@@ -4,6 +4,7 @@
 
 ![Neovim](https://img.shields.io/badge/NeoVim-0.7+-%2357A143.svg?&style=for-the-badge&logo=neovim)
 ![Lua](https://img.shields.io/badge/Lua-%232C2D72.svg?style=for-the-badge&logo=lua)
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)
 
 </div>
 
