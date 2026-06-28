@@ -36,7 +36,7 @@ end
 -- Generate autocompletion items
 function M.get_complete_list()
     local keys = {}
-    for k, _ in ipairs(M.subcommands) do
+    for k, _ in pairs(M.subcommands) do
         table.insert(keys, k)
     end
 
