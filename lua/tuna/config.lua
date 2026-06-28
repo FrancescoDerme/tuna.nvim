@@ -5,11 +5,11 @@ local M = {}
 M.defaults = {
     compile_directory = ".",
     running_directory = ".",
-    -- Other defaults to be added
+    -- TODO: add other defaults
     receive_print_message = true,
 }
 
--- Active configuration (after setup() is called)
+-- Active configuration after setup() is called
 M.options = {}
 
 -- Search for and load a local project config

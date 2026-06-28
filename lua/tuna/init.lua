@@ -1,20 +1,14 @@
 -- lua/tuna/init.lua
 local config = require("tuna.config")
+local commands = require("tuna.commands")
 
 local M = {}
 
--- Handle autocomplete logic
+-- Handle autocomplete logic dynamically based on the commabds module
 local function command_complete(arg_lead, cmd_line, cursos_pos)
-    local subcommands = {
-        "add_testcase",
-        "edit_testcase",
-        "delete_testcase",
-        "run",
-        "run_no_compile",
-        "receive",
-    }
-
+    local subcommands = commands.get_complete_list()
     local matches = {}
+
     for _, subcmd in ipairs(subcommands) do
         if subcmd:sub(1, #arg_lead) == arg_lead then
             table.insert(matches, subcmd)
@@ -37,17 +31,15 @@ function M.setup(user_opts)
             return
         end
 
-        local subcommand = args[1]
-
-        -- Need to route this to a commands.lua file
-        vim.notify("Tuna: subcommand " .. subcommand, vim.log.levels.INFO)
+        -- Hand off execution to the router in the commands module
+        commands.execute(args)
     end, {
         nargs = "*", -- Accepts any number of arguments
         desc = "Tuna",
         complete = command_complete, -- Attach the complletion function
     })
 
-    -- Setup highlight groups
+    -- TODO: setup highlight groups
 end
 
 return M

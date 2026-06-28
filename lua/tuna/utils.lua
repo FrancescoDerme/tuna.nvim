@@ -1,7 +1,7 @@
 -- lua/tuna/utils.lua
 local M = {}
 
--- Replace placeholders like $(FNAME) in a string with actual values,
+-- Replace placeholders like $(FNAME) in a string with actual values.
 -- modifiers is a table, e.g. { FNAME = "main.cpp", TNO = "1" }
 function M.apply_modifiers(str, modifiers)
     if type(str) ~= "string" then
