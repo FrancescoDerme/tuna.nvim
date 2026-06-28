@@ -5,8 +5,17 @@ local M = {}
 M.defaults = {
     compile_directory = ".",
     running_directory = ".",
-    -- TODO: add other defaults
     receive_print_message = true,
+
+    compile_command = {
+        cpp = { exec = "g++", args = { "-Wall", "$(FNAME)", "-o", "$(FNOEXT)" } },
+        c = { exec = "gcc", args = { "-Wall", "$(FNAME)", "-o", "$(FNOEXT)" } },
+    },
+    run_command = {
+        cpp = { exec = "./$(FNOEXT)" },
+        c = { exec = "./$(FNOEXT)" },
+        python = { exec = "python3", args = { "$(FNAME)" } },
+    },
 }
 
 -- Active configuration after setup() is called

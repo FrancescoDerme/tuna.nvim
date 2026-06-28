@@ -1,8 +1,7 @@
 -- lua/tuna/commands.lua
 local M = {}
 
--- TODO: require implementation modules, e.g.
--- local receive = require("tuna.receive")
+local runner = require("tuna.runner")
 
 -- Map subcommands to their handler functions
 M.subcommands = {
@@ -11,8 +10,9 @@ M.subcommands = {
         -- receive.start_server()
     end,
     run = function()
-        vim.notify("Tuna: running tests", vim.log.levels.INFO)
-        -- runner.run()
+        -- Create a new runner for the current buffer and trigger run()
+        local r = runner.new()
+        r:run()
     end,
     add_testcase = function()
         vim.notify("Tuna: sdding testcase", vim.log.levels.INFO)
