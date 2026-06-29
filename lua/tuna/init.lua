@@ -1,6 +1,7 @@
 -- lua/tuna/init.lua
 local config = require("tuna.config")
 local commands = require("tuna.commands")
+local http = require("tuna.http")
 
 local M = {}
 
@@ -23,7 +24,7 @@ function M.setup(user_opts)
     vim.api.nvim_create_user_command("Tuna", function(opts)
         local args = opts.fargs
         if #args == 0 then
-            vim.notify("Tuna: at least one argument required", vim.log.levels.ERROR)
+            vim.notify("Tuna: at least one argument required", vim.log.levels.INFO)
             return
         end
 
@@ -33,6 +34,10 @@ function M.setup(user_opts)
         desc = "Tuna",
         complete = command_complete,
     })
+end
+
+function M.lualine_component()
+    return http.status()
 end
 
 return M
