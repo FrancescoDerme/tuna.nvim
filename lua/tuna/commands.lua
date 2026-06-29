@@ -2,38 +2,47 @@
 local M = {}
 
 local runner = require("tuna.runner")
+local testcases = require("tuna.testcases")
 
--- Map subcommands to their handler functions
 M.subcommands = {
     receive = function()
-        vim.notify("Tuna: starting receive server", vim.log.levels.INFO)
-        -- receive.start_server()
+        vim.notify("Tuna: competitive-companion integration is planned", vim.log.levels.INFO)
+    end,
+    compile = function()
+        runner.new():compile()
     end,
     run = function()
-        -- Create a new runner for the current buffer and trigger run()
-        local r = runner.new()
-        r:run()
+        runner.new():run()
+    end,
+    test = function()
+        runner.new():run()
     end,
     add_testcase = function()
-        vim.notify("Tuna: sdding testcase", vim.log.levels.INFO)
-        -- testcases.add()
+        local name = vim.fn.input("Testcase name: ", "sample")
+        if name == "" then
+            return
+        end
+
+        local ok, err = testcases.add(vim.fn.getcwd(), name)
+        if ok then
+            vim.notify("Tuna: created testcase " .. name, vim.log.levels.INFO)
+        else
+            vim.notify("Tuna: " .. tostring(err), vim.log.levels.ERROR)
+        end
     end,
 }
 
--- Dispatcher function called by the user command
 function M.execute(args)
     local subcmd_name = args[1]
     local subcmd_fn = M.subcommands[subcmd_name]
 
     if subcmd_fn then
-        -- unpack passes any subsequent arguments to the function
         subcmd_fn(unpack(args, 2))
     else
         vim.notify("Tuna: unknown subcommand '" .. tostring(subcmd_name) .. "'", vim.log.levels.ERROR)
     end
 end
 
--- Generate autocompletion items
 function M.get_complete_list()
     local keys = {}
     for k, _ in pairs(M.subcommands) do

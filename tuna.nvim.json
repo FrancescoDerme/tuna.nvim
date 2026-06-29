@@ -1,0 +1,5 @@
+{
+  "name": "tuna.nvim",
+  "description": "A Lua-based competitive programming plugin for Neovim.",
+  "version": "0.1.0"
+}

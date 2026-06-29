@@ -8,7 +8,7 @@
 
 </div>
 
-`tuna.nvim` is a competitive programming tool built for Neovim.
+`tuna.nvim` is a competitive programming plugin for Neovim.
 
 This project is a ground-up rewrite and successor to the fantastic [competitest.nvim](https://github.com/xeluxee/competitest.nvim). It aims to impement the same base features (test-case handling, competitive-companion integration) and possibily add support for stress-testing, multiple-solution problems, and more.
 

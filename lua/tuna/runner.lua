@@ -1,71 +1,110 @@
 -- lua/tuna/runner.lua
 local config = require("tuna.config")
+local testcases = require("tuna.testcases")
 local utils = require("tuna.utils")
 
 local M = {}
-
--- Create a "Runner" class instance for a specific buffer
 local Runner = {}
 Runner.__index = Runner
 
+local function build_command(spec, filetype, modifiers)
+    local entry = spec and spec[filetype]
+    if not entry then
+        return nil
+    end
+
+    local cmd = {
+        exec = utils.apply_modifiers(entry.exec, modifiers),
+        args = {},
+    }
+
+    for _, arg in ipairs(entry.args or {}) do
+        table.insert(cmd.args, utils.apply_modifiers(arg, modifiers))
+    end
+
+    return cmd
+end
+
 function M.new(bufnr)
-    -- Default to current buffer
     bufnr = bufnr or vim.api.nvim_get_current_buf()
 
     local self = setmetatable({}, Runner)
     self.bufnr = bufnr
-    self.filetype = vim.bo[bufnr].filetype
+    self.filetype = vim.bo[bufnr].filetype or ""
+    self.filepath = vim.api.nvim_buf_get_name(bufnr)
+    self.project_root = vim.fn.getcwd()
 
-    -- Extract file details
-    local filepath = vim.api.nvim_buf_get_name(bufnr)
     self.modifiers = {
-        FNAME = vim.fn.fnamemodify(filepath, ":t"),
-        FNOEXT = vim.fn.fnamemodify(filepath, ":t:r"),
-        FEXT = vim.fn.fnamemodify(filepath, ":e"),
-        FABSPATH = filepath,
-        ABSDIR = vim.fn.fnamemodify(filepath, ":p:h"),
+        FNAME = vim.fn.fnamemodify(self.filepath, ":t"),
+        FNOEXT = vim.fn.fnamemodify(self.filepath, ":t:r"),
+        FEXT = vim.fn.fnamemodify(self.filepath, ":e"),
+        FABSPATH = self.filepath,
+        ABSDIR = vim.fn.fnamemodify(self.filepath, ":p:h"),
     }
 
     local all_opts = config.options
-    local raw_cc = (all_opts.compile_command or {})[self.filetype]
-    local raw_rc = (all_opts.run_command or {})[self.filetype]
-    self.compile_dir = all_opts.compile_directory or "."
-    self.run_dir = all_opts.running_directory or "."
-
-    -- Format the compile command (if applicable to the programming language)
-    if raw_cc then
-        self.compile_cmd = {
-            exec = utils.apply_modifiers(raw_cc.exec, self.modifiers),
-            args = {},
-        }
-
-        for i, arg in ipairs(raw_cc.args or {}) do
-            self.compile_cmd.args[i] = utils.apply_modifiers(arg, self.modifiers)
-        end
-    end
-
-    -- Format the run command
-    if raw_rc then
-        self.run_cmd = {
-            exec = utils.apply_modifiers(raw_rc.exec, self.modifiers),
-            args = {},
-        }
-        for i, arg in ipairs(raw_rc.args or {}) do
-            self.run_cmd.args[i] = utils.apply_modifiers(arg, self.modifiers)
-        end
-    end
+    self.compile_dir = utils.normalize_path(all_opts.compile_directory or ".", self.project_root)
+    self.run_dir = utils.normalize_path(all_opts.running_directory or ".", self.project_root)
+    self.compile_cmd = build_command(all_opts.compile_command, self.filetype, self.modifiers)
+    self.run_cmd = build_command(all_opts.run_command, self.filetype, self.modifiers)
+    self.output_bufnr = nil
+    self.output_winid = nil
 
     return self
 end
 
--- Spawn an async process and capture its output
+function Runner:show_output()
+    if self.output_bufnr and vim.api.nvim_buf_is_valid(self.output_bufnr) then
+        return self.output_bufnr
+    end
+
+    local bufnr = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_option(bufnr, "bufhidden", "wipe")
+    vim.api.nvim_buf_set_option(bufnr, "buftype", "nofile")
+    vim.api.nvim_buf_set_option(bufnr, "swapfile", false)
+    vim.api.nvim_buf_set_option(bufnr, "buflisted", false)
+    vim.api.nvim_buf_set_name(bufnr, "tuna://output")
+
+    self.output_bufnr = bufnr
+
+    if config.options.auto_open_output then
+        local width = math.max(80, math.floor(vim.o.columns * 0.8))
+        local height = math.max(12, math.floor(vim.o.lines * 0.6))
+        self.output_winid = vim.api.nvim_open_win(bufnr, true, {
+            relative = "editor",
+            width = width,
+            height = height,
+            row = 2,
+            col = 2,
+            style = "minimal",
+            border = "rounded",
+        })
+    end
+
+    return bufnr
+end
+
+function Runner:write_output(lines)
+    local bufnr = self:show_output()
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+    if self.output_winid and vim.api.nvim_win_is_valid(self.output_winid) then
+        vim.api.nvim_win_set_buf(self.output_winid, bufnr)
+    end
+end
+
+function Runner:append_output(lines)
+    local bufnr = self:show_output()
+    local current = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    vim.list_extend(current, lines)
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, current)
+end
+
 function Runner:spawn_process(cmd, cwd, stdin_data, on_exit)
     if not cmd then
-        vim.notify("Tuna: no command confgiured for filetype " .. self.filepath, vim.log.levels.ERROR)
+        vim.notify("Tuna: no command configured for filetype " .. tostring(self.filetype), vim.log.levels.ERROR)
         return
     end
 
-    -- Create libuv pipes for non-blocking I/O
     local stdin = assert(vim.uv.new_pipe(false), "Tuna: failed to create stdin pipe")
     local stdout = assert(vim.uv.new_pipe(false), "Tuna: failed to create stdout pipe")
     local stderr = assert(vim.uv.new_pipe(false), "Tuna: failed to create stderr pipe")
@@ -73,12 +112,11 @@ function Runner:spawn_process(cmd, cwd, stdin_data, on_exit)
     local output_data, error_data = {}, {}
     local handle
 
-    -- Spawn the process asynchronously
     handle = vim.uv.spawn(cmd.exec, {
         args = cmd.args,
         cwd = cwd,
         stdio = { stdin, stdout, stderr },
-    }, function(code, signal)
+    }, function(code)
         assert(handle, "Tuna: handle is unexpectedly nil in callback")
 
         stdin:close()
@@ -101,15 +139,11 @@ function Runner:spawn_process(cmd, cwd, stdin_data, on_exit)
         return
     end
 
-    -- If there is input data (like a testcase input), write it to stdin
-    if stdin_data then
+    if stdin_data ~= nil then
         stdin:write(stdin_data)
     end
-
-    -- Close stdin so the program knows it reached EOF
     stdin:shutdown()
 
-    -- Start reading standard output
     vim.uv.read_start(stdout, function(err, data)
         assert(not err, err)
         if data then
@@ -117,7 +151,6 @@ function Runner:spawn_process(cmd, cwd, stdin_data, on_exit)
         end
     end)
 
-    -- Start reading standard error
     vim.uv.read_start(stderr, function(err, data)
         assert(not err, err)
         if data then
@@ -126,42 +159,60 @@ function Runner:spawn_process(cmd, cwd, stdin_data, on_exit)
     end)
 end
 
--- Compile
 function Runner:compile(on_success)
-    -- If it's an interpreted language, skip to success
     if not self.compile_cmd then
+        on_success = on_success or function() end
         on_success()
         return
     end
 
+    self:write_output({ "[tuna] compiling " .. self.modifiers.FNAME .. "..." })
     vim.notify("Tuna: compiling " .. self.modifiers.FNAME .. "...", vim.log.levels.INFO)
 
-    local cwd = vim.fn.expand("%:p:h") .. "/" .. self.compile_dir
-
-    self:spawn_process(self.compile_cmd, cwd, nil, function(code, out, err)
+    self:spawn_process(self.compile_cmd, self.compile_dir, nil, function(code, out, err)
         if code == 0 then
-            -- Compilation succeeded, trigger the next step
-            on_success()
+            self:append_output({ "[tuna] compilation succeeded" })
+            if on_success then
+                on_success()
+            end
         else
-            -- Compilation failed, print the compiler errors
+            self:append_output({ "[tuna] compilation failed", err })
             vim.notify("Tuna: compilation failed!\n" .. err, vim.log.levels.ERROR)
         end
     end)
 end
 
--- Run
 function Runner:run()
-    -- Wrap the execution logic in a callback and pass it to compile()
+    local test_case = testcases.load_first(self.project_root)
+    local stdin_data = nil
+    if test_case and test_case.input then
+        stdin_data = test_case.input .. "\n"
+    end
+
     self:compile(function()
+        if not self.run_cmd then
+            vim.notify("Tuna: no run command configured for filetype " .. tostring(self.filetype), vim.log.levels.ERROR)
+            return
+        end
+
+        self:write_output({ "[tuna] running " .. self.modifiers.FNOEXT .. "..." })
         vim.notify("Tuna: running " .. self.modifiers.FNOEXT .. "...", vim.log.levels.INFO)
 
-        local cwd = vim.fn.expand("%:p:h") .. "/" .. self.run_dir
+        self:spawn_process(self.run_cmd, self.run_dir, stdin_data, function(code, out, err)
+            local output_lines = { "[tuna] process exited with code " .. tostring(code) }
+            if out ~= "" then
+                table.insert(output_lines, out)
+            end
+            if err ~= "" then
+                table.insert(output_lines, "[stderr]\n" .. err)
+            end
 
-        self:spawn_process(self.run_cmd, cwd, "Dummy test input\n", function(code, out, err)
+            self:append_output(output_lines)
+
             if code == 0 then
-                vim.notify("Tuna SUCCESS!\nOutput:\n" .. (out == "" and "<empty>" or out), vim.log.levels.INFO)
+                vim.notify("Tuna SUCCESS!", vim.log.levels.INFO)
             else
-                vim.notify("Tuna FAILED with code " .. code .. "\nError:\n" .. err, vim.log.levels.ERROR)
+                vim.notify("Tuna FAILED with code " .. code, vim.log.levels.ERROR)
             end
         end)
     end)
