@@ -7,6 +7,22 @@ local M = {}
 local Runner = {}
 Runner.__index = Runner
 
+local function normalize_lines(lines)
+    local result = {}
+
+    for _, entry in ipairs(lines or {}) do
+        if type(entry) == "string" then
+            for _, part in ipairs(vim.split(entry, "\n", { plain = true })) do
+                table.insert(result, part)
+            end
+        elseif entry ~= nil then
+            table.insert(result, tostring(entry))
+        end
+    end
+
+    return result
+end
+
 local function build_command(spec, filetype, modifiers)
     local entry = spec and spec[filetype]
     if not entry then
@@ -86,7 +102,7 @@ end
 
 function Runner:write_output(lines)
     local bufnr = self:show_output()
-    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, normalize_lines(lines))
     if self.output_winid and vim.api.nvim_win_is_valid(self.output_winid) then
         vim.api.nvim_win_set_buf(self.output_winid, bufnr)
     end
@@ -95,7 +111,12 @@ end
 function Runner:append_output(lines)
     local bufnr = self:show_output()
     local current = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-    vim.list_extend(current, lines)
+    local normalized = normalize_lines(lines)
+
+    for _, line in ipairs(normalized) do
+        table.insert(current, line)
+    end
+
     vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, current)
 end
 
@@ -186,7 +207,7 @@ function Runner:run()
     local test_case = testcases.load_first(self.project_root)
     local stdin_data = nil
     if test_case and test_case.input then
-        stdin_data = test_case.input .. "\n"
+        stdin_data = test_case.input
     end
 
     self:compile(function()
@@ -196,6 +217,9 @@ function Runner:run()
         end
 
         self:write_output({ "[tuna] running " .. self.modifiers.FNOEXT .. "..." })
+        if test_case then
+            self:append_output({ "[tuna] testcase: " .. test_case.name })
+        end
         vim.notify("Tuna: running " .. self.modifiers.FNOEXT .. "...", vim.log.levels.INFO)
 
         self:spawn_process(self.run_cmd, self.run_dir, stdin_data, function(code, out, err)
@@ -207,10 +231,29 @@ function Runner:run()
                 table.insert(output_lines, "[stderr]\n" .. err)
             end
 
+            if test_case and test_case.output ~= nil then
+                local expected = test_case.output
+                local actual = out or ""
+                local normalized_expected = expected:gsub("\r\n", "\n"):gsub("\r", "\n")
+                local normalized_actual = actual:gsub("\r\n", "\n"):gsub("\r", "\n")
+
+                if normalized_actual ~= normalized_expected then
+                    table.insert(output_lines, "[tuna] mismatch")
+                    table.insert(output_lines, "[tuna] expected:\n" .. normalized_expected)
+                    table.insert(output_lines, "[tuna] actual:\n" .. normalized_actual)
+                    vim.notify("Tuna: testcase mismatch", vim.log.levels.WARN)
+                else
+                    table.insert(output_lines, "[tuna] testcase passed")
+                    vim.notify("Tuna: testcase passed", vim.log.levels.INFO)
+                end
+            end
+
             self:append_output(output_lines)
 
             if code == 0 then
-                vim.notify("Tuna SUCCESS!", vim.log.levels.INFO)
+                if not test_case or test_case.output == nil then
+                    vim.notify("Tuna SUCCESS!", vim.log.levels.INFO)
+                end
             else
                 vim.notify("Tuna FAILED with code " .. code, vim.log.levels.ERROR)
             end

@@ -1,8 +1,5 @@
--- lua/tuna/utils.lua
 local M = {}
 
--- Replace placeholders like $(FNAME) in a string with actual values.
--- modifiers is a table, e.g. { FNAME = "main.cpp", TNO = "1" }
 function M.apply_modifiers(str, modifiers)
     if type(str) ~= "string" then
         return str
@@ -10,8 +7,6 @@ function M.apply_modifiers(str, modifiers)
 
     local result = str
     for key, value in pairs(modifiers) do
-        -- string.gsub uses "%" as an escape character instead of "\".
-        -- Escape the "$" and parentheses to match "$(KEY)"
         local pattern = "%$%(" .. key .. "%)"
         result = string.gsub(result, pattern, value)
     end
@@ -19,10 +14,39 @@ function M.apply_modifiers(str, modifiers)
     return result
 end
 
--- Example
 function M.file_exists(filepath)
     local stat = vim.uv.fs_stat(filepath)
     return stat ~= nil and stat.type == "file"
+end
+
+function M.directory_exists(path)
+    local stat = vim.uv.fs_stat(path)
+    return stat ~= nil and stat.type == "directory"
+end
+
+function M.normalize_path(path, base_dir)
+    if type(path) ~= "string" or path == "" then
+        return base_dir or "."
+    end
+
+    if path:sub(1, 1) == "/" then
+        return path
+    end
+
+    return vim.fn.fnamemodify((base_dir or ".") .. "/" .. path, ":p")
+end
+
+function M.ensure_directory(path)
+    if not path or path == "" then
+        return false
+    end
+
+    if M.directory_exists(path) then
+        return true
+    end
+
+    vim.fn.mkdir(path, "p")
+    return M.directory_exists(path)
 end
 
 return M
