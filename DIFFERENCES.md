@@ -207,4 +207,26 @@ solution's compile/run commands, working directories, and checker, then drives t
 loop with `vim.system` (using its `timeout` option) and `checker.judge` from
 Workstream 1.
 
+## Interactive problems (`interactive.lua`)
+
+✅ **Done (Workstream 2).** Brand new — competitest can't run interactive problems
+at all. `:Tuna interactive [n…]` runs the solution against an **interactor** that
+talks to it over stdio:
+
+```lua
+interactive = { interactor = { exec = "$(ABSDIR)/interactor", args = {} } }
+```
+
+For each testcase the solution and the interactor are spawned and their pipes are
+cross-wired — solution stdout → interactor stdin, interactor stdout → solution stdin
+— and the interactor's exit code is the verdict (0 = CORRECT). The interactor gets
+the testcase input/answer as files via the `$(INPUT)` / `$(ANSWER)` placeholders.
+
+**Native-pipe gotcha worth recording:** `vim.system` only surfaces a child's stdout
+once it *exits*, so it can't relay bytes between two live processes. tuna drops to
+`vim.uv.spawn` and forwards data between the pipes by hand, shutting down a peer's
+stdin on EOF and guarding every write against a pipe that teardown has already
+closed. A timeout timer and the interactor-exits-first / solution-crashes-first
+orderings are handled explicitly.
+
 <!-- Add new entries above this line as decisions are made. -->

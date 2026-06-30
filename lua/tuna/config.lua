@@ -62,6 +62,14 @@ M.defaults = {
         seed_arg = true, -- append the iteration seed as the generator's last argument
     },
 
+    -- interactive problems (:Tuna interactive) — the solution talks to an
+    -- interactor over stdio; the interactor decides the verdict (exit 0 = AC). The
+    -- interactor command spec receives the testcase input/answer via $(INPUT)/
+    -- $(ANSWER) placeholders (default: those two files appended as args).
+    interactive = {
+        interactor = nil, -- e.g. { exec = "$(ABSDIR)/interactor", args = {} }
+    },
+
     -- testcase storage (see DIFFERENCES.md: layout is fully customizable)
     testcases_directory = ".", -- where testcases live, relative to the source file
     testcases_storage = "files", -- "files" | "single_file" | "directory"
