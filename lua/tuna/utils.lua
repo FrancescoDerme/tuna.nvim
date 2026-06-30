@@ -18,7 +18,20 @@ function M.notify(msg, level)
     if type(level) == "string" then
         level = vim.log.levels[level]
     end
-    vim.notify("tuna.nvim: " .. msg, level or vim.log.levels.ERROR, { title = "tuna.nvim" })
+    vim.notify("Tuna: " .. msg, level or vim.log.levels.ERROR, { title = "Tuna" })
+end
+
+---Remap a floating window's `FloatBorder` highlight to `hl`. Native floats draw
+---their border with `FloatBorder`; setting `winhighlight` on the window is the
+---API equivalent of competitest's nui `border.highlight` option. No-op when `hl`
+---is nil or already the default.
+---@param winid integer
+---@param hl string? highlight group for the border
+function M.set_border_highlight(winid, hl)
+    if not hl or hl == "FloatBorder" then
+        return
+    end
+    vim.wo[winid].winhighlight = "FloatBorder:" .. hl
 end
 
 ---------------- STRING MODIFIERS ----------------

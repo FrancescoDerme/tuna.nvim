@@ -63,9 +63,24 @@ configurable avoids forcing a migration on anyone coming from either convention.
 
 📌 Recorded as we port `config.lua`, to mention in the final README:
 
-- **No `nui.nvim` border options.** competitest's `floating_border_highlight`
-  (a nui concept) is dropped; `floating_border` is passed straight to
-  `nvim_open_win`.
+- **Border highlight via `winhighlight`.** `floating_border` is passed straight
+  to `nvim_open_win`. competitest's `floating_border_highlight` is kept (same
+  name, same default `FloatBorder`) but implemented natively: every Tuna float
+  remaps its `FloatBorder` group through `winhighlight` (`utils.set_border_highlight`)
+  instead of nui's `border.highlight`. Native splits have no `FloatBorder`, so the
+  option only affects floats.
+- **`editor_ui` size keys renamed.** competitest's `editor_ui.popup_width` /
+  `popup_height` become `editor_ui.width` / `height` — consistent with
+  `picker_ui` and `viewer`, which already use `width`/`height`.
+- **Picker navigation is native.** competitest's `picker_ui.mappings.focus_next`
+  / `focus_prev` are dropped; the picker is an ordinary buffer, so `j`/`k` and the
+  arrow keys move the selection (with `cursorline`). Only `submit`/`close` remain
+  configurable.
+- **`convert` requires an explicit target.** competitest's `convert auto` inferred
+  the direction because there were only two storage modes. With three backends
+  (`files`/`single_file`/`directory`) "auto" can't pick a unique target, so
+  `:Tuna convert <target>` always takes a target; the *source* is still
+  auto-detected.
 - **Python default is `python3`.** competitest defaults the Python run command
   to `python`, which is Python 2 on some systems; tuna uses `python3`.
 - **Local config search.** Both plugins walk up the directory tree for a local
@@ -116,5 +131,21 @@ pane's buffer, the UI's `:q` handling is keyed on **window id**, not buffer —
 otherwise closing the viewer would tear down the whole UI.
 
 ---
+
+## `init.lua`
+
+- **Modern autocmd/highlight APIs.** competitest registered its command,
+  completion, `ColorScheme`/`VimResized`/`VimEnter` autocmds, and highlight
+  groups through `vim.cmd`/`nvim_command` string blocks (including a Vimscript
+  `s:command_completion` function). tuna uses `nvim_create_user_command`,
+  `nvim_create_autocmd` under a cleared `Tuna` augroup, and `nvim_set_hl` with
+  `default = true` (the API equivalent of `hi! def`). Completion is a Lua
+  function in `commands.complete`, not Vimscript.
+- **`once = true` VimEnter.** Persistent-receive-on-setup before startup is wired
+  with a one-shot `VimEnter` autocmd instead of a self-persisting `autocmd
+  VimEnter` line; it fires exactly once and needs no manual cleanup.
+- **Lazy requires in callbacks.** The command and completion callbacks
+  `require("tuna.commands")` at call time rather than at module load, keeping
+  `setup()` startup cost minimal (a project goal) and avoiding load-order cycles.
 
 <!-- Add new entries above this line as decisions are made. -->

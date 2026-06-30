@@ -270,6 +270,7 @@ function RunnerUI:show_viewer(content)
         style = "minimal",
         zindex = 60, -- above the popup grid (50)
     })
+    require("tuna.utils").set_border_highlight(self.viewer_winid, self.config.floating_border_highlight)
     vim.wo[self.viewer_winid].number = vcfg.show_nu
     vim.wo[self.viewer_winid].relativenumber = vcfg.show_rnu
     vim.wo[self.viewer_winid].wrap = false

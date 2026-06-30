@@ -30,10 +30,10 @@ local M = {}
 ---Open a floating window over the editor.
 ---@param bufnr integer buffer to display
 ---@param enter boolean whether to move the cursor into the new window
----@param opts table { width, height, row, col, border, title }
+---@param opts table { width, height, row, col, border, border_highlight, title }
 ---@return integer winid
 local function open_float(bufnr, enter, opts)
-    return api.nvim_open_win(bufnr, enter, {
+    local winid = api.nvim_open_win(bufnr, enter, {
         relative = "editor",
         width = opts.width,
         height = opts.height,
@@ -44,6 +44,8 @@ local function open_float(bufnr, enter, opts)
         title_pos = opts.title and "center" or nil,
         style = "minimal",
     })
+    require("tuna.utils").set_border_highlight(winid, opts.border_highlight)
+    return winid
 end
 
 ---Close a window if it is still valid. Closing an already-closed window throws,
@@ -96,10 +98,11 @@ local input = { ui_visible = false }
 ---@param title string|nil popup title, or `nil` to re-render after a resize
 ---@param default_text string initial text
 ---@param border string border style passed to `nvim_open_win`
+---@param border_highlight string? highlight group for the border (remaps `FloatBorder`)
 ---@param callback_only boolean if true, skip the UI and call `on_submit(default_text)` directly
 ---@param on_submit fun(text: string) called with the entered text on `<CR>`
 ---@param on_close fun()? called when the prompt is cancelled
-function M.input(title, default_text, border, callback_only, on_submit, on_close)
+function M.input(title, default_text, border, border_highlight, callback_only, on_submit, on_close)
     if title == nil then -- resize: rebuild with the current text
         if not input.ui_visible then
             return
@@ -115,6 +118,7 @@ function M.input(title, default_text, border, callback_only, on_submit, on_close
         input.title = title
         input.default_text = default_text
         input.border = border
+        input.border_highlight = border_highlight
         input.on_submit = on_submit
         input.on_close = on_close
     end
@@ -131,6 +135,7 @@ function M.input(title, default_text, border, callback_only, on_submit, on_close
         row = math.floor((vim_height - 1) / 2),
         col = math.floor((vim_width - width) / 2),
         border = input.border,
+        border_highlight = input.border_highlight,
         title = " " .. input.title .. " ",
     })
     input.ui_visible = true
@@ -249,6 +254,7 @@ function M.editor(bufnr, tcnum, input_content, output_content, callback, restore
             row = row,
             col = col,
             border = cfg.floating_border,
+            border_highlight = cfg.floating_border_highlight,
             title = " " .. title .. " " .. editor.tcnum,
         })
         vim.wo[w].number = ui.show_nu
@@ -381,6 +387,7 @@ function M.picker(bufnr, tctbl, title, callback, restore_winid)
         row = math.floor((vim_height - math.floor(vim_height * cfg.picker_ui.height)) / 2),
         col = math.floor((vim_width - math.floor(vim_width * cfg.picker_ui.width)) / 2),
         border = cfg.floating_border,
+        border_highlight = cfg.floating_border_highlight,
         title = picker.title,
     })
     -- Highlight the active row; cursor movement (j/k, arrows) is native.

@@ -77,8 +77,10 @@ M.defaults = {
     open_received_contests = true,
     replace_received_testcases = false,
 
-    -- UI: native floats (no nui). Border is passed to nvim_open_win.
+    -- UI: native floats (no nui). Border is passed to nvim_open_win; the border
+    -- highlight is applied via the window's `winhighlight` (FloatBorder remap).
     floating_border = "rounded",
+    floating_border_highlight = "FloatBorder",
     editor_ui = {
         width = 0.4,
         height = 0.6,
@@ -154,10 +156,6 @@ M.defaults = {
             { 3, { { 1, "eo" }, { 1, "se" } } },
         },
     },
-
-    -- transitional: consumed by the current runner until runner.lua is ported
-    show_output = true,
-    auto_open_output = true,
 }
 
 ---Configuration produced by `setup()` (defaults + user opts).

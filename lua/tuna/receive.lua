@@ -312,13 +312,7 @@ local function store_task_testcases(filepath, tctbl, cfg)
             cfg.testcases_directory_output
         )
     else
-        testcases.files.write(
-            tcdir,
-            tctbl,
-            filepath,
-            cfg.testcases_input_file_format,
-            cfg.testcases_output_file_format
-        )
+        testcases.files.write(tcdir, tctbl, filepath, cfg.testcases_input_file_format, cfg.testcases_output_file_format)
     end
 end
 
@@ -381,7 +375,11 @@ local function store_testcases_into_buffer(bufnr, tclist, replace, finished)
     if next(tctbl) ~= nil then
         local choice = 2 -- default to Replace when `replace` is set
         if not replace then
-            choice = vim.fn.confirm("Testcases already exist. Keep them alongside the new ones?", "&Keep\n&Replace\n&Cancel", 1)
+            choice = vim.fn.confirm(
+                "Testcases already exist. Keep them alongside the new ones?",
+                "&Keep\n&Replace\n&Cancel",
+                1
+            )
         end
         if choice == 2 then
             testcases.buf_clear(bufnr) -- delete stale files before rewriting
@@ -425,18 +423,26 @@ local function store_single_problem(task, cfg, finished)
     end
 
     local widgets = require("tuna.widgets")
-    widgets.input("Problem path", default_path, cfg.floating_border, not cfg.received_problems_prompt_path, function(filepath)
-        -- Re-resolve config at the chosen directory: a `.tuna.lua` there may
-        -- change storage layout, templates, etc.
-        local local_cfg = config.load_local_config_and_extend(vim.fn.fnamemodify(filepath, ":h"))
-        store_received_task(filepath, true, task, local_cfg)
-        if local_cfg.open_received_problems then
-            vim.cmd.edit(vim.fn.fnameescape(filepath))
-        end
-        if finished then
-            finished()
-        end
-    end, finished)
+    widgets.input(
+        "Problem path",
+        default_path,
+        cfg.floating_border,
+        cfg.floating_border_highlight,
+        not cfg.received_problems_prompt_path,
+        function(filepath)
+            -- Re-resolve config at the chosen directory: a `.tuna.lua` there may
+            -- change storage layout, templates, etc.
+            local local_cfg = config.load_local_config_and_extend(vim.fn.fnamemodify(filepath, ":h"))
+            store_received_task(filepath, true, task, local_cfg)
+            if local_cfg.open_received_problems then
+                vim.cmd.edit(vim.fn.fnameescape(filepath))
+            end
+            if finished then
+                finished()
+            end
+        end,
+        finished
+    )
 end
 
 ---Store a received contest: prompt for the directory, then the file extension,
@@ -455,35 +461,46 @@ local function store_contest(tasks, cfg, finished)
     end
 
     local widgets = require("tuna.widgets")
-    widgets.input("Contest directory", default_dir, cfg.floating_border, not cfg.received_contests_prompt_directory, function(directory)
-        local local_cfg = config.load_local_config_and_extend(directory)
-        widgets.input(
-            "Files extension",
-            local_cfg.received_files_extension,
-            local_cfg.floating_border,
-            not local_cfg.received_contests_prompt_extension,
-            function(file_extension)
-                local opened = false
-                for _, task in ipairs(tasks) do
-                    local problem_path = eval_path(local_cfg.received_contests_problems_path, task, file_extension)
-                    if problem_path then
-                        local filepath = directory .. "/" .. problem_path
-                        store_received_task(filepath, true, task, local_cfg)
-                        if local_cfg.open_received_contests and not opened then
-                            vim.cmd.edit(vim.fn.fnameescape(filepath))
-                            opened = true
+    widgets.input(
+        "Contest directory",
+        default_dir,
+        cfg.floating_border,
+        cfg.floating_border_highlight,
+        not cfg.received_contests_prompt_directory,
+        function(directory)
+            local local_cfg = config.load_local_config_and_extend(directory)
+            widgets.input(
+                "Files extension",
+                local_cfg.received_files_extension,
+                local_cfg.floating_border,
+                local_cfg.floating_border_highlight,
+                not local_cfg.received_contests_prompt_extension,
+                function(file_extension)
+                    local opened = false
+                    for _, task in ipairs(tasks) do
+                        local problem_path = eval_path(local_cfg.received_contests_problems_path, task, file_extension)
+                        if problem_path then
+                            local filepath = directory .. "/" .. problem_path
+                            store_received_task(filepath, true, task, local_cfg)
+                            if local_cfg.open_received_contests and not opened then
+                                vim.cmd.edit(vim.fn.fnameescape(filepath))
+                                opened = true
+                            end
+                        else
+                            utils.notify(
+                                "'received_contests_problems_path' evaluation failed for task '" .. task.name .. "'"
+                            )
                         end
-                    else
-                        utils.notify("'received_contests_problems_path' evaluation failed for task '" .. task.name .. "'")
                     end
-                end
-                if finished then
-                    finished()
-                end
-            end,
-            finished
-        )
-    end, finished)
+                    if finished then
+                        finished()
+                    end
+                end,
+                finished
+            )
+        end,
+        finished
+    )
 end
 
 --------------------------------------------------------------------------------
@@ -576,7 +593,10 @@ local function make_handler(mode, notify_on_receive, bufnr, cfg)
         return function(tasks, finished)
             if notify_on_receive then
                 local n = #tasks
-                utils.notify((n > 1 and ("contest (" .. n .. " tasks)") or "one task") .. " received successfully!", "INFO")
+                utils.notify(
+                    (n > 1 and ("contest (" .. n .. " tasks)") or "one task") .. " received successfully!",
+                    "INFO"
+                )
             end
             if #tasks > 1 then
                 store_contest(tasks, cfg, finished)
@@ -587,7 +607,12 @@ local function make_handler(mode, notify_on_receive, bufnr, cfg)
                     1
                 )
                 if choice == 1 then
-                    store_testcases_into_buffer(vim.api.nvim_get_current_buf(), tasks[1].tests, cfg.replace_received_testcases, finished)
+                    store_testcases_into_buffer(
+                        vim.api.nvim_get_current_buf(),
+                        tasks[1].tests,
+                        cfg.replace_received_testcases,
+                        finished
+                    )
                 elseif choice == 2 then
                     store_single_problem(tasks[1], cfg, finished)
                 else
@@ -628,7 +653,7 @@ function M.start_receiving(mode, port, notify_on_start, notify_on_receive, bufnr
 
     rs = { mode = mode, port = port, receiver = receiver, processor = processor }
     if notify_on_start then
-        utils.notify("ready to receive " .. mode .. ". Press the green button in Competitive Companion.", "INFO")
+        utils.notify("ready to receive " .. mode .. ". Press the green plus button in your browser.", "INFO")
     end
     return nil
 end

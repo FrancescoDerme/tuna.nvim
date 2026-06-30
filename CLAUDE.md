@@ -28,11 +28,11 @@ The project proceeds in three phases. Update the checklist below as work progres
    - [x] 7. `runner.lua` — multi-testcase run via `vim.system`, parallelism, per-process timeout, kill/re-run, compare integration; compile-as-testcase gate; temporary results float pending `runner_ui`
    - [x] 8. `runner_ui/` (`init.lua` `popup.lua` `split.lua`) — native results UI, recursive layout engine, viewer, diff view, `resize_ui()`
    - [x] 9. `commands.lua` — full subcommand surface (`add/edit/delete_testcase`, `convert <storage>`, `run [n…]`, `run_no_compile [n…]`, `show_ui`, `receive <mode>`) + context-aware completion; per-buffer runners
-   - [ ] 10. `init.lua` — finalize `setup()`, highlight groups, `VimResized` resize autocmd, persistent-receive-on-setup
+   - [x] 10. `init.lua` — finalize `setup()`, highlight groups, `VimResized` resize autocmd, persistent-receive-on-setup
    - [x] ~~`http.lua`~~ — folded into `receive.lua` and deleted (was not in the original design)
 3. **Extend** — once parity with competitest.nvim is reached, add new features beyond what the original plugin had.
 
-_(Phase 1 review complete. Currently entering Phase 2 — update this line as phases progress.)_
+_(Phase 1 review complete. Phase 2 port complete — all modules ported. Entering Phase 3 (Extend) — update this line as phases progress.)_
 
 ## Architecture
 

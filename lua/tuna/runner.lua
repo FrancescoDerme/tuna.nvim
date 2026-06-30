@@ -469,6 +469,7 @@ function TCRunner:display_results()
         title_pos = "center",
         style = "minimal",
     })
+    utils.set_border_highlight(win, self.config.floating_border_highlight)
     for _, key in ipairs({ "q", "<Esc>" }) do
         vim.keymap.set("n", key, function()
             if vim.api.nvim_win_is_valid(win) then

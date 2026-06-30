@@ -98,6 +98,7 @@ function M.init_ui(windows, config)
             style = "minimal",
             zindex = 50,
         })
+        require("tuna.utils").set_border_highlight(win, config.floating_border_highlight)
         local selector = name == "tc"
         vim.wo[win].number = selector and config.runner_ui.selector_show_nu or config.runner_ui.show_nu
         vim.wo[win].relativenumber = selector and config.runner_ui.selector_show_rnu or config.runner_ui.show_rnu
