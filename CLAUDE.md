@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Written in idiomatic, modern Lua — prefer current Neovim APIs (`vim.uv`, `vim.system`, etc.) over legacy/deprecated patterns.
 - Prioritize speed: async I/O and process spawning wherever possible, minimal startup overhead.
 - Don't just port competitest.nvim's design 1:1 — research current Neovim plugin best practices (structure, config patterns, testing, docs) and apply them, improving on the original where it makes sense.
-- The author is new to Neovim plugin development — briefly explain unfamiliar Neovim APIs or Lua idioms when introducing them, rather than assuming prior plugin-dev experience.
+- Document changes and improvements with respect to competitest.nvim inside CHANGES.md, this will help to write the final README.md at the end of the project.
 
 ## Roadmap / current phase
 
