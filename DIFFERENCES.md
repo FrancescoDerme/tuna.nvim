@@ -180,4 +180,31 @@ the runner now routes every clean exit through `checker.judge` instead of callin
 runner tracks a per-testcase `judging` flag so a run isn't declared complete before
 its verdict lands.
 
+## Stress testing (`stress.lua`)
+
+✅ **Done (Workstream 2).** Brand new — competitest has no stress testing. `:Tuna
+stress [count]` hunts for a small input on which the current solution disagrees with
+a trusted reference:
+
+```lua
+stress = {
+  generator = { exec = "$(ABSDIR)/gen", args = {} }, -- prints a random test to stdout
+  reference = { exec = "$(ABSDIR)/brute", args = {} }, -- a correct-but-slow solution
+  count = 100,       -- max iterations
+  seed_arg = true,   -- append the iteration number as the generator's last arg
+}
+```
+
+Each iteration: the generator is run with a reproducible seed (the iteration
+number) → its stdout is the input → the solution and the reference both run on it →
+their outputs are judged with the **same `checker`** the runner uses (so
+multiple-correct-answer problems work). The first wrong answer, crash, or timeout is
+**saved as a new testcase** (input + the reference's answer as expected output) and
+the search stops; otherwise it reports no counterexample found.
+
+**Reuse, not reinvention:** `stress.lua` calls `runner.new()` to resolve the
+solution's compile/run commands, working directories, and checker, then drives the
+loop with `vim.system` (using its `timeout` option) and `checker.judge` from
+Workstream 1.
+
 <!-- Add new entries above this line as decisions are made. -->

@@ -232,6 +232,9 @@ M.subcommands = {
         end
         M.receive(args[1])
     end,
+    stress = function(args)
+        require("tuna.stress").run(api.nvim_get_current_buf(), tonumber(args[1]))
+    end,
 }
 
 ---Dispatch a parsed `:Tuna` argument list (subcommand + its arguments).

@@ -50,6 +50,18 @@ M.defaults = {
     checker = "builtin",
     view_output_diff = false,
 
+    -- stress testing (:Tuna stress) — hunt for an input where the solution and a
+    -- trusted reference disagree. generator/reference are command specs (a string,
+    -- or { exec, args }) expanded with the usual $(FNOEXT)/$(ABSDIR)/… modifiers.
+    -- The generator gets the iteration number appended as a seed (unless
+    -- seed_arg = false) so failures are reproducible.
+    stress = {
+        generator = nil, -- e.g. { exec = "$(ABSDIR)/gen", args = {} } or "python3 gen.py"
+        reference = nil, -- a correct-but-slow solution, same input/output contract
+        count = 100, -- maximum iterations before giving up
+        seed_arg = true, -- append the iteration seed as the generator's last argument
+    },
+
     -- testcase storage (see DIFFERENCES.md: layout is fully customizable)
     testcases_directory = ".", -- where testcases live, relative to the source file
     testcases_storage = "files", -- "files" | "single_file" | "directory"
