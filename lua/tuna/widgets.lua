@@ -236,9 +236,11 @@ function M.editor(bufnr, tcnum, input_content, output_content, callback, restore
     local function make_pane(title, col, lines)
         local b = api.nvim_create_buf(false, true)
         -- `acwrite` makes `:w` route through our BufWriteCmd autocmd instead of
-        -- trying (and failing) to write the scratch buffer to disk.
+        -- trying (and failing) to write the scratch buffer to disk. The buffer
+        -- still needs a name, or `:w` aborts with E32 before BufWriteCmd fires.
         vim.bo[b].buftype = "acwrite"
         vim.bo[b].filetype = "tuna"
+        api.nvim_buf_set_name(b, "tuna://testcase/" .. title:lower() .. "/" .. b)
         api.nvim_buf_set_lines(b, 0, -1, false, lines)
         vim.bo[b].modified = false
         local w = open_float(b, false, {
