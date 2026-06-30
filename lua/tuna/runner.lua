@@ -1,285 +1,446 @@
 -- lua/tuna/runner.lua
+--
+-- Runs the current buffer's solution against its testcases and records the
+-- result of each. The engine is async and parallel: every testcase is a
+-- `vim.system` child process, and up to `multiple_testing` of them run at once.
+--
+-- A note on `vim.system`: it is Neovim's modern process wrapper (over libuv's
+-- spawn). We give it `{ exec, args... }`, an options table (`cwd`, `stdin`), and
+-- an `on_exit` callback that receives `{ code, signal, stdout, stderr }`. It
+-- handles the stdin/stdout/stderr pipes for us — far less plumbing than driving
+-- `vim.uv.spawn` and three pipes by hand. We still manage our own timeout timer
+-- so we can label a kill as TIMEOUT precisely rather than as a generic signal.
+--
+-- The "compile" step is modelled as a special testcase at index 1 (`tcnum =
+-- "Compile"`): it runs first, and the real testcases only start if it succeeds.
+--
+-- This module is the execution engine only. The rich results UI is `runner_ui`
+-- (a later port); until it exists, `display_results()` shows a temporary float
+-- so `:Tuna run` is usable. When `runner_ui` lands it sets `runner.ui` and the
+-- `update_ui` hooks below drive it instead.
+
 local config = require("tuna.config")
-local testcases = require("tuna.testcases")
 local utils = require("tuna.utils")
+local testcases = require("tuna.testcases")
+local compare = require("tuna.compare")
 
 local M = {}
-local Runner = {}
-Runner.__index = Runner
 
-local function normalize_lines(lines)
-    local result = {}
+---@class tuna.TCRunner
+---@field config table buffer configuration
+---@field bufnr integer
+---@field cc { exec: string, args: string[] }? compile command (nil for interpreted languages)
+---@field rc { exec: string, args: string[] } run command
+---@field compile_directory string
+---@field running_directory string
+---@field tcdata table[] per-testcase status/data/results (1-indexed)
+---@field tc_size integer number of entries in tcdata
+---@field compile boolean whether this run compiles first
+---@field next_tc integer index of the next unstarted testcase
+---@field completed boolean whether the current run has finished
+---@field ui table? results UI (set by runner_ui once ported)
+---@field on_complete fun(runner: tuna.TCRunner)? called once when a run finishes
+local TCRunner = {}
+TCRunner.__index = TCRunner
 
-    for _, entry in ipairs(lines or {}) do
-        if type(entry) == "string" then
-            for _, part in ipairs(vim.split(entry, "\n", { plain = true })) do
-                table.insert(result, part)
-            end
-        elseif entry ~= nil then
-            table.insert(result, tostring(entry))
+---Create a runner for `bufnr`, resolving its compile/run commands.
+---@param bufnr integer? defaults to the current buffer
+---@return tuna.TCRunner? # the runner, or `nil` if the commands are missing/malformed
+function M.new(bufnr)
+    bufnr = bufnr or vim.api.nvim_get_current_buf()
+    local filetype = vim.bo[bufnr].filetype or ""
+    local filedir = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(bufnr), ":p:h")
+    local cfg = config.get_buffer_config(bufnr)
+
+    -- Expand $(FNAME)/$(FNOEXT)/... in a command's exec and every arg.
+    local function eval_command(command)
+        local exec = utils.buf_eval_string(bufnr, command.exec)
+        if not exec then
+            return nil
         end
+        local args = {}
+        for i, arg in ipairs(command.args or {}) do
+            args[i] = utils.buf_eval_string(bufnr, arg)
+            if not args[i] then
+                return nil
+            end
+        end
+        return { exec = exec, args = args }
     end
 
-    return result
-end
-
-local function build_command(spec, filetype, modifiers)
-    local entry = spec and spec[filetype]
-    if not entry then
+    local compile_command
+    if cfg.compile_command[filetype] then
+        compile_command = eval_command(cfg.compile_command[filetype])
+        if not compile_command then
+            utils.notify("compile command for '" .. filetype .. "' is malformed; cannot run.")
+            return nil
+        end
+    end
+    if not cfg.run_command[filetype] then
+        utils.notify("no run command configured for filetype '" .. filetype .. "'; cannot run.")
+        return nil
+    end
+    local run_command = eval_command(cfg.run_command[filetype])
+    if not run_command then
+        utils.notify("run command for '" .. filetype .. "' is malformed; cannot run.")
         return nil
     end
 
-    local cmd = {
-        exec = utils.apply_modifiers(entry.exec, modifiers),
-        args = {},
-    }
-
-    for _, arg in ipairs(entry.args or {}) do
-        table.insert(cmd.args, utils.apply_modifiers(arg, modifiers))
-    end
-
-    return cmd
+    return setmetatable({
+        config = cfg,
+        bufnr = bufnr,
+        cc = compile_command,
+        rc = run_command,
+        compile_directory = vim.fs.normalize(filedir .. "/" .. cfg.compile_directory) .. "/",
+        running_directory = vim.fs.normalize(filedir .. "/" .. cfg.running_directory) .. "/",
+        tcdata = {},
+        tc_size = 0,
+        compile = compile_command ~= nil,
+        next_tc = 1,
+        completed = false,
+    }, TCRunner)
 end
 
-function M.new(bufnr)
-    bufnr = bufnr or vim.api.nvim_get_current_buf()
+---Run testcases. Pass a `tctbl` for a fresh run, or `nil` to re-run the testcases
+---loaded by the previous call (keeping their inputs/expected outputs).
+---@param tctbl table<integer, { input: string, output: string? }>? testcases, or nil to re-run
+---@param do_compile boolean? whether to compile first (defaults to true)
+function TCRunner:run_testcases(tctbl, do_compile)
+    if tctbl then
+        if self.config.save_all_files then
+            vim.cmd("silent! wall")
+        elseif self.config.save_current_file then
+            vim.api.nvim_buf_call(self.bufnr, function()
+                vim.cmd("silent! write")
+            end)
+        end
 
-    local self = setmetatable({}, Runner)
-    self.bufnr = bufnr
-    self.filetype = vim.bo[bufnr].filetype or ""
-    self.filepath = vim.api.nvim_buf_get_name(bufnr)
-    local source_dir = self.filepath ~= "" and vim.fn.fnamemodify(self.filepath, ":p:h") or ""
-    self.project_root = source_dir ~= "" and source_dir or vim.fn.getcwd()
+        if do_compile == nil then
+            do_compile = true
+        end
+        self.compile = do_compile and self.cc ~= nil
 
-    self.modifiers = {
-        FNAME = vim.fn.fnamemodify(self.filepath, ":t"),
-        FNOEXT = vim.fn.fnamemodify(self.filepath, ":t:r"),
-        FEXT = vim.fn.fnamemodify(self.filepath, ":e"),
-        FABSPATH = self.filepath,
-        ABSDIR = vim.fn.fnamemodify(self.filepath, ":p:h"),
-    }
-
-    local all_opts = config.options
-    self.compile_dir = utils.normalize_path(all_opts.compile_directory or ".", self.project_root)
-    self.run_dir = utils.normalize_path(all_opts.running_directory or ".", self.project_root)
-    self.compile_cmd = build_command(all_opts.compile_command, self.filetype, self.modifiers)
-    self.run_cmd = build_command(all_opts.run_command, self.filetype, self.modifiers)
-    self.output_bufnr = nil
-    self.output_winid = nil
-
-    return self
-end
-
-function Runner:close_output()
-    if self.output_winid and vim.api.nvim_win_is_valid(self.output_winid) then
-        vim.api.nvim_win_close(self.output_winid, true)
-        self.output_winid = nil
-    elseif self.output_bufnr and vim.api.nvim_buf_is_valid(self.output_bufnr) then
-        vim.api.nvim_buf_delete(self.output_bufnr, { force = true })
-        self.output_bufnr = nil
-    end
-end
-
-function Runner:attach_output_keymaps(bufnr)
-    local function close_handler()
-        self:close_output()
+        self.tcdata = {}
+        if self.compile then -- compilation is testcase #1
+            table.insert(self.tcdata, { tcnum = "Compile", stdin = "", expected = nil })
+        end
+        -- Insert testcases in ascending tcnum order for a stable display.
+        local nums = vim.tbl_keys(tctbl)
+        table.sort(nums)
+        local timelimit = (self.config.maximum_time and self.config.maximum_time > 0) and self.config.maximum_time or nil
+        for _, tcnum in ipairs(nums) do
+            local tc = tctbl[tcnum]
+            table.insert(self.tcdata, {
+                tcnum = tcnum,
+                stdin = tc.input or "",
+                expected = tc.output,
+                timelimit = timelimit,
+            })
+        end
     end
 
-    vim.keymap.set("n", "q", close_handler, { buffer = bufnr, silent = true })
-    vim.keymap.set("n", "<Esc>", close_handler, { buffer = bufnr, silent = true })
-end
-
-function Runner:show_output()
-    if self.output_bufnr and vim.api.nvim_buf_is_valid(self.output_bufnr) then
-        return self.output_bufnr
+    -- Reset per-run state (so re-runs start clean).
+    for _, tc in ipairs(self.tcdata) do
+        tc.status = ""
+        tc.hlgroup = "TunaRunning"
+        tc.stdout = nil
+        tc.stderr = nil
+        tc.time = nil
+        tc.running = false
+        tc.killed = false
+        tc.timed_out = false
+        tc.exit_code = nil
+        tc.exit_signal = nil
     end
 
-    local bufnr = vim.api.nvim_create_buf(false, true)
-    vim.api.nvim_buf_set_option(bufnr, "bufhidden", "wipe")
-    vim.api.nvim_buf_set_option(bufnr, "buftype", "nofile")
-    vim.api.nvim_buf_set_option(bufnr, "swapfile", false)
-    vim.api.nvim_buf_set_option(bufnr, "buflisted", false)
-    vim.api.nvim_buf_set_name(bufnr, "tuna://output")
-
-    self.output_bufnr = bufnr
-    self:attach_output_keymaps(bufnr)
-
-    if config.options.auto_open_output then
-        local width = math.max(80, math.floor(vim.o.columns * 0.8))
-        local height = math.max(12, math.floor(vim.o.lines * 0.6))
-        self.output_winid = vim.api.nvim_open_win(bufnr, true, {
-            relative = "editor",
-            width = width,
-            height = height,
-            row = 2,
-            col = 2,
-            style = "minimal",
-            border = "rounded",
-        })
-    end
-
-    return bufnr
-end
-
-function Runner:write_output(lines)
-    local bufnr = self:show_output()
-    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, normalize_lines(lines))
-    if self.output_winid and vim.api.nvim_win_is_valid(self.output_winid) then
-        vim.api.nvim_win_set_buf(self.output_winid, bufnr)
-    end
-end
-
-function Runner:append_output(lines)
-    local bufnr = self:show_output()
-    local current = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-    local normalized = normalize_lines(lines)
-
-    for _, line in ipairs(normalized) do
-        table.insert(current, line)
-    end
-
-    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, current)
-end
-
-function Runner:spawn_process(cmd, cwd, stdin_data, on_exit)
-    if not cmd then
-        vim.notify("Tuna: no command configured for filetype " .. tostring(self.filetype), vim.log.levels.ERROR)
+    self.tc_size = #self.tcdata
+    self.completed = false
+    if self.tc_size == 0 then
+        utils.notify("no testcases to run.", "WARN")
         return
     end
 
-    local stdin = assert(vim.uv.new_pipe(false), "Tuna: failed to create stdin pipe")
-    local stdout = assert(vim.uv.new_pipe(false), "Tuna: failed to create stdout pipe")
-    local stderr = assert(vim.uv.new_pipe(false), "Tuna: failed to create stderr pipe")
+    -- How many testcases to run concurrently.
+    local parallel = self.config.multiple_testing
+    if parallel == -1 then
+        parallel = vim.uv.available_parallelism()
+    elseif parallel == 0 then
+        parallel = self.tc_size
+    end
+    parallel = math.max(1, parallel)
 
-    local output_data, error_data = {}, {}
-    local handle
+    if self.compile then
+        self.next_tc = 2
+        self:execute_testcase(1, self.cc, self.compile_directory, function()
+            if self.tcdata[1].exit_code == 0 then
+                self:fill_lanes(parallel)
+            else
+                -- compilation failed: skip the rest so the run can complete
+                self.next_tc = self.tc_size + 1
+            end
+        end)
+    else
+        self.next_tc = 1
+        self:fill_lanes(parallel)
+    end
+end
 
-    handle = vim.uv.spawn(cmd.exec, {
-        args = cmd.args,
-        cwd = cwd,
-        stdio = { stdin, stdout, stderr },
-    }, function(code)
-        assert(handle, "Tuna: handle is unexpectedly nil in callback")
+---@private
+---Start up to `parallel` testcases; each, on finishing, pulls the next one.
+---@param parallel integer
+function TCRunner:fill_lanes(parallel)
+    for _ = 1, parallel do
+        if self.next_tc > self.tc_size then
+            break
+        end
+        local n = self.next_tc
+        self.next_tc = self.next_tc + 1
+        self:execute_testcase(n, self.rc, self.running_directory, function()
+            self:run_next_testcase()
+        end)
+    end
+end
 
-        stdin:close()
-        stdout:close()
-        stderr:close()
-        handle:close()
+---@private
+---Run the next unstarted testcase, if any (one parallel lane's continuation).
+function TCRunner:run_next_testcase()
+    if self.next_tc > self.tc_size then
+        return
+    end
+    local n = self.next_tc
+    self.next_tc = self.next_tc + 1
+    self:execute_testcase(n, self.rc, self.running_directory, function()
+        self:run_next_testcase()
+    end)
+end
 
+---@private
+---Spawn one testcase process.
+---@param tcindex integer index in `self.tcdata`
+---@param cmd { exec: string, args: string[] }
+---@param dir string working directory
+---@param callback fun()? run when the process exits
+function TCRunner:execute_testcase(tcindex, cmd, dir, callback)
+    local tc = self.tcdata[tcindex]
+    utils.ensure_directory(dir)
+
+    -- Our own timeout timer, so a timed-out process is labelled TIMEOUT rather
+    -- than as an anonymous kill.
+    if tc.timelimit then
+        tc.timer = vim.uv.new_timer()
+        tc.timer:start(tc.timelimit, 0, function()
+            if tc.running then
+                tc.timed_out = true
+                tc.handle:kill("sigkill")
+            end
+        end)
+    end
+
+    tc.start_time = vim.uv.now()
+    local argv = vim.list_extend({ cmd.exec }, cmd.args or {})
+    local ok, handle = pcall(vim.system, argv, {
+        cwd = dir,
+        stdin = tc.stdin,
+    }, function(res)
+        -- on_exit runs in a fast context; defer the API/UI work to the main loop.
         vim.schedule(function()
-            local out_str = table.concat(output_data, "")
-            local err_str = table.concat(error_data, "")
-            on_exit(code, out_str, err_str)
+            self:finish_testcase(tcindex, res, callback)
         end)
     end)
 
-    if not handle then
-        vim.notify("Tuna: failed to spawn process " .. cmd.exec, vim.log.levels.ERROR)
-        stdin:close()
-        stdout:close()
-        stderr:close()
+    if not ok then
+        if tc.timer then
+            tc.timer:stop()
+            tc.timer:close()
+            tc.timer = nil
+        end
+        tc.status = "FAILED"
+        tc.hlgroup = "TunaWarning"
+        tc.stderr = tostring(handle) -- the pcall error message
+        tc.time = -1
+        self:update_ui(true)
+        if callback then
+            callback()
+        end
+        self:check_complete()
         return
     end
 
-    if stdin_data ~= nil then
-        stdin:write(stdin_data)
-    end
-    stdin:shutdown()
-
-    vim.uv.read_start(stdout, function(err, data)
-        assert(not err, err)
-        if data then
-            table.insert(output_data, data)
-        end
-    end)
-
-    vim.uv.read_start(stderr, function(err, data)
-        assert(not err, err)
-        if data then
-            table.insert(error_data, data)
-        end
-    end)
+    tc.handle = handle
+    tc.running = true
+    tc.status = "RUNNING"
+    tc.hlgroup = "TunaRunning"
+    self:update_ui(true)
 end
 
-function Runner:compile(on_success)
-    if not self.compile_cmd then
-        on_success = on_success or function() end
-        on_success()
-        return
+---@private
+---Record a finished process's result and decide its status.
+---@param tcindex integer
+---@param res vim.SystemCompleted
+---@param callback fun()?
+function TCRunner:finish_testcase(tcindex, res, callback)
+    local tc = self.tcdata[tcindex]
+    tc.running = false
+    tc.time = vim.uv.now() - tc.start_time
+    tc.exit_code = res.code
+    tc.exit_signal = res.signal
+    tc.stdout = res.stdout or ""
+    tc.stderr = res.stderr or ""
+    tc.handle = nil
+    if tc.timer and not tc.timer:is_closing() then
+        tc.timer:stop()
+        tc.timer:close()
     end
+    tc.timer = nil
 
-    self:write_output({ "[tuna] compiling " .. self.modifiers.FNAME .. "..." })
-    vim.notify("Tuna: compiling " .. self.modifiers.FNAME .. "...", vim.log.levels.INFO)
-
-    self:spawn_process(self.compile_cmd, self.compile_dir, nil, function(code, out, err)
-        if code == 0 then
-            self:append_output({ "[tuna] compilation succeeded" })
-            if on_success then
-                on_success()
-            end
+    if tc.timed_out then
+        tc.status, tc.hlgroup = "TIMEOUT", "TunaWrong"
+    elseif tc.killed then
+        tc.status, tc.hlgroup = "KILLED", "TunaWarning"
+    elseif tc.exit_signal and tc.exit_signal ~= 0 then
+        tc.status, tc.hlgroup = "SIG " .. tc.exit_signal, "TunaWarning"
+    elseif tc.exit_code ~= 0 then
+        tc.status, tc.hlgroup = "RET " .. tc.exit_code, "TunaWarning"
+    else
+        -- exited cleanly: compare against expected output (nil expected → DONE)
+        local correct = compare.compare_output(tc.stdout, tc.expected, self.config.output_compare_method)
+        if correct == true then
+            tc.status, tc.hlgroup = "CORRECT", "TunaCorrect"
+        elseif correct == false then
+            tc.status, tc.hlgroup = "WRONG", "TunaWrong"
         else
-            self:append_output({ "[tuna] compilation failed", err })
-            vim.notify("Tuna: compilation failed!\n" .. err, vim.log.levels.ERROR)
+            tc.status, tc.hlgroup = "DONE", "TunaDone"
         end
-    end)
-end
-
-function Runner:run()
-    local test_case = testcases.load_first(self.project_root, self.modifiers.FNOEXT)
-    local stdin_data = nil
-    if test_case and test_case.input then
-        stdin_data = test_case.input
     end
 
-    self:compile(function()
-        if not self.run_cmd then
-            vim.notify("Tuna: no run command configured for filetype " .. tostring(self.filetype), vim.log.levels.ERROR)
+    self:update_ui(true)
+    if callback then
+        callback()
+    end
+    self:check_complete()
+end
+
+---@private
+---Fire the completion hook once every testcase has reached a terminal state.
+function TCRunner:check_complete()
+    if self.completed or self.next_tc <= self.tc_size then
+        return
+    end
+    for _, tc in ipairs(self.tcdata) do
+        if tc.running then
             return
         end
+    end
+    self.completed = true
+    self:update_ui(true)
+    if self.on_complete then
+        self.on_complete(self)
+    end
+    if not self.ui then
+        self:display_results()
+    end
+end
 
-        self:write_output({ "[tuna] running " .. self.modifiers.FNOEXT .. "..." })
-        if test_case then
-            self:append_output({ "[tuna] testcase: " .. test_case.name })
+---Kill a single running testcase process. Killing triggers its `on_exit`, which
+---then pulls the next queued testcase in that lane.
+---@param tcindex integer
+function TCRunner:kill_process(tcindex)
+    local tc = self.tcdata[tcindex]
+    if tc and tc.running and tc.handle then
+        tc.killed = true
+        tc.handle:kill("sigkill")
+    end
+end
+
+---Kill every running testcase process.
+function TCRunner:kill_all_processes()
+    for tcindex in ipairs(self.tcdata) do
+        self:kill_process(tcindex)
+    end
+end
+
+--------------------------------------------------------------------------------
+-- UI hooks
+--------------------------------------------------------------------------------
+
+---Notify the attached UI that data changed (no-op until `runner_ui` is ported).
+---@param update_windows boolean? redraw all windows, not just the details pane
+function TCRunner:update_ui(update_windows)
+    if self.ui then
+        if update_windows then
+            self.ui.update_windows = true
         end
-        vim.notify("Tuna: running " .. self.modifiers.FNOEXT .. "...", vim.log.levels.INFO)
+        self.ui.update_details = true
+        self.ui:update_ui()
+    end
+end
 
-        self:spawn_process(self.run_cmd, self.run_dir, stdin_data, function(code, out, err)
-            local output_lines = { "[tuna] process exited with code " .. tostring(code) }
-            if out ~= "" then
-                table.insert(output_lines, out)
+---Show the results UI when `runner_ui` is available; otherwise the fallback float.
+function TCRunner:show_ui()
+    if self.ui then
+        self.ui:show_ui()
+        self.ui:update_ui()
+    else
+        self:display_results()
+    end
+end
+
+---@private
+---Temporary results display used until `runner_ui` (step 8) lands: a read-only
+---float summarising each testcase, with expected/actual shown on a mismatch.
+function TCRunner:display_results()
+    local lines = {}
+    for _, tc in ipairs(self.tcdata) do
+        local label = tc.tcnum == "Compile" and "Compile" or ("Testcase " .. tc.tcnum)
+        local timestr = (tc.time and tc.time >= 0) and (" (" .. tc.time .. "ms)") or ""
+        table.insert(lines, ("%-12s %s%s"):format(label, tc.status, timestr))
+        if tc.stderr and tc.stderr ~= "" then
+            table.insert(lines, "  stderr:")
+            for _, l in ipairs(vim.split(tc.stderr:gsub("%s+$", ""), "\n", { plain = true })) do
+                table.insert(lines, "    " .. l)
             end
-            if err ~= "" then
-                table.insert(output_lines, "[stderr]\n" .. err)
+        end
+        if tc.status == "WRONG" then
+            table.insert(lines, "  expected:")
+            for _, l in ipairs(vim.split((tc.expected or ""):gsub("%s+$", ""), "\n", { plain = true })) do
+                table.insert(lines, "    " .. l)
             end
-
-            if test_case and test_case.output ~= nil then
-                local expected = test_case.output
-                local actual = out or ""
-                local normalized_expected = expected:gsub("\r\n", "\n"):gsub("\r", "\n")
-                local normalized_actual = actual:gsub("\r\n", "\n"):gsub("\r", "\n")
-
-                if normalized_actual ~= normalized_expected then
-                    table.insert(output_lines, "[tuna] mismatch")
-                    table.insert(output_lines, "[tuna] expected:\n" .. normalized_expected)
-                    table.insert(output_lines, "[tuna] actual:\n" .. normalized_actual)
-                    vim.notify("Tuna: testcase mismatch", vim.log.levels.WARN)
-                else
-                    table.insert(output_lines, "[tuna] testcase passed")
-                    vim.notify("Tuna: testcase passed", vim.log.levels.INFO)
-                end
+            table.insert(lines, "  got:")
+            for _, l in ipairs(vim.split((tc.stdout or ""):gsub("%s+$", ""), "\n", { plain = true })) do
+                table.insert(lines, "    " .. l)
             end
+        end
+    end
+    if #lines == 0 then
+        lines = { "no results" }
+    end
 
-            self:append_output(output_lines)
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+    vim.bo[buf].modifiable = false
+    vim.bo[buf].filetype = "tuna"
 
-            if code == 0 then
-                if not test_case or test_case.output == nil then
-                    vim.notify("Tuna SUCCESS!", vim.log.levels.INFO)
-                end
-            else
-                vim.notify("Tuna FAILED with code " .. code, vim.log.levels.ERROR)
+    local width, height = utils.get_ui_size()
+    local win_w = math.min(math.max(40, width - 8), 100)
+    local win_h = math.min(#lines + 1, math.floor(height * 0.6))
+    local win = vim.api.nvim_open_win(buf, true, {
+        relative = "editor",
+        width = win_w,
+        height = win_h,
+        row = math.floor((height - win_h) / 2),
+        col = math.floor((width - win_w) / 2),
+        border = self.config.floating_border,
+        title = " Results ",
+        title_pos = "center",
+        style = "minimal",
+    })
+    for _, key in ipairs({ "q", "<Esc>" }) do
+        vim.keymap.set("n", key, function()
+            if vim.api.nvim_win_is_valid(win) then
+                vim.api.nvim_win_close(win, true)
             end
-        end)
-    end)
+        end, { buffer = buf, nowait = true })
+    end
 end
 
 return M

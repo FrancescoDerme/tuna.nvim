@@ -164,10 +164,6 @@ M.defaults = {
 ---@type table?
 M.current_setup = nil
 
----Backward-compat alias for `current_setup`, read by not-yet-ported modules.
----@type table?
-M.options = nil
-
 ---Per-buffer resolved configuration (current_setup + local config), cached.
 ---@type table<integer, table>
 M.buffer_configs = {}
@@ -204,7 +200,6 @@ end
 ---@param opts table? user options
 function M.setup(opts)
     M.current_setup = M.update_config_table(M.current_setup, opts)
-    M.options = M.current_setup -- keep the compat alias pointing at the live table
     M.buffer_configs = {} -- invalidate caches so buffers re-resolve against new setup
 end
 

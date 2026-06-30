@@ -231,24 +231,4 @@ function M.get_ui_size()
     return vim.o.columns, height
 end
 
----------------- DEPRECATED / COMPAT ----------------
-
----Legacy modifier expansion used by the not-yet-ported `runner.lua`. Takes a
----pre-computed `{ KEY = value }` table rather than evaluating against a path.
----Superseded by `eval_string`; will be removed once `runner.lua` is ported.
----@param str any
----@param modifiers table<string, string>
----@return any
----@deprecated use `eval_string`/`buf_eval_string`
-function M.apply_modifiers(str, modifiers)
-    if type(str) ~= "string" then
-        return str
-    end
-    local result = str
-    for key, value in pairs(modifiers) do
-        result = result:gsub("%$%(" .. key .. "%)", value)
-    end
-    return result
-end
-
 return M

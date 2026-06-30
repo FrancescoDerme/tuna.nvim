@@ -463,9 +463,9 @@ function M.buf_delete_testcase(bufnr, tcnum)
 end
 
 ---------------- DEPRECATED / COMPAT ----------------
--- These keep the not-yet-ported runner.lua and commands.lua working. They use
--- the prototype's ad-hoc `tests/<name>/` layout and will be removed once those
--- modules move to the backend API above.
+-- Keeps the not-yet-ported `add_testcase` command working. Uses the prototype's
+-- ad-hoc `tests/<name>/` layout; removed once that command moves to the backend
+-- API above (step 9).
 
 ---@deprecated use the backend API
 function M.add(project_root, name)
@@ -487,37 +487,6 @@ function M.add(project_root, name)
     end
 
     return true, testcase_dir
-end
-
----@deprecated use `buf_get_testcases`
-function M.load_first(project_root, source_basename)
-    project_root = project_root or vim.fn.getcwd()
-    local tests_dir = project_root .. "/tests"
-    if not utils.directory_exists(tests_dir) then
-        return nil
-    end
-
-    local dirs = {}
-    for name, type_ in vim.fs.dir(tests_dir) do
-        if type_ == "directory" then
-            table.insert(dirs, tests_dir .. "/" .. name)
-        end
-    end
-    table.sort(dirs)
-
-    for _, dir in ipairs(dirs) do
-        local input = utils.read_file(dir .. "/input.txt")
-        local output = utils.read_file(dir .. "/output.txt")
-        if input or output then
-            return {
-                name = vim.fn.fnamemodify(dir, ":t"),
-                input = input or "",
-                output = output or "",
-                dir = dir,
-            }
-        end
-    end
-    return nil
 end
 
 return M

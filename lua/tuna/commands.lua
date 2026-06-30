@@ -17,6 +17,27 @@ local function start_receiving(mode)
     end
 end
 
+---Most recently created runner, kept so `kill`/`show_ui` can act on it.
+---@type tuna.TCRunner?
+M.last_runner = nil
+
+---Build a runner for the current buffer and run its testcases.
+---@param do_compile boolean
+local function start_run(do_compile)
+    local bufnr = vim.api.nvim_get_current_buf()
+    local r = runner.new(bufnr)
+    if not r then
+        return
+    end
+    M.last_runner = r
+    local tctbl = testcases.buf_get_testcases(bufnr)
+    if next(tctbl) == nil then
+        vim.notify("Tuna: no testcases found for this buffer.", vim.log.levels.WARN)
+        return
+    end
+    r:run_testcases(tctbl, do_compile)
+end
+
 M.subcommands = {
     download_problem = function()
         start_receiving("problem")
@@ -37,8 +58,24 @@ M.subcommands = {
     receive_status = function()
         receive.show_status()
     end,
-    test = function()
-        runner.new():run()
+    run = function()
+        start_run(true)
+    end,
+    run_no_compile = function()
+        start_run(false)
+    end,
+    test = function() -- alias for `run`
+        start_run(true)
+    end,
+    kill = function()
+        if M.last_runner then
+            M.last_runner:kill_all_processes()
+        end
+    end,
+    show_ui = function()
+        if M.last_runner then
+            M.last_runner:show_ui()
+        end
     end,
     add_testcase = function()
         local name = vim.fn.input("Testcase name: ", "sample")
