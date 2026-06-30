@@ -91,4 +91,30 @@ component is just a string read from module state.
 
 ---
 
+## Runner UI: native windows, simpler hide/show
+
+✅ **Decision:** the runner results UI (`runner_ui/`) is built on native floats
+and splits, sharing competitest's recursive `{ ratio, child }` layout engine but
+none of its `nui.nvim` window objects.
+
+Two simplifications fall out of going native:
+
+- **Close-and-rebuild instead of hide-and-restore.** All displayed content lives
+  in the runner's `tcdata`, so closing the UI just tears the windows down and
+  showing it rebuilds and re-renders. competitest preserved hidden `nui` buffers
+  and re-showed them; tuna doesn't need to, which removes a layer of state.
+- **Split `relative_to_editor` is approximate.** competitest's `nui.split` could
+  anchor a split to the editor edge regardless of the current window; the native
+  `nvim_open_win({ split = … })` splits a specific window. tuna splits off the
+  runner's window, which coincides with the editor edge in the usual
+  single-window competitive-programming layout.
+
+A native gotcha worth recording: a float's `row`/`col` anchor its **content**,
+with the border drawn outside, so the popup layout offsets each window by +1 to
+make footprints tile exactly. And because the viewer popup *borrows* a detail
+pane's buffer, the UI's `:q` handling is keyed on **window id**, not buffer —
+otherwise closing the viewer would tear down the whole UI.
+
+---
+
 <!-- Add new entries above this line as decisions are made. -->

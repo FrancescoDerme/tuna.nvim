@@ -36,6 +36,7 @@ local function start_run(do_compile)
         return
     end
     r:run_testcases(tctbl, do_compile)
+    r:show_ui()
 end
 
 M.subcommands = {

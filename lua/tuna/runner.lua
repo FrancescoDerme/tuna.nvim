@@ -341,6 +341,31 @@ function TCRunner:check_complete()
     end
 end
 
+---Re-run a single testcase (used by the UI's "run again"). Resets that entry and
+---executes it with the appropriate command/directory.
+---@param tcindex integer
+function TCRunner:run_single(tcindex)
+    local tc = self.tcdata[tcindex]
+    if not tc then
+        return
+    end
+    tc.status = ""
+    tc.hlgroup = "TunaRunning"
+    tc.stdout = nil
+    tc.stderr = nil
+    tc.time = nil
+    tc.running = false
+    tc.killed = false
+    tc.timed_out = false
+    tc.exit_code = nil
+    tc.exit_signal = nil
+    if tcindex == 1 and self.compile then
+        self:execute_testcase(tcindex, self.cc, self.compile_directory)
+    else
+        self:execute_testcase(tcindex, self.rc, self.running_directory)
+    end
+end
+
 ---Kill a single running testcase process. Killing triggers its `on_exit`, which
 ---then pulls the next queued testcase in that lane.
 ---@param tcindex integer
@@ -375,13 +400,23 @@ function TCRunner:update_ui(update_windows)
     end
 end
 
----Show the results UI when `runner_ui` is available; otherwise the fallback float.
+---Show the results UI, creating it on first use. Falls back to the temporary
+---results float if the UI can't be created (e.g. a bad `runner_ui.interface`).
 function TCRunner:show_ui()
+    if not self.ui then
+        self.ui = require("tuna.runner_ui").new(self)
+    end
     if self.ui then
         self.ui:show_ui()
-        self.ui:update_ui()
     else
         self:display_results()
+    end
+end
+
+---Re-show/refresh the runner UI after a `VimResized`.
+function TCRunner:resize_ui()
+    if self.ui then
+        self.ui:resize_ui()
     end
 end
 
