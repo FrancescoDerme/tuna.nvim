@@ -148,4 +148,36 @@ otherwise closing the viewer would tear down the whole UI.
   `require("tuna.commands")` at call time rather than at module load, keeping
   `setup()` startup cost minimal (a project goal) and avoiding load-order cycles.
 
+---
+
+# Phase 3 — extensions beyond competitest
+
+New capabilities tuna adds that competitest never had. (See the Phase 3 roadmap.)
+
+## Pluggable checkers (`checker.lua`)
+
+✅ **Done (Workstream 1).** competitest could only decide a verdict by comparing
+program output against the expected output (`exact` / `squish` / a custom Lua
+function). tuna keeps that as the `"builtin"` checker but adds support for an
+**external, testlib-style checker program** via the new `checker` option:
+
+```lua
+checker = "builtin"                                  -- default: output comparison
+checker = "~/cp/checkers/wcmp"                       -- a checker binary
+checker = { exec = "$(ABSDIR)/chk", args = { ... } } -- full control
+```
+
+An external checker is invoked as `checker <input> <output> <answer>` (the testlib
+convention: jury input, participant output, jury answer); exit code `0` is correct,
+anything else is wrong, and its stderr/stdout becomes the verdict message
+(`tc.checker_message`). The three files are passed through the `$(INPUT)`,
+`$(OUTPUT)`, `$(ANSWER)` placeholders in `args` (defaulted when omitted).
+
+**Why it's the foundation:** stress testing, interactive problems, and
+multiple-solution problems all need a verdict that isn't plain string equality, so
+the runner now routes every clean exit through `checker.judge` instead of calling
+`compare` directly. Because an external checker is a separate async process, the
+runner tracks a per-testcase `judging` flag so a run isn't declared complete before
+its verdict lands.
+
 <!-- Add new entries above this line as decisions are made. -->

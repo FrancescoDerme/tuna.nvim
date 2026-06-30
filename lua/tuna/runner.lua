@@ -22,7 +22,7 @@
 local config = require("tuna.config")
 local utils = require("tuna.utils")
 local testcases = require("tuna.testcases")
-local compare = require("tuna.compare")
+local checker = require("tuna.checker")
 
 local M = {}
 
@@ -31,6 +31,7 @@ local M = {}
 ---@field bufnr integer
 ---@field cc { exec: string, args: string[] }? compile command (nil for interpreted languages)
 ---@field rc { exec: string, args: string[] } run command
+---@field checker "builtin"|{ exec: string, args: string[]? } resolved verdict checker
 ---@field compile_directory string
 ---@field running_directory string
 ---@field tcdata table[] per-testcase status/data/results (1-indexed)
@@ -86,11 +87,33 @@ function M.new(bufnr)
         return nil
     end
 
+    -- Resolve the checker. "builtin" (the default) uses output_compare_method.
+    -- An external checker may be a path string or a { exec, args } table; only
+    -- the exec is modifier-expanded here — its args keep the $(INPUT)/$(OUTPUT)/
+    -- $(ANSWER) placeholders, which `checker.judge` fills in per testcase.
+    local resolved_checker = "builtin"
+    if type(cfg.checker) == "string" and cfg.checker ~= "builtin" then
+        local exec = utils.buf_eval_string(bufnr, cfg.checker)
+        if exec then
+            resolved_checker = { exec = exec }
+        else
+            utils.notify("checker path is malformed; falling back to builtin comparison.", "WARN")
+        end
+    elseif type(cfg.checker) == "table" and cfg.checker.exec then
+        local exec = utils.buf_eval_string(bufnr, cfg.checker.exec)
+        if exec then
+            resolved_checker = { exec = exec, args = cfg.checker.args }
+        else
+            utils.notify("checker command is malformed; falling back to builtin comparison.", "WARN")
+        end
+    end
+
     return setmetatable({
         config = cfg,
         bufnr = bufnr,
         cc = compile_command,
         rc = run_command,
+        checker = resolved_checker,
         compile_directory = vim.fs.normalize(filedir .. "/" .. cfg.compile_directory) .. "/",
         running_directory = vim.fs.normalize(filedir .. "/" .. cfg.running_directory) .. "/",
         tcdata = {},
@@ -147,6 +170,7 @@ function TCRunner:run_testcases(tctbl, do_compile)
         tc.stderr = nil
         tc.time = nil
         tc.running = false
+        tc.judging = false
         tc.killed = false
         tc.timed_out = false
         tc.exit_code = nil
@@ -293,31 +317,47 @@ function TCRunner:finish_testcase(tcindex, res, callback)
     end
     tc.timer = nil
 
-    if tc.timed_out then
-        tc.status, tc.hlgroup = "TIMEOUT", "TunaWrong"
-    elseif tc.killed then
-        tc.status, tc.hlgroup = "KILLED", "TunaWarning"
-    elseif tc.exit_signal and tc.exit_signal ~= 0 then
-        tc.status, tc.hlgroup = "SIG " .. tc.exit_signal, "TunaWarning"
-    elseif tc.exit_code ~= 0 then
-        tc.status, tc.hlgroup = "RET " .. tc.exit_code, "TunaWarning"
-    else
-        -- exited cleanly: compare against expected output (nil expected → DONE)
-        local correct = compare.compare_output(tc.stdout, tc.expected, self.config.output_compare_method)
-        if correct == true then
-            tc.status, tc.hlgroup = "CORRECT", "TunaCorrect"
-        elseif correct == false then
-            tc.status, tc.hlgroup = "WRONG", "TunaWrong"
-        else
-            tc.status, tc.hlgroup = "DONE", "TunaDone"
+    -- Updating the UI, advancing the lane, and checking for completion happens
+    -- once the verdict is known. The checker may be async (external program), so
+    -- this is wrapped and called either inline or from the checker callback.
+    local function finalize()
+        self:update_ui(true)
+        if callback then
+            callback()
         end
+        self:check_complete()
     end
 
-    self:update_ui(true)
-    if callback then
-        callback()
+    if tc.timed_out then
+        tc.status, tc.hlgroup = "TIMEOUT", "TunaWrong"
+        finalize()
+    elseif tc.killed then
+        tc.status, tc.hlgroup = "KILLED", "TunaWarning"
+        finalize()
+    elseif tc.exit_signal and tc.exit_signal ~= 0 then
+        tc.status, tc.hlgroup = "SIG " .. tc.exit_signal, "TunaWarning"
+        finalize()
+    elseif tc.exit_code ~= 0 then
+        tc.status, tc.hlgroup = "RET " .. tc.exit_code, "TunaWarning"
+        finalize()
+    else
+        -- exited cleanly: derive the verdict via the checker (nil expected → DONE).
+        -- An external checker is async: mark the testcase as still being judged so
+        -- `check_complete` doesn't declare the run finished before the verdict lands.
+        tc.judging = true
+        checker.judge(tc, self.checker, self.config.output_compare_method, function(correct, message)
+            tc.judging = false
+            tc.checker_message = message
+            if correct == true then
+                tc.status, tc.hlgroup = "CORRECT", "TunaCorrect"
+            elseif correct == false then
+                tc.status, tc.hlgroup = "WRONG", "TunaWrong"
+            else
+                tc.status, tc.hlgroup = "DONE", "TunaDone"
+            end
+            finalize()
+        end)
     end
-    self:check_complete()
 end
 
 ---@private
@@ -327,7 +367,7 @@ function TCRunner:check_complete()
         return
     end
     for _, tc in ipairs(self.tcdata) do
-        if tc.running then
+        if tc.running or tc.judging then
             return
         end
     end
@@ -355,6 +395,7 @@ function TCRunner:run_single(tcindex)
     tc.stderr = nil
     tc.time = nil
     tc.running = false
+    tc.judging = false
     tc.killed = false
     tc.timed_out = false
     tc.exit_code = nil

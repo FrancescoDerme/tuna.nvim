@@ -43,6 +43,11 @@ M.defaults = {
     multiple_testing = -1, -- testcases to run at once: -1 = CPU count, 0 = all, n = n
     maximum_time = 5000, -- per-process time limit in ms (process is killed past it)
     output_compare_method = "squish", -- "exact" | "squish" | function(out, expected)
+    -- verdict source: "builtin" uses output_compare_method; otherwise a
+    -- testlib-style external checker. May be a path string, or a command table
+    -- { exec, args } whose args expand $(INPUT)/$(OUTPUT)/$(ANSWER) (default:
+    -- `checker <input> <output> <answer>`). The exec also expands $(FNOEXT) etc.
+    checker = "builtin",
     view_output_diff = false,
 
     -- testcase storage (see DIFFERENCES.md: layout is fully customizable)
