@@ -18,6 +18,7 @@ local M = {}
 local subcommand_args = {
     convert = { "files", "single_file", "directory" },
     receive = { "testcases", "problem", "contest", "persistently", "status", "stop" },
+    scaffold = { "checker", "generator", "brute" },
 }
 
 --------------------------------------------------------------------------------
@@ -238,7 +239,43 @@ M.subcommands = {
     interactive = function(args)
         require("tuna.interactive").run(api.nvim_get_current_buf(), #args > 0 and args or nil)
     end,
+    run_all = function()
+        require("tuna.multi").run(api.nvim_get_current_buf())
+    end,
+    scaffold = function(args)
+        if not args[1] then
+            utils.notify("scaffold: a kind is required (checker | generator | brute).")
+            return
+        end
+        require("tuna.scaffold").create(args[1], api.nvim_get_current_buf())
+    end,
+    menu = function()
+        M.open_menu()
+    end,
 }
+
+---Open the mode-switcher menu: pick a run/test/scaffold action and launch it.
+function M.open_menu()
+    local bufnr = api.nvim_get_current_buf()
+    local actions = {
+        { "Run", function() M.run_testcases(nil, true, false) end },
+        { "Run (no compile)", function() M.run_testcases(nil, false, false) end },
+        { "Show results UI", function() M.run_testcases(nil, false, true) end },
+        { "Run all versions", function() require("tuna.multi").run(bufnr) end },
+        { "Stress test", function() require("tuna.stress").run(bufnr) end },
+        { "Interactive", function() require("tuna.interactive").run(bufnr) end },
+        { "Scaffold: checker", function() require("tuna.scaffold").create("checker", bufnr) end },
+        { "Scaffold: generator", function() require("tuna.scaffold").create("generator", bufnr) end },
+        { "Scaffold: brute", function() require("tuna.scaffold").create("brute", bufnr) end },
+    }
+    local labels = {}
+    for i, a in ipairs(actions) do
+        labels[i] = a[1]
+    end
+    require("tuna.widgets").menu(labels, "Tuna", function(idx)
+        actions[idx][2]()
+    end, api.nvim_get_current_win())
+end
 
 ---Dispatch a parsed `:Tuna` argument list (subcommand + its arguments).
 ---@param args string[] the full fargs list (args[1] is the subcommand)

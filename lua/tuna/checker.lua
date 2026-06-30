@@ -46,7 +46,7 @@ end
 
 ---Judge a finished testcase.
 ---@param tc table testcase data; reads `.stdin`, `.stdout`, `.expected`
----@param checker "builtin"|{ exec: string, args: string[]? } resolved checker spec
+---@param checker "builtin"|fun(tc: table): boolean?, string?|{ exec: string, args: string[]? } resolved checker spec
 ---@param compare_method tuna.CompareBuiltin|tuna.CompareMethod builtin compare method
 ---@param callback fun(correct: boolean?, message: string?) verdict (`nil` => uncheckable/DONE)
 function M.judge(tc, checker, compare_method, callback)
@@ -57,11 +57,24 @@ function M.judge(tc, checker, compare_method, callback)
         return
     end
 
-    -- An external checker needs a jury answer to compare against; without one
-    -- (the compile pseudo-testcase, or a case with no expected output) there is
-    -- nothing to check, so report uncheckable.
+    -- Neither a Lua-function nor an external checker can judge the compile
+    -- pseudo-testcase (or a case with no expected output), so report uncheckable.
     if tc.expected == nil then
         callback(nil)
+        return
+    end
+
+    -- A Lua-function checker: input-aware (gets the whole testcase), runs in-process.
+    if type(checker) == "function" then
+        local ok, correct, message = pcall(checker, tc)
+        if not ok then
+            vim.schedule(function()
+                utils.notify("checker function errored: " .. tostring(correct))
+            end)
+            callback(nil)
+        else
+            callback(correct, message)
+        end
         return
     end
 

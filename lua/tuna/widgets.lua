@@ -426,12 +426,102 @@ end
 
 --------------------------------------------------------------------------------
 
+---@class tuna.MenuWidget
+---@field ui_visible boolean
+---@field items string[]
+---@field title string
+---@field on_choice fun(idx: integer)?
+---@field restore_winid integer?
+---@field winid integer?
+---@field menu_buf integer?
+local menu = { ui_visible = false }
+
+---Open a generic single-choice menu (used by the mode switcher). `on_choice`
+---receives the 1-based index of the picked item.
+---@param items string[]? menu labels, or `nil` to re-render after a resize
+---@param title string? floating window title
+---@param on_choice fun(idx: integer)? called with the chosen index
+---@param restore_winid integer? window to refocus once the menu closes
+function M.menu(items, title, on_choice, restore_winid)
+    if items == nil then -- resize
+        if not menu.ui_visible then
+            return
+        end
+        close_win(menu.winid)
+    else
+        if #items == 0 then
+            return
+        end
+        menu.items = items
+        menu.title = title and (" " .. title .. " ") or " Tuna "
+        menu.on_choice = on_choice
+        menu.restore_winid = restore_winid
+    end
+
+    local cfg = config.get_buffer_config(api.nvim_get_current_buf())
+    local vim_width, vim_height = utils.get_ui_size()
+    local width = #menu.title
+    for _, l in ipairs(menu.items) do
+        width = math.max(width, #l)
+    end
+    width = math.min(math.max(width + 4, 24), vim_width - 4)
+    local height = math.min(#menu.items, vim_height - 4)
+
+    menu.menu_buf = api.nvim_create_buf(false, true)
+    api.nvim_buf_set_lines(menu.menu_buf, 0, -1, false, menu.items)
+    vim.bo[menu.menu_buf].modifiable = false
+    vim.bo[menu.menu_buf].filetype = "tuna"
+
+    menu.winid = open_float(menu.menu_buf, true, {
+        width = width,
+        height = height,
+        row = math.floor((vim_height - height) / 2),
+        col = math.floor((vim_width - width) / 2),
+        border = cfg.floating_border,
+        border_highlight = cfg.floating_border_highlight,
+        title = menu.title,
+    })
+    vim.wo[menu.winid].cursorline = true
+    menu.ui_visible = true
+
+    ---@param idx integer? chosen index, or nil if cancelled
+    local function close(idx)
+        if not menu.ui_visible then
+            return
+        end
+        menu.ui_visible = false
+        close_win(menu.winid)
+        if menu.restore_winid and api.nvim_win_is_valid(menu.restore_winid) then
+            api.nvim_set_current_win(menu.restore_winid)
+        end
+        if idx and menu.on_choice then
+            menu.on_choice(idx)
+        end
+    end
+
+    map_keys(cfg.picker_ui.mappings.submit, "n", menu.menu_buf, function()
+        close(api.nvim_win_get_cursor(menu.winid)[1])
+    end)
+    map_keys(cfg.picker_ui.mappings.close, "n", menu.menu_buf, function()
+        close(nil)
+    end)
+    api.nvim_create_autocmd("WinClosed", {
+        buffer = menu.menu_buf,
+        callback = function()
+            close(nil)
+        end,
+    })
+end
+
+--------------------------------------------------------------------------------
+
 ---Rebuild whichever widgets are currently visible. Called from the `VimResized`
 ---autocmd so floats stay centred and proportional after the UI changes size.
 function M.resize_widgets()
     M.editor(nil)
     M.picker(nil)
     M.input(nil)
+    M.menu(nil)
 end
 
 return M

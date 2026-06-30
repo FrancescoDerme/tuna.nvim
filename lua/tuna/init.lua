@@ -42,7 +42,7 @@ function M.setup(user_opts)
 
     vim.api.nvim_create_user_command("Tuna", function(opts)
         if #opts.fargs == 0 then
-            require("tuna.utils").notify("at least one argument required", "INFO")
+            require("tuna.commands").open_menu() -- bare `:Tuna` opens the mode menu
             return
         end
         require("tuna.commands").execute(opts.fargs)

@@ -229,4 +229,39 @@ stdin on EOF and guarding every write against a pipe that teardown has already
 closed. A timeout timer and the interactor-exits-first / solution-crashes-first
 orderings are handled explicitly.
 
+## Multiple-answer problems & the Lua-function checker
+
+✅ **Done.** A problem that accepts several valid outputs (e.g. "print two numbers
+that sum to 3" → both `1 2` and `2 1`) is handled by the checker. competitest's
+custom comparator was `function(output, expected)` — it never saw the **input**, so
+it couldn't validate input-dependent answers. tuna adds a third `checker` form: a
+**Lua function `function(tc)` that receives the whole testcase** (`tc.stdin`,
+`tc.stdout`, `tc.expected`) and returns `(ok, message)`. So you get input-aware
+special judging in pure Lua, without writing/compiling an external checker — and the
+same capability flows through `:Tuna run`, `stress`, `interactive`, and `run_all`.
+
+## Multiple solution versions (`multi.lua`, `:Tuna run_all`)
+
+✅ **Done.** Keep several attempts side by side (`main.cpp`, `brute.cpp`, …) and
+`:Tuna run_all` compiles and runs *every* sibling file of the same extension against
+the shared testcases, printing a per-solution `correct/total` summary. competitest
+only ever ran the current file. (This is distinct from multiple-*answer* support
+above — here it's multiple *programs*.)
+
+## Scaffolding (`scaffold.lua`, `:Tuna scaffold …`)
+
+✅ **Done.** `:Tuna scaffold <checker|generator|brute>` drops a dependency-free C++
+starter (no testlib needed) into the problem directory and opens it, giving a clean
+on-ramp to writing the checker/generator that stress testing and special judging
+need. Filenames and template sources are overridable via `config.scaffold`.
+competitest had nothing comparable.
+
+## Mode-switcher menu (`widgets.menu`)
+
+✅ **Done.** Bare `:Tuna` (or `:Tuna menu`) opens a native chooser listing the run/
+test/scaffold actions (Run, Run-all, Stress, Interactive, Scaffold…) so the Phase 3
+modes are discoverable without memorising subcommands. In competitest a bare
+`:CompetiTest` was an error. This is a deliberate precursor to the fuller `:Tuna`
+dashboard planned for Workstream 5.
+
 <!-- Add new entries above this line as decisions are made. -->

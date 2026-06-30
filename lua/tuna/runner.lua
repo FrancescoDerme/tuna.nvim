@@ -31,7 +31,7 @@ local M = {}
 ---@field bufnr integer
 ---@field cc { exec: string, args: string[] }? compile command (nil for interpreted languages)
 ---@field rc { exec: string, args: string[] } run command
----@field checker "builtin"|{ exec: string, args: string[]? } resolved verdict checker
+---@field checker "builtin"|fun(tc: table): boolean?, string?|{ exec: string, args: string[]? } resolved verdict checker
 ---@field compile_directory string
 ---@field running_directory string
 ---@field tcdata table[] per-testcase status/data/results (1-indexed)
@@ -92,7 +92,9 @@ function M.new(bufnr)
     -- the exec is modifier-expanded here — its args keep the $(INPUT)/$(OUTPUT)/
     -- $(ANSWER) placeholders, which `checker.judge` fills in per testcase.
     local resolved_checker = "builtin"
-    if type(cfg.checker) == "string" and cfg.checker ~= "builtin" then
+    if type(cfg.checker) == "function" then
+        resolved_checker = cfg.checker
+    elseif type(cfg.checker) == "string" and cfg.checker ~= "builtin" then
         local exec = utils.buf_eval_string(bufnr, cfg.checker)
         if exec then
             resolved_checker = { exec = exec }
