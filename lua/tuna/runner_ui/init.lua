@@ -83,7 +83,8 @@ local function as_list(maps)
 end
 
 ---@private
----The testcase index under the selector cursor.
+---The testcase index under the selector cursor (1:1 with `tcdata`; the Compile
+---pseudo-testcase, when present, is row 1).
 function RunnerUI:cursor_tc()
     if not (self.windows.tc and api.nvim_win_is_valid(self.windows.tc.winid)) then
         return 1
@@ -99,7 +100,9 @@ function RunnerUI:show_ui()
     end
 
     self.restore_winid = self.restore_winid or api.nvim_get_current_win()
-    self.interface.init_ui(self.windows, self.config, self.restore_winid)
+    -- The "Run" pane is sized to the runner's (stable) status-line count.
+    local status_height = math.max(1, #self:status_lines())
+    self.interface.init_ui(self.windows, self.config, self.restore_winid, status_height)
     self.ui_visible = true
     self:update_status_line()
 
@@ -119,9 +122,19 @@ function RunnerUI:show_ui()
     -- Close maps on every window; ":q" handled per-window via WinClosed keyed on
     -- the *window id* (not buffer — the viewer borrows a detail pane's buffer, so
     -- a buffer-keyed autocmd would tear the UI down when the viewer is closed).
+    local switch = as_list(mappings.switch_window or {})
+    local dirs = { "h", "j", "k", "l" }
     for _, w in pairs(self.windows) do
         for _, key in ipairs(as_list(mappings.close)) do
             vim.keymap.set("n", key, close_or_viewer, { buffer = w.bufnr, nowait = true })
+        end
+        for i, key in ipairs(switch) do
+            local d = dirs[i]
+            if d then
+                vim.keymap.set("n", key, function()
+                    self:focus_dir(d)
+                end, { buffer = w.bufnr, nowait = true })
+            end
         end
         api.nvim_create_autocmd("WinClosed", {
             group = self.augroup,
@@ -348,6 +361,43 @@ function RunnerUI:resize_ui()
     end)
 end
 
+---Show an ad-hoc message (e.g. a compilation error) in a large float, closable
+---with the same keys as the viewer. Independent of the viewer's state.
+---@param title string
+---@param text string
+function RunnerUI:show_message(title, text)
+    local buf = api.nvim_create_buf(false, true)
+    api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(text or "", "\n", { plain = true }))
+    vim.bo[buf].modifiable = false
+    vim.bo[buf].filetype = "tuna"
+
+    local vim_width, vim_height = utils.get_ui_size()
+    local vcfg = self.config.runner_ui.viewer
+    local width = math.floor(vim_width * vcfg.width + 0.5)
+    local height = math.floor(vim_height * vcfg.height + 0.5)
+    local win = api.nvim_open_win(buf, true, {
+        relative = "editor",
+        width = width,
+        height = height,
+        col = math.floor((vim_width - width) / 2),
+        row = math.floor((vim_height - height) / 2),
+        border = self.config.floating_border,
+        title = title,
+        title_pos = "center",
+        style = "minimal",
+        zindex = 70,
+    })
+    utils.set_border_highlight(win, self.config.floating_border_highlight)
+    vim.wo[win].wrap = false
+    for _, key in ipairs(as_list(self.config.runner_ui.mappings.close)) do
+        vim.keymap.set("n", key, function()
+            if api.nvim_win_is_valid(win) then
+                api.nvim_win_close(win, true)
+            end
+        end, { buffer = buf, nowait = true })
+    end
+end
+
 ---@private
 ---Pad/truncate `str` to display width `len`.
 local function fit(len, str)
@@ -359,18 +409,94 @@ local function fit(len, str)
 end
 
 ---@private
----Fill the status pane ("st") with the run mode and verdict source. Its own
----rectangle above the Testcases pane, in both the popup and split interfaces.
+---The lines shown in the "Run" status pane: the run mode and verdict source, then
+---any runner-specific tail (e.g. the stress iteration/save counters). The compile
+---step is *not* here — it's a testcase row, so its warnings are viewable. The
+---count is stable for a given runner, so it can size the pane at build time.
+---@return string[]
+function RunnerUI:status_lines()
+    -- Each entry is a { label, value } pair; the colons are aligned by padding
+    -- every label to the widest one.
+    local entries = {
+        { "mode", self.runner.mode or "normal" },
+        { "judge", self.runner.judge_label and self.runner:judge_label() or "builtin" },
+    }
+    if self.runner.status_tail then
+        vim.list_extend(entries, self.runner:status_tail())
+    end
+
+    local width = 0
+    for _, e in ipairs(entries) do
+        width = math.max(width, #e[1])
+    end
+    local lines = {}
+    for _, e in ipairs(entries) do
+        lines[#lines + 1] = string.format("%-" .. width .. "s: %s", e[1], e[2])
+    end
+    return lines
+end
+
+---@private
+---Fill the "Run" status pane. Its own rectangle above the Testcases pane, in both
+---the popup and split interfaces.
 function RunnerUI:update_status_line()
     local w = self.windows.st
     if not (w and w.bufnr and api.nvim_buf_is_valid(w.bufnr)) then
         return
     end
-    local mode = self.runner.mode or "normal"
-    local judge = self.runner.judge_label and self.runner:judge_label() or "builtin"
     vim.bo[w.bufnr].modifiable = true
-    api.nvim_buf_set_lines(w.bufnr, 0, -1, false, { ("  mode: %s      judge: %s"):format(mode, judge) })
+    api.nvim_buf_set_lines(w.bufnr, 0, -1, false, self:status_lines())
     vim.bo[w.bufnr].modifiable = false
+end
+
+---@private
+---Move focus to the nearest pane in direction `dir` ("h"/"j"/"k"/"l"), chosen by
+---window geometry. Works for the floating (popup) interface too, where the
+---built-in `<C-w>hjkl` motions don't cross floating windows.
+---@param dir string
+function RunnerUI:focus_dir(dir)
+    local cur = api.nvim_get_current_win()
+    local from, targets = nil, {}
+    for _, name in ipairs({ "tc", "so", "eo", "si", "se", "st" }) do
+        local w = self.windows[name]
+        if w and w.winid and api.nvim_win_is_valid(w.winid) then
+            local pos = api.nvim_win_get_position(w.winid)
+            local t = {
+                winid = w.winid,
+                r = pos[1] + api.nvim_win_get_height(w.winid) / 2,
+                c = pos[2] + api.nvim_win_get_width(w.winid) / 2,
+            }
+            targets[#targets + 1] = t
+            if w.winid == cur then
+                from = t
+            end
+        end
+    end
+    if not from then
+        return
+    end
+    local best, bestscore
+    for _, t in ipairs(targets) do
+        if t.winid ~= cur then
+            local dr, dc = t.r - from.r, t.c - from.c
+            local score
+            if dir == "h" and dc < -0.5 then
+                score = -dc + 3 * math.abs(dr)
+            elseif dir == "l" and dc > 0.5 then
+                score = dc + 3 * math.abs(dr)
+            elseif dir == "k" and dr < -0.5 then
+                score = -dr + 3 * math.abs(dc)
+            elseif dir == "j" and dr > 0.5 then
+                score = dr + 3 * math.abs(dc)
+            end
+            if score and (not bestscore or score < bestscore) then
+                bestscore, best = score, t.winid
+            end
+        end
+    end
+    if best then
+        api.nvim_set_current_win(best)
+    end
 end
 
 ---@private
@@ -388,19 +514,27 @@ end
 ---`update_details` one-shot flags set by `TCRunner:update_ui`.
 function RunnerUI:update_ui()
     vim.schedule(function()
-        if not self.ui_visible or next(self.runner.tcdata) == nil then
+        if not self.ui_visible then
+            return
+        end
+        -- Always refresh the status line (stress progress updates even before any
+        -- testcase/counterexample exists).
+        self:update_status_line()
+        if next(self.runner.tcdata) == nil then
             return
         end
 
         if self.update_windows then
             self.update_windows = false
             self.update_details = true
-            self:update_status_line()
 
             local lines, regions = {}, {}
             for i, tc in ipairs(self.runner.tcdata) do
                 local header = tc.tcnum == "Compile" and "Compile" or ("TC " .. tc.tcnum)
-                local timestr = (tc.time and tc.time >= 0) and string.format("%.3f s", tc.time / 1000) or ""
+                -- No runtime for a just-saved counterexample: show its label
+                -- (e.g. "saved") in the time column instead.
+                local timestr = (tc.time and tc.time >= 0) and string.format("%.3f s", tc.time / 1000)
+                    or (tc.time_label or "")
                 table.insert(lines, fit(10, header) .. fit(10, tc.status) .. timestr)
                 table.insert(regions, { line = i - 1, hlgroup = tc.hlgroup, len = #tc.status })
 
@@ -414,7 +548,7 @@ function RunnerUI:update_ui()
                     and tc.start_time ~= self.latest_compile_token
                 then
                     self.latest_compile_token = tc.start_time
-                    self.update_testcase = 1
+                    self.update_testcase = i
                     self.viewer_content = "se"
                     self.make_viewer_visible = true
                 end

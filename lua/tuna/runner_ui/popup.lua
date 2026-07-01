@@ -14,9 +14,6 @@ local utils = require("tuna.utils")
 
 local M = {}
 
--- Height (in screen rows, border included) of the status strip above the grid.
-local STATUS_HEIGHT = 3
-
 local titles = {
     st = " Run ",
     tc = " Testcases ",
@@ -65,8 +62,10 @@ local function rec_compute_layout(layout, vertical, width, height, col, row, siz
 end
 
 ---@param config table
+---@param status_rows integer content rows of the "Run" pane (border added here)
 ---@return table sizes, table positions
-local function compute_layout(config)
+local function compute_layout(config, status_rows)
+    local STATUS_HEIGHT = status_rows + 2 -- content rows plus top & bottom border
     local sizes, positions = {}, {}
     local vim_width, vim_height = utils.get_ui_size()
     local total_width = math.floor(vim_width * config.popup_ui.total_width + 0.5)
@@ -74,27 +73,29 @@ local function compute_layout(config)
     local col0 = math.floor((vim_width - total_width) / 2 + 0.5)
     local row0 = math.floor((vim_height - total_height) / 2 + 0.5)
 
-    -- Reserve a full-width status strip at the top; the grid fills the rest.
-    sizes.st = { width = total_width - 2, height = STATUS_HEIGHT - 2 }
-    positions.st = { col = col0, row = row0 }
-    rec_compute_layout(
-        config.popup_ui.layout,
-        false,
-        total_width,
-        total_height - STATUS_HEIGHT,
-        col0,
-        row0 + STATUS_HEIGHT,
-        sizes,
-        positions
-    )
+    -- Lay the whole grid out first, then carve the status strip out of the top of
+    -- the Testcases pane only (so it sits above "tc" and not the other panes).
+    rec_compute_layout(config.popup_ui.layout, false, total_width, total_height, col0, row0, sizes, positions)
+
+    local tc_pos, tc_size = positions.tc, sizes.tc
+    if tc_pos and tc_size then
+        -- st occupies the top STATUS_HEIGHT rows of tc's rectangle (matching width);
+        -- tc shrinks and moves down by STATUS_HEIGHT.
+        sizes.st = { width = tc_size.width, height = STATUS_HEIGHT - 2 }
+        positions.st = { col = tc_pos.col, row = tc_pos.row }
+        positions.tc = { col = tc_pos.col, row = tc_pos.row + STATUS_HEIGHT }
+        sizes.tc = { width = tc_size.width, height = tc_size.height - STATUS_HEIGHT }
+    end
     return sizes, positions
 end
 
 ---Create the floating windows; populates `windows[name] = { bufnr, winid, title }`.
 ---@param windows table
 ---@param config table
-function M.init_ui(windows, config)
-    local sizes, positions = compute_layout(config)
+---@param _init_winid integer? unused (popup anchors to the editor)
+---@param status_rows integer? content rows of the "Run" pane (default 2)
+function M.init_ui(windows, config, _init_winid, status_rows)
+    local sizes, positions = compute_layout(config, status_rows or 2)
     for name in pairs(titles) do
         local buf = api.nvim_create_buf(false, true)
         vim.bo[buf].filetype = "tuna"
@@ -117,10 +118,8 @@ function M.init_ui(windows, config)
         })
         require("tuna.utils").set_border_highlight(win, config.floating_border_highlight)
         local selector = name == "tc"
-        local status = name == "st"
-        vim.wo[win].number = not status and (selector and config.runner_ui.selector_show_nu or config.runner_ui.show_nu)
-        vim.wo[win].relativenumber = not status
-            and (selector and config.runner_ui.selector_show_rnu or config.runner_ui.show_rnu)
+        vim.wo[win].number = selector and config.runner_ui.selector_show_nu or config.runner_ui.show_nu
+        vim.wo[win].relativenumber = selector and config.runner_ui.selector_show_rnu or config.runner_ui.show_rnu
         vim.wo[win].wrap = false
         vim.wo[win].spell = false
         vim.wo[win].cursorline = selector

@@ -172,11 +172,15 @@ Config specs still override discovery, and a prebuilt binary / shell script stil
 works — but no `.tuna.lua` is required to stress-test or special-judge.
 
 Because you no longer flip modes by editing config, tuna adds a **per-buffer run
-mode**: `:Tuna run [normal|all|stress|interactive]`. A bare `:Tuna run` repeats the
-buffer's current mode; passing a mode (or picking one in the `:Tuna` menu) switches
-it. A **checker toggle** (`:Tuna checker [on|off]`, or the menu) turns special
-judging off for a buffer without deleting `checker.cpp`. competitest had a single
-`:CompetiTest run` and no notion of modes or helper discovery.
+mode**: `:Tuna run [normal|all|stress|interactive]`. A bare `:Tuna run` **auto-detects
+the mode from the sibling files** — an `interactor.*` ⇒ interactive, a `gen.*` +
+`brute.*` pair ⇒ stress, otherwise normal — so dropping the right helpers next to
+the solution is enough. Passing a mode explicitly (or picking one in the `:Tuna`
+menu) **pins** it, so later bare `:Tuna run`s repeat it; but if the files that mode
+needs are later deleted, tuna falls back to auto-detection rather than failing on a
+now-impossible mode. A **checker toggle** (`:Tuna checker [on|off]`, or the menu)
+turns special judging off for a buffer without deleting `checker.cpp`. competitest
+had a single `:CompetiTest run` and no notion of modes or helper discovery.
 
 ## Pluggable checkers (`checker.lua`)
 
@@ -218,19 +222,32 @@ with a trusted reference. By convention it uses a sibling `gen.*` (generator) an
 
 ```lua
 stress = {
-  generator = nil,   -- override discovery, e.g. { exec = "python3", args = { "$(ABSDIR)/gen.py" } }
-  reference = nil,    -- override discovery: a correct-but-slow solution
-  count = 100,        -- max iterations
-  seed_arg = true,    -- append the iteration number as the generator's last arg
+  generator = nil,    -- override discovery, e.g. { exec = "python3", args = { "$(ABSDIR)/gen.py" } }
+  reference = nil,     -- override discovery: a correct-but-slow solution
+  count = 100,         -- max generator iterations
+  seed_arg = true,     -- append the iteration number as the generator's last arg
+  saves_per_run = 1,   -- counterexamples to save per run before stopping
+  max_saved = 10,      -- hard cap on the total testcase count stress will grow to
 }
 ```
 
 Each iteration: the generator is run with a reproducible seed (the iteration
 number) → its stdout is the input → the solution and the reference both run on it →
 their outputs are judged with the **same `checker`** the runner uses (so
-multiple-correct-answer problems work). The first wrong answer, crash, or timeout is
-**saved as a new testcase** (input + the reference's answer as expected output) and
-the search stops; otherwise it reports no counterexample found.
+multiple-correct-answer problems — and any custom checker — work here too). A wrong
+answer, crash, or timeout is **saved as a new testcase** (input + the reference's
+answer as expected output).
+
+Unlike a bare "find one and stop", stress opens its **own results UI** — the same
+`runner_ui` the normal runner uses — that first re-runs the problem's existing
+testcases and then appends each counterexample as it's found. Its status pane shows
+the run mode, the verdict source, the live iteration count, and both save
+thresholds. The search stops as soon as either threshold is hit: `saves_per_run`
+counterexamples saved this run, or `max_saved` total testcases on disk. Inside the
+UI you can re-run a single (saved) testcase, restart the whole search, or stop it.
+A `StressRunner` implements just enough of the `TCRunner` surface (`tcdata`,
+`mode`, `judge_label`, `kill_*`, `run_single`, `run_testcases`, a `status_text`)
+for the UI to drive it.
 
 **Reuse, not reinvention:** `stress.lua` calls `runner.new()` to resolve the
 solution's compile/run commands, working directories, and checker, then drives the

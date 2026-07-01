@@ -359,28 +359,75 @@ end
 M.MODES = { "normal", "all", "stress", "interactive" }
 
 ---Runtime state keyed by a buffer's file path (not bufnr) so it survives the
----buffer being unloaded and reopened during a session.
----@type table<string, { mode: string, checker: boolean }>
+---buffer being unloaded and reopened during a session. `explicit` records whether
+---the user chose the mode by hand (`:Tuna run <mode>` / the menu); until they do,
+---the mode is auto-detected from the sibling files present.
+---@type table<string, { mode: string, explicit: boolean, checker: boolean }>
 local state = {}
 
 ---@param path string
 local function state_for(path)
     if not state[path] then
-        state[path] = { mode = "normal", checker = true }
+        state[path] = { mode = "normal", explicit = false, checker = true }
     end
     return state[path]
 end
 
 ---@param path string
----@return string
+---@return string # the raw stored mode (see `resolve_mode` for the effective one)
 function M.get_mode(path)
     return state_for(path).mode
 end
 
+---Set the buffer's mode as an explicit user choice (so it sticks across runs).
 ---@param path string
 ---@param mode string
 function M.set_mode(path, mode)
-    state_for(path).mode = mode
+    local s = state_for(path)
+    s.mode = mode
+    s.explicit = true
+end
+
+---Auto-detect a run mode from the helper files sitting beside the solution:
+---an `interactor.*` ⇒ interactive; both a `gen.*` and a `brute.*` ⇒ stress;
+---otherwise normal. (A `checker.*` is orthogonal — it's applied within any mode
+---via the checker toggle, so it doesn't select a mode.)
+---@param dir string problem directory
+---@param cfg table buffer config
+---@return string
+function M.detect_mode(dir, cfg)
+    if M.find(dir, "interactor", cfg) then
+        return "interactive"
+    end
+    if M.find(dir, "generator", cfg) and M.find(dir, "reference", cfg) then
+        return "stress"
+    end
+    return "normal"
+end
+
+---The mode a bare `:Tuna run` should use. If the user picked a mode explicitly it
+---sticks — unless the files that mode needs have since disappeared (e.g. `brute.*`
+---was deleted), in which case we fall back to auto-detection so the run doesn't
+---fail on a now-impossible mode. Otherwise the mode is auto-detected each time.
+---@param path string solution file path
+---@param dir string problem directory
+---@param cfg table buffer config
+---@return string
+function M.resolve_mode(path, dir, cfg)
+    local s = state_for(path)
+    if s.explicit then
+        local m = s.mode
+        local usable = true
+        if m == "stress" then
+            usable = M.find(dir, "generator", cfg) ~= nil and M.find(dir, "reference", cfg) ~= nil
+        elseif m == "interactive" then
+            usable = M.find(dir, "interactor", cfg) ~= nil
+        end
+        if usable then
+            return m
+        end
+    end
+    return M.detect_mode(dir, cfg)
 end
 
 ---@param path string

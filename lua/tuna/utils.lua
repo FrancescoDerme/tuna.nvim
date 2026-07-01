@@ -21,17 +21,30 @@ function M.notify(msg, level)
     vim.notify("Tuna: " .. msg, level or vim.log.levels.ERROR, { title = "Tuna" })
 end
 
----Remap a floating window's `FloatBorder` highlight to `hl`. Native floats draw
----their border with `FloatBorder`; setting `winhighlight` on the window is the
----API equivalent of competitest's nui `border.highlight` option. No-op when `hl`
----is nil or already the default.
+---Remap a floating window's border highlight so the border keeps the configured
+---`hl` foreground (the coloured line) but takes the *float's own* background —
+---i.e. `NormalFloat`'s bg. This makes the border ring share the interior fill:
+---there's no seam between border and content, so the float reads as one solid
+---panel whose corners the rounded glyphs sit on. (A terminal cell can't be split,
+---so the fill can't literally be rounded; matching the fill is the closest look.)
+---The derived group is (re)computed each call so it tracks colourscheme changes.
+---Setting `winhighlight` is the API equivalent of competitest's nui
+---`border.highlight` option.
 ---@param winid integer
----@param hl string? highlight group for the border
+---@param hl string? highlight group whose foreground is used for the border
 function M.set_border_highlight(winid, hl)
-    if not hl or hl == "FloatBorder" then
-        return
-    end
-    vim.wo[winid].winhighlight = "FloatBorder:" .. hl
+    hl = hl or "FloatBorder"
+    local border = vim.api.nvim_get_hl(0, { name = hl, link = false })
+    local float = vim.api.nvim_get_hl(0, { name = "NormalFloat", link = false })
+    local normal = vim.api.nvim_get_hl(0, { name = "Normal", link = false })
+    vim.api.nvim_set_hl(0, "TunaFloatBorder", {
+        fg = border.fg,
+        bg = float.bg or normal.bg,
+        sp = border.sp,
+        bold = border.bold,
+        italic = border.italic,
+    })
+    vim.wo[winid].winhighlight = "FloatBorder:TunaFloatBorder"
 end
 
 ---------------- STRING MODIFIERS ----------------

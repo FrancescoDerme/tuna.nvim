@@ -18,9 +18,6 @@ local utils = require("tuna.utils")
 
 local M = {}
 
--- Height (in rows) of the status strip above the grid.
-local STATUS_HEIGHT = 1
-
 local titles = {
     st = " Run ",
     tc = " Testcases ",
@@ -49,7 +46,9 @@ end
 ---@param windows table
 ---@param config table
 ---@param init_winid integer window the runner was launched from
-function M.init_ui(windows, config, init_winid)
+---@param status_rows integer? rows of the "Run" pane (default 2)
+function M.init_ui(windows, config, init_winid, status_rows)
+    local STATUS_HEIGHT = status_rows or 2
     for name in pairs(titles) do
         local buf = api.nvim_create_buf(false, true)
         vim.bo[buf].filetype = "tuna"
@@ -125,29 +124,30 @@ function M.init_ui(windows, config, init_winid)
         vim.wo[outer].winfixheight = true
     end
 
-    -- Carve a full-width status strip at the top of the frame, above the grid.
-    local st = api.nvim_open_win(windows.st.bufnr, false, { split = "above", win = outer })
-    windows.st.winid = st
-    api.nvim_win_set_height(st, STATUS_HEIGHT)
-    vim.wo[st].winfixheight = true
-
-    -- The grid fills the rest of the frame.
+    -- The outer frame is the grid's first window.
     windows[fw].winid = outer
 
     -- Disable equalisation while we subdivide, then restore it.
     local old_equalalways = vim.o.equalalways
     vim.o.equalalways = false
     create_layout(layout, outer, vertical)
+
+    -- Carve a status strip above the Testcases pane only (not the whole frame).
+    if windows.tc.winid and api.nvim_win_is_valid(windows.tc.winid) then
+        local st = api.nvim_open_win(windows.st.bufnr, false, { split = "above", win = windows.tc.winid })
+        windows.st.winid = st
+        api.nvim_win_set_height(st, STATUS_HEIGHT)
+        vim.wo[st].winfixheight = true
+    end
     vim.o.equalalways = old_equalalways
 
     -- Apply selector/detail window options.
     for name, w in pairs(windows) do
         if w.winid and api.nvim_win_is_valid(w.winid) then
             local selector = name == "tc"
-            local status = name == "st"
-            vim.wo[w.winid].number = not status and (selector and config.runner_ui.selector_show_nu or config.runner_ui.show_nu)
-            vim.wo[w.winid].relativenumber = not status
-                and (selector and config.runner_ui.selector_show_rnu or config.runner_ui.show_rnu)
+            vim.wo[w.winid].number = selector and config.runner_ui.selector_show_nu or config.runner_ui.show_nu
+            vim.wo[w.winid].relativenumber = selector and config.runner_ui.selector_show_rnu
+                or config.runner_ui.show_rnu
             vim.wo[w.winid].wrap = false
             vim.wo[w.winid].spell = false
             vim.wo[w.winid].cursorline = selector

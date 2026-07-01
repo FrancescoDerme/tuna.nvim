@@ -1,15 +1,23 @@
 -- lua/tuna/stress.lua
 --
--- Stress testing: hunt for a small input on which the current solution disagrees
--- with a trusted reference (brute force). For each iteration a generator produces
--- a random input (seeded by the iteration number, so failures are reproducible);
--- the solution and the reference both run on it; their outputs are judged with the
--- same `checker` the runner uses (so checker-based problems with multiple correct
--- answers work too). The first mismatch — or a solution crash/timeout — is saved
--- as a new testcase and the search stops.
+-- Stress testing: hunt for inputs on which the current solution disagrees with a
+-- trusted reference (brute force). A generator produces a random input (seeded by
+-- the iteration number, so failures are reproducible); the solution and the
+-- reference both run on it; their outputs are judged with the same `checker` the
+-- runner uses (so checker-based problems with multiple correct answers work too).
+-- Every counterexample — a wrong answer, a crash, or a timeout — is appended as a
+-- new testcase (so it doubles as a regression test) and shown in a dedicated
+-- results UI. The search also re-runs any testcases that already exist.
+--
+-- The search stops as soon as one of two thresholds is hit: `saves_per_run`
+-- counterexamples saved this run, or `max_saved` total testcases on disk. Both,
+-- plus the live iteration count, are surfaced in the UI's status line.
 --
 -- Reuse: `runner.new()` resolves the solution's compile/run commands, working
--- directories, and checker; `checker.judge()` decides each verdict.
+-- directories, and checker; `checker.judge()` decides each verdict; the results
+-- UI is the same `runner_ui` the normal runner uses — a `StressRunner` exposes
+-- just enough of the `TCRunner` surface (`tcdata`, `mode`, `judge_label`,
+-- `kill_*`, `run_single`, `run_testcases`) to drive it.
 
 local config = require("tuna.config")
 local utils = require("tuna.utils")
@@ -19,6 +27,412 @@ local testcases = require("tuna.testcases")
 local tools = require("tuna.tools")
 
 local M = {}
+
+-- Live stress runners keyed by buffer, so `VimResized` can rebuild their UIs and
+-- a fresh `:Tuna run stress` can tear the previous one down.
+---@type table<integer, table>
+M.active = {}
+
+--------------------------------------------------------------------------------
+-- StressRunner: a TCRunner-shaped object the runner UI can drive.
+--------------------------------------------------------------------------------
+
+local StressRunner = {}
+StressRunner.__index = StressRunner
+
+---@return string
+function StressRunner:judge_label()
+    return self.r:judge_label()
+end
+
+---Extra "Run" pane rows below mode/judge: the live stress counters, as
+---{ label, value } pairs (the UI aligns the colons), one per line.
+---@return string[][]
+function StressRunner:status_tail()
+    return {
+        { "iter", ("%d / %d"):format(self.iter, self.count) },
+        { "saved", ("%d / %d"):format(self.saved_this_run, self.saves_per_run) },
+        { "max", ("%d testcases"):format(self.max_saved) },
+    }
+end
+
+---@return boolean # whether the search should no longer progress
+function StressRunner:aborted()
+    return self.stopped or self.finished
+end
+
+---Poke the attached UI (mirrors `TCRunner:update_ui`).
+---@param update_windows boolean?
+function StressRunner:update_ui(update_windows)
+    if self.ui then
+        if update_windows then
+            self.ui.update_windows = true
+        end
+        self.ui.update_details = true
+        self.ui:update_ui()
+    end
+end
+
+function StressRunner:show_ui()
+    if not self.ui then
+        self.ui = require("tuna.runner_ui").new(self)
+    end
+    if self.ui then
+        self.ui:show_ui()
+    end
+end
+
+function StressRunner:resize_ui()
+    if self.ui then
+        self.ui:resize_ui()
+    end
+end
+
+function StressRunner:delete_ui()
+    if self.ui then
+        self.ui:hide_ui()
+    end
+    self.ui = nil
+end
+
+---Load the existing testcases into `tcdata` (pending), resetting the counters
+---that decide where new counterexamples are numbered.
+function StressRunner:load_testcases()
+    local tctbl = testcases.buf_get_testcases(self.bufnr)
+    local nums = vim.tbl_keys(tctbl)
+    table.sort(nums)
+    self.tcdata = {}
+    -- The solution's compile step is the first row (its warnings/errors are then
+    -- viewable in the detail panes, like competitest's compile-as-testcase).
+    if self.compile_entry then
+        table.insert(self.tcdata, self.compile_entry)
+    end
+    local maxnum = -1
+    for _, num in ipairs(nums) do
+        table.insert(self.tcdata, {
+            tcnum = num,
+            stdin = tctbl[num].input or "",
+            expected = tctbl[num].output,
+            status = "",
+            hlgroup = "TunaRunning",
+        })
+        if num > maxnum then
+            maxnum = num
+        end
+    end
+    self.next_num = maxnum + 1 -- next free testcase number for a counterexample
+end
+
+---Run the solution on a single `tcdata` entry and judge it against that entry's
+---expected output (used for pre-existing testcases and for the UI's "run again").
+---@param idx integer
+---@param cb fun()?
+function StressRunner:execute_entry(idx, cb)
+    local tc = self.tcdata[idx]
+    if not tc then
+        if cb then
+            cb()
+        end
+        return
+    end
+    tc.status, tc.hlgroup = "RUNNING", "TunaRunning"
+    tc.stdout, tc.stderr, tc.time = nil, nil, nil
+    self:update_ui(true)
+
+    local start = vim.uv.now()
+    local argv = vim.list_extend({ self.r.rc.exec }, vim.deepcopy(self.r.rc.args))
+    local ok, handle = pcall(vim.system, argv, {
+        cwd = self.rundir,
+        stdin = tc.stdin,
+        timeout = self.timeout,
+    }, function(res)
+        vim.schedule(function()
+            tc.time = vim.uv.now() - start
+            tc.stdout = res.stdout or ""
+            tc.stderr = res.stderr or ""
+            if res.signal and res.signal ~= 0 then
+                tc.status, tc.hlgroup = "RE/TLE", "TunaWrong"
+            elseif res.code ~= 0 then
+                tc.status, tc.hlgroup = "RET " .. tostring(res.code), "TunaWarning"
+            else
+                checker.judge(tc, self.r.checker, self.config.output_compare_method, function(correct)
+                    if correct == true then
+                        tc.status, tc.hlgroup = "CORRECT", "TunaCorrect"
+                    elseif correct == false then
+                        tc.status, tc.hlgroup = "WRONG", "TunaWrong"
+                    else
+                        tc.status, tc.hlgroup = "DONE", "TunaDone"
+                    end
+                    self:update_ui(true)
+                    if cb then
+                        cb()
+                    end
+                end)
+                return
+            end
+            self:update_ui(true)
+            if cb then
+                cb()
+            end
+        end)
+    end)
+
+    if not ok then
+        tc.status, tc.hlgroup = "FAILED", "TunaWarning"
+        tc.stderr = tostring(handle)
+        self:update_ui(true)
+        if cb then
+            cb()
+        end
+        return
+    end
+    self.handle = handle
+end
+
+---Save a counterexample as a new testcase and add it to the UI.
+---@param seed integer generator seed that produced it
+---@param input string
+---@param expected string reference (correct) output, stored as expected output
+---@param sol_out string the solution's (wrong) output
+---@param sol_err string the solution's stderr
+---@param status string short verdict label ("WRONG" / "RE" / "TLE" / …)
+function StressRunner:record_counterexample(seed, input, expected, sol_out, sol_err, status)
+    -- Don't save a counterexample whose input we already have (as a pre-existing
+    -- testcase or one saved earlier this run); just keep searching.
+    local norm = vim.trim(input)
+    for _, tc in ipairs(self.tcdata) do
+        if tc.tcnum ~= "Compile" and tc.stdin and vim.trim(tc.stdin) == norm then
+            self:generation(seed + 1)
+            return
+        end
+    end
+
+    local n = self.next_num
+    self.next_num = n + 1
+    testcases.buf_save_testcase(self.bufnr, n, input, expected or "")
+    self.saved_this_run = self.saved_this_run + 1
+    table.insert(self.tcdata, {
+        tcnum = n,
+        stdin = input,
+        expected = expected,
+        stdout = sol_out,
+        stderr = sol_err,
+        status = status,
+        hlgroup = "TunaWrong",
+        -- A freshly-saved counterexample has no runtime to show; the UI displays
+        -- this in the time column instead (re-running it fills in a real time).
+        time_label = "saved",
+    })
+    self:update_ui(true)
+    -- Keep searching; the thresholds are re-checked at the top of `generation`.
+    self:generation(seed + 1)
+end
+
+---Finish the search (idempotent), refreshing the status line and notifying why.
+---@param msg string? reason to report
+function StressRunner:finish(msg)
+    if self.finished then
+        return
+    end
+    self.finished = true
+    self.handle = nil
+    self:update_ui(true)
+    if msg then
+        utils.notify("stress: " .. msg .. ".", "INFO")
+    end
+end
+
+---One generation iteration: generator → solution → reference → judge.
+---@param i integer iteration / seed
+function StressRunner:generation(i)
+    if self:aborted() then
+        return
+    end
+    if self.saved_this_run >= self.saves_per_run then
+        return
+    end
+    if #self.tcdata >= self.max_saved then
+        self:finish("reached the max of " .. self.max_saved .. " testcases")
+        return
+    end
+    if i > self.count then
+        self:finish(string.format("no counterexample found in %d runs", self.count))
+        return
+    end
+    self.iter = i
+    self:update_ui(false)
+
+    local gen_argv = vim.list_extend({ self.gen.exec }, vim.deepcopy(self.gen.args))
+    if self.seed_arg then
+        table.insert(gen_argv, tostring(i))
+    end
+    vim.system(gen_argv, { cwd = self.rundir, timeout = self.timeout }, function(gres)
+        vim.schedule(function()
+            if self:aborted() then
+                return
+            end
+            if gres.code ~= 0 then
+                self:finish("generator failed (seed " .. i .. ")\n" .. (gres.stderr or ""))
+                return
+            end
+            local input = gres.stdout or ""
+
+            -- Solution on the generated input.
+            vim.system(
+                vim.list_extend({ self.r.rc.exec }, vim.deepcopy(self.r.rc.args)),
+                { cwd = self.rundir, stdin = input, timeout = self.timeout },
+                function(sres)
+                    vim.schedule(function()
+                        if self:aborted() then
+                            return
+                        end
+                        -- Reference on the same input (for the expected output).
+                        vim.system(
+                            vim.list_extend({ self.ref.exec }, vim.deepcopy(self.ref.args)),
+                            { cwd = self.rundir, stdin = input, timeout = self.timeout },
+                            function(rres)
+                                vim.schedule(function()
+                                    if self:aborted() then
+                                        return
+                                    end
+                                    if rres.code ~= 0 then
+                                        self:finish("reference failed (seed " .. i .. ")\n" .. (rres.stderr or ""))
+                                        return
+                                    end
+                                    local expected = rres.stdout or ""
+
+                                    -- A crash/timeout is itself a counterexample.
+                                    if sres.signal and sres.signal ~= 0 then
+                                        self:record_counterexample(
+                                            i,
+                                            input,
+                                            expected,
+                                            sres.stdout or "",
+                                            sres.stderr or "",
+                                            "RE/TLE"
+                                        )
+                                        return
+                                    elseif sres.code ~= 0 then
+                                        self:record_counterexample(
+                                            i,
+                                            input,
+                                            expected,
+                                            sres.stdout or "",
+                                            sres.stderr or "",
+                                            "RET " .. tostring(sres.code)
+                                        )
+                                        return
+                                    end
+
+                                    -- Judge the solution's output against the reference.
+                                    local tc = { stdin = input, stdout = sres.stdout or "", expected = expected }
+                                    checker.judge(
+                                        tc,
+                                        self.r.checker,
+                                        self.config.output_compare_method,
+                                        function(correct)
+                                            if self:aborted() then
+                                                return
+                                            end
+                                            if correct == false then
+                                                self:record_counterexample(
+                                                    i,
+                                                    input,
+                                                    expected,
+                                                    sres.stdout or "",
+                                                    "",
+                                                    "WRONG"
+                                                )
+                                            else
+                                                self:generation(i + 1)
+                                            end
+                                        end
+                                    )
+                                end)
+                            end
+                        )
+                    end)
+                end
+            )
+        end)
+    end)
+end
+
+---Run the pre-existing testcases (in order) through the solution, then call `cb`.
+---This needs only the solution compiled, so it can run while the generator and
+---reference are still building.
+---@param cb fun()?
+function StressRunner:run_existing(cb)
+    -- The real testcase rows (everything except the Compile row).
+    local idxs = {}
+    for i, tc in ipairs(self.tcdata) do
+        if tc.tcnum ~= "Compile" then
+            idxs[#idxs + 1] = i
+        end
+    end
+    local function step(k)
+        if self:aborted() then
+            return
+        end
+        if k > #idxs then
+            if cb then
+                cb()
+            end
+            return
+        end
+        self:execute_entry(idxs[k], function()
+            step(k + 1)
+        end)
+    end
+    step(1)
+end
+
+--- UI-driven controls (the runner UI calls these on the "runner"). ---
+
+---Stop the search (kill the in-flight process).
+function StressRunner:kill_all_processes()
+    if self.stopped then
+        return
+    end
+    self.stopped = true
+    if self.handle then
+        pcall(function()
+            self.handle:kill("sigkill")
+        end)
+    end
+    self:finish("stopped")
+end
+
+---A single kill stops the whole search (there's only one lane).
+function StressRunner:kill_process()
+    self:kill_all_processes()
+end
+
+---Re-run the solution on one displayed testcase and re-judge it.
+---@param idx integer
+function StressRunner:run_single(idx)
+    self:execute_entry(idx)
+end
+
+---Restart the whole search from scratch (the UI's "run all again"). The helpers
+---are already compiled (cached), so re-run the existing testcases, then generate.
+function StressRunner:run_testcases()
+    self.stopped = false
+    self.finished = false
+    self.iter = 0
+    self.saved_this_run = 0
+    self:load_testcases()
+    self:update_ui(true)
+    self:run_existing(function()
+        if not self:aborted() then
+            self:generation(1)
+        end
+    end)
+end
+
+--------------------------------------------------------------------------------
+-- Entry point
+--------------------------------------------------------------------------------
 
 ---Resolve a stress command spec (a string, or a `{ exec, args }` table) into an
 ---argv table, expanding `$(FNOEXT)` etc. against the buffer.
@@ -44,6 +458,13 @@ local function resolve_cmd(bufnr, spec)
         return { exec = exec, args = args }
     end
     return nil
+end
+
+---Rebuild any open stress UIs after a `VimResized`.
+function M.resize_all()
+    for _, sr in pairs(M.active) do
+        sr:resize_ui()
+    end
 end
 
 ---Run stress testing for a buffer's solution.
@@ -76,8 +497,14 @@ function M.run(bufnr, count_override)
         local path = tools.find(dir, role, cfg)
         if not path then
             utils.notify(
-                "stress: no " .. label .. " found — create a sibling '" .. tools.DEFAULT_NAMES[role][1] .. ".*' "
-                    .. "file, or set 'stress." .. label .. "'."
+                "stress: no "
+                    .. label
+                    .. " found — create a sibling '"
+                    .. tools.DEFAULT_NAMES[role][1]
+                    .. ".*' "
+                    .. "file, or set 'stress."
+                    .. label
+                    .. "'."
             )
             return nil
         end
@@ -97,145 +524,126 @@ function M.run(bufnr, count_override)
         return
     end
 
-    local count = count_override or scfg.count or 100
-    local seed_arg = scfg.seed_arg ~= false
     local timeout = (cfg.maximum_time and cfg.maximum_time > 0) and cfg.maximum_time or nil
     local rundir = r.running_directory
     utils.ensure_directory(rundir)
 
-    -- Save the failing input (with the reference's answer as expected output) as a
-    -- new testcase, then report.
-    local function save_counterexample(iter, seed, input, expected, reason)
-        local tctbl = testcases.buf_get_testcases(bufnr)
-        local n = 0
-        while tctbl[n] do
-            n = n + 1
-        end
-        testcases.buf_save_testcase(bufnr, n, input, expected or "")
-        utils.notify(
-            string.format(
-                "stress: counterexample on run %d (seed %d) — %s. Saved as testcase %d.",
-                iter,
-                seed,
-                reason,
-                n
-            ),
-            "WARN"
-        )
+    -- Tear down a previous stress UI for this buffer before starting a fresh run.
+    if M.active[bufnr] then
+        M.active[bufnr]:delete_ui()
     end
 
-    local loop -- forward declaration (loop iterates asynchronously)
+    local sr = setmetatable({
+        config = cfg,
+        bufnr = bufnr,
+        r = r,
+        gen = gen,
+        ref = ref,
+        dir = dir,
+        rundir = rundir,
+        timeout = timeout,
+        seed_arg = scfg.seed_arg ~= false,
+        count = count_override or scfg.count or 100,
+        saves_per_run = math.max(1, scfg.saves_per_run or 1),
+        max_saved = scfg.max_saved or 10,
+        mode = "stress",
+        -- The solution's compile step is shown as the first testcase row (so its
+        -- warnings are viewable), like the normal runner. nil for interpreted
+        -- solutions. gen/ref compile separately (errors shown in a float).
+        compile_entry = r.compile and { tcnum = "Compile", stdin = "", expected = nil, status = "", hlgroup = "TunaRunning" }
+            or nil,
+        tcdata = {},
+        next_num = 0,
+        iter = 0,
+        saved_this_run = 0,
+        stopped = false,
+        finished = false,
+    }, StressRunner)
+    M.active[bufnr] = sr
 
-    ---Run one iteration: generator → solution → reference → judge.
-    loop = function(i)
-        if i > count then
-            utils.notify(string.format("stress: no counterexample found in %d runs.", count), "INFO")
-            return
+    vim.api.nvim_create_autocmd("BufUnload", {
+        buffer = bufnr,
+        once = true,
+        callback = function()
+            M.active[bufnr] = nil
+        end,
+    })
+
+    -- Open the results UI and show the testcase list (incl. the Compile row and any
+    -- existing testcases, pending) right away, like competitest.
+    sr:show_ui()
+    sr:load_testcases()
+    sr:update_ui(true)
+
+    -- A gen/ref compile failure is a normal outcome, not an editor error: show the
+    -- compiler output in a UI float (no error notify).
+    local function helper_compile_failed(label, err)
+        if sr.ui then
+            sr.ui:show_message(" stress: " .. label .. " failed to compile ", err or "")
         end
-        local seed = i
-
-        -- 1. Generator → input.
-        local gen_argv = vim.list_extend({ gen.exec }, vim.deepcopy(gen.args))
-        if seed_arg then
-            table.insert(gen_argv, tostring(seed))
-        end
-        vim.system(gen_argv, { cwd = rundir, timeout = timeout }, function(gres)
-            vim.schedule(function()
-                if gres.code ~= 0 then
-                    utils.notify("stress: generator failed (seed " .. seed .. ").\n" .. (gres.stderr or ""))
-                    return
-                end
-                local input = gres.stdout or ""
-
-                -- 2. Solution on the generated input.
-                vim.system(
-                    vim.list_extend({ r.rc.exec }, vim.deepcopy(r.rc.args)),
-                    { cwd = rundir, stdin = input, timeout = timeout },
-                    function(sres)
-                        vim.schedule(function()
-                            -- A crash or timeout is itself a counterexample. We still
-                            -- need the reference's answer to store as expected output.
-                            local sol_failed = sres.code ~= 0
-                            local sol_reason = sres.signal and sres.signal ~= 0
-                                    and ("runtime error / timeout (signal " .. sres.signal .. ")")
-                                or ("non-zero exit " .. tostring(sres.code))
-
-                            -- 3. Reference on the same input.
-                            vim.system(
-                                vim.list_extend({ ref.exec }, vim.deepcopy(ref.args)),
-                                { cwd = rundir, stdin = input, timeout = timeout },
-                                function(rres)
-                                    vim.schedule(function()
-                                        if rres.code ~= 0 then
-                                            utils.notify(
-                                                "stress: reference failed (seed "
-                                                    .. seed
-                                                    .. "); aborting.\n"
-                                                    .. (rres.stderr or "")
-                                            )
-                                            return
-                                        end
-                                        local expected = rres.stdout or ""
-
-                                        if sol_failed then
-                                            save_counterexample(i, seed, input, expected, sol_reason)
-                                            return
-                                        end
-
-                                        -- 4. Judge solution output against the reference.
-                                        local tc = { stdin = input, stdout = sres.stdout or "", expected = expected }
-                                        checker.judge(tc, r.checker, cfg.output_compare_method, function(correct)
-                                            if correct == false then
-                                                save_counterexample(i, seed, input, expected, "wrong answer")
-                                            else
-                                                loop(i + 1)
-                                            end
-                                        end)
-                                    end)
-                                end
-                            )
-                        end)
-                    end
-                )
-            end)
-        end)
     end
 
-    -- Compile the generator and reference once (no-op for interpreted/prebuilt
-    -- helpers), then start the loop.
-    local function start()
+    -- Compile the generator and reference; `cb()` once both are ready.
+    local function prepare_helpers(cb)
         tools.prepare(gen, function(gok, gerr)
             if not gok then
-                utils.notify("stress: generator " .. gerr)
+                helper_compile_failed("generator", gerr)
                 return
             end
             tools.prepare(ref, function(rok, rerr)
                 if not rok then
-                    utils.notify("stress: reference " .. rerr)
+                    helper_compile_failed("reference", rerr)
                     return
                 end
-                utils.notify(string.format("stress: running up to %d iterations…", count), "INFO")
-                loop(1)
+                cb()
             end)
         end)
     end
 
-    -- Compile the solution once (if it needs compiling), then prepare the helpers.
-    if r.compile then
-        utils.ensure_directory(r.compile_directory)
-        vim.system(
-            vim.list_extend({ r.cc.exec }, vim.deepcopy(r.cc.args)),
-            { cwd = r.compile_directory },
-            function(res)
-                vim.schedule(function()
-                    if res.code ~= 0 then
-                        utils.notify("stress: compilation failed.\n" .. (res.stderr or ""))
-                        return
-                    end
-                    start()
-                end)
+    -- With the solution built, run the existing testcases *immediately* while the
+    -- generator/reference compile in parallel; generation waits for both the
+    -- helpers to be ready and the existing run to finish.
+    local function start()
+        local existing_done, helpers_ready = false, false
+        local function maybe_generate()
+            if existing_done and helpers_ready and not sr:aborted() then
+                sr:generation(1)
             end
-        )
+        end
+
+        sr:run_existing(function()
+            existing_done = true
+            maybe_generate()
+        end)
+
+        prepare_helpers(function()
+            helpers_ready = true
+            maybe_generate()
+        end)
+    end
+
+    -- Compile the solution once (if it needs compiling), driving the Compile row.
+    if r.compile then
+        local ce = sr.compile_entry
+        ce.status, ce.hlgroup, ce.start_time = "RUNNING", "TunaRunning", vim.uv.now()
+        sr:update_ui(true)
+        utils.ensure_directory(r.compile_directory)
+        vim.system(vim.list_extend({ r.cc.exec }, vim.deepcopy(r.cc.args)), { cwd = r.compile_directory }, function(res)
+            vim.schedule(function()
+                ce.time = vim.uv.now() - ce.start_time
+                ce.stdout, ce.stderr, ce.exit_code = res.stdout or "", res.stderr or "", res.code
+                if res.code ~= 0 then
+                    -- Failure stays in the UI (compile row + auto-viewer), no notify.
+                    ce.status, ce.hlgroup = "RET " .. tostring(res.code), "TunaWarning"
+                    sr:update_ui(true)
+                    return
+                end
+                -- Success (warnings, if any, are viewable by selecting this row).
+                ce.status, ce.hlgroup = "DONE", "TunaDone"
+                sr:update_ui(true)
+                start()
+            end)
+        end)
     else
         start()
     end

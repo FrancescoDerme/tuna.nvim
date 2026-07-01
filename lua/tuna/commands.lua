@@ -224,7 +224,10 @@ function M.run_mode(args)
         mode = table.remove(args, 1)
         tools.set_mode(path, mode)
     else
-        mode = tools.get_mode(path)
+        -- No mode given: use the buffer's explicit choice if it still applies,
+        -- otherwise auto-detect from the sibling helper files present.
+        local dir = vim.fn.fnamemodify(path, ":p:h")
+        mode = tools.resolve_mode(path, dir, config.get_buffer_config(bufnr))
     end
     M.dispatch_mode(mode, args, true, bufnr)
 end
@@ -351,7 +354,9 @@ function M.open_menu()
     -- Operate on the solution even when opened from a helper buffer (checker.cpp).
     local bufnr = tools.solution_bufnr(cur, config.get_buffer_config(cur)) or cur
     local path = api.nvim_buf_get_name(bufnr)
-    local mode = tools.get_mode(path)
+    local dir = vim.fn.fnamemodify(path, ":p:h")
+    -- Show the mode a bare `:Tuna run` would actually use (explicit or detected).
+    local mode = tools.resolve_mode(path, dir, config.get_buffer_config(bufnr))
     local checker_on = tools.checker_enabled(path)
 
     local function switch(m)

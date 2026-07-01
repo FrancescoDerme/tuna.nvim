@@ -81,8 +81,15 @@ M.defaults = {
     stress = {
         generator = nil, -- override discovery, e.g. { exec = "python3", args = { "$(ABSDIR)/gen.py" } }
         reference = nil, -- override discovery: a correct-but-slow solution
-        count = 100, -- maximum iterations before giving up
+        count = 100, -- maximum generator iterations before giving up
         seed_arg = true, -- append the iteration seed as the generator's last argument
+        -- How many counterexamples a single `:Tuna run stress` may save before it
+        -- stops, and the hard cap on the total number of testcases stress will let
+        -- accumulate on disk. The search stops as soon as either is reached; each
+        -- saved counterexample is appended as a normal testcase (so it becomes a
+        -- regression test). Both are surfaced live in the stress runner UI.
+        saves_per_run = 1, -- counterexamples to save per run before stopping
+        max_saved = 10, -- never grow the testcase set beyond this many total
     },
 
     -- interactive problems (:Tuna run interactive) — the solution talks to an
@@ -174,6 +181,10 @@ M.defaults = {
         show_nu = true,
         show_rnu = false,
         mappings = {
+            -- move focus between panes, by geometry, as { left, down, up, right }.
+            -- Tuna handles this itself so it works for the floating (popup)
+            -- interface too, where the built-in `<C-w>hjkl` can't cross floats.
+            switch_window = { "<M-h>", "<M-j>", "<M-k>", "<M-l>" },
             run_again = "R",
             run_all_again = "<C-r>",
             kill = "K",

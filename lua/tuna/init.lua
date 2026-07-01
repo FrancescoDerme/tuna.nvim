@@ -29,6 +29,7 @@ function M.resize_ui()
         for _, r in pairs(require("tuna.commands").runners) do
             r:resize_ui()
         end
+        require("tuna.stress").resize_all()
     end)
 end
 
@@ -53,6 +54,12 @@ function M.setup(user_opts)
             return require("tuna.commands").complete(...)
         end,
     })
+
+    -- Let a lowercase `:tuna …` work too: expand `tuna` to `Tuna` when it's the
+    -- command word (so completion and dispatch behave identically).
+    vim.cmd(
+        [[cnoreabbrev <expr> tuna (getcmdtype() == ':' && getcmdline() =~# '^\s*tuna$') ? 'Tuna' : 'tuna']]
+    )
 
     local augroup = vim.api.nvim_create_augroup("Tuna", { clear = true })
 
