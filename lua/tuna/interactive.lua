@@ -22,6 +22,7 @@ local config = require("tuna.config")
 local utils = require("tuna.utils")
 local runner = require("tuna.runner")
 local testcases = require("tuna.testcases")
+local tools = require("tuna.tools")
 
 local M = {}
 
@@ -223,14 +224,35 @@ function M.run(bufnr, list)
     end
     local cfg = r.config
     local icfg = cfg.interactive or {}
-    if not icfg.interactor then
-        utils.notify("interactive: configure 'interactive.interactor' first.")
-        return
-    end
-    local interactor = resolve_cmd(bufnr, icfg.interactor)
-    if not interactor then
-        utils.notify("interactive: 'interactive.interactor' command is malformed.")
-        return
+    local dir = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(bufnr), ":p:h")
+    tools.save_sources(bufnr, cfg) -- save the solution (interactor is saved in tools.prepare)
+
+    -- Interactor: an explicit config spec wins, otherwise discover a sibling
+    -- 'interactor.*' source file (compiled below). The discovered interactor gets
+    -- the testcase input/answer appended as $(INPUT)/$(ANSWER) file args.
+    local interactor
+    if icfg.interactor then
+        interactor = resolve_cmd(bufnr, icfg.interactor)
+        if not interactor then
+            utils.notify("interactive: 'interactive.interactor' command is malformed.")
+            return
+        end
+    else
+        local ipath = tools.find(dir, "interactor", cfg)
+        if not ipath then
+            utils.notify(
+                "interactive: no interactor found — create a sibling 'interactor.*' file, "
+                    .. "or set 'interactive.interactor'."
+            )
+            return
+        end
+        local spec, err = tools.program(ipath, cfg)
+        if not spec then
+            utils.notify("interactive: interactor " .. err .. ".")
+            return
+        end
+        interactor = spec
+        interactor.args = vim.list_extend(interactor.args, { "$(INPUT)", "$(ANSWER)" })
     end
 
     -- Build the testcase list (default: all; fall back to one empty case).
@@ -283,6 +305,18 @@ function M.run(bufnr, list)
         next_case()
     end
 
+    -- Compile the interactor once (no-op for interpreted/prebuilt interactors),
+    -- then run the sessions.
+    local function prepare_and_start()
+        tools.prepare(interactor, function(ok, err)
+            if not ok then
+                utils.notify("interactive: interactor " .. err)
+                return
+            end
+            start()
+        end)
+    end
+
     if r.compile then
         utils.ensure_directory(r.compile_directory)
         vim.system(
@@ -294,12 +328,12 @@ function M.run(bufnr, list)
                         utils.notify("interactive: compilation failed.\n" .. (res.stderr or ""))
                         return
                     end
-                    start()
+                    prepare_and_start()
                 end)
             end
         )
     else
-        start()
+        prepare_and_start()
     end
 end
 

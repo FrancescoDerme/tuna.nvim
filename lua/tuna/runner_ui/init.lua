@@ -101,6 +101,7 @@ function RunnerUI:show_ui()
     self.restore_winid = self.restore_winid or api.nvim_get_current_win()
     self.interface.init_ui(self.windows, self.config, self.restore_winid)
     self.ui_visible = true
+    self:update_status_line()
 
     augroup_counter = augroup_counter + 1
     self.augroup = api.nvim_create_augroup("tuna_runner_ui_" .. augroup_counter, { clear = true })
@@ -358,6 +359,21 @@ local function fit(len, str)
 end
 
 ---@private
+---Fill the status pane ("st") with the run mode and verdict source. Its own
+---rectangle above the Testcases pane, in both the popup and split interfaces.
+function RunnerUI:update_status_line()
+    local w = self.windows.st
+    if not (w and w.bufnr and api.nvim_buf_is_valid(w.bufnr)) then
+        return
+    end
+    local mode = self.runner.mode or "normal"
+    local judge = self.runner.judge_label and self.runner:judge_label() or "builtin"
+    vim.bo[w.bufnr].modifiable = true
+    api.nvim_buf_set_lines(w.bufnr, 0, -1, false, { ("  mode: %s      judge: %s"):format(mode, judge) })
+    vim.bo[w.bufnr].modifiable = false
+end
+
+---@private
 ---Replace a buffer's content (toggling modifiable around the write).
 local function set_buf(bufnr, content)
     if not (bufnr and api.nvim_buf_is_valid(bufnr)) then
@@ -379,6 +395,7 @@ function RunnerUI:update_ui()
         if self.update_windows then
             self.update_windows = false
             self.update_details = true
+            self:update_status_line()
 
             local lines, regions = {}, {}
             for i, tc in ipairs(self.runner.tcdata) do

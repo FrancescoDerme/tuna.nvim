@@ -43,45 +43,66 @@ M.defaults = {
     multiple_testing = -1, -- testcases to run at once: -1 = CPU count, 0 = all, n = n
     maximum_time = 5000, -- per-process time limit in ms (process is killed past it)
     output_compare_method = "squish", -- "exact" | "squish" | function(out, expected)
-    -- verdict source. One of:
-    --   "builtin"                 -> uses output_compare_method (exact/squish/fn)
+    -- Verdict source. Default "builtin" means: plain comparison via
+    -- output_compare_method, *unless* a sibling `checker.*` source file is found
+    -- (see tool_names) and the per-buffer checker toggle is on — then that file is
+    -- compiled and used as a special judge. Set explicitly to override:
+    --   "builtin"                 -> always plain comparison, no auto-discovery
     --   a Lua function(tc)        -> input-aware: gets tc.stdin/stdout/expected,
     --                                returns (ok: boolean, message: string?)
     --   a path string, or a       -> testlib-style external checker, invoked as
-    --   command table { exec,args }   `checker <input> <output> <answer>`; args
-    --                                expand $(INPUT)/$(OUTPUT)/$(ANSWER), exec
-    --                                also expands $(FNOEXT) etc.
+    --   command table { exec,args }   `checker <input> <output> <answer>`. A path to
+    --                                a *source* file is compiled first; args expand
+    --                                $(INPUT)/$(OUTPUT)/$(ANSWER), exec expands
+    --                                $(FNOEXT) etc.
     -- A function/external checker accepts any correct answer (special judge), which
     -- is how problems with multiple valid outputs are supported.
     checker = "builtin",
     view_output_diff = false,
 
-    -- stress testing (:Tuna stress) — hunt for an input where the solution and a
-    -- trusted reference disagree. generator/reference are command specs (a string,
-    -- or { exec, args }) expanded with the usual $(FNOEXT)/$(ABSDIR)/… modifiers.
-    -- The generator gets the iteration number appended as a seed (unless
+    -- Helper programs (checker / generator / reference / interactor) for the
+    -- stress / interactive / special-judge run modes are discovered by convention:
+    -- a sibling source file whose *base name* matches one of these (any extension),
+    -- compiled and run with the same commands as a solution of that language. This
+    -- is what lets you switch run modes with no .tuna.lua — just drop the file in.
+    tool_names = {
+        checker = { "checker", "check" },
+        generator = { "gen", "generator" },
+        reference = { "brute", "reference", "slow" },
+        interactor = { "interactor", "interact" },
+    },
+
+    -- stress testing (:Tuna run stress) — hunt for an input where the solution and
+    -- a trusted reference disagree. generator/reference are discovered by
+    -- convention (gen.* / brute.*); set these only to override — a command spec (a
+    -- string, or { exec, args }) expanded with the usual $(FNOEXT)/$(ABSDIR)/…
+    -- modifiers. The generator gets the iteration number appended as a seed (unless
     -- seed_arg = false) so failures are reproducible.
     stress = {
-        generator = nil, -- e.g. { exec = "$(ABSDIR)/gen", args = {} } or "python3 gen.py"
-        reference = nil, -- a correct-but-slow solution, same input/output contract
+        generator = nil, -- override discovery, e.g. { exec = "python3", args = { "$(ABSDIR)/gen.py" } }
+        reference = nil, -- override discovery: a correct-but-slow solution
         count = 100, -- maximum iterations before giving up
         seed_arg = true, -- append the iteration seed as the generator's last argument
     },
 
-    -- interactive problems (:Tuna interactive) — the solution talks to an
+    -- interactive problems (:Tuna run interactive) — the solution talks to an
     -- interactor over stdio; the interactor decides the verdict (exit 0 = AC). The
-    -- interactor command spec receives the testcase input/answer via $(INPUT)/
-    -- $(ANSWER) placeholders (default: those two files appended as args).
+    -- interactor is discovered by convention (interactor.*); set this only to
+    -- override. It receives the testcase input/answer via $(INPUT)/$(ANSWER)
+    -- placeholders (default: those two files appended as args).
     interactive = {
-        interactor = nil, -- e.g. { exec = "$(ABSDIR)/interactor", args = {} }
+        interactor = nil, -- override discovery, e.g. { exec = "python3", args = { "$(ABSDIR)/interactor.py" } }
     },
 
-    -- scaffolding (:Tuna scaffold <checker|generator|brute>) — drop a starter file
-    -- into the problem directory. Override the output filename or the template
-    -- source (a file path) per kind; nil templates use the built-in C++ stubs.
+    -- scaffolding (:Tuna scaffold <checker|generator|brute|interactor> [ext]) — drop
+    -- a starter helper into the problem directory, in the solution's language by
+    -- default. `files` are base names (extension chosen from the target language).
+    -- `templates[kind]` overrides the built-in stub: a template-file path string,
+    -- or a per-language { [ext] = path } table (like `template_file`). Built-in
+    -- stubs exist for cpp and py.
     scaffold = {
-        files = { checker = "checker.cpp", generator = "gen.cpp", brute = "brute.cpp" },
-        templates = { checker = nil, generator = nil, brute = nil },
+        files = { checker = "checker", generator = "gen", brute = "brute", interactor = "interactor" },
+        templates = { checker = nil, generator = nil, brute = nil, interactor = nil },
     },
 
     -- testcase storage (see DIFFERENCES.md: layout is fully customizable)
@@ -140,6 +161,8 @@ M.defaults = {
         width = 0.2,
         height = 0.3,
         mappings = {
+            focus_next = { "j", "<down>", "<Tab>" }, -- move to the next entry (wraps)
+            focus_prev = { "k", "<up>", "<S-Tab>" }, -- move to the previous entry (wraps)
             close = { "<esc>", "<C-c>", "q", "Q" },
             submit = "<cr>",
         },

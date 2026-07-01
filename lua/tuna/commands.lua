@@ -11,15 +11,25 @@ local config = require("tuna.config")
 local utils = require("tuna.utils")
 local testcases = require("tuna.testcases")
 local runner = require("tuna.runner")
+local tools = require("tuna.tools")
 
 local M = {}
 
 -- Sub-argument completions for subcommands that take a second word.
 local subcommand_args = {
+    run = tools.MODES,
     convert = { "files", "single_file", "directory" },
     receive = { "testcases", "problem", "contest", "persistently", "status", "stop" },
-    scaffold = { "checker", "generator", "brute" },
+    scaffold = { "checker", "generator", "brute", "interactor" },
+    checker = { "on", "off", "toggle" },
 }
+
+-- Run modes selectable via `:Tuna run <mode>` and the menu. Kept as a set for
+-- quick "is this arg a mode keyword?" checks.
+local MODE_SET = {}
+for _, m in ipairs(tools.MODES) do
+    MODE_SET[m] = true
+end
 
 --------------------------------------------------------------------------------
 -- Testcase editing
@@ -120,12 +130,29 @@ end
 ---@type table<integer, tuna.TCRunner>
 M.runners = {}
 
+---Resolve the buffer a run should target — redirecting a helper buffer (e.g.
+---`checker.cpp`) to the solution beside it. Notifies and returns nil on failure.
+---@return integer? bufnr, string? mode label of the resolved buffer's active mode
+function M.solution_bufnr()
+    local bufnr = api.nvim_get_current_buf()
+    config.load_buffer_config(bufnr)
+    local target, note = tools.solution_bufnr(bufnr, config.get_buffer_config(bufnr))
+    if not target then
+        utils.notify("run: " .. tostring(note))
+        return nil
+    end
+    if note then
+        utils.notify(note, "INFO")
+    end
+    return target
+end
+
 ---Run testcases (or a subset), and show the results UI.
+---@param bufnr integer the solution buffer to run
 ---@param list string[]? testcase numbers to run, or nil for all
 ---@param compile boolean compile before running
 ---@param only_show boolean just (re)open the UI without running
-function M.run_testcases(list, compile, only_show)
-    local bufnr = api.nvim_get_current_buf()
+function M.run_testcases(bufnr, list, compile, only_show)
     config.load_buffer_config(bufnr)
     local tctbl = testcases.buf_get_testcases(bufnr)
 
@@ -163,6 +190,58 @@ function M.run_testcases(list, compile, only_show)
         r:run_testcases(tctbl, compile)
     end
     r:show_ui()
+end
+
+---Run a buffer in a given mode (dispatching to the right engine).
+---@param mode string "normal" | "all" | "stress" | "interactive"
+---@param args string[] mode arguments (testcase numbers, or a stress count)
+---@param compile boolean compile before running (normal mode only)
+---@param bufnr integer
+function M.dispatch_mode(mode, args, compile, bufnr)
+    if mode == "all" then
+        require("tuna.multi").run(bufnr)
+    elseif mode == "stress" then
+        require("tuna.stress").run(bufnr, tonumber(args[1]))
+    elseif mode == "interactive" then
+        require("tuna.interactive").run(bufnr, #args > 0 and args or nil)
+    else -- "normal"
+        M.run_testcases(bufnr, #args > 0 and args or nil, compile, false)
+    end
+end
+
+---Handle `:Tuna run [mode] [args]`. A leading mode keyword switches the buffer's
+---active mode (and is consumed); otherwise the buffer's current mode is used, so
+---a bare `:Tuna run` repeats whatever mode you last selected.
+---@param args string[] the arguments after `run`
+function M.run_mode(args)
+    local bufnr = M.solution_bufnr()
+    if not bufnr then
+        return
+    end
+    local path = api.nvim_buf_get_name(bufnr)
+    local mode
+    if args[1] and MODE_SET[args[1]] then
+        mode = table.remove(args, 1)
+        tools.set_mode(path, mode)
+    else
+        mode = tools.get_mode(path)
+    end
+    M.dispatch_mode(mode, args, true, bufnr)
+end
+
+---Toggle (or set) the per-buffer checker: when off, runs fall back to plain
+---output comparison even if a checker.* file exists. Drops the cached runner so
+---the next run re-resolves the checker.
+---@param bufnr integer
+---@param want boolean? explicit target state; nil flips the current value
+function M.set_checker(bufnr, want)
+    local path = api.nvim_buf_get_name(bufnr)
+    if want == nil then
+        want = not tools.checker_enabled(path)
+    end
+    tools.set_checker(path, want)
+    M.runners[bufnr] = nil -- force checker re-resolution on the next run
+    utils.notify("checker " .. (want and "enabled" or "disabled") .. " for this buffer.", "INFO")
 end
 
 --------------------------------------------------------------------------------
@@ -218,13 +297,19 @@ M.subcommands = {
         M.convert_testcases(args[1])
     end,
     run = function(args)
-        M.run_testcases(#args > 0 and args or nil, true, false)
+        M.run_mode(args)
     end,
     run_no_compile = function(args)
-        M.run_testcases(#args > 0 and args or nil, false, false)
+        local bufnr = M.solution_bufnr()
+        if bufnr then
+            M.run_testcases(bufnr, #args > 0 and args or nil, false, false)
+        end
     end,
     show_ui = function()
-        M.run_testcases(nil, false, true)
+        local bufnr = M.solution_bufnr()
+        if bufnr then
+            M.run_testcases(bufnr, nil, false, true)
+        end
     end,
     receive = function(args)
         if not args[1] then
@@ -233,40 +318,63 @@ M.subcommands = {
         end
         M.receive(args[1])
     end,
-    stress = function(args)
-        require("tuna.stress").run(api.nvim_get_current_buf(), tonumber(args[1]))
-    end,
-    interactive = function(args)
-        require("tuna.interactive").run(api.nvim_get_current_buf(), #args > 0 and args or nil)
-    end,
-    run_all = function()
-        require("tuna.multi").run(api.nvim_get_current_buf())
+    checker = function(args)
+        local want = nil
+        if args[1] == "on" then
+            want = true
+        elseif args[1] == "off" then
+            want = false
+        end
+        local bufnr = M.solution_bufnr()
+        if bufnr then
+            M.set_checker(bufnr, want)
+        end
     end,
     scaffold = function(args)
         if not args[1] then
-            utils.notify("scaffold: a kind is required (checker | generator | brute).")
+            utils.notify("scaffold: a kind is required (checker | generator | brute | interactor).")
             return
         end
-        require("tuna.scaffold").create(args[1], api.nvim_get_current_buf())
+        require("tuna.scaffold").create(args[1], api.nvim_get_current_buf(), args[2])
     end,
     menu = function()
         M.open_menu()
     end,
 }
 
----Open the mode-switcher menu: pick a run/test/scaffold action and launch it.
+---Open the mode-switcher menu. Selecting a mode sets it as the buffer's active
+---mode (so a later bare `:Tuna run` repeats it) and runs it now; the checker
+---entry toggles special-judge use; scaffold entries drop in a helper.
 function M.open_menu()
-    local bufnr = api.nvim_get_current_buf()
+    local cur = api.nvim_get_current_buf()
+    config.load_buffer_config(cur)
+    -- Operate on the solution even when opened from a helper buffer (checker.cpp).
+    local bufnr = tools.solution_bufnr(cur, config.get_buffer_config(cur)) or cur
+    local path = api.nvim_buf_get_name(bufnr)
+    local mode = tools.get_mode(path)
+    local checker_on = tools.checker_enabled(path)
+
+    local function switch(m)
+        return function()
+            tools.set_mode(path, m)
+            M.dispatch_mode(m, {}, true, bufnr)
+        end
+    end
+
     local actions = {
-        { "Run", function() M.run_testcases(nil, true, false) end },
-        { "Run (no compile)", function() M.run_testcases(nil, false, false) end },
-        { "Show results UI", function() M.run_testcases(nil, false, true) end },
-        { "Run all versions", function() require("tuna.multi").run(bufnr) end },
-        { "Stress test", function() require("tuna.stress").run(bufnr) end },
-        { "Interactive", function() require("tuna.interactive").run(bufnr) end },
-        { "Scaffold: checker", function() require("tuna.scaffold").create("checker", bufnr) end },
-        { "Scaffold: generator", function() require("tuna.scaffold").create("generator", bufnr) end },
-        { "Scaffold: brute", function() require("tuna.scaffold").create("brute", bufnr) end },
+        { "Run (mode: " .. mode .. ")", switch(mode) },
+        { "Mode → normal", switch("normal") },
+        { "Mode → run all versions", switch("all") },
+        { "Mode → stress test", switch("stress") },
+        { "Mode → interactive", switch("interactive") },
+        { "Checker: " .. (checker_on and "on (click to disable)" or "off (click to enable)"), function()
+            M.set_checker(bufnr)
+        end },
+        { "Show results UI", function() M.run_testcases(bufnr, nil, false, true) end },
+        { "Scaffold: checker", function() require("tuna.scaffold").create("checker", cur) end },
+        { "Scaffold: generator", function() require("tuna.scaffold").create("generator", cur) end },
+        { "Scaffold: brute", function() require("tuna.scaffold").create("brute", cur) end },
+        { "Scaffold: interactor", function() require("tuna.scaffold").create("interactor", cur) end },
     }
     local labels = {}
     for i, a in ipairs(actions) do

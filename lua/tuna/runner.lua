@@ -23,6 +23,7 @@ local config = require("tuna.config")
 local utils = require("tuna.utils")
 local testcases = require("tuna.testcases")
 local checker = require("tuna.checker")
+local tools = require("tuna.tools")
 
 local M = {}
 
@@ -87,17 +88,30 @@ function M.new(bufnr)
         return nil
     end
 
-    -- Resolve the checker. "builtin" (the default) uses output_compare_method.
-    -- An external checker may be a path string or a { exec, args } table; only
-    -- the exec is modifier-expanded here — its args keep the $(INPUT)/$(OUTPUT)/
-    -- $(ANSWER) placeholders, which `checker.judge` fills in per testcase.
+    -- Resolve the checker. The per-buffer toggle (tools.checker_enabled) forces
+    -- plain comparison when off. Otherwise:
+    --   * "builtin"          -> auto-discover a sibling checker.* source file; if
+    --                           found it's compiled (on first judge) and used, else
+    --                           plain output_compare_method comparison.
+    --   * a Lua function     -> used as-is (in-process special judge).
+    --   * a path string      -> a checker source file (compiled) or prebuilt binary.
+    --   * a { exec, args }    -> a prebuilt checker; only exec is modifier-expanded,
+    --     table                 args keep their $(INPUT)/$(OUTPUT)/$(ANSWER) markers.
+    local path = vim.api.nvim_buf_get_name(bufnr)
     local resolved_checker = "builtin"
-    if type(cfg.checker) == "function" then
+    if not tools.checker_enabled(path) then
+        resolved_checker = "builtin"
+    elseif type(cfg.checker) == "function" then
         resolved_checker = cfg.checker
-    elseif type(cfg.checker) == "string" and cfg.checker ~= "builtin" then
-        local exec = utils.buf_eval_string(bufnr, cfg.checker)
-        if exec then
-            resolved_checker = { exec = exec }
+    elseif cfg.checker == "builtin" then
+        local cpath = tools.find(filedir, "checker", cfg)
+        if cpath then
+            resolved_checker = tools.checker_spec(cpath, cfg)
+        end
+    elseif type(cfg.checker) == "string" then
+        local expanded = utils.buf_eval_string(bufnr, cfg.checker)
+        if expanded then
+            resolved_checker = tools.checker_spec(expanded, cfg)
         else
             utils.notify("checker path is malformed; falling back to builtin comparison.", "WARN")
         end
@@ -123,7 +137,20 @@ function M.new(bufnr)
         compile = compile_command ~= nil,
         next_tc = 1,
         completed = false,
+        mode = "normal", -- run mode shown in the UI (set by commands)
     }, TCRunner)
+end
+
+---A short human label for how verdicts are decided, for the UI status line.
+---@return string
+function TCRunner:judge_label()
+    local c = self.checker
+    if type(c) == "function" then
+        return "checker (lua)"
+    elseif type(c) == "table" then
+        return "checker"
+    end
+    return "builtin (" .. tostring(self.config.output_compare_method) .. ")"
 end
 
 ---Run testcases. Pass a `tctbl` for a fresh run, or `nil` to re-run the testcases
@@ -132,13 +159,7 @@ end
 ---@param do_compile boolean? whether to compile first (defaults to true)
 function TCRunner:run_testcases(tctbl, do_compile)
     if tctbl then
-        if self.config.save_all_files then
-            vim.cmd("silent! wall")
-        elseif self.config.save_current_file then
-            vim.api.nvim_buf_call(self.bufnr, function()
-                vim.cmd("silent! write")
-            end)
-        end
+        tools.save_sources(self.bufnr, self.config)
 
         if do_compile == nil then
             do_compile = true
@@ -147,7 +168,7 @@ function TCRunner:run_testcases(tctbl, do_compile)
 
         self.tcdata = {}
         if self.compile then -- compilation is testcase #1
-            table.insert(self.tcdata, { tcnum = "Compile", stdin = "", expected = nil })
+            table.insert(self.tcdata, { tcnum = "Compile", stdin = "", expected = nil, compile = true })
         end
         -- Insert testcases in ascending tcnum order for a stable display.
         local nums = vim.tbl_keys(tctbl)

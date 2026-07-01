@@ -8,13 +8,17 @@
 --   * external   — a testlib-style checker program, invoked as
 --     `checker <input> <output> <answer>` (jury input, participant output, jury
 --     answer). Exit code 0 means correct; any other code means wrong, and the
---     checker's stderr/stdout becomes the verdict message.
+--     checker's stderr/stdout becomes the verdict message. The checker is usually
+--     an ordinary source file in the solution's language (e.g. `checker.cpp`); it
+--     is compiled once, on first use, via `tools.prepare` (a prebuilt binary or a
+--     shell script works too — it just skips the compile step).
 --
 -- `judge` is asynchronous (it may spawn a process), so it reports the verdict
 -- through a callback. The builtin path calls back synchronously.
 
 local compare = require("tuna.compare")
 local utils = require("tuna.utils")
+local tools = require("tuna.tools")
 
 local M = {}
 
@@ -57,9 +61,11 @@ function M.judge(tc, checker, compare_method, callback)
         return
     end
 
-    -- Neither a Lua-function nor an external checker can judge the compile
-    -- pseudo-testcase (or a case with no expected output), so report uncheckable.
-    if tc.expected == nil then
+    -- The compile pseudo-testcase has no output to judge — report uncheckable.
+    -- (A *real* testcase with no expected output is still judged: a checker often
+    -- validates the participant output against the input alone, so there's no need
+    -- to write an example answer when a checker is in use.)
+    if tc.compile then
         callback(nil)
         return
     end
@@ -78,39 +84,51 @@ function M.judge(tc, checker, compare_method, callback)
         return
     end
 
-    local files = {
-        INPUT = temp_with(tc.stdin),
-        OUTPUT = temp_with(tc.stdout),
-        ANSWER = temp_with(tc.expected),
-    }
+    -- Compile the checker if it is a source file (cached across testcases), then run
+    -- it against this testcase's three temp files.
+    tools.prepare(checker, function(ready, cerr)
+        if not ready then
+            vim.schedule(function()
+                utils.notify("checker " .. cerr)
+            end)
+            callback(nil, "checker did not compile")
+            return
+        end
 
-    local raw_args = (checker.args and #checker.args > 0) and checker.args or DEFAULT_ARGS
-    local args = {}
-    for i, a in ipairs(raw_args) do
-        args[i] = expand_placeholders(a, files)
-    end
+        local files = {
+            INPUT = temp_with(tc.stdin),
+            OUTPUT = temp_with(tc.stdout),
+            ANSWER = temp_with(tc.expected),
+        }
 
-    local argv = vim.list_extend({ checker.exec }, args)
-    local ok, err = pcall(vim.system, argv, { text = true }, function(res)
-        vim.schedule(function()
+        local raw_args = (checker.args and #checker.args > 0) and checker.args or DEFAULT_ARGS
+        local args = {}
+        for i, a in ipairs(raw_args) do
+            args[i] = expand_placeholders(a, files)
+        end
+
+        local argv = vim.list_extend({ checker.exec }, args)
+        local ok, err = pcall(vim.system, argv, { text = true, cwd = checker.cwd }, function(res)
+            vim.schedule(function()
+                for _, path in pairs(files) do
+                    utils.delete_file(path)
+                end
+                local msg = res.stderr ~= "" and res.stderr or res.stdout
+                msg = msg ~= "" and vim.trim(msg) or nil
+                callback(res.code == 0, msg)
+            end)
+        end)
+
+        if not ok then
             for _, path in pairs(files) do
                 utils.delete_file(path)
             end
-            local msg = res.stderr ~= "" and res.stderr or res.stdout
-            msg = msg ~= "" and vim.trim(msg) or nil
-            callback(res.code == 0, msg)
-        end)
-    end)
-
-    if not ok then
-        for _, path in pairs(files) do
-            utils.delete_file(path)
+            vim.schedule(function()
+                utils.notify("checker '" .. tostring(checker.exec) .. "' failed to start: " .. tostring(err))
+            end)
+            callback(nil, "checker failed to start")
         end
-        vim.schedule(function()
-            utils.notify("checker '" .. tostring(checker.exec) .. "' failed to start: " .. tostring(err))
-        end)
-        callback(nil, "checker failed to start")
-    end
+    end)
 end
 
 return M

@@ -14,6 +14,7 @@ local config = require("tuna.config")
 local utils = require("tuna.utils")
 local checker = require("tuna.checker")
 local testcases = require("tuna.testcases")
+local tools = require("tuna.tools")
 
 local M = {}
 
@@ -36,18 +37,22 @@ local function eval_command(filepath, command)
     return { exec = exec, args = args }
 end
 
----Resolve the checker for a specific solution file (mirrors `runner.new`).
----@param filepath string
+---Resolve the shared checker for a problem directory (mirrors `runner.new`).
+---The checker is the same for every sibling solution, so it's resolved once.
+---@param dir string problem directory
 ---@param cfg table
----@return "builtin"|function|{ exec: string, args: string[]? }
-local function resolve_checker(filepath, cfg)
+---@return "builtin"|function|table
+local function resolve_checker(dir, cfg)
     if type(cfg.checker) == "function" then
         return cfg.checker
-    elseif type(cfg.checker) == "string" and cfg.checker ~= "builtin" then
-        local exec = utils.eval_string(filepath, cfg.checker)
-        return exec and { exec = exec } or "builtin"
+    elseif cfg.checker == "builtin" then
+        local cpath = tools.find(dir, "checker", cfg)
+        return cpath and tools.checker_spec(cpath, cfg) or "builtin"
+    elseif type(cfg.checker) == "string" then
+        local exec = utils.eval_string(dir, cfg.checker)
+        return exec and tools.checker_spec(exec, cfg) or "builtin"
     elseif type(cfg.checker) == "table" and cfg.checker.exec then
-        local exec = utils.eval_string(filepath, cfg.checker.exec)
+        local exec = utils.eval_string(dir, cfg.checker.exec)
         return exec and { exec = exec, args = cfg.checker.args } or "builtin"
     end
     return "builtin"
@@ -70,11 +75,26 @@ function M.run(bufnr)
     end
 
     local files = vim.fn.globpath(dir, "*." .. ext, false, true)
+    files = vim.tbl_filter(function(f)
+        return not tools.is_helper(f, cfg)
+    end, files)
     table.sort(files)
     if #files == 0 then
-        utils.notify("run_all: no '*." .. ext .. "' files found beside this one.")
+        utils.notify("run_all: no solution '*." .. ext .. "' files found beside this one.")
         return
     end
+
+    -- Save sources before running. run_all runs *every* sibling version, so (when
+    -- auto-save is enabled) flush each candidate's buffer, not just the current one.
+    tools.save_sources(bufnr, cfg)
+    if cfg.save_current_file or cfg.save_all_files then
+        for _, f in ipairs(files) do
+            tools.flush_buffer(f)
+        end
+    end
+
+    -- The checker is shared across every solution version, so resolve it once.
+    local chk = resolve_checker(dir, cfg)
 
     local tctbl = testcases.buf_get_testcases(bufnr)
     local nums = vim.tbl_keys(tctbl)
@@ -120,7 +140,6 @@ function M.run(bufnr)
             return
         end
         local cc = cfg.compile_command[filetype] and eval_command(f, cfg.compile_command[filetype])
-        local chk = resolve_checker(f, cfg)
 
         local function run_cases()
             local correct, total = 0, 0

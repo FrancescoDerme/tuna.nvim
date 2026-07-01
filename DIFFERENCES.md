@@ -154,19 +154,48 @@ otherwise closing the viewer would tear down the whole UI.
 
 New capabilities tuna adds that competitest never had. (See the Phase 3 roadmap.)
 
+## Helper programs by convention + run modes (`tools.lua`)
+
+✅ **Done.** The stress/checker/interactive extras originally forced a `.tuna.lua`
+per problem, spelling out each helper as a command spec — which pushed people toward
+**shell** checkers. That's backwards from how competitive programmers actually work
+(see ali-ibrahim137's stress-testing article): the generator, brute/reference,
+checker and interactor are ordinary **source files in the solution's own language**.
+
+`tools.lua` makes that the default. Helpers are discovered **by filename
+convention** beside the solution — `checker.*`, `gen.*`, `brute.*`, `interactor.*`
+(aliases and names configurable via `tool_names`) — then compiled and run with the
+**same config-driven commands as a solution of that language** (so a Python helper
+beside a C++ solution just works). A source checker is compiled **once**, on first
+use, and cached (`tools.prepare`), so parallel judges don't recompile or race.
+Config specs still override discovery, and a prebuilt binary / shell script still
+works — but no `.tuna.lua` is required to stress-test or special-judge.
+
+Because you no longer flip modes by editing config, tuna adds a **per-buffer run
+mode**: `:Tuna run [normal|all|stress|interactive]`. A bare `:Tuna run` repeats the
+buffer's current mode; passing a mode (or picking one in the `:Tuna` menu) switches
+it. A **checker toggle** (`:Tuna checker [on|off]`, or the menu) turns special
+judging off for a buffer without deleting `checker.cpp`. competitest had a single
+`:CompetiTest run` and no notion of modes or helper discovery.
+
 ## Pluggable checkers (`checker.lua`)
 
 ✅ **Done (Workstream 1).** competitest could only decide a verdict by comparing
 program output against the expected output (`exact` / `squish` / a custom Lua
 function). tuna keeps that as the `"builtin"` checker but adds support for an
-**external, testlib-style checker program** via the new `checker` option:
+**external, testlib-style checker program** — usually a **source file in the
+solution's language**, discovered as `checker.*` and compiled automatically:
 
 ```lua
-checker = "builtin"                                  -- default: output comparison
-checker = "~/cp/checkers/wcmp"                       -- a checker binary
-checker = { exec = "$(ABSDIR)/chk", args = { ... } } -- full control
+checker = "builtin"    -- default: plain comparison, OR a discovered checker.* if present
+checker = "~/cp/checkers/wcmp"                       -- an explicit checker binary
+checker = "$(ABSDIR)/checker.py"                     -- an explicit checker source file (compiled if needed)
+checker = { exec = "$(ABSDIR)/chk", args = { ... } } -- full control over a prebuilt binary
 ```
 
+With the default `"builtin"`, dropping a `checker.cpp` (or `checker.py`, …) next to
+the solution switches that problem to special-judge mode with no config; the
+per-buffer checker toggle (`:Tuna checker off`) forces plain comparison back on.
 An external checker is invoked as `checker <input> <output> <answer>` (the testlib
 convention: jury input, participant output, jury answer); exit code `0` is correct,
 anything else is wrong, and its stderr/stdout becomes the verdict message
@@ -183,15 +212,16 @@ its verdict lands.
 ## Stress testing (`stress.lua`)
 
 ✅ **Done (Workstream 2).** Brand new — competitest has no stress testing. `:Tuna
-stress [count]` hunts for a small input on which the current solution disagrees with
-a trusted reference:
+run stress [count]` hunts for a small input on which the current solution disagrees
+with a trusted reference. By convention it uses a sibling `gen.*` (generator) and
+`brute.*` (reference) — **no config needed**; the `stress` table only overrides:
 
 ```lua
 stress = {
-  generator = { exec = "$(ABSDIR)/gen", args = {} }, -- prints a random test to stdout
-  reference = { exec = "$(ABSDIR)/brute", args = {} }, -- a correct-but-slow solution
-  count = 100,       -- max iterations
-  seed_arg = true,   -- append the iteration number as the generator's last arg
+  generator = nil,   -- override discovery, e.g. { exec = "python3", args = { "$(ABSDIR)/gen.py" } }
+  reference = nil,    -- override discovery: a correct-but-slow solution
+  count = 100,        -- max iterations
+  seed_arg = true,    -- append the iteration number as the generator's last arg
 }
 ```
 
@@ -210,11 +240,12 @@ Workstream 1.
 ## Interactive problems (`interactive.lua`)
 
 ✅ **Done (Workstream 2).** Brand new — competitest can't run interactive problems
-at all. `:Tuna interactive [n…]` runs the solution against an **interactor** that
-talks to it over stdio:
+at all. `:Tuna run interactive [n…]` runs the solution against an **interactor**
+that talks to it over stdio. By convention it uses a sibling `interactor.*` — **no
+config needed**; `interactive.interactor` only overrides:
 
 ```lua
-interactive = { interactor = { exec = "$(ABSDIR)/interactor", args = {} } }
+interactive = { interactor = nil } -- override, e.g. { exec = "python3", args = { "$(ABSDIR)/interactor.py" } }
 ```
 
 For each testcase the solution and the interactor are spawned and their pipes are
@@ -238,30 +269,37 @@ it couldn't validate input-dependent answers. tuna adds a third `checker` form: 
 **Lua function `function(tc)` that receives the whole testcase** (`tc.stdin`,
 `tc.stdout`, `tc.expected`) and returns `(ok, message)`. So you get input-aware
 special judging in pure Lua, without writing/compiling an external checker — and the
-same capability flows through `:Tuna run`, `stress`, `interactive`, and `run_all`.
+same capability flows through `:Tuna run`, `run stress`, `run interactive`, and
+`run all`.
 
 ## Multiple solution versions (`multi.lua`, `:Tuna run_all`)
 
-✅ **Done.** Keep several attempts side by side (`main.cpp`, `brute.cpp`, …) and
-`:Tuna run_all` compiles and runs *every* sibling file of the same extension against
-the shared testcases, printing a per-solution `correct/total` summary. competitest
-only ever ran the current file. (This is distinct from multiple-*answer* support
-above — here it's multiple *programs*.)
+✅ **Done.** Keep several attempts side by side (`main.cpp`, `slow.cpp`, …) and
+`:Tuna run all` compiles and runs *every* sibling solution file of the same
+extension against the shared testcases, printing a per-solution `correct/total`
+summary. Helper files (`checker.*`, `gen.*`, `brute.*`, `interactor.*`) are excluded
+so they aren't mistaken for solutions. competitest only ever ran the current file.
+(This is distinct from multiple-*answer* support above — here it's multiple
+*programs*.)
 
 ## Scaffolding (`scaffold.lua`, `:Tuna scaffold …`)
 
-✅ **Done.** `:Tuna scaffold <checker|generator|brute>` drops a dependency-free C++
-starter (no testlib needed) into the problem directory and opens it, giving a clean
-on-ramp to writing the checker/generator that stress testing and special judging
-need. Filenames and template sources are overridable via `config.scaffold`.
-competitest had nothing comparable.
+✅ **Done.** `:Tuna scaffold <checker|generator|brute|interactor> [ext]` drops a
+dependency-free starter (no testlib needed) into the problem directory and opens it,
+giving a clean on-ramp to the convention-named helpers that stress testing, special
+judging, and interactive problems discover. The file is created in the **solution's
+language** by default (or the language named by `[ext]`); built-in templates ship
+for C++ and Python, and both the base filenames and the templates — per kind and
+**per language** (`{ [ext] = path }`, like `template_file`) — are overridable via
+`config.scaffold`. competitest had nothing comparable.
 
 ## Mode-switcher menu (`widgets.menu`)
 
-✅ **Done.** Bare `:Tuna` (or `:Tuna menu`) opens a native chooser listing the run/
-test/scaffold actions (Run, Run-all, Stress, Interactive, Scaffold…) so the Phase 3
-modes are discoverable without memorising subcommands. In competitest a bare
-`:CompetiTest` was an error. This is a deliberate precursor to the fuller `:Tuna`
-dashboard planned for Workstream 5.
+✅ **Done.** Bare `:Tuna` (or `:Tuna menu`) opens a native chooser that switches the
+buffer's **run mode** (normal / run-all / stress / interactive), toggles the checker,
+shows the results UI, or scaffolds a helper — so the Phase 3 modes are discoverable
+without memorising subcommands, and picking a mode here is what a later bare `:Tuna
+run` repeats. In competitest a bare `:CompetiTest` was an error. This is a deliberate
+precursor to the fuller `:Tuna` dashboard planned for Workstream 5.
 
 <!-- Add new entries above this line as decisions are made. -->

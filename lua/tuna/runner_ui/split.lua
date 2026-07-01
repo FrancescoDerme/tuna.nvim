@@ -18,7 +18,11 @@ local utils = require("tuna.utils")
 
 local M = {}
 
+-- Height (in rows) of the status strip above the grid.
+local STATUS_HEIGHT = 1
+
 local titles = {
+    st = " Run ",
     tc = " Testcases ",
     so = " Output ",
     eo = " Expected Output ",
@@ -113,7 +117,6 @@ function M.init_ui(windows, config, init_winid)
         split = dir_map[config.split_ui.position] or "right",
         win = init_winid,
     })
-    windows[fw].winid = outer
     if vertical then
         api.nvim_win_set_width(outer, total_width)
         vim.wo[outer].winfixwidth = true
@@ -121,6 +124,15 @@ function M.init_ui(windows, config, init_winid)
         api.nvim_win_set_height(outer, total_height)
         vim.wo[outer].winfixheight = true
     end
+
+    -- Carve a full-width status strip at the top of the frame, above the grid.
+    local st = api.nvim_open_win(windows.st.bufnr, false, { split = "above", win = outer })
+    windows.st.winid = st
+    api.nvim_win_set_height(st, STATUS_HEIGHT)
+    vim.wo[st].winfixheight = true
+
+    -- The grid fills the rest of the frame.
+    windows[fw].winid = outer
 
     -- Disable equalisation while we subdivide, then restore it.
     local old_equalalways = vim.o.equalalways
@@ -132,8 +144,10 @@ function M.init_ui(windows, config, init_winid)
     for name, w in pairs(windows) do
         if w.winid and api.nvim_win_is_valid(w.winid) then
             local selector = name == "tc"
-            vim.wo[w.winid].number = selector and config.runner_ui.selector_show_nu or config.runner_ui.show_nu
-            vim.wo[w.winid].relativenumber = selector and config.runner_ui.selector_show_rnu or config.runner_ui.show_rnu
+            local status = name == "st"
+            vim.wo[w.winid].number = not status and (selector and config.runner_ui.selector_show_nu or config.runner_ui.show_nu)
+            vim.wo[w.winid].relativenumber = not status
+                and (selector and config.runner_ui.selector_show_rnu or config.runner_ui.show_rnu)
             vim.wo[w.winid].wrap = false
             vim.wo[w.winid].spell = false
             vim.wo[w.winid].cursorline = selector

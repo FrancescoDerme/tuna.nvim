@@ -16,6 +16,7 @@ local utils = require("tuna.utils")
 local runner = require("tuna.runner")
 local checker = require("tuna.checker")
 local testcases = require("tuna.testcases")
+local tools = require("tuna.tools")
 
 local M = {}
 
@@ -59,19 +60,40 @@ function M.run(bufnr, count_override)
     end
     local cfg = r.config
     local scfg = cfg.stress or {}
+    local dir = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(bufnr), ":p:h")
+    tools.save_sources(bufnr, cfg) -- save the solution (helpers are saved in tools.prepare)
 
-    if not scfg.generator or not scfg.reference then
-        utils.notify("stress: configure both 'stress.generator' and 'stress.reference' first.")
-        return
+    -- Resolve a helper (generator/reference): an explicit config spec wins,
+    -- otherwise discover a sibling source file (gen.* / brute.*) and compile it.
+    local function resolve_helper(role, override, label)
+        if override then
+            local spec = resolve_cmd(bufnr, override)
+            if not spec then
+                utils.notify("stress: 'stress." .. label .. "' command is malformed.")
+            end
+            return spec
+        end
+        local path = tools.find(dir, role, cfg)
+        if not path then
+            utils.notify(
+                "stress: no " .. label .. " found — create a sibling '" .. tools.DEFAULT_NAMES[role][1] .. ".*' "
+                    .. "file, or set 'stress." .. label .. "'."
+            )
+            return nil
+        end
+        local spec, err = tools.program(path, cfg)
+        if not spec then
+            utils.notify("stress: " .. label .. " " .. err .. ".")
+        end
+        return spec
     end
-    local gen = resolve_cmd(bufnr, scfg.generator)
-    local ref = resolve_cmd(bufnr, scfg.reference)
+
+    local gen = resolve_helper("generator", scfg.generator, "generator")
     if not gen then
-        utils.notify("stress: 'stress.generator' command is malformed.")
         return
     end
+    local ref = resolve_helper("reference", scfg.reference, "reference")
     if not ref then
-        utils.notify("stress: 'stress.reference' command is malformed.")
         return
     end
 
@@ -179,7 +201,26 @@ function M.run(bufnr, count_override)
         end)
     end
 
-    -- Compile the solution once (if it needs compiling), then start the loop.
+    -- Compile the generator and reference once (no-op for interpreted/prebuilt
+    -- helpers), then start the loop.
+    local function start()
+        tools.prepare(gen, function(gok, gerr)
+            if not gok then
+                utils.notify("stress: generator " .. gerr)
+                return
+            end
+            tools.prepare(ref, function(rok, rerr)
+                if not rok then
+                    utils.notify("stress: reference " .. rerr)
+                    return
+                end
+                utils.notify(string.format("stress: running up to %d iterations…", count), "INFO")
+                loop(1)
+            end)
+        end)
+    end
+
+    -- Compile the solution once (if it needs compiling), then prepare the helpers.
     if r.compile then
         utils.ensure_directory(r.compile_directory)
         vim.system(
@@ -191,14 +232,12 @@ function M.run(bufnr, count_override)
                         utils.notify("stress: compilation failed.\n" .. (res.stderr or ""))
                         return
                     end
-                    utils.notify(string.format("stress: running up to %d iterations…", count), "INFO")
-                    loop(1)
+                    start()
                 end)
             end
         )
     else
-        utils.notify(string.format("stress: running up to %d iterations…", count), "INFO")
-        loop(1)
+        start()
     end
 end
 

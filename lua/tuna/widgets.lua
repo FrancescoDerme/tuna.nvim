@@ -71,6 +71,19 @@ local function map_keys(spec, mode, bufnr, fn)
     end
 end
 
+---Move the cursor by `delta` rows in a single-column chooser, wrapping around.
+---@param winid integer
+---@param count integer number of selectable rows
+---@param delta integer -1 (previous) or +1 (next)
+local function move_cursor(winid, count, delta)
+    if count <= 0 then
+        return
+    end
+    local row = api.nvim_win_get_cursor(winid)[1]
+    row = (row - 1 + delta) % count + 1
+    api.nvim_win_set_cursor(winid, { row, 0 })
+end
+
 ---Read a whole buffer as a single newline-joined string.
 ---@param bufnr integer
 ---@return string
@@ -409,6 +422,12 @@ function M.picker(bufnr, tctbl, title, callback, restore_winid)
         end
     end
 
+    map_keys(cfg.picker_ui.mappings.focus_next, "n", picker.menu_buf, function()
+        move_cursor(picker.winid, #picker.tcnums, 1)
+    end)
+    map_keys(cfg.picker_ui.mappings.focus_prev, "n", picker.menu_buf, function()
+        move_cursor(picker.winid, #picker.tcnums, -1)
+    end)
     map_keys(cfg.picker_ui.mappings.submit, "n", picker.menu_buf, function()
         local row = api.nvim_win_get_cursor(picker.winid)[1]
         close(picker.tcnums[row])
@@ -499,6 +518,12 @@ function M.menu(items, title, on_choice, restore_winid)
         end
     end
 
+    map_keys(cfg.picker_ui.mappings.focus_next, "n", menu.menu_buf, function()
+        move_cursor(menu.winid, #menu.items, 1)
+    end)
+    map_keys(cfg.picker_ui.mappings.focus_prev, "n", menu.menu_buf, function()
+        move_cursor(menu.winid, #menu.items, -1)
+    end)
     map_keys(cfg.picker_ui.mappings.submit, "n", menu.menu_buf, function()
         close(api.nvim_win_get_cursor(menu.winid)[1])
     end)
