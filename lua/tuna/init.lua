@@ -30,6 +30,8 @@ function M.resize_ui()
             r:resize_ui()
         end
         require("tuna.stress").resize_all()
+        require("tuna.interactive").resize_all()
+        require("tuna.multi").resize_all()
     end)
 end
 

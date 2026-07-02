@@ -16,6 +16,7 @@
 
 local api = vim.api
 local utils = require("tuna.utils")
+local SKIP = require("tuna.runner.core").SKIP
 
 local M = {}
 
@@ -209,6 +210,12 @@ function RunnerUI:show_ui()
     if self.diff_view then
         self.diff_view = false
         self:toggle_diff_view()
+    end
+
+    -- Let the runner augment the freshly-built UI (interactive makes the Input pane
+    -- editable and wires its send-line keymap here).
+    if self.runner.on_ui_shown then
+        self.runner:on_ui_shown(self)
     end
 end
 
@@ -530,7 +537,14 @@ function RunnerUI:update_ui()
 
             local lines, regions = {}, {}
             for i, tc in ipairs(self.runner.tcdata) do
-                local header = tc.tcnum == "Compile" and "Compile" or ("TC " .. tc.tcnum)
+                -- The left column: a mode may relabel rows (run-all groups solution
+                -- header rows above indented per-testcase rows).
+                local header
+                if self.runner.row_label then
+                    header = self.runner:row_label(tc)
+                else
+                    header = tc.tcnum == "Compile" and "Compile" or ("TC " .. tc.tcnum)
+                end
                 -- No runtime for a just-saved counterexample: show its label
                 -- (e.g. "saved") in the time column instead.
                 local timestr = (tc.time and tc.time >= 0) and string.format("%.3f s", tc.time / 1000)
@@ -573,10 +587,15 @@ function RunnerUI:update_ui()
             self.update_details = false
             local tc = self.runner.tcdata[self.update_testcase or 1]
             if tc then
-                set_buf(self.windows.so.bufnr, tc.stdout)
-                set_buf(self.windows.eo.bufnr, tc.expected)
-                set_buf(self.windows.si.bufnr, tc.stdin)
-                set_buf(self.windows.se.bufnr, tc.stderr)
+                -- Ask the runner what each detail pane should show. A mode can own a
+                -- pane (return SKIP) so we don't clobber it — e.g. interactive's
+                -- editable Input pane while you're typing into it.
+                for _, name in ipairs(detail_windows) do
+                    local content = self.runner:pane_content(tc, name)
+                    if content ~= SKIP then
+                        set_buf(self.windows[name].bufnr, content)
+                    end
+                end
             end
         end
 

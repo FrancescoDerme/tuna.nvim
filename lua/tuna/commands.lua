@@ -24,6 +24,9 @@ local subcommand_args = {
     checker = { "on", "off", "toggle" },
 }
 
+-- Third-level completions: `:Tuna run interactive <Tab>` offers its input sources.
+local interactive_sources = { "live", "feed", "interactor" }
+
 -- Run modes selectable via `:Tuna run <mode>` and the menu. Kept as a set for
 -- quick "is this arg a mode keyword?" checks.
 local MODE_SET = {}
@@ -219,10 +222,18 @@ end
 ---mode, so a stress run re-opens its own UI rather than a fresh normal one.
 ---@param bufnr integer
 function M.show_results_ui(bufnr)
-    local stress = require("tuna.stress")
-    if M.last_mode[bufnr] == "stress" and stress.active[bufnr] then
-        stress.active[bufnr]:show_ui()
-        return
+    -- Stress and interactive keep their own live runner (with a re-showable UI);
+    -- reopen whichever matches the last run, else fall back to the normal runner.
+    local last = M.last_mode[bufnr]
+    local mod = (last == "stress" and "tuna.stress")
+        or (last == "interactive" and "tuna.interactive")
+        or (last == "all" and "tuna.multi")
+    if mod then
+        local active = require(mod).active[bufnr]
+        if active then
+            active:show_ui()
+            return
+        end
     end
     M.run_testcases(bufnr, nil, false, true)
 end
@@ -436,6 +447,8 @@ function M.complete(arg_lead, cmd_line, cursor_pos)
         candidates = vim.tbl_keys(M.subcommands)
     elseif count == 2 or (count == 3 and not ending_space) then
         candidates = subcommand_args[words[2]] or {}
+    elseif (count == 3 or (count == 4 and not ending_space)) and words[2] == "run" and words[3] == "interactive" then
+        candidates = interactive_sources
     else
         return {}
     end

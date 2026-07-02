@@ -48,15 +48,13 @@ M.defaults = {
     -- (see tool_names) and the per-buffer checker toggle is on — then that file is
     -- compiled and used as a special judge. Set explicitly to override:
     --   "builtin"                 -> always plain comparison, no auto-discovery
-    --   a Lua function(tc)        -> input-aware: gets tc.stdin/stdout/expected,
-    --                                returns (ok: boolean, message: string?)
     --   a path string, or a       -> testlib-style external checker, invoked as
     --   command table { exec,args }   `checker <input> <output> <answer>`. A path to
     --                                a *source* file is compiled first; args expand
     --                                $(INPUT)/$(OUTPUT)/$(ANSWER), exec expands
     --                                $(FNOEXT) etc.
-    -- A function/external checker accepts any correct answer (special judge), which
-    -- is how problems with multiple valid outputs are supported.
+    -- An external checker accepts any correct answer (special judge), which is how
+    -- problems with multiple valid outputs are supported.
     checker = "builtin",
     view_output_diff = false,
 
@@ -68,7 +66,7 @@ M.defaults = {
     tool_names = {
         checker = { "checker", "check" },
         generator = { "gen", "generator" },
-        reference = { "brute", "reference", "slow" },
+        reference = { "brute", "reference" },
         interactor = { "interactor", "interact" },
     },
 
@@ -92,11 +90,18 @@ M.defaults = {
         max_saved = 10, -- never grow the testcase set beyond this many total
     },
 
-    -- interactive problems (:Tuna run interactive) — the solution talks to an
-    -- interactor over stdio; the interactor decides the verdict (exit 0 = AC). The
-    -- interactor is discovered by convention (interactor.*); set this only to
-    -- override. It receives the testcase input/answer via $(INPUT)/$(ANSWER)
-    -- placeholders (default: those two files appended as args).
+    -- interactive problems (:Tuna run interactive [live|feed|interactor]) — the
+    -- solution talks to the other side over stdio, turn by turn. Three sources:
+    --   * live       — YOU are the other side: type into the (editable) Input pane,
+    --                  each <CR> line is sent to the solution; no auto-verdict.
+    --   * feed       — the testcase input plays the other side, one line per turn;
+    --                  judged against the expected output if present.
+    --   * interactor — a written interactor.* program decides the verdict (exit 0 =
+    --                  AC). Secondary: auto-used only when an interactor.* exists.
+    -- The chosen source is remembered per buffer, so a later bare `:Tuna run`
+    -- repeats it. `interactor` below overrides interactor discovery; it receives the
+    -- testcase input/answer via $(INPUT)/$(ANSWER) (default: those two files appended
+    -- as args).
     interactive = {
         interactor = nil, -- override discovery, e.g. { exec = "python3", args = { "$(ABSDIR)/interactor.py" } }
     },

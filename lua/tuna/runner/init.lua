@@ -1,38 +1,33 @@
--- lua/tuna/runner.lua
+-- lua/tuna/runner/init.lua
 --
--- Runs the current buffer's solution against its testcases and records the
--- result of each. The engine is async and parallel: every testcase is a
--- `vim.system` child process, and up to `multiple_testing` of them run at once.
+-- The normal run mode plus the shared *resolver* every mode reuses. `M.new(bufnr)`
+-- resolves a buffer's compile/run commands, working directories, and checker into a
+-- runner object — stress/interactive/multi all call it to get those pieces, then
+-- drive their own loops. The normal runner itself runs the buffer's solution against
+-- its testcases in parallel (`multiple_testing` at a time), each a `vim.system`
+-- child process.
 --
--- A note on `vim.system`: it is Neovim's modern process wrapper (over libuv's
--- spawn). We give it `{ exec, args... }`, an options table (`cwd`, `stdin`), and
--- an `on_exit` callback that receives `{ code, signal, stdout, stderr }`. It
--- handles the stdin/stdout/stderr pipes for us — far less plumbing than driving
--- `vim.uv.spawn` and three pipes by hand. We still manage our own timeout timer
--- so we can label a kill as TIMEOUT precisely rather than as a generic signal.
+-- Everything the results UI touches — `tcdata`, the show/update/resize plumbing, the
+-- spawn-and-judge routine (`execute_process`), kill helpers — lives in `RunnerCore`
+-- (`runner/core.lua`); `NormalRunner` is a thin subclass that only adds the parallel
+-- lane scheduling, completion check, and a fallback results float.
 --
 -- The "compile" step is modelled as a special testcase at index 1 (`tcnum =
 -- "Compile"`): it runs first, and the real testcases only start if it succeeds.
---
--- This module is the execution engine only. The rich results UI is `runner_ui`
--- (a later port); until it exists, `display_results()` shows a temporary float
--- so `:Tuna run` is usable. When `runner_ui` lands it sets `runner.ui` and the
--- `update_ui` hooks below drive it instead.
 
 local config = require("tuna.config")
 local utils = require("tuna.utils")
-local testcases = require("tuna.testcases")
-local checker = require("tuna.checker")
 local tools = require("tuna.tools")
+local core = require("tuna.runner.core")
 
 local M = {}
 
----@class tuna.TCRunner
+---@class tuna.TCRunner : tuna.RunnerCore
 ---@field config table buffer configuration
 ---@field bufnr integer
 ---@field cc { exec: string, args: string[] }? compile command (nil for interpreted languages)
 ---@field rc { exec: string, args: string[] } run command
----@field checker "builtin"|fun(tc: table): boolean?, string?|{ exec: string, args: string[]? } resolved verdict checker
+---@field checker "builtin"|{ exec: string, args: string[]? } resolved verdict checker
 ---@field compile_directory string
 ---@field running_directory string
 ---@field tcdata table[] per-testcase status/data/results (1-indexed)
@@ -40,12 +35,12 @@ local M = {}
 ---@field compile boolean whether this run compiles first
 ---@field next_tc integer index of the next unstarted testcase
 ---@field completed boolean whether the current run has finished
----@field ui table? results UI (set by runner_ui once ported)
+---@field ui table? results UI (set by runner_ui)
 ---@field on_complete fun(runner: tuna.TCRunner)? called once when a run finishes
-local TCRunner = {}
-TCRunner.__index = TCRunner
+local TCRunner = core.extend()
+M.TCRunner = TCRunner
 
----Create a runner for `bufnr`, resolving its compile/run commands.
+---Create a runner for `bufnr`, resolving its compile/run commands and checker.
 ---@param bufnr integer? defaults to the current buffer
 ---@return tuna.TCRunner? # the runner, or `nil` if the commands are missing/malformed
 function M.new(bufnr)
@@ -93,7 +88,6 @@ function M.new(bufnr)
     --   * "builtin"          -> auto-discover a sibling checker.* source file; if
     --                           found it's compiled (on first judge) and used, else
     --                           plain output_compare_method comparison.
-    --   * a Lua function     -> used as-is (in-process special judge).
     --   * a path string      -> a checker source file (compiled) or prebuilt binary.
     --   * a { exec, args }    -> a prebuilt checker; only exec is modifier-expanded,
     --     table                 args keep their $(INPUT)/$(OUTPUT)/$(ANSWER) markers.
@@ -101,8 +95,6 @@ function M.new(bufnr)
     local resolved_checker = "builtin"
     if not tools.checker_enabled(path) then
         resolved_checker = "builtin"
-    elseif type(cfg.checker) == "function" then
-        resolved_checker = cfg.checker
     elseif cfg.checker == "builtin" then
         local cpath = tools.find(filedir, "checker", cfg)
         if cpath then
@@ -141,18 +133,6 @@ function M.new(bufnr)
     }, TCRunner)
 end
 
----A short human label for how verdicts are decided, for the UI status line.
----@return string
-function TCRunner:judge_label()
-    local c = self.checker
-    if type(c) == "function" then
-        return "checker (lua)"
-    elseif type(c) == "table" then
-        return "checker"
-    end
-    return "builtin (" .. tostring(self.config.output_compare_method) .. ")"
-end
-
 ---Run testcases. Pass a `tctbl` for a fresh run, or `nil` to re-run the testcases
 ---loaded by the previous call (keeping their inputs/expected outputs).
 ---@param tctbl table<integer, { input: string, output: string? }>? testcases, or nil to re-run
@@ -187,17 +167,7 @@ function TCRunner:run_testcases(tctbl, do_compile)
 
     -- Reset per-run state (so re-runs start clean).
     for _, tc in ipairs(self.tcdata) do
-        tc.status = ""
-        tc.hlgroup = "TunaRunning"
-        tc.stdout = nil
-        tc.stderr = nil
-        tc.time = nil
-        tc.running = false
-        tc.judging = false
-        tc.killed = false
-        tc.timed_out = false
-        tc.exit_code = nil
-        tc.exit_signal = nil
+        self:reset_row(tc)
     end
 
     self.tc_size = #self.tcdata
@@ -218,12 +188,13 @@ function TCRunner:run_testcases(tctbl, do_compile)
 
     if self.compile then
         self.next_tc = 2
-        self:execute_testcase(1, self.cc, self.compile_directory, function()
+        self:execute_process(1, self.cc, self.compile_directory, { judge = false }, function()
             if self.tcdata[1].exit_code == 0 then
                 self:fill_lanes(parallel)
             else
                 -- compilation failed: skip the rest so the run can complete
                 self.next_tc = self.tc_size + 1
+                self:check_complete()
             end
         end)
     else
@@ -242,8 +213,9 @@ function TCRunner:fill_lanes(parallel)
         end
         local n = self.next_tc
         self.next_tc = self.next_tc + 1
-        self:execute_testcase(n, self.rc, self.running_directory, function()
+        self:execute_process(n, self.rc, self.running_directory, {}, function()
             self:run_next_testcase()
+            self:check_complete()
         end)
     end
 end
@@ -256,131 +228,10 @@ function TCRunner:run_next_testcase()
     end
     local n = self.next_tc
     self.next_tc = self.next_tc + 1
-    self:execute_testcase(n, self.rc, self.running_directory, function()
+    self:execute_process(n, self.rc, self.running_directory, {}, function()
         self:run_next_testcase()
-    end)
-end
-
----@private
----Spawn one testcase process.
----@param tcindex integer index in `self.tcdata`
----@param cmd { exec: string, args: string[] }
----@param dir string working directory
----@param callback fun()? run when the process exits
-function TCRunner:execute_testcase(tcindex, cmd, dir, callback)
-    local tc = self.tcdata[tcindex]
-    utils.ensure_directory(dir)
-
-    -- Our own timeout timer, so a timed-out process is labelled TIMEOUT rather
-    -- than as an anonymous kill.
-    if tc.timelimit then
-        tc.timer = vim.uv.new_timer()
-        tc.timer:start(tc.timelimit, 0, function()
-            if tc.running then
-                tc.timed_out = true
-                tc.handle:kill("sigkill")
-            end
-        end)
-    end
-
-    tc.start_time = vim.uv.now()
-    local argv = vim.list_extend({ cmd.exec }, cmd.args or {})
-    local ok, handle = pcall(vim.system, argv, {
-        cwd = dir,
-        stdin = tc.stdin,
-    }, function(res)
-        -- on_exit runs in a fast context; defer the API/UI work to the main loop.
-        vim.schedule(function()
-            self:finish_testcase(tcindex, res, callback)
-        end)
-    end)
-
-    if not ok then
-        if tc.timer then
-            tc.timer:stop()
-            tc.timer:close()
-            tc.timer = nil
-        end
-        tc.status = "FAILED"
-        tc.hlgroup = "TunaWarning"
-        tc.stderr = tostring(handle) -- the pcall error message
-        tc.time = -1
-        self:update_ui(true)
-        if callback then
-            callback()
-        end
         self:check_complete()
-        return
-    end
-
-    tc.handle = handle
-    tc.running = true
-    tc.status = "RUNNING"
-    tc.hlgroup = "TunaRunning"
-    self:update_ui(true)
-end
-
----@private
----Record a finished process's result and decide its status.
----@param tcindex integer
----@param res vim.SystemCompleted
----@param callback fun()?
-function TCRunner:finish_testcase(tcindex, res, callback)
-    local tc = self.tcdata[tcindex]
-    tc.running = false
-    tc.time = vim.uv.now() - tc.start_time
-    tc.exit_code = res.code
-    tc.exit_signal = res.signal
-    tc.stdout = res.stdout or ""
-    tc.stderr = res.stderr or ""
-    tc.handle = nil
-    if tc.timer and not tc.timer:is_closing() then
-        tc.timer:stop()
-        tc.timer:close()
-    end
-    tc.timer = nil
-
-    -- Updating the UI, advancing the lane, and checking for completion happens
-    -- once the verdict is known. The checker may be async (external program), so
-    -- this is wrapped and called either inline or from the checker callback.
-    local function finalize()
-        self:update_ui(true)
-        if callback then
-            callback()
-        end
-        self:check_complete()
-    end
-
-    if tc.timed_out then
-        tc.status, tc.hlgroup = "TIMEOUT", "TunaWrong"
-        finalize()
-    elseif tc.killed then
-        tc.status, tc.hlgroup = "KILLED", "TunaWarning"
-        finalize()
-    elseif tc.exit_signal and tc.exit_signal ~= 0 then
-        tc.status, tc.hlgroup = "SIG " .. tc.exit_signal, "TunaWarning"
-        finalize()
-    elseif tc.exit_code ~= 0 then
-        tc.status, tc.hlgroup = "RET " .. tc.exit_code, "TunaWarning"
-        finalize()
-    else
-        -- exited cleanly: derive the verdict via the checker (nil expected → DONE).
-        -- An external checker is async: mark the testcase as still being judged so
-        -- `check_complete` doesn't declare the run finished before the verdict lands.
-        tc.judging = true
-        checker.judge(tc, self.checker, self.config.output_compare_method, function(correct, message)
-            tc.judging = false
-            tc.checker_message = message
-            if correct == true then
-                tc.status, tc.hlgroup = "CORRECT", "TunaCorrect"
-            elseif correct == false then
-                tc.status, tc.hlgroup = "WRONG", "TunaWrong"
-            else
-                tc.status, tc.hlgroup = "DONE", "TunaDone"
-            end
-            finalize()
-        end)
-    end
+    end)
 end
 
 ---@private
@@ -412,80 +263,20 @@ function TCRunner:run_single(tcindex)
     if not tc then
         return
     end
-    tc.status = ""
-    tc.hlgroup = "TunaRunning"
-    tc.stdout = nil
-    tc.stderr = nil
-    tc.time = nil
-    tc.running = false
-    tc.judging = false
-    tc.killed = false
-    tc.timed_out = false
-    tc.exit_code = nil
-    tc.exit_signal = nil
+    self:reset_row(tc)
     if tcindex == 1 and self.compile then
-        self:execute_testcase(tcindex, self.cc, self.compile_directory)
+        self:execute_process(tcindex, self.cc, self.compile_directory, { judge = false }, function()
+            self:check_complete()
+        end)
     else
-        self:execute_testcase(tcindex, self.rc, self.running_directory)
-    end
-end
-
----Kill a single running testcase process. Killing triggers its `on_exit`, which
----then pulls the next queued testcase in that lane.
----@param tcindex integer
-function TCRunner:kill_process(tcindex)
-    local tc = self.tcdata[tcindex]
-    if tc and tc.running and tc.handle then
-        tc.killed = true
-        tc.handle:kill("sigkill")
-    end
-end
-
----Kill every running testcase process.
-function TCRunner:kill_all_processes()
-    for tcindex in ipairs(self.tcdata) do
-        self:kill_process(tcindex)
-    end
-end
-
---------------------------------------------------------------------------------
--- UI hooks
---------------------------------------------------------------------------------
-
----Notify the attached UI that data changed (no-op until `runner_ui` is ported).
----@param update_windows boolean? redraw all windows, not just the details pane
-function TCRunner:update_ui(update_windows)
-    if self.ui then
-        if update_windows then
-            self.ui.update_windows = true
-        end
-        self.ui.update_details = true
-        self.ui:update_ui()
-    end
-end
-
----Show the results UI, creating it on first use. Falls back to the temporary
----results float if the UI can't be created (e.g. a bad `runner_ui.interface`).
-function TCRunner:show_ui()
-    if not self.ui then
-        self.ui = require("tuna.runner_ui").new(self)
-    end
-    if self.ui then
-        self.ui:show_ui()
-    else
-        self:display_results()
-    end
-end
-
----Re-show/refresh the runner UI after a `VimResized`.
-function TCRunner:resize_ui()
-    if self.ui then
-        self.ui:resize_ui()
+        self:execute_process(tcindex, self.rc, self.running_directory, {}, function()
+            self:check_complete()
+        end)
     end
 end
 
 ---@private
----Temporary results display used until `runner_ui` (step 8) lands: a read-only
+---Temporary results display used when the runner UI can't be created: a read-only
 ---float summarising each testcase, with expected/actual shown on a mismatch.
 function TCRunner:display_results()
     local lines = {}

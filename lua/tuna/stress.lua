@@ -25,6 +25,7 @@ local runner = require("tuna.runner")
 local checker = require("tuna.checker")
 local testcases = require("tuna.testcases")
 local tools = require("tuna.tools")
+local core = require("tuna.runner.core")
 
 local M = {}
 
@@ -37,13 +38,12 @@ M.active = {}
 -- StressRunner: a TCRunner-shaped object the runner UI can drive.
 --------------------------------------------------------------------------------
 
-local StressRunner = {}
-StressRunner.__index = StressRunner
-
----@return string
-function StressRunner:judge_label()
-    return self.r:judge_label()
-end
+-- StressRunner subclasses RunnerCore: it inherits the UI plumbing
+-- (update_ui/show_ui/resize_ui/delete_ui), judge_label, and execute_process, and
+-- adds only the generation search + its counters. It sets `self.checker` to the
+-- solution runner's checker so the inherited `judge_label`/`execute_process` decide
+-- verdicts exactly as a normal run would.
+local StressRunner = core.extend()
 
 ---Extra "Run" pane rows below mode/judge: the live stress counters, as
 ---{ label, value } pairs (the UI aligns the colons), one per line.
@@ -59,40 +59,6 @@ end
 ---@return boolean # whether the search should no longer progress
 function StressRunner:aborted()
     return self.stopped or self.finished
-end
-
----Poke the attached UI (mirrors `TCRunner:update_ui`).
----@param update_windows boolean?
-function StressRunner:update_ui(update_windows)
-    if self.ui then
-        if update_windows then
-            self.ui.update_windows = true
-        end
-        self.ui.update_details = true
-        self.ui:update_ui()
-    end
-end
-
-function StressRunner:show_ui()
-    if not self.ui then
-        self.ui = require("tuna.runner_ui").new(self)
-    end
-    if self.ui then
-        self.ui:show_ui()
-    end
-end
-
-function StressRunner:resize_ui()
-    if self.ui then
-        self.ui:resize_ui()
-    end
-end
-
-function StressRunner:delete_ui()
-    if self.ui then
-        self.ui:hide_ui()
-    end
-    self.ui = nil
 end
 
 ---Load the existing testcases into `tcdata` (pending), resetting the counters
@@ -125,6 +91,9 @@ end
 
 ---Run the solution on a single `tcdata` entry and judge it against that entry's
 ---expected output (used for pre-existing testcases and for the UI's "run again").
+---Delegates to the inherited `execute_process` (which spawns, times, judges via
+---`self.checker`, and updates the UI); a just-saved row's "saved" label is dropped
+---so a real runtime shows on re-run.
 ---@param idx integer
 ---@param cb fun()?
 function StressRunner:execute_entry(idx, cb)
@@ -135,58 +104,8 @@ function StressRunner:execute_entry(idx, cb)
         end
         return
     end
-    tc.status, tc.hlgroup = "RUNNING", "TunaRunning"
-    tc.stdout, tc.stderr, tc.time = nil, nil, nil
-    self:update_ui(true)
-
-    local start = vim.uv.now()
-    local argv = vim.list_extend({ self.r.rc.exec }, vim.deepcopy(self.r.rc.args))
-    local ok, handle = pcall(vim.system, argv, {
-        cwd = self.rundir,
-        stdin = tc.stdin,
-        timeout = self.timeout,
-    }, function(res)
-        vim.schedule(function()
-            tc.time = vim.uv.now() - start
-            tc.stdout = res.stdout or ""
-            tc.stderr = res.stderr or ""
-            if res.signal and res.signal ~= 0 then
-                tc.status, tc.hlgroup = "RE/TLE", "TunaWrong"
-            elseif res.code ~= 0 then
-                tc.status, tc.hlgroup = "RET " .. tostring(res.code), "TunaWarning"
-            else
-                checker.judge(tc, self.r.checker, self.config.output_compare_method, function(correct)
-                    if correct == true then
-                        tc.status, tc.hlgroup = "CORRECT", "TunaCorrect"
-                    elseif correct == false then
-                        tc.status, tc.hlgroup = "WRONG", "TunaWrong"
-                    else
-                        tc.status, tc.hlgroup = "DONE", "TunaDone"
-                    end
-                    self:update_ui(true)
-                    if cb then
-                        cb()
-                    end
-                end)
-                return
-            end
-            self:update_ui(true)
-            if cb then
-                cb()
-            end
-        end)
-    end)
-
-    if not ok then
-        tc.status, tc.hlgroup = "FAILED", "TunaWarning"
-        tc.stderr = tostring(handle)
-        self:update_ui(true)
-        if cb then
-            cb()
-        end
-        return
-    end
-    self.handle = handle
+    self:reset_row(tc)
+    self:execute_process(idx, self.r.rc, self.rundir, { timelimit = self.timeout }, cb)
 end
 
 ---Save a counterexample as a new testcase and add it to the UI.
@@ -228,6 +147,21 @@ function StressRunner:record_counterexample(seed, input, expected, sol_out, sol_
     self:generation(seed + 1)
 end
 
+---A generator/reference process failed at *runtime* (nonzero exit). Show its output
+---in the UI (like a compile failure) rather than dumping a traceback into a
+---notification, and stop the search quietly.
+---@param label string "generator" | "reference"
+---@param seed integer
+---@param output string? the failing process's stderr/stdout
+function StressRunner:helper_failed(label, seed, output)
+    if self.ui then
+        self.ui:show_message((" stress: %s failed (seed %d) "):format(label, seed), output or "")
+        self:finish()
+    else
+        self:finish(("%s failed (seed %d)"):format(label, seed))
+    end
+end
+
 ---Finish the search (idempotent), refreshing the status line and notifying why.
 ---@param msg string? reason to report
 function StressRunner:finish(msg)
@@ -235,7 +169,6 @@ function StressRunner:finish(msg)
         return
     end
     self.finished = true
-    self.handle = nil
     self:update_ui(true)
     if msg then
         utils.notify("stress: " .. msg .. ".", "INFO")
@@ -275,7 +208,7 @@ function StressRunner:generation(i)
                 return
             end
             if gres.code ~= 0 then
-                self:finish("generator failed (seed " .. i .. ")\n" .. (gres.stderr or ""))
+                self:helper_failed("generator", i, gres.stderr)
                 return
             end
             local input = gres.stdout or ""
@@ -299,7 +232,7 @@ function StressRunner:generation(i)
                                         return
                                     end
                                     if rres.code ~= 0 then
-                                        self:finish("reference failed (seed " .. i .. ")\n" .. (rres.stderr or ""))
+                                        self:helper_failed("reference", i, rres.stderr)
                                         return
                                     end
                                     local expected = rres.stdout or ""
@@ -392,16 +325,22 @@ end
 
 --- UI-driven controls (the runner UI calls these on the "runner"). ---
 
----Stop the search (kill the in-flight process).
+---Stop the search: kill any in-flight testcase process and halt the generation
+---loop (`aborted()` gates every step). The generator/reference/solution processes
+---spawned inside `generation` aren't tracked individually; they finish and are
+---ignored because every continuation checks `aborted()` first.
 function StressRunner:kill_all_processes()
     if self.stopped then
         return
     end
     self.stopped = true
-    if self.handle then
-        pcall(function()
-            self.handle:kill("sigkill")
-        end)
+    for _, tc in ipairs(self.tcdata) do
+        if tc.running and tc.handle then
+            tc.killed = true
+            pcall(function()
+                tc.handle:kill("sigkill")
+            end)
+        end
     end
     self:finish("stopped")
 end
@@ -540,6 +479,9 @@ function M.run(bufnr, count_override)
         config = cfg,
         bufnr = bufnr,
         r = r,
+        -- The inherited execute_process/judge_label judge with self.checker; reuse
+        -- the solution runner's resolved checker so verdicts match a normal run.
+        checker = r.checker,
         gen = gen,
         ref = ref,
         dir = dir,

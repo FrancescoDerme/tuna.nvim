@@ -28,7 +28,7 @@ local M = {}
 M.DEFAULT_NAMES = {
     checker = { "checker", "check" },
     generator = { "gen", "generator" },
-    reference = { "brute", "reference", "slow" },
+    reference = { "brute", "reference" },
     interactor = { "interactor", "interact" },
 }
 
@@ -385,13 +385,13 @@ M.MODES = { "normal", "all", "stress", "interactive" }
 ---buffer being unloaded and reopened during a session. `explicit` records whether
 ---the user chose the mode by hand (`:Tuna run <mode>` / the menu); until they do,
 ---the mode is auto-detected from the sibling files present.
----@type table<string, { mode: string, explicit: boolean, checker: boolean }>
+---@type table<string, { mode: string, explicit: boolean, checker: boolean, source: string? }>
 local state = {}
 
 ---@param path string
 local function state_for(path)
     if not state[path] then
-        state[path] = { mode = "normal", explicit = false, checker = true }
+        state[path] = { mode = "normal", explicit = false, checker = true, source = nil }
     end
     return state[path]
 end
@@ -443,9 +443,9 @@ function M.resolve_mode(path, dir, cfg)
         local usable = true
         if m == "stress" then
             usable = M.find(dir, "generator", cfg) ~= nil and M.find(dir, "reference", cfg) ~= nil
-        elseif m == "interactive" then
-            usable = M.find(dir, "interactor", cfg) ~= nil
         end
+        -- interactive stays usable even with no interactor.* — its live/feed sources
+        -- need no helper files, so an explicit interactive choice always sticks.
         if usable then
             return m
         end
@@ -463,6 +463,21 @@ end
 ---@param enabled boolean
 function M.set_checker(path, enabled)
     state_for(path).checker = enabled
+end
+
+---The buffer's chosen interactive source ("live"|"feed"|"interactor"), or nil when
+---unset (the caller then defaults it — interactor if one exists, else live).
+---@param path string
+---@return string?
+function M.get_source(path)
+    return state_for(path).source
+end
+
+---Remember the interactive source so a later bare `:Tuna run` repeats it.
+---@param path string
+---@param source string
+function M.set_source(path, source)
+    state_for(path).source = source
 end
 
 return M

@@ -130,6 +130,16 @@ make footprints tile exactly. And because the viewer popup *borrows* a detail
 pane's buffer, the UI's `:q` handling is keyed on **window id**, not buffer —
 otherwise closing the viewer would tear down the whole UI.
 
+**One UI, many run modes (`runner/core.lua`).** Every run mode — normal, stress,
+interactive, and later run-all — drives the *same* `runner_ui` through a shared
+`RunnerCore` base rather than each mode reimplementing the UI plumbing and the
+spawn-and-judge routine. A mode subclasses the base and supplies only its own loop
+(parallel lanes / a generation search / interactive sessions); the UI stays
+mode-agnostic through two seams — `runner:pane_content(name)` (what each pane shows,
+or `SKIP` to leave it alone) and `runner:on_ui_shown(ui)` (augment the built UI, e.g.
+interactive making the Input pane editable). This is what lets interactive get a
+first-class results UI for a few dozen lines instead of a fourth copy of the runner.
+
 ---
 
 ## `init.lua`
@@ -276,15 +286,27 @@ compile in ~2.6 s vs ~6.9 s without.)
 ## Interactive problems (`interactive.lua`)
 
 ✅ **Done (Workstream 2).** Brand new — competitest can't run interactive problems
-at all. `:Tuna run interactive [n…]` runs the solution against an **interactor**
-that talks to it over stdio. By convention it uses a sibling `interactor.*` — **no
-config needed**; `interactive.interactor` only overrides:
+at all, and can only *drive* them with a written interactor. tuna's
+`:Tuna run interactive [live|feed|interactor] [n…]` offers **three sources** for the
+other side of the conversation, in its own results UI:
+
+- **live** — *you* are the other side. The solution's stdout streams into the Output
+  pane; you type into the (editable) Input pane and each `<CR>` line is sent to the
+  solution's stdin. No auto-verdict — you read the transcript. This is the common
+  case (poke at the solution by hand) that competitest has no answer for.
+- **feed** — a pre-written input plays the other side **one line per turn**: each
+  time the solution emits a line, the next input line is sent. Judged against the
+  expected output if the testcase has one, else DONE.
+- **interactor** — a written `interactor.*` program (or `interactive.interactor`) is
+  cross-wired to the solution and rules the verdict. Secondary: auto-used only when
+  an `interactor.*` sibling exists. The chosen source is remembered per buffer, so a
+  bare `:Tuna run` repeats it.
 
 ```lua
 interactive = { interactor = nil } -- override, e.g. { exec = "python3", args = { "$(ABSDIR)/interactor.py" } }
 ```
 
-For each testcase the solution and the interactor are spawned and their pipes are
+In interactor mode the solution and interactor are spawned and their pipes are
 cross-wired — solution stdout → interactor stdin, interactor stdout → solution stdin
 — and the interactor's exit code is the verdict (0 = CORRECT). The interactor gets
 the testcase input/answer as files via the `$(INPUT)` / `$(ANSWER)` placeholders.
@@ -296,27 +318,34 @@ stdin on EOF and guarding every write against a pipe that teardown has already
 closed. A timeout timer and the interactor-exits-first / solution-crashes-first
 orderings are handled explicitly.
 
-## Multiple-answer problems & the Lua-function checker
+## Multiple-answer problems (the external checker)
 
 ✅ **Done.** A problem that accepts several valid outputs (e.g. "print two numbers
 that sum to 3" → both `1 2` and `2 1`) is handled by the checker. competitest's
 custom comparator was `function(output, expected)` — it never saw the **input**, so
-it couldn't validate input-dependent answers. tuna adds a third `checker` form: a
-**Lua function `function(tc)` that receives the whole testcase** (`tc.stdin`,
-`tc.stdout`, `tc.expected`) and returns `(ok, message)`. So you get input-aware
-special judging in pure Lua, without writing/compiling an external checker — and the
-same capability flows through `:Tuna run`, `run stress`, `run interactive`, and
-`run all`.
+it couldn't validate input-dependent answers. tuna's checker is a **testlib-style
+external program** that receives the input, participant output, and jury answer
+(`checker <input> <output> <answer>`) and decides the verdict — the standard special
+judge every judge/testlib user already knows. It's discovered by convention
+(`checker.*`) or set via `checker = { exec, args }` / a path, and the same capability
+flows through `:Tuna run`, `run stress`, `run interactive`, and `run all`.
 
 ## Multiple solution versions (`multi.lua`, `:Tuna run_all`)
 
 ✅ **Done.** Keep several attempts side by side (`main.cpp`, `slow.cpp`, …) and
-`:Tuna run all` compiles and runs *every* sibling solution file of the same
-extension against the shared testcases, printing a per-solution `correct/total`
-summary. Helper files (`checker.*`, `gen.*`, `brute.*`, `interactor.*`) are excluded
-so they aren't mistaken for solutions. competitest only ever ran the current file.
-(This is distinct from multiple-*answer* support above — here it's multiple
-*programs*.)
+`:Tuna run all` compiles and runs *every* runnable sibling solution — **of any
+language** (each file's compile/run commands come from its own filetype, so a C++
+and a Python attempt run side by side) — against the shared testcases. Helper files
+(`checker.*`, `gen.*`, `brute.*`, `interactor.*`) are excluded so they aren't
+mistaken for solutions. competitest only ever ran the current file. (This is distinct
+from multiple-*answer* support above — here it's multiple *programs*.)
+
+Results show in the same `runner_ui` as every other mode, laid out as a **flattened
+matrix**: a solution header row (name + a live `correct/total`) above its indented
+per-testcase rows. Selecting a testcase row shows that exact run in the detail panes;
+selecting a solution row shows its per-testcase summary and any compile output. A
+solution that fails to compile is a `CE` row (its cases marked `—`), surfaced in the
+UI rather than as an error popup — so one broken attempt doesn't abort the batch.
 
 ## Scaffolding (`scaffold.lua`, `:Tuna scaffold …`)
 
