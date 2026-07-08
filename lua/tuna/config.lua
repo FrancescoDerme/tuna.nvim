@@ -123,9 +123,16 @@ M.defaults = {
     testcases_auto_detect = true, -- if the chosen mode finds nothing, try the others
     -- "single_file" mode: one msgpack-encoded file
     testcases_single_file_format = "$(FNOEXT).testcases",
-    -- "files" mode: a pair of text files per testcase
-    testcases_input_file_format = "$(FNOEXT)_input$(TCNUM).txt",
-    testcases_output_file_format = "$(FNOEXT)_output$(TCNUM).txt",
+    -- "files" mode: a pair of text files per testcase. Either a single format
+    -- string or an ordered list of them. On load, formats are tried in order and
+    -- the first that discovers any testcase wins (no merging across formats, so a
+    -- folder holding two problems' per-source testcases never cross-contaminates).
+    -- The first entry is canonical: new testcases are written with it. The default
+    -- picks up the source-named pair first, then a shared, un-prefixed `input<N>.txt`
+    -- so any solution in a folder can run testcases it didn't create (e.g. run all
+    -- versions, or CC-downloaded testcases whose source name differs).
+    testcases_input_file_format = { "$(FNOEXT)_input$(TCNUM).txt", "input$(TCNUM).txt" },
+    testcases_output_file_format = { "$(FNOEXT)_output$(TCNUM).txt", "output$(TCNUM).txt" },
     -- "directory" mode: one sub-directory per testcase holding input/output files
     testcases_directory_format = "tests/$(TCNUM)",
     testcases_directory_input = "input.txt",
@@ -266,6 +273,14 @@ function M.update_config_table(cfg_tbl, opts)
     for lang, cmd in pairs(opts.run_command or {}) do
         if cmd.args then
             new_config.run_command[lang].args = cmd.args
+        end
+    end
+
+    -- Same index-merge hazard for the file-format lists: a user-supplied list must
+    -- replace the default list wholesale (a plain string override is fine as-is).
+    for _, key in ipairs({ "testcases_input_file_format", "testcases_output_file_format" }) do
+        if type(opts[key]) == "table" then
+            new_config[key] = opts[key]
         end
     end
 

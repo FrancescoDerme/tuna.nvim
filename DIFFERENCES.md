@@ -57,6 +57,33 @@ move testcases **between any two of the three modes**, including to/from the new
 **Why:** different users and judges expect different layouts; making it
 configurable avoids forcing a migration on anyone coming from either convention.
 
+### Auto-discovery of shared testcases (`files` mode)
+
+competitest names `files`-mode testcases after the source file, so testcases are
+only ever found for the exact source that created them — running a *second*
+solution (or a differently-named download) against the same testcases finds
+nothing. tuna makes `testcases_input_file_format`/`testcases_output_file_format`
+accept an **ordered list** of formats (a single string still works). On load they
+are tried in order and the **first that discovers any testcase wins**; the first
+entry stays canonical for writing. The default,
+
+```lua
+testcases_input_file_format  = { "$(FNOEXT)_input$(TCNUM).txt",  "input$(TCNUM).txt"  },
+testcases_output_file_format = { "$(FNOEXT)_output$(TCNUM).txt", "output$(TCNUM).txt" },
+```
+
+tries the source-named pair first (fully backward compatible), then a shared,
+un-prefixed `input<N>.txt`/`output<N>.txt`. So any solution in a folder — every
+version in `:Tuna run all`, or a source whose name differs from the download —
+picks up the same testcases without configuration.
+
+**Why first-non-empty (not merged):** a folder that legitimately holds two
+problems distinguished by source prefix stops at the prefixed format and never
+mixes their testcases together; only when the source-specific search comes up
+empty does the shared fallback apply. `files.buf_clear` conversely deletes files
+matching **any** configured format, so `convert` still cleans up fallback-named
+testcases.
+
 ---
 
 ## Smaller config differences

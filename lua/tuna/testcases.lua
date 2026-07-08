@@ -50,6 +50,16 @@ local function format_name(parts, tcnum)
     return table.concat(parts, tostring(tcnum))
 end
 
+---Normalize a file-format option (string or list of strings) to a list.
+---@param fmt string|string[]
+---@return string[]
+local function normalize_formats(fmt)
+    if type(fmt) == "table" then
+        return fmt
+    end
+    return { fmt }
+end
+
 ---Escape Lua pattern magic characters in `s`.
 ---@param s string
 ---@return string
@@ -108,35 +118,53 @@ end
 ---@param input_format string
 ---@param output_format string
 ---@return table<integer, { input: string?, output: string? }>
+---@param input_format string|string[] one format, or an ordered list; the first
+---  format that discovers any testcase wins (see config docs for the rationale).
+---@param output_format string|string[] paired with `input_format` by index
 function M.files.load(directory, filepath, input_format, output_format)
-    local in_parts = eval_format_parts(filepath, input_format)
-    local out_parts = eval_format_parts(filepath, output_format)
-    if not in_parts or not out_parts then
+    if not utils.directory_exists(directory) then
         return {}
     end
-    local in_pattern = format_pattern(in_parts)
-    local out_pattern = format_pattern(out_parts)
+    local in_formats = normalize_formats(input_format)
+    local out_formats = normalize_formats(output_format)
 
-    local tctbl = {}
-    if not utils.directory_exists(directory) then
-        return tctbl
-    end
+    -- Read the directory once, then try each input/output format pair in order.
+    local entries = {}
     for name, type_ in vim.fs.dir(directory) do
         if type_ == "file" then
-            local tcnum = match_tcnum(name, in_pattern)
-            if tcnum then
-                tctbl[tcnum] = tctbl[tcnum] or {}
-                tctbl[tcnum].input = utils.read_file(directory .. name)
-            else
-                tcnum = match_tcnum(name, out_pattern)
+            entries[#entries + 1] = name
+        end
+    end
+
+    for i, in_fmt in ipairs(in_formats) do
+        local in_parts = eval_format_parts(filepath, in_fmt)
+        local out_parts = eval_format_parts(filepath, out_formats[i] or out_formats[1])
+        if in_parts and out_parts then
+            local in_pattern = format_pattern(in_parts)
+            local out_pattern = format_pattern(out_parts)
+            local tctbl = {}
+            local found = false
+            for _, name in ipairs(entries) do
+                local tcnum = match_tcnum(name, in_pattern)
                 if tcnum then
                     tctbl[tcnum] = tctbl[tcnum] or {}
-                    tctbl[tcnum].output = utils.read_file(directory .. name)
+                    tctbl[tcnum].input = utils.read_file(directory .. name)
+                    found = true
+                else
+                    tcnum = match_tcnum(name, out_pattern)
+                    if tcnum then
+                        tctbl[tcnum] = tctbl[tcnum] or {}
+                        tctbl[tcnum].output = utils.read_file(directory .. name)
+                        found = true
+                    end
                 end
+            end
+            if found then
+                return tctbl
             end
         end
     end
-    return tctbl
+    return {}
 end
 
 ---@param directory string testcase directory (with trailing slash)
@@ -145,8 +173,9 @@ end
 ---@param input_format string
 ---@param output_format string
 function M.files.write(directory, tctbl, filepath, input_format, output_format)
-    local in_parts = eval_format_parts(filepath, input_format)
-    local out_parts = eval_format_parts(filepath, output_format)
+    -- Always write with the first (canonical) format, even if load matched a later one.
+    local in_parts = eval_format_parts(filepath, normalize_formats(input_format)[1])
+    local out_parts = eval_format_parts(filepath, normalize_formats(output_format)[1])
     if not in_parts or not out_parts then
         return
     end
@@ -368,7 +397,38 @@ local function buf_clear_backend(backend, bufnr)
 end
 
 function M.files.buf_clear(bufnr)
-    buf_clear_backend(M.files, bufnr)
+    -- Delete every file matching any configured input/output format — not just the
+    -- canonical one — so `convert` cleans up testcases that were discovered through a
+    -- fallback format (e.g. shared `input0.txt`) too.
+    local cfg = config.get_buffer_config(bufnr)
+    local directory = buf_tc_directory(bufnr)
+    if not utils.directory_exists(directory) then
+        return
+    end
+    local filepath = vim.api.nvim_buf_get_name(bufnr)
+    local patterns = {}
+    for _, fmt in ipairs(normalize_formats(cfg.testcases_input_file_format)) do
+        local parts = eval_format_parts(filepath, fmt)
+        if parts then
+            patterns[#patterns + 1] = format_pattern(parts)
+        end
+    end
+    for _, fmt in ipairs(normalize_formats(cfg.testcases_output_file_format)) do
+        local parts = eval_format_parts(filepath, fmt)
+        if parts then
+            patterns[#patterns + 1] = format_pattern(parts)
+        end
+    end
+    for name, type_ in vim.fs.dir(directory) do
+        if type_ == "file" then
+            for _, pat in ipairs(patterns) do
+                if match_tcnum(name, pat) then
+                    utils.delete_file(directory .. name)
+                    break
+                end
+            end
+        end
+    end
 end
 function M.single_file.buf_clear(bufnr)
     M.single_file.buf_write(bufnr, {})
