@@ -49,6 +49,55 @@ local function eval_command(filepath, command)
     return { exec = exec, args = args }
 end
 
+---Load testcases from a directory without a buffer, mirroring
+---`testcases.buf_get_testcases` (configured storage + auto-detect fallback). Used
+---when `run all` is invoked from a buffer that isn't itself a solution file (e.g. an
+---unnamed buffer), so testcases are still found via a discovered solution as anchor.
+---@param source_dir string directory the solutions live in
+---@param anchor string a real solution path, for `$(FNOEXT)`-style format modifiers
+---@param cfg table resolved buffer config
+---@return table<integer, { input: string?, output: string? }>
+local function load_dir_testcases(source_dir, anchor, cfg)
+    local tcdir = vim.fs.normalize(source_dir .. "/" .. cfg.testcases_directory) .. "/"
+    local loaders = {
+        files = function()
+            return testcases.files.load(
+                tcdir,
+                anchor,
+                cfg.testcases_input_file_format,
+                cfg.testcases_output_file_format
+            )
+        end,
+        single_file = function()
+            return testcases.single_file.load(
+                tcdir .. utils.eval_string(anchor, cfg.testcases_single_file_format)
+            )
+        end,
+        directory = function()
+            return testcases.directory.load(
+                tcdir,
+                anchor,
+                cfg.testcases_directory_format,
+                cfg.testcases_directory_input,
+                cfg.testcases_directory_output
+            )
+        end,
+    }
+    local primary = loaders[cfg.testcases_storage]
+    local tctbl = primary and primary() or {}
+    if next(tctbl) == nil and cfg.testcases_auto_detect then
+        for name, load in pairs(loaders) do
+            if name ~= cfg.testcases_storage then
+                tctbl = load()
+                if next(tctbl) ~= nil then
+                    break
+                end
+            end
+        end
+    end
+    return tctbl
+end
+
 ---Resolve the shared checker for a problem directory (mirrors `runner.new`).
 ---@param dir string problem directory
 ---@param cfg table
@@ -408,13 +457,25 @@ function M.run(bufnr)
     config.load_buffer_config(bufnr)
     local cfg = config.get_buffer_config(bufnr)
 
-    local curpath = vim.fs.normalize(vim.fn.fnamemodify(vim.api.nvim_buf_get_name(bufnr), ":p"))
-    local dir = vim.fn.fnamemodify(curpath, ":h")
+    -- Resolve the problem directory. When the buffer is a real file, that's its
+    -- parent. When it isn't (an unnamed/scratch buffer, common when you just `nvim`
+    -- into a folder), fall back to the working directory and run whatever solutions
+    -- live there — there's no "current" solution to anchor on. (`fnamemodify("", ":p")`
+    -- returns the cwd without a trailing slash, so a naive `:h` would wrongly climb to
+    -- the parent — hence the explicit check.)
+    local bufname = vim.api.nvim_buf_get_name(bufnr)
+    local curpath, dir
+    if bufname ~= "" and vim.fn.filereadable(bufname) == 1 then
+        curpath = vim.fs.normalize(vim.fn.fnamemodify(bufname, ":p"))
+        dir = vim.fn.fnamemodify(curpath, ":h")
+    else
+        dir = vim.fs.normalize(vim.fn.getcwd())
+    end
 
     -- A candidate's filetype: the current buffer's own is authoritative for it
     -- (respects a manual `:set ft`), others are matched from the filename.
     local function candidate_filetype(f)
-        if vim.fs.normalize(vim.fn.fnamemodify(f, ":p")) == curpath then
+        if curpath and vim.fs.normalize(vim.fn.fnamemodify(f, ":p")) == curpath then
             local ft = vim.bo[bufnr].filetype
             if ft and ft ~= "" then
                 return ft
@@ -439,7 +500,13 @@ function M.run(bufnr)
         return a.path < b.path
     end)
     if #paths == 0 then
-        utils.notify("run_all: no runnable solution files found beside this one.")
+        local where = curpath and "beside " .. vim.fn.fnamemodify(curpath, ":t") or "in " .. dir
+        utils.notify(
+            ("run_all: no runnable solution files found %s. Open or `cd` into the "):format(where)
+                .. "problem folder, and make sure it holds source files with a configured "
+                .. "run_command (helpers like gen/brute/checker/interactor are excluded).",
+            "WARN"
+        )
         return
     end
 
@@ -451,11 +518,14 @@ function M.run(bufnr)
         end
     end
 
-    local tctbl = testcases.buf_get_testcases(bufnr)
+    -- With a real solution buffer, use its testcases directly. Otherwise anchor on a
+    -- discovered solution so shared testcases (e.g. `input0.txt`) are still found.
+    local tctbl = curpath and testcases.buf_get_testcases(bufnr)
+        or load_dir_testcases(dir, paths[1].path, cfg)
     local nums = vim.tbl_keys(tctbl)
     table.sort(nums)
     if #nums == 0 then
-        utils.notify("run_all: no testcases to run.")
+        utils.notify("run_all: no testcases to run (looked in " .. dir .. ").", "WARN")
         return
     end
 

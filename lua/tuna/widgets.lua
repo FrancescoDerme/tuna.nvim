@@ -45,6 +45,12 @@ local function open_float(bufnr, enter, opts)
         style = "minimal",
     })
     require("tuna.utils").set_border_highlight(winid, opts.border_highlight)
+    -- These floats are short, navigable lists (menu/picker/editor). A large global
+    -- `scrolloff` (e.g. 999, to keep normal buffers centred) fights list navigation
+    -- by refusing to let the cursor reach the top/bottom rows, so pin it off here —
+    -- `scrolloff`/`sidescrolloff` are global-local, so this only affects this window.
+    vim.wo[winid].scrolloff = 0
+    vim.wo[winid].sidescrolloff = 0
     return winid
 end
 

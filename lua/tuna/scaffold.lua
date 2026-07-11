@@ -10,6 +10,7 @@
 
 local config = require("tuna.config")
 local utils = require("tuna.utils")
+local widgets = require("tuna.widgets")
 
 local M = {}
 
@@ -211,8 +212,14 @@ function M.create(kind, bufnr, ext)
     local content = resolve_template(scfg.templates and scfg.templates[kind], ext, DEFAULT_TEMPLATES[kind])
     if not content then
         utils.notify(
-            "scaffold: no built-in " .. kind .. " template for '." .. ext .. "'; "
-                .. "set config.scaffold.templates." .. kind .. " for this language."
+            "scaffold: no built-in "
+                .. kind
+                .. " template for '."
+                .. ext
+                .. "', "
+                .. "set config.scaffold.templates."
+                .. kind
+                .. " for this language."
         )
         return
     end
@@ -220,19 +227,28 @@ function M.create(kind, bufnr, ext)
     local dir = vim.fn.fnamemodify(bufname, ":p:h")
     local path = dir .. "/" .. fname
 
-    if utils.file_exists(path) then
-        local choice = vim.fn.confirm('"' .. fname .. '" already exists.', "&Open it\n&Overwrite\n&Cancel", 1)
-        if choice == 1 then
-            vim.cmd.edit(vim.fn.fnameescape(path))
-            return
-        elseif choice ~= 2 then
-            return
-        end
+    local function create()
+        utils.write_file(path, content)
+        vim.cmd.edit(vim.fn.fnameescape(path))
+        utils.notify("scaffold: created " .. fname .. ".", "INFO")
     end
 
-    utils.write_file(path, content)
-    vim.cmd.edit(vim.fn.fnameescape(path))
-    utils.notify("scaffold: created " .. fname .. ".", "INFO")
+    if not utils.file_exists(path) then
+        create()
+        return
+    end
+
+    -- The file already exists: ask via the plugin's floating chooser (same UI as
+    -- the mode-switcher menu) rather than a plain `confirm` command-line prompt.
+    local restore_winid = vim.api.nvim_get_current_win()
+    widgets.menu({ "Open it", "Overwrite", "Cancel" }, '"' .. fname .. '" already exists', function(idx)
+        if idx == 1 then
+            vim.cmd.edit(vim.fn.fnameescape(path))
+        elseif idx == 2 then
+            create()
+        end
+        -- idx 3 (Cancel) or dismissed (nil): do nothing.
+    end, restore_winid)
 end
 
 return M
