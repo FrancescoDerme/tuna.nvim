@@ -265,7 +265,7 @@ function StressRunner:generation(i)
                                     checker.judge(
                                         tc,
                                         self.r.checker,
-                                        self.config.output_compare_method,
+                                        self:effective_compare(),
                                         function(correct)
                                             if self:aborted() then
                                                 return
@@ -482,6 +482,8 @@ function M.run(bufnr, count_override)
         -- The inherited execute_process/judge_label judge with self.checker; reuse
         -- the solution runner's resolved checker so verdicts match a normal run.
         checker = r.checker,
+        compare_method = r.compare_method, -- carry the per-buffer `:Tuna compare` override
+
         gen = gen,
         ref = ref,
         dir = dir,

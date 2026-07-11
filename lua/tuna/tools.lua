@@ -385,13 +385,13 @@ M.MODES = { "normal", "all", "stress", "interactive" }
 ---buffer being unloaded and reopened during a session. `explicit` records whether
 ---the user chose the mode by hand (`:Tuna run <mode>` / the menu); until they do,
 ---the mode is auto-detected from the sibling files present.
----@type table<string, { mode: string, explicit: boolean, checker: boolean, source: string? }>
+---@type table<string, { mode: string, explicit: boolean, checker: boolean, source: string?, compare: tuna.CompareSpec? }>
 local state = {}
 
 ---@param path string
 local function state_for(path)
     if not state[path] then
-        state[path] = { mode = "normal", explicit = false, checker = true, source = nil }
+        state[path] = { mode = "normal", explicit = false, checker = true, source = nil, compare = nil }
     end
     return state[path]
 end
@@ -478,6 +478,21 @@ end
 ---@param source string
 function M.set_source(path, source)
     state_for(path).source = source
+end
+
+---The buffer's runtime compare-method override (set via `:Tuna compare …`), or nil
+---when unset (the caller then uses `config.output_compare_method`).
+---@param path string
+---@return tuna.CompareSpec?
+function M.get_compare(path)
+    return state_for(path).compare
+end
+
+---Override the compare method for this buffer (nil clears it back to config).
+---@param path string
+---@param method tuna.CompareSpec?
+function M.set_compare(path, method)
+    state_for(path).compare = method
 end
 
 return M

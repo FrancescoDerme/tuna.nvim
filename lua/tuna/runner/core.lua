@@ -83,13 +83,21 @@ function RunnerCore:delete_ui()
     self.ui = nil
 end
 
+---The effective output-compare method: a per-buffer runtime override
+---(`:Tuna compare …`, carried on the runner as `compare_method`) if set, else the
+---configured `output_compare_method`.
+---@return tuna.CompareSpec
+function RunnerCore:effective_compare()
+    return self.compare_method or self.config.output_compare_method
+end
+
 ---A short human label for how verdicts are decided, shown in the "Run" pane.
 ---@return string
 function RunnerCore:judge_label()
     if type(self.checker) == "table" then
         return "checker"
     end
-    return "builtin (" .. tostring(self.config.output_compare_method) .. ")"
+    return require("tuna.compare").method_name(self:effective_compare())
 end
 
 ---What text a detail pane should show for `tc`. Overridable so a mode can own or
@@ -243,7 +251,7 @@ function RunnerCore:finish_process(tcindex, res, opts, on_done)
         -- checkers are async, so flag the row as judging until the verdict lands.
         tc.judging = true
         local chk = opts.checker or self.checker
-        checker.judge(tc, chk, self.config.output_compare_method, function(correct, message)
+        checker.judge(tc, chk, self:effective_compare(), function(correct, message)
             tc.judging = false
             tc.checker_message = message
             if correct == true then

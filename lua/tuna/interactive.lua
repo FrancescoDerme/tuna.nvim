@@ -342,7 +342,7 @@ function InteractiveRunner:run_feed(idx, on_done)
                 return on_done()
             elseif tc.expected ~= nil then
                 tc.judging = true
-                checker.judge(tc, self.checker, self.config.output_compare_method, function(correct, message)
+                checker.judge(tc, self.checker, self:effective_compare(), function(correct, message)
                     tc.judging = false
                     tc.checker_message = message
                     if correct == true then
@@ -720,6 +720,7 @@ function M.run(bufnr, args)
         bufnr = bufnr,
         r = r,
         checker = r.checker,
+        compare_method = r.compare_method, -- carry the per-buffer `:Tuna compare` override
         source = source,
         interactor = interactor,
         list = list,

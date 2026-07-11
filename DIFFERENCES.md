@@ -73,9 +73,16 @@ testcases_output_file_format = { "$(FNOEXT)_output$(TCNUM).txt", "output$(TCNUM)
 ```
 
 tries the source-named pair first (fully backward compatible), then a shared,
-un-prefixed `input<N>.txt`/`output<N>.txt`. So any solution in a folder — every
-version in `:Tuna run all`, or a source whose name differs from the download —
-picks up the same testcases without configuration.
+un-prefixed `input<N>.txt`/`output<N>.txt`, then a **numberless** `in.txt`/`out.txt`.
+So any solution in a folder — every version in `:Tuna run all`, or a source whose
+name differs from the download — picks up the same testcases without configuration.
+
+A format **without** `$(TCNUM)` (like `out.txt`) names a *single* testcase (index 0)
+rather than a numbered series, and a testcase may have **only an input or only an
+output** — an output with no matching input still runs, with the solution fed empty
+stdin. So a bare `main.cpp` + `out.txt` folder is runnable with zero setup.
+competitest required numbered `input`/`output` pairs and had no numberless or
+output-only form.
 
 **Why first-non-empty (not merged):** a folder that legitimately holds two
 problems distinguished by source prefix stops at the prefixed format and never
@@ -249,6 +256,32 @@ the runner now routes every clean exit through `checker.judge` instead of callin
 `compare` directly. Because an external checker is a separate async process, the
 runner tracks a per-testcase `judging` flag so a run isn't declared complete before
 its verdict lands.
+
+### Builtin float-tolerant comparison
+
+competitest's only tolerant option was `squish` (whitespace-insensitive but still an
+**exact** textual match), so floating-point problems forced you to write a custom
+`output_compare_method` function or a full checker. tuna adds a builtin `"float"`
+method selected as a table carrying its options:
+
+```lua
+output_compare_method = { "float", tol = 1e-6 }   -- default tol is 1e-6
+```
+
+It compares token-wise: a numeric token matches when it is within `tol` **absolute
+or relative** error of the expected token, while any non-numeric token (or a
+numeric-vs-text mismatch, or a differing token count) must match exactly. So
+`YES\n3.1400001` passes against `YES\n3.14` but `NO` never passes against `YES`.
+The table form (`{ builtin, opts... }`) is the general shape for any option-bearing
+builtin; `exact`/`squish`/custom-function all still work unchanged.
+
+The method can also be switched **at runtime, per buffer**, without touching config
+— `:Tuna compare <exact|squish|float [tol]|default>` (e.g. `:Tuna compare float 1e-9`;
+`default` clears back to the configured method), and a **Compare** entry in the
+bare-`:Tuna` menu that cycles the methods. This mirrors the per-buffer `:Tuna checker`
+toggle (state in `tools.lua`, keyed by file path), so a float problem needs neither a
+config edit nor a local `tuna.lua`. competitest had no runtime way to change the
+comparison method at all.
 
 ## Stress testing (`stress.lua`)
 

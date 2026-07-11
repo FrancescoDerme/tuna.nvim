@@ -22,6 +22,7 @@ local subcommand_args = {
     receive = { "testcases", "problem", "contest", "persistently", "status", "stop" },
     scaffold = { "checker", "generator", "brute", "interactor" },
     checker = { "on", "off", "toggle" },
+    compare = { "exact", "squish", "float", "default" },
 }
 
 -- Third-level completions: `:Tuna run interactive <Tab>` offers its input sources.
@@ -276,6 +277,81 @@ function M.set_checker(bufnr, want)
     utils.notify("checker " .. (want and "enabled" or "disabled") .. " for this buffer.", "INFO")
 end
 
+---Parse `:Tuna compare` args into a compare-method spec (or nil to clear the
+---override back to the configured default). Notifies and returns false on a bad name.
+---@param args string[] e.g. { "float", "1e-9" } or { "exact" } or { "default" }
+---@return boolean ok, tuna.CompareSpec? method, boolean cleared
+local function parse_compare(args)
+    local name = args[1]
+    if name == nil or name == "default" then
+        return true, nil, true -- clear the override
+    elseif name == "exact" or name == "squish" then
+        return true, name, false
+    elseif name == "float" then
+        local tol = args[2] and tonumber(args[2]) or nil
+        if args[2] and not tol then
+            utils.notify("compare: '" .. args[2] .. "' is not a valid tolerance.")
+            return false
+        end
+        return true, { "float", tol = tol or 1e-6 }, false
+    end
+    utils.notify("compare: unknown method '" .. tostring(name) .. "' (exact | squish | float [tol] | default).")
+    return false
+end
+
+-- Order the menu's "Compare" entry cycles through (default = clear the override).
+local COMPARE_CYCLE = { "default", "exact", "squish", "float" }
+
+---The cycle token naming the buffer's current compare override (or "default").
+---@param path string
+---@return string
+local function compare_token(path)
+    local cur = tools.get_compare(path)
+    if cur == nil then
+        return "default"
+    elseif type(cur) == "table" then
+        return cur[1]
+    end
+    return cur
+end
+
+---Advance the per-buffer compare method to the next one in `COMPARE_CYCLE` (used by
+---the mode menu, where a click cycles rather than takes an argument).
+---@param bufnr integer
+function M.cycle_compare(bufnr)
+    local token = compare_token(api.nvim_buf_get_name(bufnr))
+    local i = 1
+    for k, t in ipairs(COMPARE_CYCLE) do
+        if t == token then
+            i = k
+            break
+        end
+    end
+    local next_token = COMPARE_CYCLE[i % #COMPARE_CYCLE + 1]
+    M.set_compare(bufnr, { next_token })
+end
+
+---Set (or clear) the per-buffer output-compare override. Drops the cached runner so
+---the next run re-resolves. Mirrors `set_checker`.
+---@param bufnr integer
+---@param args string[]
+function M.set_compare(bufnr, args)
+    local ok, method, cleared = parse_compare(args)
+    if not ok then
+        return
+    end
+    tools.set_compare(api.nvim_buf_get_name(bufnr), method)
+    M.runners[bufnr] = nil
+    if cleared then
+        utils.notify("compare method reset to config default for this buffer.", "INFO")
+    else
+        utils.notify(
+            "compare method set to " .. require("tuna.compare").method_name(method) .. " for this buffer.",
+            "INFO"
+        )
+    end
+end
+
 --------------------------------------------------------------------------------
 -- Receiving
 --------------------------------------------------------------------------------
@@ -362,6 +438,12 @@ M.subcommands = {
             M.set_checker(bufnr, want)
         end
     end,
+    compare = function(args)
+        local bufnr = M.solution_bufnr()
+        if bufnr then
+            M.set_compare(bufnr, args)
+        end
+    end,
     scaffold = function(args)
         if not args[1] then
             utils.notify("scaffold: a kind is required (checker | generator | brute | interactor).")
@@ -387,6 +469,11 @@ function M.open_menu()
     -- Show the mode a bare `:Tuna run` would actually use (explicit or detected).
     local mode = tools.resolve_mode(path, dir, config.get_buffer_config(bufnr))
     local checker_on = tools.checker_enabled(path)
+    local cmp_override = tools.get_compare(path)
+    local cmp_label = cmp_override and require("tuna.compare").method_name(cmp_override)
+        or ("default (" .. require("tuna.compare").method_name(
+            config.get_buffer_config(bufnr).output_compare_method
+        ) .. ")")
 
     local function switch(m)
         return function()
@@ -403,6 +490,9 @@ function M.open_menu()
         { "Mode → interactive", switch("interactive") },
         { "Checker: " .. (checker_on and "on (click to disable)" or "off (click to enable)"), function()
             M.set_checker(bufnr)
+        end },
+        { "Compare: " .. cmp_label .. " (click to cycle)", function()
+            M.cycle_compare(bufnr)
         end },
         { "Show results UI", function() M.show_results_ui(bufnr) end },
         { "Scaffold: checker", function() require("tuna.scaffold").create("checker", cur) end },

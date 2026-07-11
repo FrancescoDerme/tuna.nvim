@@ -98,6 +98,24 @@ local function match_tcnum(name, pattern)
     return tonumber(value)
 end
 
+---Build a matcher `fun(name) -> tcnum?` for a format's evaluated `parts`. A format
+---with `$(TCNUM)` (≥2 parts) matches numbered names; a **numberless** format (one
+---part, e.g. `out.txt`) names a single testcase and maps an exact match to index 0.
+---@param parts string[]
+---@return fun(name: string): integer?
+local function make_matcher(parts)
+    if #parts <= 1 then
+        local exact = parts[1] or ""
+        return function(name)
+            return name == exact and 0 or nil
+        end
+    end
+    local pattern = format_pattern(parts)
+    return function(name)
+        return match_tcnum(name, pattern)
+    end
+end
+
 ---Write `content` to `path`, or delete `path` when `content` is empty/nil.
 ---@param path string
 ---@param content string?
@@ -140,18 +158,20 @@ function M.files.load(directory, filepath, input_format, output_format)
         local in_parts = eval_format_parts(filepath, in_fmt)
         local out_parts = eval_format_parts(filepath, out_formats[i] or out_formats[1])
         if in_parts and out_parts then
-            local in_pattern = format_pattern(in_parts)
-            local out_pattern = format_pattern(out_parts)
+            local match_in = make_matcher(in_parts)
+            local match_out = make_matcher(out_parts)
             local tctbl = {}
             local found = false
             for _, name in ipairs(entries) do
-                local tcnum = match_tcnum(name, in_pattern)
+                -- A testcase may have only an input or only an output (an output with
+                -- no matching input still runs — the solution is fed empty stdin).
+                local tcnum = match_in(name)
                 if tcnum then
                     tctbl[tcnum] = tctbl[tcnum] or {}
                     tctbl[tcnum].input = utils.read_file(directory .. name)
                     found = true
                 else
-                    tcnum = match_tcnum(name, out_pattern)
+                    tcnum = match_out(name)
                     if tcnum then
                         tctbl[tcnum] = tctbl[tcnum] or {}
                         tctbl[tcnum].output = utils.read_file(directory .. name)
@@ -406,23 +426,20 @@ function M.files.buf_clear(bufnr)
         return
     end
     local filepath = vim.api.nvim_buf_get_name(bufnr)
-    local patterns = {}
-    for _, fmt in ipairs(normalize_formats(cfg.testcases_input_file_format)) do
+    local matchers = {}
+    local both = {}
+    vim.list_extend(both, normalize_formats(cfg.testcases_input_file_format))
+    vim.list_extend(both, normalize_formats(cfg.testcases_output_file_format))
+    for _, fmt in ipairs(both) do
         local parts = eval_format_parts(filepath, fmt)
         if parts then
-            patterns[#patterns + 1] = format_pattern(parts)
-        end
-    end
-    for _, fmt in ipairs(normalize_formats(cfg.testcases_output_file_format)) do
-        local parts = eval_format_parts(filepath, fmt)
-        if parts then
-            patterns[#patterns + 1] = format_pattern(parts)
+            matchers[#matchers + 1] = make_matcher(parts)
         end
     end
     for name, type_ in vim.fs.dir(directory) do
         if type_ == "file" then
-            for _, pat in ipairs(patterns) do
-                if match_tcnum(name, pat) then
+            for _, match in ipairs(matchers) do
+                if match(name) then
                     utils.delete_file(directory .. name)
                     break
                 end

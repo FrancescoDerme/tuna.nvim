@@ -42,7 +42,11 @@ M.defaults = {
     },
     multiple_testing = -1, -- testcases to run at once: -1 = CPU count, 0 = all, n = n
     maximum_time = 5000, -- per-process time limit in ms (process is killed past it)
-    output_compare_method = "squish", -- "exact" | "squish" | function(out, expected)
+    -- "exact" | "squish" | { "float", tol = 1e-6 } | function(out, expected)
+    -- "float" compares token-wise, accepting numeric tokens within `tol` absolute
+    -- or relative error (non-numeric tokens must match exactly) — for problems with
+    -- floating-point answers, no custom checker needed.
+    output_compare_method = "squish",
     -- Verdict source. Default "builtin" means: plain comparison via
     -- output_compare_method, *unless* a sibling `checker.*` source file is found
     -- (see tool_names) and the per-buffer checker toggle is on — then that file is
@@ -131,8 +135,10 @@ M.defaults = {
     -- picks up the source-named pair first, then a shared, un-prefixed `input<N>.txt`
     -- so any solution in a folder can run testcases it didn't create (e.g. run all
     -- versions, or CC-downloaded testcases whose source name differs).
-    testcases_input_file_format = { "$(FNOEXT)_input$(TCNUM).txt", "input$(TCNUM).txt" },
-    testcases_output_file_format = { "$(FNOEXT)_output$(TCNUM).txt", "output$(TCNUM).txt" },
+    -- A format without `$(TCNUM)` (e.g. `out.txt`) names a single testcase (index 0),
+    -- and a testcase may have only an output (it runs with empty stdin).
+    testcases_input_file_format = { "$(FNOEXT)_input$(TCNUM).txt", "input$(TCNUM).txt", "in.txt" },
+    testcases_output_file_format = { "$(FNOEXT)_output$(TCNUM).txt", "output$(TCNUM).txt", "out.txt" },
     -- "directory" mode: one sub-directory per testcase holding input/output files
     testcases_directory_format = "tests/$(TCNUM)",
     testcases_directory_input = "input.txt",

@@ -553,6 +553,7 @@ function M.run(bufnr)
         config = cfg,
         bufnr = bufnr,
         checker = resolve_checker(dir, cfg),
+        compare_method = tools.get_compare(vim.api.nvim_buf_get_name(bufnr)), -- per-buffer `:Tuna compare` override
         mode = "all",
         files = files,
         nums = nums,

@@ -122,6 +122,7 @@ function M.new(bufnr)
         cc = compile_command,
         rc = run_command,
         checker = resolved_checker,
+        compare_method = tools.get_compare(path), -- per-buffer `:Tuna compare` override (nil = use config)
         compile_directory = vim.fs.normalize(filedir .. "/" .. cfg.compile_directory) .. "/",
         running_directory = vim.fs.normalize(filedir .. "/" .. cfg.running_directory) .. "/",
         tcdata = {},
