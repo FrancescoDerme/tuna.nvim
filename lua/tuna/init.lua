@@ -78,6 +78,16 @@ function M.setup(user_opts)
         desc = "Resize Tuna's UI when the window geometry changes",
     })
 
+    require("tuna.keymaps").setup()
+
+    vim.api.nvim_create_autocmd("BufReadPost", {
+        group = augroup,
+        callback = function(ev)
+            require("tuna.submit").restore(ev.buf)
+        end,
+        desc = "Restore a persisted Tuna submit verdict for a solution buffer",
+    })
+
     if config.current_setup.start_receiving_persistently_on_setup then
         if vim.v.vim_did_enter == 1 then
             require("tuna.commands").receive("persistently")
@@ -95,6 +105,8 @@ function M.setup(user_opts)
 end
 
 ---lualine component: shows the receive listener's state, or nothing when idle.
+---The submit verdict is a separate component (`require("tuna.submit").status`)
+---so it can carry its own per-verdict color — see the lualine snippet in CLAUDE.md.
 function M.lualine_component()
     return require("tuna.receive").status()
 end

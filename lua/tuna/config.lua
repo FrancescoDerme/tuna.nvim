@@ -173,6 +173,93 @@ M.defaults = {
     open_received_contests = true,
     replace_received_testcases = false,
 
+    -- submit (:Tuna submit) — hand the current solution to an external submit tool.
+    submit = {
+        provider = "command", -- entry in submit.providers (see submit.lua)
+        -- The "command" provider expands this through the modifier engine (adds
+        -- $(URL)/$(LANG) to the usual $(FABSPATH)/$(FNAME)/…) and runs it in a
+        -- terminal. nil = submit is unconfigured (errors with a hint). Example:
+        --   command = 'subwithoutcred "$(URL)" "$(LANG)" "$(FABSPATH)"',
+        command = nil,
+        -- How to find the problem URL: a Lua pattern scanned over the first
+        -- `url_scan_lines` header lines (first capture = URL), or a
+        -- function(ctx) -> string. Falls back to the per-problem sidecar below.
+        url = "submit at:%s*(%S+)",
+        url_scan_lines = 10,
+        url_store_file = ".tuna.json", -- receive writes {url,name,group} here per problem
+        -- filetype -> the language name your submit tool expects
+        languages = { cpp = "C++", c = "C", python = "Python 3", java = "Java", rust = "Rust" },
+        terminal = "auto", -- "auto" (toggleterm if installed, else split) | "toggleterm" | "split"
+        direction = "vertical", -- terminal orientation: "vertical" | "horizontal"
+        reuse_terminal = true, -- keep one cached submit terminal across submits
+        -- Watch mode: run the submit command as a tracked async job (no terminal),
+        -- parse its stdout for the judge verdict, and show it in the lualine
+        -- component — persistently, per solution buffer, until the next submit.
+        -- Requires a submit tool that polls and prints a verdict (e.g. the Rust
+        -- `submitter`). Leave false to keep the fire-and-forget terminal behaviour.
+        watch = false,
+        -- How long (ms) the terminal-path "submitting …" flash stays up (watch mode
+        -- ignores this — its state persists until the next submit). 0 disables it.
+        status_time = 6000,
+        -- Verdict classifier for watch mode: ordered { lua_pattern, state } rules
+        -- matched (first wins) against each lowercased stdout status line. States
+        -- `accepted`/`rejected`/`partial` are final; `pending` keeps watching.
+        -- Unmatched lines are ignored (so "Submission url: …" etc. don't show).
+        verdicts = {
+            { "queued", "pending" },
+            { "in queue", "pending" },
+            { "testing", "pending" },
+            { "running", "pending" },
+            { "compiling", "pending" },
+            { "judging", "pending" },
+            { "pending", "pending" },
+            { "accepted", "accepted" },
+            { "pretests passed", "accepted" },
+            { "partial", "partial" },
+            { "wrong answer", "rejected" },
+            { "time limit", "rejected" },
+            { "memory limit", "rejected" },
+            { "idleness limit", "rejected" },
+            { "runtime error", "rejected" },
+            { "compilation error", "rejected" },
+            { "denial of judgement", "rejected" },
+            { "challenged", "rejected" },
+            { "hacked", "rejected" },
+            { "skipped", "rejected" },
+            { "rejected", "rejected" },
+            { "failed", "rejected" },
+            { "crashed", "rejected" },
+            { "security", "rejected" },
+        },
+        -- state -> highlight group for the lualine verdict color (reuses tuna's
+        -- runner highlight groups; override to taste).
+        verdict_hl = {
+            pending = "TunaWarning",
+            accepted = "TunaCorrect",
+            partial = "TunaWarning",
+            rejected = "TunaWrong",
+            error = "TunaWrong",
+        },
+    },
+
+    -- Opt-in keymaps. Nothing is mapped unless you add entries; each maps an action
+    -- to a left-hand side (a string, or a list of strings; false/nil disables it).
+    -- Actions mirror the :Tuna subcommands — see keymaps.lua `M.actions`. Two scopes:
+    --   * `mappings` — buffer-local, set on solution files (filetypes in `filetypes`)
+    --     via a FileType autocmd, so they follow you from one solution to the next.
+    --   * `global`   — always available, set once regardless of the current buffer
+    --     (handy for buffer-agnostic actions like `menu` or `receive_*`).
+    -- Example:
+    --   keymaps = {
+    --     mappings = { submit = "<leader>ts", run = "<leader>tr" },
+    --     global   = { menu = "<leader>tt", receive_problem = "<leader>tp" },
+    --   }
+    keymaps = {
+        filetypes = { "c", "cpp", "rust", "java", "python" },
+        mappings = {},
+        global = {},
+    },
+
     -- UI: native floats (no nui). Border is passed to nvim_open_win; the border
     -- highlight is applied via the window's `winhighlight` (FloatBorder remap).
     floating_border = "rounded",

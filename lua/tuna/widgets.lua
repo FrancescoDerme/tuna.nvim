@@ -45,6 +45,10 @@ local function open_float(bufnr, enter, opts)
         style = "minimal",
     })
     require("tuna.utils").set_border_highlight(winid, opts.border_highlight)
+    -- Tag this plugin's floats with a "tuna" filetype so users (and other plugins) can target
+    -- them. For example add "tuna" to scrollEOF.nvim's "disabled_filetypes" so it doesn't
+    -- write the *global* "scrolloff" off a transient float's height
+    vim.bo[bufnr].filetype = "tuna"
     -- These floats are short, navigable lists (menu/picker/editor). A large global
     -- `scrolloff` (e.g. 999, to keep normal buffers centred) fights list navigation
     -- by refusing to let the cursor reach the top/bottom rows, so pin it off here —
@@ -282,10 +286,8 @@ function M.editor(bufnr, tcnum, input_content, output_content, callback, restore
     end
 
     -- Place the two panes symmetrically about the editor's vertical centre.
-    editor.input_buf, editor.input_win =
-        make_pane("Input", math.floor(vim_width / 2) - width - 1, input_lines)
-    editor.output_buf, editor.output_win =
-        make_pane("Output", math.floor(vim_width / 2) + 1, output_lines)
+    editor.input_buf, editor.input_win = make_pane("Input", math.floor(vim_width / 2) - width - 1, input_lines)
+    editor.output_buf, editor.output_win = make_pane("Output", math.floor(vim_width / 2) + 1, output_lines)
     api.nvim_set_current_win(editor.input_win)
     editor.ui_visible = true
 

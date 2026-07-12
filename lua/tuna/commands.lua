@@ -451,6 +451,12 @@ M.subcommands = {
         end
         require("tuna.scaffold").create(args[1], api.nvim_get_current_buf(), args[2])
     end,
+    submit = function()
+        local bufnr = M.solution_bufnr()
+        if bufnr then
+            require("tuna.submit").submit(bufnr)
+        end
+    end,
     menu = function()
         M.open_menu()
     end,

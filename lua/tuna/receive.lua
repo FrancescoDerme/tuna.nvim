@@ -334,6 +334,9 @@ local function store_received_task(filepath, confirm_overwrite, task, cfg)
     end
 
     store_task_testcases(filepath, task_to_tctbl(task), cfg)
+    -- Persist the task's URL beside the source so `:Tuna submit` can find it even
+    -- when the file carries no header marker.
+    require("tuna.submit").write_task_store(vim.fn.fnamemodify(filepath, ":h"), task, cfg)
 end
 
 ---Store received testcases into an open buffer (the `testcases` receive mode).

@@ -29,6 +29,16 @@ and ports cleanly.
 **Consequence:** tuna targets a more recent Neovim baseline than competitest's
 0.5+. Exact minimum TBD when the UI modules land.
 
+**Float filetype:** every tuna widget float (`widgets.open_float`: menu / input /
+picker / editor) sets `filetype = "tuna"` on its buffer, mirroring how e.g.
+telescope tags its prompt (`TelescopePrompt`). This lets users and other plugins
+target tuna floats. It also side-steps a class of third-party bug: plugins that
+write the **global** `scrolloff` off the focused window's height (e.g.
+`scrollEOF.nvim`'s `vim_resized_cb`) will clobber it to `0` when a *short* float
+(tuna's 1-line input prompt → `height/2 = 0`) gains focus. Such plugins honor a
+`disabled_filetypes` list, so adding `tuna` to it stops the clobber; the real fix
+belongs upstream (those callbacks should skip floating / non-normal windows).
+
 ---
 
 ## Testcase storage: fully user-customizable layout
@@ -171,6 +181,63 @@ they're just now defaults you can replace.
 **Why:** contest-naming conventions differ per judge and change over time; making the
 rules data (config) rather than code lets users support CodeChef/USACO/etc. and fix
 naming without forking the plugin.
+
+---
+
+## Submit integration (`submit.lua`, `:Tuna submit`)
+
+✅ **Done (Workstream 4).** Brand new — competitest has no submit support at all
+(the community's PR #87 for it is still open upstream). `:Tuna submit` hands the
+current solution to an **external** submit tool through a **provider registry**, so
+it's agnostic to which judge/tool/language you use.
+
+```lua
+submit = {
+  provider = "command",
+  command  = 'subwithoutcred "$(URL)" "$(LANG)" "$(FABSPATH)"',
+  url          = "submit at:%s*(%S+)",  -- header marker (a template writes it), or a function
+  languages    = { cpp = "C++", python = "Python 3", ... },  -- filetype -> submit tool's lang name
+  terminal     = "auto",   -- toggleterm if installed, else a native :terminal split
+}
+```
+
+Design notes:
+
+- **Provider registry** (`M.providers[name]`) leaves a clean seam for future
+  first-class providers (e.g. a Kattis provider, per PR #87). The shipped default is
+  the `command` provider, which expands a shell command through the modifier engine —
+  gaining `$(URL)` and `$(LANG)` on top of the usual `$(FABSPATH)`/`$(FNAME)`/… — and
+  runs it in a terminal.
+- **URL resolution** is header-marker-first with a sidecar fallback: it scans the
+  file header for a configurable marker (e.g. `submit at: <url>`, which a template
+  embeds via the existing `$(URL)` receive modifier), and if absent reads a
+  per-problem sidecar (`.tuna.json`) that the receive path now writes with the task's
+  URL. So both templated and freshly-received problems are submittable with no manual
+  URL entry.
+- **Terminal** prefers a cached toggleterm (mirroring the common setup) but falls back
+  to a native `:terminal` split, so toggleterm is detected-and-used, never required.
+- **lualine verdict (watch mode)**, matching the receiver's `status()`/`is_receiving()`.
+  With `submit.watch = true` the command runs as a tracked `vim.system` job (no
+  terminal); tuna strips ANSI from its stdout, takes the latest `\r`/`\n` status
+  segment, and classifies it via the ordered `submit.verdicts` `{ pattern → state }`
+  rules into a live `Testing → Accepted / Wrong Answer / …` verdict. State is **kept
+  per solution buffer and persists until the next submit** — so the indicator is bound
+  to a problem, not a timer — colored by verdict via `submit.verdict_hl`
+  (`TunaCorrect`/`TunaWrong`/`TunaWarning`). This turns submit into a full
+  no-terminal loop for tools that poll a verdict (e.g. the Rust `submitter`); a run
+  that reaches no final verdict surfaces an `error` state + a notification. The
+  default (no `watch`) keeps the fire-and-forget terminal with a brief pending flash
+  (`status_time`), for submit tools that don't report a verdict.
+- **Persists across restarts, invalidated on edit.** A final verdict is written into
+  the per-problem sidecar (`.tuna.json`, alongside the URL/name) keyed by file name,
+  with the source's mtime. On `BufReadPost` the verdict is restored into lualine —
+  unless the file was edited since (mtime mismatch) — and it's dropped the moment you
+  edit the buffer (`TextChanged`), because a verdict no longer describes changed
+  source. So the indicator is genuinely bound to *this* problem's *submitted* state.
+
+**Why:** submitting is the last manual step in the loop; folding it into the plugin
+(configurably, not hardcoded to one tool) removes the last reason to drop back to a
+shell, and the provider seam keeps it open to new judges.
 
 ---
 
