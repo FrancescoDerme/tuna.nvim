@@ -528,4 +528,17 @@ without memorising subcommands, and picking a mode here is what a later bare `:T
 run` repeats. In competitest a bare `:CompetiTest` was an error. This is a deliberate
 precursor to the fuller `:Tuna` dashboard planned for Workstream 5.
 
+## Health check (`health.lua`, `:checkhealth tuna`)
+
+✅ **Done (W7).** tuna ships a `lua/tuna/health.lua` so `:checkhealth tuna` gives a
+one-shot diagnosis of a setup — the single biggest self-service answer to "why
+doesn't it work?" It reports the Neovim version (errors below 0.10, since tuna needs
+`vim.system`/`vim.uv`), whether `setup()` ran, which configured compilers/interpreters
+are actually on `PATH` (skipping per-problem build outputs like `./$(FNOEXT)` that
+don't exist pre-compile), the Competitive Companion listener port + live state, the
+submit tool's presence (and, for the browser provider, clipboard availability), and
+optional integrations (toggleterm/lualine). It is read-only — it never spawns a
+compiler or touches state. competitest had no health check; users diagnosed broken
+setups by trial and error.
+
 <!-- Add new entries above this line as decisions are made. -->
