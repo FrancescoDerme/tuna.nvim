@@ -247,23 +247,47 @@ end
 -- Resolution
 --------------------------------------------------------------------------------
 
----Find the submission URL for a buffer: a `submit.url` function, else the header
----marker pattern scanned over the first `url_scan_lines` lines, else the sidecar.
+---Whether `url` looks like a real submission URL: an `http(s)://host…` address with
+---no leftover `$(…)` template modifier. Guards the common "wrong URL" case — a raw
+---template or a problem set up before it was received resolves the marker/sidecar to
+---the literal placeholder `$(URL)`, which must never be handed to the submitter.
+---@param url any
+---@return boolean
+local function is_valid_url(url)
+    if type(url) ~= "string" or url:find("%$%(") then
+        return false -- non-string, or an unexpanded modifier like the template's "$(URL)"
+    end
+    return url:match("^https?://[^%s/]+") ~= nil
+end
+
+---Find the submission URL for a buffer, in priority order: a `submit.url` function,
+---else the header marker pattern scanned over the first `url_scan_lines` lines, else
+---the sidecar. Each candidate is validated (`is_valid_url`) and an invalid one is
+---skipped so a placeholder marker can still fall through to a real sidecar URL.
 ---@param bufnr integer
 ---@param filepath string
 ---@param cfg table resolved buffer config
----@return string?
+---@return string? url the first valid candidate, or nil
+---@return string? invalid the first rejected candidate (for a precise error), or nil
 local function resolve_url(bufnr, filepath, cfg)
     local scfg = cfg.submit
+    local candidates = {}
     if type(scfg.url) == "function" then
-        return scfg.url({ bufnr = bufnr, filepath = filepath })
+        candidates[#candidates + 1] = scfg.url({ bufnr = bufnr, filepath = filepath })
+    else
+        candidates[#candidates + 1] = scan_header(bufnr, scfg.url, scfg.url_scan_lines)
+        local store = M.read_task_store(vim.fn.fnamemodify(filepath, ":h"), cfg)
+        candidates[#candidates + 1] = store and store.url or nil
     end
-    local marked = scan_header(bufnr, scfg.url, scfg.url_scan_lines)
-    if marked then
-        return marked
+
+    local invalid
+    for _, c in ipairs(candidates) do
+        if is_valid_url(c) then
+            return c, nil
+        end
+        invalid = invalid or c -- remember the first non-nil-but-invalid candidate
     end
-    local store = M.read_task_store(vim.fn.fnamemodify(filepath, ":h"), cfg)
-    return store and store.url or nil
+    return nil, invalid
 end
 
 ---The submitter's language name for a buffer's filetype (from `submit.languages`).
@@ -294,10 +318,15 @@ function M.context(bufnr)
         end)
     end
 
-    local url = resolve_url(bufnr, filepath, cfg)
+    local url, invalid = resolve_url(bufnr, filepath, cfg)
     if not url then
+        if invalid then
+            return nil,
+                ("resolved submission URL is not valid (%s), "):format(vim.inspect(invalid))
+                    .. "fix the `submit at:` URL in the header or sidecar."
+        end
         return nil,
-            "no submission URL found — add a URL marker to the header (see `submit.url`), "
+            "no submission URL found, add a URL marker to the header (see `submit.url`), "
                 .. "or receive the problem so its URL is stored in the sidecar."
     end
     -- Now that we know the URL (hence the judge), fold in any per-judge override.
@@ -305,7 +334,7 @@ function M.context(bufnr)
     local lang = resolve_lang(bufnr, scfg)
     if not lang then
         return nil,
-            ("no submit language for filetype '%s' — set `submit.languages.%s` (or `submit.judges.%s.languages.%s`)."):format(
+            ("no submit language for filetype '%s', set `submit.languages.%s` (or `submit.judges.%s.languages.%s`)."):format(
                 vim.bo[bufnr].filetype,
                 vim.bo[bufnr].filetype,
                 judge_of(url),
@@ -331,13 +360,37 @@ end
 
 local cached = {} -- reused terminals: { tt = <toggleterm Terminal>, native = { buf, chan } }
 
----Run `cmd` in a native `:terminal` split, reusing one shell across submits.
+---Start a background native terminal: a hidden `:terminal` buffer hosting a shell,
+---no window and no focus (mirrors the backgrounded toggleterm path when
+---`submit.open_terminal` is false). Returns `{ buf, chan }` so it can be cached and
+---reused. The buffer is reachable with `:b` if you want to inspect the output.
+---@return { buf: integer, chan: integer }
+local function spawn_native_background()
+    local buf = vim.api.nvim_create_buf(true, false)
+    local chan
+    vim.api.nvim_buf_call(buf, function()
+        chan = vim.fn.termopen(vim.o.shell)
+    end)
+    return { buf = buf, chan = chan }
+end
+
+---Run `cmd` in a native `:terminal`, reusing one shell across submits. When
+---`submit.open_terminal` is false the shell runs in a hidden buffer (no split, no
+---focus); otherwise it opens in a split and focuses it.
 ---@param cmd string
 ---@param scfg table
 local function run_native(cmd, scfg)
+    local background = scfg.open_terminal == false
     local split = scfg.direction == "horizontal" and "botright split" or "botright vsplit"
 
     if not scfg.reuse_terminal then
+        if background then
+            local n = spawn_native_background()
+            vim.defer_fn(function()
+                pcall(vim.fn.chansend, n.chan, cmd .. "\n")
+            end, 120)
+            return
+        end
         vim.cmd(split)
         vim.cmd.enew()
         vim.fn.termopen({ vim.o.shell, "-c", cmd })
@@ -347,25 +400,34 @@ local function run_native(cmd, scfg)
 
     local n = cached.native
     if n and vim.api.nvim_buf_is_valid(n.buf) and n.chan then
-        local win
-        for _, w in ipairs(vim.api.nvim_list_wins()) do
-            if vim.api.nvim_win_get_buf(w) == n.buf then
-                win = w
-                break
+        if not background then
+            local win
+            for _, w in ipairs(vim.api.nvim_list_wins()) do
+                if vim.api.nvim_win_get_buf(w) == n.buf then
+                    win = w
+                    break
+                end
             end
-        end
-        if win then
-            vim.api.nvim_set_current_win(win)
-        else
-            vim.cmd(split)
-            vim.api.nvim_win_set_buf(0, n.buf)
+            if win then
+                vim.api.nvim_set_current_win(win)
+            else
+                vim.cmd(split)
+                vim.api.nvim_win_set_buf(0, n.buf)
+            end
+            vim.cmd("startinsert")
         end
         pcall(vim.fn.chansend, n.chan, cmd .. "\n")
-        vim.cmd("startinsert")
         return
     end
 
     -- Fresh shell terminal; send the command once the shell has settled.
+    if background then
+        cached.native = spawn_native_background()
+        vim.defer_fn(function()
+            pcall(vim.fn.chansend, cached.native.chan, cmd .. "\n")
+        end, 120)
+        return
+    end
     vim.cmd(split)
     vim.cmd.enew()
     local chan = vim.fn.termopen(vim.o.shell)
@@ -376,7 +438,12 @@ local function run_native(cmd, scfg)
     vim.cmd("startinsert")
 end
 
----Run `cmd` in a cached toggleterm terminal (mirrors the maintainer's setup).
+---Run `cmd` in a cached toggleterm terminal. `spawn()` starts the job with no
+---window, so when `submit.open_terminal` is false the command runs in the background
+---without stealing focus — the terminal is there to toggle open manually if you want
+---to inspect it. When true, the terminal is opened (and focused) so its output/errors
+---are visible immediately. `send(cmd, true)` passes `go_back = true` so toggleterm
+---never auto-focuses a backgrounded terminal.
 ---@param cmd string
 ---@param scfg table
 ---@param tt table the `toggleterm.terminal` module
@@ -390,8 +457,10 @@ local function run_toggleterm(cmd, scfg, tt)
     if not cached.tt.job_id then
         cached.tt:spawn()
     end
-    cached.tt:open() -- make the terminal visible, so submit output/errors are seen
-    cached.tt:send(cmd)
+    if scfg.open_terminal ~= false then
+        cached.tt:open() -- make the terminal visible, so submit output/errors are seen
+    end
+    cached.tt:send(cmd, scfg.open_terminal == false) -- go_back → don't focus a background term
 end
 
 ---Run a submit command in a terminal per `scfg.terminal` ("auto"|"toggleterm"|"split").
@@ -611,7 +680,6 @@ local function strip_ansi(s)
     return s
 end
 
-
 ---Pick the most informative line from a tool's output to show on failure.
 ---A verbose submit CLI logs a wall of `[INFO]`/`[NETWORK]` progress plus a
 ---cookie-save on exit, so the *last* line ("[INFO] save cookie to: …") is noise, not
@@ -649,13 +717,28 @@ local function meaningful_tail(err, out)
         -- else the last line flagged as an error / failure / limit.
         for i = #lines, 1, -1 do
             local low = lines[i]:lower()
-            if low:find("%[error%]") or low:find("%[failure%]") or low:find("error") or low:find("fail") or low:find("limit") then
+            if
+                low:find("%[error%]")
+                or low:find("%[failure%]")
+                or low:find("error")
+                or low:find("fail")
+                or low:find("limit")
+            then
                 -- A bare "submission failed" is generic; pair it with the nearest
                 -- preceding specific flagged line if there is one.
                 if is_generic(low) then
                     for j = i - 1, 1, -1 do
                         local lj = lines[j]:lower()
-                        if not is_generic(lj) and (lj:find("error") or lj:find("fail") or lj:find("limit") or lj:find("says:") or lj:find("alert")) then
+                        if
+                            not is_generic(lj)
+                            and (
+                                lj:find("error")
+                                or lj:find("fail")
+                                or lj:find("limit")
+                                or lj:find("says:")
+                                or lj:find("alert")
+                            )
+                        then
                             return lines[j] .. " — " .. lines[i]
                         end
                     end

@@ -200,6 +200,11 @@ M.defaults = {
         terminal = "auto", -- "auto" (toggleterm if installed, else split) | "toggleterm" | "split"
         direction = "vertical", -- terminal orientation: "vertical" | "horizontal"
         reuse_terminal = true, -- keep one cached submit terminal across submits
+        -- Fire-and-forget path only (watch = false): whether to open and focus the
+        -- terminal on submit. false runs the command in the background (toggleterm
+        -- stays hidden / a hidden native buffer) without stealing focus — toggle it
+        -- open yourself to inspect output. true pops it open so output is visible.
+        open_terminal = true,
         -- Watch mode: run the submit command as a tracked async job (no terminal),
         -- parse its stdout for the judge verdict, and show it in the lualine
         -- component — persistently, per solution buffer, until the next submit.
