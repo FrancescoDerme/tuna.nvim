@@ -317,7 +317,7 @@ local function compare_token(path)
 end
 
 ---Advance the per-buffer compare method to the next one in `COMPARE_CYCLE` (used by
----the mode menu, where a click cycles rather than takes an argument).
+---the dashboard, where a click cycles rather than takes an argument).
 ---@param bufnr integer
 function M.cycle_compare(bufnr)
     local token = compare_token(api.nvim_buf_get_name(bufnr))
@@ -463,63 +463,13 @@ M.subcommands = {
             require("tuna.submit").submit(bufnr)
         end
     end,
-    menu = function()
-        M.open_menu()
+    clean = function()
+        require("tuna.clean").clean(api.nvim_get_current_buf())
+    end,
+    dashboard = function()
+        require("tuna.dashboard").open(api.nvim_get_current_buf())
     end,
 }
-
----Open the mode-switcher menu. Selecting a mode sets it as the buffer's active
----mode (so a later bare `:Tuna run` repeats it) and runs it now; the checker
----entry toggles special-judge use; scaffold entries drop in a helper.
-function M.open_menu()
-    local cur = api.nvim_get_current_buf()
-    config.load_buffer_config(cur)
-    -- Operate on the solution even when opened from a helper buffer (checker.cpp).
-    local bufnr = tools.solution_bufnr(cur, config.get_buffer_config(cur)) or cur
-    local path = api.nvim_buf_get_name(bufnr)
-    local dir = vim.fn.fnamemodify(path, ":p:h")
-    -- Show the mode a bare `:Tuna run` would actually use (explicit or detected).
-    local mode = tools.resolve_mode(path, dir, config.get_buffer_config(bufnr))
-    local checker_on = tools.checker_enabled(path)
-    local cmp_override = tools.get_compare(path)
-    local cmp_label = cmp_override and require("tuna.compare").method_name(cmp_override)
-        or ("default (" .. require("tuna.compare").method_name(
-            config.get_buffer_config(bufnr).output_compare_method
-        ) .. ")")
-
-    local function switch(m)
-        return function()
-            tools.set_mode(path, m)
-            M.dispatch_mode(m, {}, true, bufnr)
-        end
-    end
-
-    local actions = {
-        { "Run (mode: " .. mode .. ")", switch(mode) },
-        { "Mode → normal", switch("normal") },
-        { "Mode → run all versions", switch("all") },
-        { "Mode → stress test", switch("stress") },
-        { "Mode → interactive", switch("interactive") },
-        { "Checker: " .. (checker_on and "on (click to disable)" or "off (click to enable)"), function()
-            M.set_checker(bufnr)
-        end },
-        { "Compare: " .. cmp_label .. " (click to cycle)", function()
-            M.cycle_compare(bufnr)
-        end },
-        { "Show results UI", function() M.show_results_ui(bufnr) end },
-        { "Scaffold: checker", function() require("tuna.scaffold").create("checker", cur) end },
-        { "Scaffold: generator", function() require("tuna.scaffold").create("generator", cur) end },
-        { "Scaffold: brute", function() require("tuna.scaffold").create("brute", cur) end },
-        { "Scaffold: interactor", function() require("tuna.scaffold").create("interactor", cur) end },
-    }
-    local labels = {}
-    for i, a in ipairs(actions) do
-        labels[i] = a[1]
-    end
-    require("tuna.widgets").menu(labels, "Tuna", function(idx)
-        actions[idx][2]()
-    end, api.nvim_get_current_win())
-end
 
 ---Dispatch a parsed `:Tuna` argument list (subcommand + its arguments).
 ---@param args string[] the full fargs list (args[1] is the subcommand)

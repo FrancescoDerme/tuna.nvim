@@ -8,7 +8,7 @@
 --     filetypes via a `FileType` autocmd, so they follow the user from one problem
 --     to the next (what an ftplugin used to give).
 --   * `keymaps.global`   — always-available maps set once at setup, regardless of
---     the current buffer (handy for buffer-agnostic actions like `menu`/`receive_*`).
+--     the current buffer (handy for buffer-agnostic actions like `dashboard`/`receive_*`).
 --
 -- Nothing is mapped unless the user opts in (both tables empty by default).
 
@@ -17,7 +17,7 @@ local M = {}
 -- Action name -> the Ex command a mapping runs (wrapped as `<cmd>… <cr>`). Keep
 -- these aligned with the :Tuna subcommand surface in commands.lua.
 M.actions = {
-    menu = "Tuna", -- bare :Tuna opens the mode menu
+    dashboard = "Tuna", -- bare :Tuna opens the dashboard
     run = "Tuna run",
     run_all = "Tuna run all",
     run_stress = "Tuna run stress",
@@ -31,6 +31,7 @@ M.actions = {
     receive_testcases = "Tuna receive testcases",
     receive_problem = "Tuna receive problem",
     receive_contest = "Tuna receive contest",
+    clean = "Tuna clean",
 }
 
 ---The configured solution filetypes, with a sane fallback.

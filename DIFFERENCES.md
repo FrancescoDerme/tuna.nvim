@@ -519,14 +519,44 @@ for C++ and Python, and both the base filenames and the templates — per kind a
 **per language** (`{ [ext] = path }`, like `template_file`) — are overridable via
 `config.scaffold`. competitest had nothing comparable.
 
-## Mode-switcher menu (`widgets.menu`)
+## The `:Tuna` dashboard (`dashboard.lua`)
 
-✅ **Done.** Bare `:Tuna` (or `:Tuna menu`) opens a native chooser that switches the
-buffer's **run mode** (normal / run-all / stress / interactive), toggles the checker,
-shows the results UI, or scaffolds a helper — so the Phase 3 modes are discoverable
-without memorising subcommands, and picking a mode here is what a later bare `:Tuna
-run` repeats. In competitest a bare `:CompetiTest` was an error. This is a deliberate
-precursor to the fuller `:Tuna` dashboard planned for Workstream 5.
+✅ **Done (evolving, W8).** Bare `:Tuna` (or `:Tuna dashboard`) opens a native chooser
+that switches the buffer's **run mode**
+(normal / run-all / stress / interactive), toggles the checker, cycles the compare
+method, shows the results UI, scaffolds a helper, or cleans unused files — so the
+Phase 3 features are discoverable without memorising subcommands, and picking a mode
+here is what a later bare `:Tuna run` repeats. In competitest a bare `:CompetiTest`
+was an error. This started as an inline "mode-switcher menu" and has been promoted to
+its own `dashboard.lua` — the seed of the fuller contest hub (problem navigation,
+at-a-glance status) it will grow into.
+
+## Clean unused files (`clean.lua`, `:Tuna clean`)
+
+✅ **Done (W5).** A competitive-programming workflow accretes clutter: every received
+or templated problem drops a solution file, and `:Tuna scaffold` drops helper stubs —
+many of which are never touched. `:Tuna clean` sweeps them up. The catch competitest
+never had to solve is that these files **aren't empty** — they carry a template — so
+"unused" is defined as *"content still matches the template that would generate it."*
+tuna turns the template into a pattern with each `$(...)` modifier as a wildcard, so
+it recognises an untouched file whether the template was copied verbatim (modifiers
+left literal) or expanded via `evaluate_template_modifiers`; scaffolds are matched
+against their `scaffold` template, solutions against `template_file`, and a
+template-less file is unused only when empty. The entire interaction runs through
+tuna's **floating widgets, not `vim.ui.input`/`confirm` command-line prompts**: a
+single **form** (three stacked lists shown at once — Tab / `<M-j>`/`<M-k>` switch,
+`<CR>` submits all) picks the directory (prefilled with the roots derived from the
+`received_*`/`template_file` config, plus "Other directory…"), the recursion depth
+(infinite by default, or a custom number), *and* the **match threshold** — because
+"unused" is measured as a **similarity percentage** to the template (a line-LCS
+ratio), the user can erase files that are, say, ≥ 95% the template (full match / 95% /
+custom), not only byte-for-byte untouched ones. Then a **per-file confirmation menu**
+(Delete / Keep / Stop, showing each file's match %) — with a **read-only preview of
+the file rendered beneath the prompt** (scroll with `<C-d>`/`<C-u>`) — guards every
+deletion. Form/list navigation uses the plugin-wide pane keys (`switch_window_keys`,
+default `<C-hjkl>`). Clean may delete the file it was launched from and stays robust:
+the file's buffer is wiped afterwards (kept, if it has unsaved edits). competitest had
+no cleanup facility at all.
 
 ## Health check (`health.lua`, `:checkhealth tuna`)
 
@@ -540,5 +570,15 @@ submit tool's presence (and, for the browser provider, clipboard availability), 
 optional integrations (toggleterm/lualine). It is read-only — it never spawns a
 compiler or touches state. competitest had no health check; users diagnosed broken
 setups by trial and error.
+
+## Receive duplicate handling in the floating UI
+
+✅ **Done.** When a received problem or contest would overwrite existing files,
+competitest asked with a command-line `confirm`. tuna keeps the whole receive flow in
+its floating widgets: a duplicate **problem** shows an `Override`/`Stop` menu, and a
+**contest** shows a *single* `Override all`/`Stop` menu for the whole batch (resolved
+up front by scanning every target path) rather than one prompt per problem — decide
+once for the contest. Dismissing either (Esc) counts as "stop" and, via the menu's new
+`on_close` hook, still advances the batch processor so a cancellation never wedges it.
 
 <!-- Add new entries above this line as decisions are made. -->

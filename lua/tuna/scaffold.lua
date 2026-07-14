@@ -170,8 +170,9 @@ data = open(sys.argv[1]).read().split()
 ---@param override string|table|nil `config.scaffold.templates[kind]`
 ---@param ext string target extension (e.g. "cpp", "py")
 ---@param builtins table<string, string> built-in templates for the kind, by ext
+---@param quiet boolean? suppress the "template not found" warning (for classification)
 ---@return string? # template content, or nil if no template exists for `ext`
-local function resolve_template(override, ext, builtins)
+local function resolve_template(override, ext, builtins, quiet)
     if type(override) == "table" then
         override = override[ext]
     end
@@ -181,9 +182,26 @@ local function resolve_template(override, ext, builtins)
         if c then
             return c
         end
-        utils.notify("scaffold: template '" .. override .. "' not found; using the built-in.", "WARN")
+        if not quiet then
+            utils.notify("scaffold: template '" .. override .. "' not found; using the built-in.", "WARN")
+        end
     end
     return builtins[ext]
+end
+
+---Resolve the template content a scaffold of `kind` + `ext` would be created with,
+---honouring `config.scaffold.templates`. Exposed (quietly — no warning on a missing
+---override) so `clean.lua` can recognise an untouched scaffold by its template.
+---@param kind string "checker" | "generator" | "brute" | "interactor"
+---@param ext string target extension
+---@param cfg table resolved buffer config
+---@return string? # template content, or nil if none exists for `ext`
+function M.template_for(kind, ext, cfg)
+    if not DEFAULT_TEMPLATES[kind] then
+        return nil
+    end
+    local scfg = (cfg and cfg.scaffold) or {}
+    return resolve_template(scfg.templates and scfg.templates[kind], ext, DEFAULT_TEMPLATES[kind], true)
 end
 
 ---Create (or open) the scaffold file for `kind` in the current problem directory.
@@ -239,7 +257,7 @@ function M.create(kind, bufnr, ext)
     end
 
     -- The file already exists: ask via the plugin's floating chooser (same UI as
-    -- the mode-switcher menu) rather than a plain `confirm` command-line prompt.
+    -- the `:Tuna` dashboard) rather than a plain `confirm` command-line prompt.
     local restore_winid = vim.api.nvim_get_current_win()
     widgets.menu({ "Open it", "Overwrite", "Cancel" }, '"' .. fname .. '" already exists', function(idx)
         if idx == 1 then

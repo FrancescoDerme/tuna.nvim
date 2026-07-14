@@ -310,6 +310,12 @@ M.defaults = {
     -- highlight is applied via the window's `winhighlight` (FloatBorder remap).
     floating_border = "rounded",
     floating_border_highlight = "FloatBorder",
+    -- Plugin-wide keys to move focus between panes in every multi-pane floating UI
+    -- (the results/runner UI and the `:Tuna clean` chooser form). Tuna handles this
+    -- itself so it works across floats, where the built-in `<C-w>hjkl` can't reach.
+    -- Given as { left, down, up, right }. (The testcase editor keeps its own 2-pane
+    -- `editor_ui.*_mappings.switch_window`, which also has an insert-mode variant.)
+    switch_window_keys = { "<C-h>", "<C-j>", "<C-k>", "<C-l>" },
     editor_ui = {
         width = 0.4,
         height = 0.6,
@@ -343,10 +349,8 @@ M.defaults = {
         show_nu = true,
         show_rnu = false,
         mappings = {
-            -- move focus between panes, by geometry, as { left, down, up, right }.
-            -- Tuna handles this itself so it works for the floating (popup)
-            -- interface too, where the built-in `<C-w>hjkl` can't cross floats.
-            switch_window = { "<M-h>", "<M-j>", "<M-k>", "<M-l>" },
+            -- Pane focus switching is the plugin-wide `switch_window_keys` (above),
+            -- shared with the clean form — not a runner-only mapping.
             run_again = "R",
             run_all_again = "<C-r>",
             kill = "K",

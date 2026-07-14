@@ -123,7 +123,7 @@ function RunnerUI:show_ui()
     -- Close maps on every window; ":q" handled per-window via WinClosed keyed on
     -- the *window id* (not buffer — the viewer borrows a detail pane's buffer, so
     -- a buffer-keyed autocmd would tear the UI down when the viewer is closed).
-    local switch = as_list(mappings.switch_window or {})
+    local switch = as_list(self.config.switch_window_keys or {})
     local dirs = { "h", "j", "k", "l" }
     for _, w in pairs(self.windows) do
         for _, key in ipairs(as_list(mappings.close)) do

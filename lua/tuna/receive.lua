@@ -288,18 +288,13 @@ local function store_task_testcases(filepath, tctbl, cfg)
 end
 
 ---Create the source file (from a template if configured) and write its testcases.
+---Always writes, overwriting any existing file — the caller decides whether to
+---proceed when the target already exists (see the floating override prompts in
+---`store_single_problem`/`store_contest`).
 ---@param filepath string source file absolute path
----@param confirm_overwrite boolean
 ---@param task tuna.CCTask
 ---@param cfg table resolved configuration for the target directory
-local function store_received_task(filepath, confirm_overwrite, task, cfg)
-    if confirm_overwrite and utils.file_exists(filepath) then
-        local choice = vim.fn.confirm('Overwrite "' .. filepath .. '"?', "&Yes\n&No", 2)
-        if choice ~= 1 then
-            return
-        end
-    end
-
+local function store_received_task(filepath, task, cfg)
     local file_extension = vim.fn.fnamemodify(filepath, ":e")
 
     -- Resolve the template: a string is a path with file-format modifiers; a
@@ -407,12 +402,35 @@ local function store_single_problem(task, cfg, finished)
             -- Re-resolve config at the chosen directory: a `.tuna.lua` there may
             -- change storage layout, templates, etc.
             local local_cfg = config.load_local_config_and_extend(vim.fn.fnamemodify(filepath, ":h"))
-            store_received_task(filepath, true, task, local_cfg)
-            if local_cfg.open_received_problems then
-                vim.cmd.edit(vim.fn.fnameescape(filepath))
+
+            local function proceed()
+                store_received_task(filepath, task, local_cfg)
+                if local_cfg.open_received_problems then
+                    vim.cmd.edit(vim.fn.fnameescape(filepath))
+                end
+                if finished then
+                    finished()
+                end
             end
-            if finished then
-                finished()
+
+            -- A duplicate is resolved in the floating UI (override / stop), not a
+            -- command-line prompt. Dismissing (Esc) counts as "stop".
+            if utils.file_exists(filepath) then
+                widgets.menu(
+                    { "Override", "Stop" },
+                    'Already exists: ' .. vim.fn.fnamemodify(filepath, ":t"),
+                    function(idx)
+                        if idx == 1 then
+                            proceed()
+                        elseif finished then
+                            finished()
+                        end
+                    end,
+                    vim.api.nvim_get_current_win(),
+                    finished
+                )
+            else
+                proceed()
             end
         end,
         finished
@@ -450,15 +468,16 @@ local function store_contest(tasks, cfg, finished)
                 local_cfg.floating_border_highlight,
                 not local_cfg.received_contests_prompt_extension,
                 function(file_extension)
-                    local opened = false
+                    -- Resolve every problem's path up front so we can decide once,
+                    -- for the whole contest, whether any already exist.
+                    local targets, existing = {}, 0
                     for _, task in ipairs(tasks) do
                         local problem_path = eval_path(local_cfg.received_contests_problems_path, task, file_extension, local_cfg)
                         if problem_path then
                             local filepath = directory .. "/" .. problem_path
-                            store_received_task(filepath, true, task, local_cfg)
-                            if local_cfg.open_received_contests and not opened then
-                                vim.cmd.edit(vim.fn.fnameescape(filepath))
-                                opened = true
+                            targets[#targets + 1] = { filepath = filepath, task = task }
+                            if utils.file_exists(filepath) then
+                                existing = existing + 1
                             end
                         else
                             utils.notify(
@@ -466,8 +485,39 @@ local function store_contest(tasks, cfg, finished)
                             )
                         end
                     end
-                    if finished then
-                        finished()
+
+                    local function write_all()
+                        local opened = false
+                        for _, t in ipairs(targets) do
+                            store_received_task(t.filepath, t.task, local_cfg)
+                            if local_cfg.open_received_contests and not opened then
+                                vim.cmd.edit(vim.fn.fnameescape(t.filepath))
+                                opened = true
+                            end
+                        end
+                        if finished then
+                            finished()
+                        end
+                    end
+
+                    -- One prompt for the whole contest: override every problem, or
+                    -- stop (write none). Dismissing (Esc) counts as "stop".
+                    if existing > 0 then
+                        widgets.menu(
+                            { "Override all", "Stop" },
+                            ("%d of %d problem(s) already exist"):format(existing, #targets),
+                            function(idx)
+                                if idx == 1 then
+                                    write_all()
+                                elseif finished then
+                                    finished()
+                                end
+                            end,
+                            vim.api.nvim_get_current_win(),
+                            finished
+                        )
+                    else
+                        write_all()
                     end
                 end,
                 finished

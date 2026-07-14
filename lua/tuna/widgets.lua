@@ -1,11 +1,15 @@
 -- lua/tuna/widgets.lua
 --
 -- Interactive floating-window widgets, built on Neovim's native window API
--- instead of nui.nvim (see DIFFERENCES.md). Three widgets are exposed:
+-- instead of nui.nvim (see DIFFERENCES.md). The widgets exposed:
 --
 --   * `input`  — a single-line prompt (used by receive to confirm paths)
 --   * `editor` — side-by-side input/output buffers for editing a testcase
 --   * `picker` — a list to choose a testcase from
+--   * `menu`   — a single-choice chooser (dashboard, confirmations; optional
+--                read-only preview pane beneath it)
+--   * `form`   — several single-choice lists visible at once (clean's directory,
+--                depth and match-threshold choosers)
 --
 -- Each widget is a module-level singleton holding the state of the one instance
 -- that can be visible at a time. This mirrors competitest's design and, more
@@ -458,23 +462,38 @@ end
 ---@field items string[]
 ---@field title string
 ---@field on_choice fun(idx: integer)?
+---@field on_close fun()?
+---@field skip_close boolean swallow the next WinClosed (used by resize)
 ---@field restore_winid integer?
 ---@field winid integer?
 ---@field menu_buf integer?
+---@field preview { title: string?, lines: string[], filetype: string? }?
+---@field preview_win integer?
+---@field preview_buf integer?
 local menu = { ui_visible = false }
 
----Open a generic single-choice menu (used by the mode switcher). `on_choice`
----receives the 1-based index of the picked item.
+---Open a generic single-choice menu (drives the `:Tuna` dashboard). `on_choice`
+---receives the 1-based index of the picked item. An optional `preview` renders a
+---read-only pane *under* the menu (used by `:Tuna clean` to show the file about to
+---be deleted); scroll it with `<C-d>`/`<C-u>` while the menu keeps focus.
 ---@param items string[]? menu labels, or `nil` to re-render after a resize
 ---@param title string? floating window title
 ---@param on_choice fun(idx: integer)? called with the chosen index
 ---@param restore_winid integer? window to refocus once the menu closes
-function M.menu(items, title, on_choice, restore_winid)
+---@param on_close fun()? called when the menu is dismissed without a choice (Esc /
+---  window closed) — so a caller that must always continue (e.g. receive's batch
+---  processor) isn't left hanging on a cancellation
+---@param preview { title: string?, lines: string[], filetype: string? }? content pane
+function M.menu(items, title, on_choice, restore_winid, on_close, preview)
     if items == nil then -- resize
         if not menu.ui_visible then
             return
         end
+        -- A resize closes and rebuilds the windows; keep that self-inflicted
+        -- WinClosed from being mistaken for a user cancellation (firing on_close).
+        menu.skip_close = true
         close_win(menu.winid)
+        close_win(menu.preview_win)
     else
         if #items == 0 then
             return
@@ -482,17 +501,41 @@ function M.menu(items, title, on_choice, restore_winid)
         menu.items = items
         menu.title = title and (" " .. title .. " ") or " Tuna "
         menu.on_choice = on_choice
+        menu.on_close = on_close
         menu.restore_winid = restore_winid
+        menu.preview = preview
     end
 
     local cfg = config.get_buffer_config(api.nvim_get_current_buf())
     local vim_width, vim_height = utils.get_ui_size()
+    local pv = menu.preview
+
     local width = #menu.title
     for _, l in ipairs(menu.items) do
         width = math.max(width, #l)
     end
+    if pv then
+        width = math.max(width, #(pv.title or "") + 4)
+        for _, l in ipairs(pv.lines) do
+            width = math.max(width, #l)
+        end
+    end
     width = math.min(math.max(width + 4, 24), vim_width - 4)
-    local height = math.min(#menu.items, vim_height - 4)
+    local col = math.floor((vim_width - width) / 2)
+
+    -- Lay out the menu (and, if present, the preview stacked beneath it), centring
+    -- the whole group vertically.
+    local menu_h = math.min(#menu.items, vim_height - 4)
+    local menu_row, pv_h, pv_row
+    if pv then
+        local avail = vim_height - 4 - (menu_h + 2) - 2 - 1 -- rows left for preview interior
+        pv_h = math.max(1, math.min(#pv.lines, avail))
+        local total = (menu_h + 2) + 1 + (pv_h + 2)
+        menu_row = math.max(0, math.floor((vim_height - total) / 2))
+        pv_row = menu_row + menu_h + 2 + 1
+    else
+        menu_row = math.floor((vim_height - menu_h) / 2)
+    end
 
     menu.menu_buf = api.nvim_create_buf(false, true)
     api.nvim_buf_set_lines(menu.menu_buf, 0, -1, false, menu.items)
@@ -501,14 +544,40 @@ function M.menu(items, title, on_choice, restore_winid)
 
     menu.winid = open_float(menu.menu_buf, true, {
         width = width,
-        height = height,
-        row = math.floor((vim_height - height) / 2),
-        col = math.floor((vim_width - width) / 2),
+        height = menu_h,
+        row = menu_row,
+        col = col,
         border = cfg.floating_border,
         border_highlight = cfg.floating_border_highlight,
         title = menu.title,
     })
     vim.wo[menu.winid].cursorline = true
+
+    if pv then
+        menu.preview_buf = api.nvim_create_buf(false, true)
+        api.nvim_buf_set_lines(menu.preview_buf, 0, -1, false, pv.lines)
+        menu.preview_win = open_float(menu.preview_buf, false, {
+            width = width,
+            height = pv_h,
+            row = pv_row,
+            col = col,
+            border = cfg.floating_border,
+            border_highlight = cfg.floating_border_highlight,
+            title = pv.title and (" " .. pv.title .. " ") or nil,
+        })
+        vim.wo[menu.preview_win].wrap = false
+        vim.wo[menu.preview_win].cursorline = false
+        vim.bo[menu.preview_buf].modifiable = false
+        -- Colour the preview via 'syntax' (not 'filetype') so no FileType autocmds
+        -- fire — a throwaway preview shouldn't attach LSP or run ftplugins.
+        if pv.filetype then
+            pcall(function()
+                vim.bo[menu.preview_buf].syntax = pv.filetype
+            end)
+        end
+    else
+        menu.preview_win, menu.preview_buf = nil, nil
+    end
     menu.ui_visible = true
 
     ---@param idx integer? chosen index, or nil if cancelled
@@ -518,11 +587,14 @@ function M.menu(items, title, on_choice, restore_winid)
         end
         menu.ui_visible = false
         close_win(menu.winid)
+        close_win(menu.preview_win)
         if menu.restore_winid and api.nvim_win_is_valid(menu.restore_winid) then
             api.nvim_set_current_win(menu.restore_winid)
         end
         if idx and menu.on_choice then
             menu.on_choice(idx)
+        elseif not idx and menu.on_close then
+            menu.on_close()
         end
     end
 
@@ -538,12 +610,241 @@ function M.menu(items, title, on_choice, restore_winid)
     map_keys(cfg.picker_ui.mappings.close, "n", menu.menu_buf, function()
         close(nil)
     end)
+
+    if pv then
+        -- Scroll the preview without leaving the menu.
+        local function scroll(key)
+            if menu.preview_win and api.nvim_win_is_valid(menu.preview_win) then
+                api.nvim_win_call(menu.preview_win, function()
+                    vim.cmd("normal! " .. api.nvim_replace_termcodes(key, true, false, true))
+                end)
+            end
+        end
+        map_keys("<C-d>", "n", menu.menu_buf, function()
+            scroll("<C-d>")
+        end)
+        map_keys("<C-u>", "n", menu.menu_buf, function()
+            scroll("<C-u>")
+        end)
+    end
+
     api.nvim_create_autocmd("WinClosed", {
         buffer = menu.menu_buf,
         callback = function()
+            if menu.skip_close then
+                menu.skip_close = false
+                return
+            end
             close(nil)
         end,
     })
+end
+
+--------------------------------------------------------------------------------
+-- Multi-choice form (several single-choice lists visible at once)
+--------------------------------------------------------------------------------
+
+---@class tuna.FormWidget
+---@field ui_visible boolean
+---@field sections { title: string, items: string[], sel: integer }[]
+---@field title string?
+---@field on_submit fun(indices: integer[])?
+---@field on_close fun()?
+---@field skip_close boolean swallow WinClosed events during a resize/teardown
+---@field restore_winid integer?
+---@field focused integer index of the focused section
+---@field wins integer[]
+---@field bufs integer[]
+local form = { ui_visible = false }
+
+---Title for a section, marking the focused one so focus is visible at a glance.
+---@param t string
+---@param focused boolean
+---@return string
+local function form_title(t, focused)
+    return (focused and " ▸ " or "   ") .. t .. " "
+end
+
+---Open a vertical stack of single-choice lists, all visible at once. Move within a
+---list with `j`/`k` (arrows), switch lists with the plugin-wide pane-navigation keys
+---(`switch_window_keys`, default `<C-hjkl>`) or `<Tab>`/`<S-Tab>`,
+---`<CR>` submits every list's current selection (a 1-based index per section), Esc
+---cancels. Unlike a chain of `menu`s, the user sees and sets all choices together.
+---@param sections { title: string, items: string[] }[]? sections, or `nil` to resize
+---@param title string? overall form title (unused chrome for now; kept for parity)
+---@param on_submit fun(indices: integer[])? receives one 1-based index per section
+---@param restore_winid integer? window to refocus once the form closes
+---@param on_close fun()? called when the form is dismissed without submitting
+function M.form(sections, title, on_submit, restore_winid, on_close)
+    if sections == nil then -- resize: keep each section's current selection
+        if not form.ui_visible then
+            return
+        end
+        for i, w in ipairs(form.wins) do
+            if api.nvim_win_is_valid(w) then
+                form.sections[i].sel = api.nvim_win_get_cursor(w)[1]
+            end
+        end
+        form.skip_close = true
+        for _, w in ipairs(form.wins) do
+            close_win(w)
+        end
+    else
+        if #sections == 0 then
+            return
+        end
+        form.sections = {}
+        for _, s in ipairs(sections) do
+            form.sections[#form.sections + 1] = { title = s.title, items = s.items, sel = 1 }
+        end
+        form.title = title
+        form.on_submit = on_submit
+        form.on_close = on_close
+        form.restore_winid = restore_winid
+        form.focused = 1
+    end
+
+    local cfg = config.get_buffer_config(api.nvim_get_current_buf())
+    local vim_width, vim_height = utils.get_ui_size()
+
+    -- Width = the widest item or section title across the whole form.
+    local width = 0
+    for _, s in ipairs(form.sections) do
+        width = math.max(width, #s.title + 4)
+        for _, it in ipairs(s.items) do
+            width = math.max(width, #it)
+        end
+    end
+    width = math.min(math.max(width + 2, 20), vim_width - 4)
+
+    -- Per-section heights, then vertically centre the whole stack (each section has
+    -- a 2-line border; a 1-line gap separates consecutive sections).
+    local n = #form.sections
+    local per_cap = math.max(1, math.floor((vim_height - 4 - 3 * n) / n))
+    local heights, total = {}, 0
+    for i, s in ipairs(form.sections) do
+        heights[i] = math.max(1, math.min(#s.items, per_cap))
+        total = total + heights[i] + 2
+    end
+    total = total + (n - 1)
+    local row = math.max(0, math.floor((vim_height - total) / 2))
+    local col = math.floor((vim_width - width) / 2)
+
+    form.skip_close = false -- fresh windows: a real close should count again
+    form.wins, form.bufs = {}, {}
+    for i, s in ipairs(form.sections) do
+        local b = api.nvim_create_buf(false, true)
+        api.nvim_buf_set_lines(b, 0, -1, false, s.items)
+        vim.bo[b].modifiable = false
+        vim.bo[b].filetype = "tuna"
+        local w = open_float(b, i == form.focused, {
+            width = width,
+            height = heights[i],
+            row = row,
+            col = col,
+            border = cfg.floating_border,
+            border_highlight = cfg.floating_border_highlight,
+            title = form_title(s.title, i == form.focused),
+        })
+        vim.wo[w].cursorline = true
+        api.nvim_win_set_cursor(w, { math.min(s.sel, #s.items), 0 })
+        form.wins[i] = w
+        form.bufs[i] = b
+        row = row + heights[i] + 3 -- border (2) + gap (1)
+    end
+    form.ui_visible = true
+
+    ---Tear all section windows down and restore focus.
+    local function teardown()
+        form.ui_visible = false
+        form.skip_close = true
+        for _, w in ipairs(form.wins) do
+            close_win(w)
+        end
+        form.skip_close = false
+        if form.restore_winid and api.nvim_win_is_valid(form.restore_winid) then
+            api.nvim_set_current_win(form.restore_winid)
+        end
+    end
+
+    local function submit()
+        if not form.ui_visible then
+            return
+        end
+        local sels = {}
+        for i, w in ipairs(form.wins) do
+            sels[i] = api.nvim_win_is_valid(w) and api.nvim_win_get_cursor(w)[1] or form.sections[i].sel
+        end
+        teardown()
+        if form.on_submit then
+            form.on_submit(sels)
+        end
+    end
+
+    local function cancel()
+        if not form.ui_visible then
+            return
+        end
+        teardown()
+        if form.on_close then
+            form.on_close()
+        end
+    end
+
+    ---Move section focus by `delta`, wrapping, and re-mark titles.
+    local function refocus(delta)
+        form.focused = (form.focused - 1 + delta) % n + 1
+        for i, w in ipairs(form.wins) do
+            if api.nvim_win_is_valid(w) then
+                api.nvim_win_set_config(w, {
+                    title = form_title(form.sections[i].title, i == form.focused),
+                    title_pos = "center",
+                })
+            end
+        end
+        if api.nvim_win_is_valid(form.wins[form.focused]) then
+            api.nvim_set_current_win(form.wins[form.focused])
+        end
+    end
+
+    -- Switch lists with the plugin-wide pane-navigation keys (`switch_window_keys`,
+    -- also used to move between result panes; default <C-hjkl>), given as
+    -- { left, down, up, right }: down/right go to the next list, up/left to the
+    -- previous. Tab/S-Tab are always accepted as a portable fallback.
+    local sw = cfg.switch_window_keys or {}
+    local next_keys, prev_keys = { "<Tab>" }, { "<S-Tab>" }
+    for _, k in ipairs({ sw[2], sw[4] }) do
+        next_keys[#next_keys + 1] = k
+    end
+    for _, k in ipairs({ sw[3], sw[1] }) do
+        prev_keys[#prev_keys + 1] = k
+    end
+
+    for i, b in ipairs(form.bufs) do
+        map_keys({ "j", "<down>" }, "n", b, function()
+            move_cursor(form.wins[i], #form.sections[i].items, 1)
+        end)
+        map_keys({ "k", "<up>" }, "n", b, function()
+            move_cursor(form.wins[i], #form.sections[i].items, -1)
+        end)
+        map_keys(next_keys, "n", b, function()
+            refocus(1)
+        end)
+        map_keys(prev_keys, "n", b, function()
+            refocus(-1)
+        end)
+        map_keys("<CR>", "n", b, submit)
+        map_keys({ "<Esc>", "<C-c>", "q", "Q" }, "n", b, cancel)
+        api.nvim_create_autocmd("WinClosed", {
+            buffer = b,
+            callback = function()
+                if form.skip_close then
+                    return
+                end
+                cancel()
+            end,
+        })
+    end
 end
 
 --------------------------------------------------------------------------------
@@ -555,6 +856,7 @@ function M.resize_widgets()
     M.picker(nil)
     M.input(nil)
     M.menu(nil)
+    M.form(nil)
 end
 
 return M
