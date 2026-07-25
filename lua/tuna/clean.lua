@@ -345,25 +345,56 @@ local function drop_buffer(path)
     return false
 end
 
+---The confirmation title for a single candidate, e.g.
+---`[2/7] cf/1234A/main.cpp, 100% match to solution template`.
+---@param files { path: string, rel: string, reason: string }[]
+---@param i integer
+---@return string
+local function confirm_title(files, i)
+    return ("[%d/%d] %s, %s"):format(i, #files, files[i].rel, files[i].reason)
+end
+
+---A single width to use for *every* file's confirmation menu this run, so the float
+---doesn't jump size as filenames/contents vary from one file to the next. It fits the
+---longest title it will show (the file path + match reason the user reviews), then
+---clamps to `clean.min_width`/`clean.max_width` (fractions of the editor width); a
+---longer title truncates and the preview scrolls horizontally, both stable-width.
+---@param files { path: string, rel: string, reason: string }[]
+---@param cfg table
+---@return integer
+local function confirm_width(files, cfg)
+    local longest = 0
+    for i = 1, #files do
+        longest = math.max(longest, #confirm_title(files, i))
+    end
+    local vim_width = utils.get_ui_size()
+    local clean = cfg.clean or {}
+    local lo = math.floor(vim_width * (clean.min_width or 0.5))
+    local hi = math.floor(vim_width * (clean.max_width or 0.7))
+    return math.max(lo, math.min(longest + 4, hi))
+end
+
 ---Confirm and delete the candidate files one at a time, via a menu per file.
 ---@param files { path: string, rel: string, reason: string }[]
 ---@param i integer index into `files`
 ---@param restore integer? window to refocus after each menu
 ---@param stats { deleted: integer }
-local function confirm_each(files, i, restore, stats)
+---@param width integer fixed menu width shared by every file this run
+local function confirm_each(files, i, restore, stats, width)
     if i > #files then
         utils.notify(("clean: removed %d file%s."):format(stats.deleted, plural(stats.deleted)), "INFO")
         return
     end
     local f = files[i]
-    local title = ("[%d/%d] delete %s (%s)?"):format(i, #files, f.rel, f.reason)
-    -- Preview the file to be deleted in a pane below the prompt (scroll with C-d/C-u).
+    -- Preview the file to be deleted in a pane below the prompt: scroll it with
+    -- <C-d>/<C-u>, or step into it with the pane-switch keys (`switch_window_keys`).
     local preview = {
         title = f.rel,
         lines = vim.split(utils.read_file(f.path) or "", "\n", { plain = true }),
         filetype = vim.filetype.match({ filename = f.path }),
+        width = width,
     }
-    widgets.menu({ "Delete", "Keep", "Stop" }, title, function(idx)
+    widgets.menu({ "Delete", "Keep", "Stop" }, confirm_title(files, i), function(idx)
         if idx == 3 then -- Stop
             utils.notify(("clean: stopped, removed %d file%s."):format(stats.deleted, plural(stats.deleted)), "INFO")
             return
@@ -381,7 +412,7 @@ local function confirm_each(files, i, restore, stats)
                 utils.notify("clean: could not delete " .. f.rel .. ".", "WARN")
             end
         end
-        confirm_each(files, i + 1, restore, stats) -- idx 2 (Keep) falls through here too
+        confirm_each(files, i + 1, restore, stats, width) -- idx 2 (Keep) falls through here too
     end, restore, nil, preview)
 end
 
@@ -417,7 +448,7 @@ local function scan_and_confirm(dir, cfg, restore, depth, threshold)
         utils.notify("clean: no unused files found in " .. dir .. ".", "INFO")
         return
     end
-    confirm_each(files, 1, restore, { deleted = 0 })
+    confirm_each(files, 1, restore, { deleted = 0 }, confirm_width(files, cfg))
 end
 
 ---Entry point for `:Tuna clean`. Choose a directory, recursion depth, and match

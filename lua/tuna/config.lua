@@ -121,6 +121,15 @@ M.defaults = {
         templates = { checker = nil, generator = nil, brute = nil, interactor = nil },
     },
 
+    -- clean (:Tuna clean) — remove created-but-unused files. All of a run's per-file
+    -- confirmation menus share one width, sized to the longest title (file path +
+    -- match reason) it will show, then clamped to this fraction of the editor width so
+    -- the float neither shrinks to nothing nor balloons; a longer title is truncated.
+    clean = {
+        min_width = 0.5, -- floor, as a fraction of the editor width
+        max_width = 0.7, -- ceiling, as a fraction of the editor width
+    },
+
     -- testcase storage (see DIFFERENCES.md: layout is fully customizable)
     testcases_directory = ".", -- where testcases live, relative to the source file
     testcases_storage = "files", -- "files" | "single_file" | "directory"
