@@ -212,8 +212,7 @@ local function classify(full, ext, base, kinds, cfg, threshold)
         return nil
     end
     local kind = kinds[base]
-    local tmpl = kind and require("tuna.scaffold").template_for(kind, ext, cfg)
-        or solution_template(full, ext, cfg)
+    local tmpl = kind and require("tuna.scaffold").template_for(kind, ext, cfg) or solution_template(full, ext, cfg)
     if tmpl then
         local sim = similarity(content, tmpl)
         if sim >= threshold then
@@ -366,14 +365,17 @@ local function confirm_each(files, i, restore, stats)
     }
     widgets.menu({ "Delete", "Keep", "Stop" }, title, function(idx)
         if idx == 3 then -- Stop
-            utils.notify(("clean: stopped — removed %d file%s."):format(stats.deleted, plural(stats.deleted)), "INFO")
+            utils.notify(("clean: stopped, removed %d file%s."):format(stats.deleted, plural(stats.deleted)), "INFO")
             return
         end
         if idx == 1 then -- Delete
             if utils.delete_file(f.path) then
                 stats.deleted = stats.deleted + 1
                 if drop_buffer(f.path) then
-                    utils.notify("clean: deleted " .. f.rel .. " (its buffer has unsaved changes and was kept).", "WARN")
+                    utils.notify(
+                        "clean: deleted " .. f.rel .. " (its buffer has unsaved changes and was kept).",
+                        "WARN"
+                    )
                 end
             else
                 utils.notify("clean: could not delete " .. f.rel .. ".", "WARN")
@@ -446,58 +448,63 @@ function M.clean(bufnr)
     -- Directory, recursion depth and match threshold are chosen together, all three
     -- lists visible at once (`switch_window_keys` or Tab switch lists, <CR> submits).
     -- Any "Custom…"/"Other directory…" choice defers to a text prompt afterwards.
-    widgets.form({
-        { title = "Directory", items = dir_items },
-        { title = "Recursion depth", items = labels_of(DEPTH_CHOICES) },
-        { title = "Match threshold", items = labels_of(THRESHOLD_CHOICES) },
-    }, "Clean", function(sels)
-        -- Resolve each choice (some open a follow-up prompt), then scan.
-        local function resolve_dir(cont)
-            if sels[1] == #dir_items then
-                ask("Directory to clean", dirs[1] or vim.fs.normalize(vim.fn.getcwd()), cont)
-            else
-                cont(dirs[sels[1]])
+    widgets.form(
+        {
+            { title = "Directory", items = dir_items },
+            { title = "Recursion depth", items = labels_of(DEPTH_CHOICES) },
+            { title = "Match threshold", items = labels_of(THRESHOLD_CHOICES) },
+        },
+        "Clean",
+        function(sels)
+            -- Resolve each choice (some open a follow-up prompt), then scan.
+            local function resolve_dir(cont)
+                if sels[1] == #dir_items then
+                    ask("Directory to clean", dirs[1] or vim.fs.normalize(vim.fn.getcwd()), cont)
+                else
+                    cont(dirs[sels[1]])
+                end
             end
-        end
-        local function resolve_depth(cont)
-            local c = DEPTH_CHOICES[sels[2]]
-            if c.custom then
-                ask("Recursion depth (a number ≥ 1)", "5", function(txt)
-                    local d = tonumber(txt)
-                    if not d or d < 1 then
-                        utils.notify("clean: '" .. txt .. "' is not a valid depth.")
-                        return
-                    end
-                    cont(math.floor(d))
-                end)
-            else
-                cont(c[2])
+            local function resolve_depth(cont)
+                local c = DEPTH_CHOICES[sels[2]]
+                if c.custom then
+                    ask("Recursion depth (a number ≥ 1)", "5", function(txt)
+                        local d = tonumber(txt)
+                        if not d or d < 1 then
+                            utils.notify("clean: '" .. txt .. "' is not a valid depth.")
+                            return
+                        end
+                        cont(math.floor(d))
+                    end)
+                else
+                    cont(c[2])
+                end
             end
-        end
-        local function resolve_threshold(cont)
-            local c = THRESHOLD_CHOICES[sels[3]]
-            if c.custom then
-                ask("Match threshold (a percent 1-100)", "95", function(txt)
-                    local p = tonumber((txt:gsub("%%", "")))
-                    if not p or p <= 0 or p > 100 then
-                        utils.notify("clean: '" .. txt .. "' is not a valid percentage.")
-                        return
-                    end
-                    cont(p / 100)
-                end)
-            else
-                cont(c[2])
+            local function resolve_threshold(cont)
+                local c = THRESHOLD_CHOICES[sels[3]]
+                if c.custom then
+                    ask("Match threshold (a percent 1-100)", "95", function(txt)
+                        local p = tonumber((txt:gsub("%%", "")))
+                        if not p or p <= 0 or p > 100 then
+                            utils.notify("clean: '" .. txt .. "' is not a valid percentage.")
+                            return
+                        end
+                        cont(p / 100)
+                    end)
+                else
+                    cont(c[2])
+                end
             end
-        end
 
-        resolve_dir(function(dir)
-            resolve_depth(function(depth)
-                resolve_threshold(function(threshold)
-                    scan_and_confirm(dir, cfg, restore, depth, threshold)
+            resolve_dir(function(dir)
+                resolve_depth(function(depth)
+                    resolve_threshold(function(threshold)
+                        scan_and_confirm(dir, cfg, restore, depth, threshold)
+                    end)
                 end)
             end)
-        end)
-    end, restore)
+        end,
+        restore
+    )
 end
 
 return M
