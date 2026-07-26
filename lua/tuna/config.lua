@@ -341,7 +341,19 @@ M.defaults = {
     -- itself so it works across floats, where the built-in `<C-w>hjkl` can't reach.
     -- Given as { left, down, up, right }. (The testcase editor keeps its own 2-pane
     -- `editor_ui.*_mappings.switch_window`, which also has an insert-mode variant.)
-    switch_window_keys = { "<C-h>", "<C-j>", "<C-k>", "<C-l>" },
+    -- Plugin-wide keys that dismiss a floating widget (prompt, picker, menu, chooser
+    -- form, testcase editor), bound in one place so the same press means the same thing
+    -- in all of them. The default `insert` list is empty on purpose: `<Esc>` there
+    -- leaves insert mode, as everywhere else in vim, so cancelling something being
+    -- typed into takes a second, deliberate press — put `"<Esc>"` in `insert` to have
+    -- it cancel straight from insert mode instead. (`<C-c>` is not worth listing under
+    -- `insert`: Neovim handles `i_CTRL-C` itself and never runs a mapping for it.)
+    -- Per-widget keys (`editor_ui.*_mappings.cancel`, `picker_ui.mappings.close`) are
+    -- added to these rather than replacing them.
+    cancel_keys = {
+        normal = { "<Esc>", "<C-c>" },
+        insert = {},
+    },
     editor_ui = {
         width = 0.4,
         height = 0.6,

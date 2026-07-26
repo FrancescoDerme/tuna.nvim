@@ -16,6 +16,11 @@
 -- importantly, lets `resize_widgets()` rebuild whatever is open after a
 -- `VimResized` event by re-invoking the same function with a `nil` first arg.
 --
+-- Every widget is dismissed through `map_cancel`, which is the single place cancel
+-- keys are bound (see the dismissal contract there): the same keypress means the same
+-- thing whether the widget in front of you is a receive path prompt, a testcase
+-- editor or a clean confirmation.
+--
 -- A few native APIs used throughout, briefly:
 --   * `nvim_create_buf(listed, scratch)` — make a buffer to back a window.
 --   * `nvim_open_win(buf, enter, cfg)`   — open a floating window; `cfg.relative
@@ -76,17 +81,73 @@ local function close_win(winid)
     end
 end
 
----Normalise a mapping spec (a string or list of strings) and bind every key.
+---A mapping spec is written as a single key or a list of them; this is the one place
+---that difference is smoothed out.
+---@param spec string|string[]|nil
+---@return string[]
+local function to_list(spec)
+    if type(spec) == "string" then
+        return { spec }
+    end
+    return spec or {}
+end
+
+---Bind every key of a mapping spec.
 ---@param spec string|string[]|nil
 ---@param mode string|string[] keymap mode(s)
 ---@param bufnr integer buffer the mapping is local to
 ---@param fn function callback invoked on key press
 local function map_keys(spec, mode, bufnr, fn)
-    if type(spec) == "string" then
-        spec = { spec }
-    end
-    for _, lhs in ipairs(spec or {}) do
+    for _, lhs in ipairs(to_list(spec)) do
         vim.keymap.set(mode, lhs, fn, { buffer = bufnr, noremap = true, nowait = true })
+    end
+end
+
+--------------------------------------------------------------------------------
+-- Dismissal contract
+--------------------------------------------------------------------------------
+
+-- Every widget in this file is cancelled the same way — prompt, picker, menu, chooser
+-- form and testcase editor alike — so the habit learned on one carries to all of them:
+--
+--   * `<Esc>` **from normal mode cancels.** No widget is exempt: an editor holding a
+--     half-written testcase closes on the same key as a menu.
+--   * By default `<Esc>` **while inserting only leaves insert mode**, which is what the
+--     key means everywhere else in vim. Cancelling something being typed into therefore
+--     takes a second, deliberate press — the reason a stray Esc in a receive path
+--     prompt no longer throws away a whole download.
+--   * Both lists are `config.cancel_keys`, so a user who prefers Esc to cancel straight
+--     from insert mode says so once (`cancel_keys.insert = { "<Esc>" }`) and every
+--     widget follows. Nothing is filtered out behind their back; the two-press default
+--     is a default, not a rule.
+--   * A widget adds keys of its own on top (`q`/`Q` on the choosers, `<C-q>` while
+--     editing a testcase) — its own list extends the shared one rather than replacing
+--     it, which is what keeps the widgets consistent with each other.
+--
+-- Worth knowing when configuring: `<C-c>` cancels from normal mode, but listing it
+-- under `insert` does nothing — Neovim handles `i_CTRL-C` itself and never runs a
+-- mapping for it (verified). `<Esc>` is the key to use there.
+--
+-- `map_cancel` is the only place cancel keys are bound, so a widget added later cannot
+-- quietly grow its own dismissal behaviour.
+
+---Bind a widget's cancel keys: the shared `config.cancel_keys` plus whatever the
+---widget itself contributes, per mode.
+---@param bufs integer|integer[] buffer(s) the widget is made of
+---@param cancel fun() the widget's teardown
+---@param opts { normal: string|string[]|nil, insert: string|string[]|nil }? the
+---  widget's own keys, added to the shared ones
+local function map_cancel(bufs, cancel, opts)
+    opts = opts or {}
+    if type(bufs) == "number" then
+        bufs = { bufs }
+    end
+    local shared = (config.current_setup or config.defaults or {}).cancel_keys or {}
+    local normal = vim.list_extend(vim.list_extend({}, to_list(shared.normal)), to_list(opts.normal))
+    local insert = vim.list_extend(vim.list_extend({}, to_list(shared.insert)), to_list(opts.insert))
+    for _, b in ipairs(bufs) do
+        map_keys(normal, "n", b, cancel)
+        map_keys(insert, "i", b, cancel)
     end
 end
 
@@ -197,7 +258,7 @@ function M.input(title, default_text, border, border_highlight, callback_only, o
     map_keys("<CR>", { "n", "i" }, input.bufnr, function()
         finish(true)
     end)
-    map_keys({ "<Esc>", "<C-c>" }, { "n", "i" }, input.bufnr, function()
+    map_cancel(input.bufnr, function()
         finish(false)
     end)
 
@@ -347,12 +408,19 @@ function M.editor(bufnr, tcnum, input_content, output_content, callback, restore
                 save()
                 close()
             end)
-            map_keys(maps.cancel, mode, b, close)
         end
     end
 
     bind(ui.normal_mode_mappings, "n")
     bind(ui.insert_mode_mappings, "i")
+    -- Cancelling goes through the shared contract, on top of the editor's own keys
+    -- (`q`/`Q`, and `<C-q>` while inserting). Discarding a testcase being written is
+    -- the costliest cancellation in the plugin, which is exactly what the two-press
+    -- default protects: the first `<Esc>` only leaves insert mode.
+    map_cancel({ editor.input_buf, editor.output_buf }, close, {
+        normal = ui.normal_mode_mappings.cancel,
+        insert = ui.insert_mode_mappings.cancel,
+    })
 
     for _, b in ipairs({ editor.input_buf, editor.output_buf }) do
         -- `:w` / `:wq` save the testcase; closing either window tears down both.
@@ -453,9 +521,9 @@ function M.picker(bufnr, tctbl, title, callback, restore_winid)
         local row = api.nvim_win_get_cursor(picker.winid)[1]
         close(picker.tcnums[row])
     end)
-    map_keys(cfg.picker_ui.mappings.close, "n", picker.menu_buf, function()
+    map_cancel(picker.menu_buf, function()
         close(nil)
-    end)
+    end, { normal = cfg.picker_ui.mappings.close })
     api.nvim_create_autocmd("WinClosed", {
         buffer = picker.menu_buf,
         callback = function()
@@ -679,9 +747,9 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
     map_keys(cfg.picker_ui.mappings.submit, "n", menu.menu_buf, function()
         close(api.nvim_win_get_cursor(menu.winid)[1])
     end)
-    map_keys(cfg.picker_ui.mappings.close, "n", menu.menu_buf, function()
+    map_cancel(menu.menu_buf, function()
         close(nil)
-    end)
+    end, { normal = cfg.picker_ui.mappings.close })
 
     if pv then
         -- Scroll the preview without leaving the menu.
@@ -731,9 +799,9 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
         map_keys(cfg.picker_ui.mappings.submit, "n", menu.preview_buf, function()
             close(api.nvim_win_get_cursor(menu.winid)[1])
         end)
-        map_keys(cfg.picker_ui.mappings.close, "n", menu.preview_buf, function()
+        map_cancel(menu.preview_buf, function()
             close(nil)
-        end)
+        end, { normal = cfg.picker_ui.mappings.close })
     end
 
     api.nvim_create_autocmd("WinClosed", {
@@ -1077,7 +1145,9 @@ function M.form(sections, title, on_submit, restore_winid, on_close)
             refocus(-1)
         end)
         map_keys("<CR>", "n", b, submit)
-        map_keys({ "<Esc>", "<C-c>", "q", "Q" }, "n", b, cancel)
+        -- `q`/`Q` on top of the shared cancel keys; a section being typed into keeps
+        -- `<Esc>` for leaving insert mode, so cancelling from there takes a second one.
+        map_cancel(b, cancel, { normal = { "q", "Q" } })
 
         if s.custom then
             local edit_row = #s.items + 1

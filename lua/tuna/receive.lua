@@ -418,7 +418,9 @@ local function store_single_problem(task, cfg, finished)
             if utils.file_exists(filepath) then
                 widgets.menu(
                     { "Override", "Stop" },
-                    'Already exists: ' .. vim.fn.fnamemodify(filepath, ":t"),
+                    -- `:~:.` keeps the title readable: relative to the cwd when the
+                    -- problem lives under it, otherwise with `$HOME` as `~`.
+                    vim.fn.fnamemodify(filepath, ":~:.") .. " already exists",
                     function(idx)
                         if idx == 1 then
                             proceed()
@@ -486,13 +488,20 @@ local function store_contest(tasks, cfg, finished)
                         end
                     end
 
-                    local function write_all()
+                    ---@param skip_existing boolean? keep what is already on disk and
+                    ---  write only the problems missing from the contest directory
+                    local function write_all(skip_existing)
                         local opened = false
                         for _, t in ipairs(targets) do
-                            store_received_task(t.filepath, t.task, local_cfg)
-                            if local_cfg.open_received_contests and not opened then
-                                vim.cmd.edit(vim.fn.fnameescape(t.filepath))
-                                opened = true
+                            if not (skip_existing and utils.file_exists(t.filepath)) then
+                                store_received_task(t.filepath, t.task, local_cfg)
+                                -- Open the first problem actually written, so a partial
+                                -- download lands on something new rather than on a
+                                -- problem that was already there.
+                                if local_cfg.open_received_contests and not opened then
+                                    vim.cmd.edit(vim.fn.fnameescape(t.filepath))
+                                    opened = true
+                                end
                             end
                         end
                         if finished then
@@ -500,18 +509,39 @@ local function store_contest(tasks, cfg, finished)
                         end
                     end
 
-                    -- One prompt for the whole contest: override every problem, or
-                    -- stop (write none). Dismissing (Esc) counts as "stop".
+                    -- One prompt for the whole contest: override every problem, write
+                    -- only the ones missing, or stop (write none). Dismissing (Esc)
+                    -- counts as "stop". The middle option is offered only when there is
+                    -- something missing to write — with the contest complete on disk it
+                    -- would do nothing.
                     if existing > 0 then
+                        local items, actions = { "Override all" }, {
+                            function()
+                                write_all()
+                            end,
+                        }
+                        if existing < #targets then
+                            items[#items + 1] = "Write missing only"
+                            actions[#actions + 1] = function()
+                                write_all(true)
+                            end
+                        end
+                        items[#items + 1] = "Stop"
+                        actions[#actions + 1] = function()
+                            if finished then
+                                finished()
+                            end
+                        end
                         widgets.menu(
-                            { "Override all", "Stop" },
-                            ("%d of %d problem(s) already exist"):format(existing, #targets),
+                            items,
+                            ("%s already exists (%d of %d problem%s)"):format(
+                                vim.fn.fnamemodify(directory, ":~:."),
+                                existing,
+                                #targets,
+                                #targets == 1 and "" or "s"
+                            ),
                             function(idx)
-                                if idx == 1 then
-                                    write_all()
-                                elseif finished then
-                                    finished()
-                                end
+                                actions[idx]()
                             end,
                             vim.api.nvim_get_current_win(),
                             finished

@@ -195,7 +195,19 @@ function M.run_testcases(bufnr, list, compile, only_show)
     end
 
     local r = M.runners[bufnr]
-    if not only_show then
+    if only_show then
+        -- Opening the UI without a run: show the testcases themselves (inputs and
+        -- expected outputs, reviewable in the detail panes) rather than an empty
+        -- window. Only when there is nothing to show yet — a runner that has already
+        -- run keeps its results.
+        if #r.tcdata == 0 or r.preloaded then
+            if next(tctbl) == nil then
+                utils.notify("no testcases to show.", "WARN")
+                return
+            end
+            r:load_testcases(tctbl)
+        end
+    else
         r:kill_all_processes()
         r:run_testcases(tctbl, compile)
     end

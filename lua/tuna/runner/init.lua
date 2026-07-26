@@ -35,6 +35,7 @@ local M = {}
 ---@field compile boolean whether this run compiles first
 ---@field next_tc integer index of the next unstarted testcase
 ---@field completed boolean whether the current run has finished
+---@field preloaded boolean? rows are testcases listed for review, never run (see `load_testcases`)
 ---@field ui table? results UI (set by runner_ui)
 ---@field on_complete fun(runner: tuna.TCRunner)? called once when a run finishes
 local TCRunner = core.extend()
@@ -134,36 +135,73 @@ function M.new(bufnr)
     }, TCRunner)
 end
 
+---Build the `tcdata` rows for a set of testcases: the compile pseudo-testcase first
+---when compiling, then one row per testcase in ascending order. Split out of
+---`run_testcases` because the rows are also what the UI needs to *show* testcases that
+---have not been run yet (see `load_testcases`).
+---@param tctbl table<integer, { input: string, output: string? }>
+---@param do_compile boolean? whether the run will compile first (defaults to true)
+function TCRunner:build_rows(tctbl, do_compile)
+    if do_compile == nil then
+        do_compile = true
+    end
+    self.compile = do_compile and self.cc ~= nil
+
+    self.tcdata = {}
+    if self.compile then -- compilation is testcase #1
+        table.insert(self.tcdata, { tcnum = "Compile", stdin = "", expected = nil, compile = true })
+    end
+    -- Insert testcases in ascending tcnum order for a stable display.
+    local nums = vim.tbl_keys(tctbl)
+    table.sort(nums)
+    local timelimit = (self.config.maximum_time and self.config.maximum_time > 0) and self.config.maximum_time or nil
+    for _, tcnum in ipairs(nums) do
+        local tc = tctbl[tcnum]
+        table.insert(self.tcdata, {
+            tcnum = tcnum,
+            stdin = tc.input or "",
+            expected = tc.output,
+            timelimit = timelimit,
+        })
+    end
+    self.tc_size = #self.tcdata
+end
+
+---Fill the UI with testcases without running anything, so `:Tuna show_ui` before any
+---`:Tuna run` shows what there is to run — each testcase's input and expected output,
+---reviewable in the detail panes — instead of an empty results window. The rows are
+---built exactly as a run would build them (compile row included), so `R` on a row and
+---`<C-r>` for all of them work straight from this view.
+---@param tctbl table<integer, { input: string, output: string? }>
+---@param do_compile boolean? whether a run from here would compile first
+function TCRunner:load_testcases(tctbl, do_compile)
+    self:build_rows(tctbl, do_compile)
+    for _, tc in ipairs(self.tcdata) do
+        self:reset_row(tc)
+        tc.status = "NOT RUN"
+        -- `TunaDone` is the unstyled group: "not run" is the absence of a verdict, not
+        -- a bad one, so it must not read like a warning.
+        tc.hlgroup = "TunaDone"
+    end
+    -- Nothing is in flight, so the runner counts as idle: a re-run starts from a clean
+    -- state and `check_complete` has nothing to wait for.
+    self.next_tc = self.tc_size + 1
+    self.completed = true
+    -- Marks these rows as "listed, never run", so re-opening the UI picks up testcases
+    -- added or edited since — results, by contrast, are kept as they are.
+    self.preloaded = true
+    self:update_ui(true)
+end
+
 ---Run testcases. Pass a `tctbl` for a fresh run, or `nil` to re-run the testcases
 ---loaded by the previous call (keeping their inputs/expected outputs).
 ---@param tctbl table<integer, { input: string, output: string? }>? testcases, or nil to re-run
 ---@param do_compile boolean? whether to compile first (defaults to true)
 function TCRunner:run_testcases(tctbl, do_compile)
+    self.preloaded = false
     if tctbl then
         tools.save_sources(self.bufnr, self.config)
-
-        if do_compile == nil then
-            do_compile = true
-        end
-        self.compile = do_compile and self.cc ~= nil
-
-        self.tcdata = {}
-        if self.compile then -- compilation is testcase #1
-            table.insert(self.tcdata, { tcnum = "Compile", stdin = "", expected = nil, compile = true })
-        end
-        -- Insert testcases in ascending tcnum order for a stable display.
-        local nums = vim.tbl_keys(tctbl)
-        table.sort(nums)
-        local timelimit = (self.config.maximum_time and self.config.maximum_time > 0) and self.config.maximum_time or nil
-        for _, tcnum in ipairs(nums) do
-            local tc = tctbl[tcnum]
-            table.insert(self.tcdata, {
-                tcnum = tcnum,
-                stdin = tc.input or "",
-                expected = tc.output,
-                timelimit = timelimit,
-            })
-        end
+        self:build_rows(tctbl, do_compile)
     end
 
     -- Reset per-run state (so re-runs start clean).
