@@ -41,21 +41,27 @@ M.actions = {
 }
 
 -- The ready-made preset, enabled with `keymaps.preset = "<leader>t"` (any prefix).
--- Suffixes are grouped so which-key shows one "Tuna" group with a "download" subgroup:
+-- Suffixes are grouped by subject, so which-key shows one "Tuna" group with a
+-- "testcases" and a "download" subgroup under it:
 --
---   <leader>ta  add testcase        <leader>tr  run            <leader>tdt  testcases
---   <leader>te  edit testcase       <leader>tu  show ui        <leader>tdp  problem
---   <leader>tx  delete testcase     <leader>ts  submit         <leader>tdc  contest
---   <leader>tn  next problem        <leader>tm  dashboard      <leader>tds  temp sync
---   <leader>tp  previous problem    <leader>tc  clean          <leader>tt   temp
+--   <leader>tta  add testcase       <leader>tr  run            <leader>tdt  testcases
+--   <leader>tte  edit testcase      <leader>tu  show ui        <leader>tdp  problem
+--   <leader>ttd  delete testcase    <leader>ts  submit         <leader>tdc  contest
+--   <leader>tn   next problem       <leader>tm  dashboard      <leader>tds  temp sync
+--   <leader>tp   previous problem   <leader>tw  temp scratch
+--
+-- No group prefix is itself a mapping, so none of them costs a `timeoutlen` wait.
+-- `:Tuna clean` is deliberately absent: it is run once in a while, not during a
+-- contest, and the dashboard is where it belongs (the `clean` action is still there
+-- for anyone who wants to map it).
 --
 -- `buffer` maps are set on solution filetypes only; `global` ones are always there,
 -- because they are what you reach for when no solution is open yet.
 M.preset = {
     buffer = {
-        add_testcase = "a",
-        edit_testcase = "e",
-        delete_testcase = "x",
+        add_testcase = "ta",
+        edit_testcase = "te",
+        delete_testcase = "td",
         run = "r",
         show_ui = "u",
         submit = "s",
@@ -65,8 +71,7 @@ M.preset = {
     },
     global = {
         dashboard = "m",
-        clean = "c",
-        temp = "t",
+        temp = "w", -- w for write-ahead: the scratch written before the problem exists
         temp_sync = "ds",
         receive_problem = "dp",
         receive_contest = "dc",
