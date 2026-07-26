@@ -407,6 +407,8 @@ local function store_single_problem(task, cfg, finished)
                 store_received_task(filepath, task, local_cfg)
                 if local_cfg.open_received_problems then
                     vim.cmd.edit(vim.fn.fnameescape(filepath))
+                    utils.place_cursor(local_cfg)
+                    require("tuna.temp").absorb(filepath, local_cfg)
                 end
                 if finished then
                     finished()
@@ -500,6 +502,10 @@ local function store_contest(tasks, cfg, finished)
                                 -- problem that was already there.
                                 if local_cfg.open_received_contests and not opened then
                                     vim.cmd.edit(vim.fn.fnameescape(t.filepath))
+                                    utils.place_cursor(local_cfg)
+                                    -- A `:Tuna temp` scratch waiting for this contest
+                                    -- folds into the first problem opened.
+                                    require("tuna.temp").absorb(t.filepath, local_cfg)
                                     opened = true
                                 end
                             end

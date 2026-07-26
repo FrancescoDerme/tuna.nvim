@@ -24,6 +24,7 @@ local subcommand_args = {
     checker = { "on", "off", "toggle" },
     compare = { "exact", "squish", "float", "default" },
     submit = { "clear" },
+    temp = { "sync" },
 }
 
 -- Third-level completions: `:Tuna run interactive <Tab>` offers its input sources.
@@ -477,6 +478,23 @@ M.subcommands = {
     end,
     clean = function()
         require("tuna.clean").clean(api.nvim_get_current_buf())
+    end,
+    -- Contest navigation: step to the sibling problem directory either side of this
+    -- one. Deliberately not routed through `solution_bufnr`, since navigating away
+    -- from a helper file (say `gen.cpp`) is a perfectly reasonable thing to do.
+    next = function()
+        require("tuna.navigate").next(api.nvim_get_current_buf())
+    end,
+    prev = function()
+        require("tuna.navigate").prev(api.nvim_get_current_buf())
+    end,
+    temp = function(args)
+        local temp = require("tuna.temp")
+        if args[1] == "sync" then
+            temp.sync(api.nvim_get_current_buf())
+        else
+            temp.start(api.nvim_get_current_buf())
+        end
     end,
     dashboard = function()
         require("tuna.dashboard").open(api.nvim_get_current_buf())

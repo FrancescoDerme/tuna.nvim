@@ -246,6 +246,62 @@ end
 
 ---------------- UI ----------------
 
+---Put the cursor where `config.template_cursor` says a freshly-opened solution should
+---start being typed. Templates open on their header, which is never that place. The
+---spec is a number (that line), a Lua pattern (the first line matching it), a
+---`{ pattern = …, offset = n }` table (that many lines below the match — a landmark
+---like `void solve()` is what one recognizes, but the line *under* it is where the
+---typing goes), or a function computing the line. A pattern that matches nothing
+---leaves the cursor alone, so a spec written for one language does no harm in another;
+---anything out of range is clamped. Scheduled, so it lands after whatever opened the
+---buffer has finished settling it.
+---@param cfg table resolved configuration
+---@param bufnr integer? defaults to the current buffer
+function M.place_cursor(cfg, bufnr)
+    local spec = cfg.template_cursor
+    if not spec then
+        return
+    end
+    bufnr = bufnr or vim.api.nvim_get_current_buf()
+    vim.schedule(function()
+        if not vim.api.nvim_buf_is_valid(bufnr) then
+            return
+        end
+        local pattern, offset
+        if type(spec) == "string" then
+            pattern, offset = spec, 0
+        elseif type(spec) == "table" then
+            pattern, offset = spec.pattern, spec.offset or 0
+        end
+
+        local line
+        if type(spec) == "number" then
+            line = spec
+        elseif type(spec) == "function" then
+            local ok, res = pcall(spec, bufnr)
+            line = ok and tonumber(res) or nil
+        elseif pattern then
+            for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+                if l:match(pattern) then
+                    line = i + offset
+                    break
+                end
+            end
+        end
+        if not line then
+            return
+        end
+        line = math.max(1, math.min(line, vim.api.nvim_buf_line_count(bufnr)))
+        -- Only in a window actually showing the buffer: an opened-but-unfocused file
+        -- (a contest writes several) has no cursor to move.
+        for _, win in ipairs(vim.api.nvim_list_wins()) do
+            if vim.api.nvim_win_get_buf(win) == bufnr then
+                pcall(vim.api.nvim_win_set_cursor, win, { line, 0 })
+            end
+        end
+    end)
+end
+
 ---Usable editor size: columns, and rows excluding the command line and (when
 ---shown) the global statusline.
 ---@return integer width, integer height

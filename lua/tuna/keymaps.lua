@@ -2,7 +2,9 @@
 --
 -- Opt-in default keymaps. Rather than hand-writing `vim.keymap.set(...)` in an
 -- ftplugin (or scattered through a config), a user maps an **action** to a key in
--- `config.keymaps`; this module sets them as `<cmd>Tuna …<cr>` maps. Two scopes:
+-- `config.keymaps` — or takes the whole ready-made set with
+-- `keymaps.preset = "<leader>t"` (see `M.preset`) and adjusts individual keys on top
+-- of it. This module sets them as `<cmd>Tuna …<cr>` maps. Two scopes:
 --
 --   * `keymaps.mappings` — buffer-local maps set on the configured solution
 --     filetypes via a `FileType` autocmd, so they follow the user from one problem
@@ -32,7 +34,62 @@ M.actions = {
     receive_problem = "Tuna receive problem",
     receive_contest = "Tuna receive contest",
     clean = "Tuna clean",
+    next_problem = "Tuna next", -- step to the next/previous problem of a contest
+    prev_problem = "Tuna prev",
+    temp = "Tuna temp", -- scratch solution to write in before the problem exists
+    temp_sync = "Tuna temp sync",
 }
+
+-- The ready-made preset, enabled with `keymaps.preset = "<leader>t"` (any prefix).
+-- Suffixes are grouped so which-key shows one "Tuna" group with a "download" subgroup:
+--
+--   <leader>ta  add testcase        <leader>tr  run            <leader>tdt  testcases
+--   <leader>te  edit testcase       <leader>tu  show ui        <leader>tdp  problem
+--   <leader>tx  delete testcase     <leader>ts  submit         <leader>tdc  contest
+--   <leader>tn  next problem        <leader>tm  dashboard      <leader>tds  temp sync
+--   <leader>tp  previous problem    <leader>tc  clean          <leader>tt   temp
+--
+-- `buffer` maps are set on solution filetypes only; `global` ones are always there,
+-- because they are what you reach for when no solution is open yet.
+M.preset = {
+    buffer = {
+        add_testcase = "a",
+        edit_testcase = "e",
+        delete_testcase = "x",
+        run = "r",
+        show_ui = "u",
+        submit = "s",
+        next_problem = "n",
+        prev_problem = "p",
+        receive_testcases = "dt",
+    },
+    global = {
+        dashboard = "m",
+        clean = "c",
+        temp = "t",
+        temp_sync = "ds",
+        receive_problem = "dp",
+        receive_contest = "dc",
+    },
+}
+
+---Expand `M.preset` against a prefix, with the user's own tables layered on top so a
+---single key can be moved (or dropped, by mapping it to `false`) without giving up
+---the preset.
+---@param prefix string e.g. "<leader>t"
+---@param scope "buffer"|"global"
+---@param user table<string, string|string[]|false>
+---@return table<string, string|string[]>
+local function expand_preset(prefix, scope, user)
+    local out = {}
+    for action, suffix in pairs(M.preset[scope]) do
+        out[action] = prefix .. suffix
+    end
+    for action, lhs in pairs(user) do
+        out[action] = lhs or nil -- `false` removes a preset entry
+    end
+    return out
+end
 
 ---The configured solution filetypes, with a sane fallback.
 ---@param km table the resolved `config.keymaps` table
@@ -89,6 +146,12 @@ function M.setup()
     end
     local mappings = type(km.mappings) == "table" and km.mappings or {}
     local global = type(km.global) == "table" and km.global or {}
+    -- `preset = "<leader>t"` fills both tables with the ready-made set; whatever the
+    -- user wrote stays on top of it.
+    if type(km.preset) == "string" then
+        mappings = expand_preset(km.preset, "buffer", mappings)
+        global = expand_preset(km.preset, "global", global)
+    end
     if vim.tbl_isempty(mappings) and vim.tbl_isempty(global) then
         return
     end

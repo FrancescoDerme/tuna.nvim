@@ -187,6 +187,29 @@ M.defaults = {
     judge_parsers = {},
     template_file = false, -- false | string with modifiers | { [ext] = path }
     evaluate_template_modifiers = false,
+    -- Where the cursor lands when tuna opens a solution made from the template — a
+    -- received problem/contest, a problem stepped onto with `:Tuna next`/`prev`, or
+    -- the scratch file of `:Tuna temp`. Templates open on their header, which is never
+    -- where one starts typing.
+    --   false                          leave the cursor at the top (default)
+    --   <number>                       that line
+    --   "<lua pattern>"                the first line matching it
+    --   { pattern = …, offset = <n> }  n lines below that match, e.g.
+    --                                  { pattern = "^void solve", offset = 1 }
+    --   function(bufnr)                -> line number
+    -- A pattern that matches nothing leaves the cursor alone, so one written for a
+    -- given language does no harm to templates in another.
+    template_cursor = false,
+    -- `:Tuna temp` — a scratch solution to start writing in before the problem exists
+    -- (typing during the countdown, then folding the code into the real file with
+    -- `:Tuna temp sync` once the contest is received). The scratch is the template
+    -- minus its modifier header, since that header can only be filled in by a real
+    -- problem. `file` is where it lives; `receive` is what `sync` downloads.
+    temp = {
+        file = vim.fn.stdpath("cache") .. "/tuna_temp.$(FEXT)",
+        extension = "cpp", -- language of the scratch when no solution buffer says otherwise
+        receive = "contest", -- "contest" | "problem"
+    },
     date_format = "%c",
     received_files_extension = "cpp",
     received_problems_path = "$(CWD)/$(PROBLEM).$(FEXT)",
@@ -314,19 +337,30 @@ M.defaults = {
         judges = {},
     },
 
-    -- Opt-in keymaps. Nothing is mapped unless you add entries; each maps an action
-    -- to a left-hand side (a string, or a list of strings; false/nil disables it).
-    -- Actions mirror the :Tuna subcommands — see keymaps.lua `M.actions`. Two scopes:
+    -- Opt-in keymaps. Nothing is mapped unless you ask for it, in one of two ways.
+    --
+    -- `preset` takes the whole ready-made set under a prefix of your choosing:
+    --   keymaps = { preset = "<leader>t" }
+    -- giving <leader>tr run, <leader>tu show ui, <leader>ta/te/tx testcases,
+    -- <leader>ts submit, <leader>tn/tp next/previous problem, <leader>tm dashboard,
+    -- <leader>tc clean, <leader>tt scratch + <leader>tds sync, and <leader>td{t,p,c}
+    -- receive testcases/problem/contest (see keymaps.lua `M.preset`).
+    --
+    -- `mappings`/`global` map individual actions to a left-hand side (a string or a
+    -- list of them). They work on their own, and layer over `preset` when both are
+    -- given — mapping an action to `false` drops it from the preset. Actions mirror
+    -- the :Tuna subcommands (keymaps.lua `M.actions`). The two scopes:
     --   * `mappings` — buffer-local, set on solution files (filetypes in `filetypes`)
     --     via a FileType autocmd, so they follow you from one solution to the next.
     --   * `global`   — always available, set once regardless of the current buffer
-    --     (handy for buffer-agnostic actions like `menu` or `receive_*`).
+    --     (for what you reach for when no solution is open: receive, dashboard, …).
     -- Example:
     --   keymaps = {
-    --     mappings = { submit = "<leader>ts", run = "<leader>tr" },
-    --     global   = { menu = "<leader>tt", receive_problem = "<leader>tp" },
+    --     preset   = "<leader>t",
+    --     mappings = { run = "<leader><leader>", delete_testcase = false },
     --   }
     keymaps = {
+        preset = false, -- false | prefix string, e.g. "<leader>t"
         filetypes = { "c", "cpp", "rust", "java", "python" },
         mappings = {},
         global = {},
