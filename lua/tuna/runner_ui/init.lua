@@ -93,6 +93,30 @@ function RunnerUI:cursor_tc()
     return api.nvim_win_get_cursor(self.windows.tc.winid)[1]
 end
 
+---@private
+---Which selector row the UI should open on. Row 1 — the Compile step — normally,
+---since a compilation that had something to say (warnings, an error) is the first
+---thing to read. But a compile that printed nothing leaves four empty panes in front
+---of someone who ran their solution to see a verdict, so when the first testcase
+---already carries a result the cursor starts there instead.
+---@return integer
+function RunnerUI:initial_row()
+    local first = self.runner.tcdata[1]
+    if not first or first.tcnum ~= "Compile" then
+        return 1
+    end
+    if (first.stdout or "") ~= "" or (first.stderr or "") ~= "" then
+        return 1
+    end
+    local tc = self.runner.tcdata[2]
+    -- A recorded result, not merely a listed testcase: `time` is set when a run
+    -- finishes, and a row still running or being judged has no verdict yet.
+    if tc and tc.time and not tc.running and not tc.judging then
+        return 2
+    end
+    return 1
+end
+
 ---Show the UI, building it if needed and focusing the selector.
 function RunnerUI:show_ui()
     if self.ui_visible then
@@ -205,7 +229,20 @@ function RunnerUI:show_ui()
 
     api.nvim_set_current_win(self.windows.tc.winid)
     self.update_windows = true
+    local initial = self:initial_row()
+    self.update_testcase = initial > 1 and initial or self.update_testcase
     self:update_ui()
+
+    if initial > 1 then
+        -- The selector is filled on a scheduled tick, so the row only exists by the
+        -- time this (queued after it) runs.
+        vim.schedule(function()
+            if self.ui_visible and self.windows.tc and api.nvim_win_is_valid(self.windows.tc.winid) then
+                local line_count = api.nvim_buf_line_count(self.windows.tc.bufnr)
+                api.nvim_win_set_cursor(self.windows.tc.winid, { math.min(initial, line_count), 0 })
+            end
+        end)
+    end
 
     if self.diff_view then
         self.diff_view = false

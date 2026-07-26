@@ -282,6 +282,13 @@ or `SKIP` to leave it alone) and `runner:on_ui_shown(ui)` (augment the built UI,
 interactive making the Input pane editable). This is what lets interactive get a
 first-class results UI for a few dozen lines instead of a fourth copy of the runner.
 
+**The UI opens on what there is to read.** competitest always parked the cursor on
+the first row, which is the compile step. A compilation that printed warnings or
+failed is worth landing on — but a silent one leaves four empty panes in front of
+someone who opened the UI to see a verdict, one keypress away from the row they
+wanted. So `initial_row()` starts on the first testcase when the compile step has no
+output *and* that testcase already carries a result; otherwise nothing has changed.
+
 ---
 
 ## `init.lua`

@@ -91,6 +91,34 @@ local function scratch_ext(bufnr, cfg)
     return (cfg.temp or {}).extension or cfg.downloaded_files_extension or "cpp"
 end
 
+---Put the cursor where `template_cursor` asks it to be. A line *number* counts lines of
+---the template, and the scratch is the template minus its header, so the header has to
+---come off the number too; a pattern needs no adjustment, since it is matched against
+---the buffer as it stands.
+---@param cfg table
+---@param header integer
+---@param blanks integer
+local function place_cursor(cfg, header, blanks)
+    if type(cfg.template_cursor) == "number" then
+        cfg = vim.tbl_extend("force", cfg, { template_cursor = cfg.template_cursor - header - blanks })
+    end
+    utils.place_cursor(cfg)
+end
+
+---The header the template of `ext` would contribute, needed to shift a numeric
+---`template_cursor`. Only read when it can make a difference.
+---@param ext string
+---@param cfg table
+---@return integer header
+---@return integer blanks
+local function template_header(ext, cfg)
+    local tmpl = template_path(ext, cfg)
+    if not tmpl then
+        return 0, 0
+    end
+    return split_template(vim.split(utils.read_file(tmpl) or "", "\n", { plain = true }))
+end
+
 ---`:Tuna temp` — open the scratch solution, creating it from the template's body.
 ---An existing scratch is reopened rather than overwritten, so an interrupted session
 ---(or a restart) resumes where it left off.
@@ -105,6 +133,13 @@ function M.start(bufnr)
 
     if utils.file_exists(path) then
         vim.cmd.edit(vim.fn.fnameescape(path))
+        -- Resuming has to land where starting did: reopening the scratch is the same
+        -- gesture as opening it, so it must not drop the user on line 1.
+        local header, blanks = 0, 0
+        if type(cfg.template_cursor) == "number" then
+            header, blanks = template_header(ext, cfg)
+        end
+        place_cursor(cfg, header, blanks)
         utils.notify(
             "temp: resumed the existing scratch, use ':Tuna download sync' to fold it into a problem or contest.",
             "INFO"
@@ -126,14 +161,7 @@ function M.start(bufnr)
         return
     end
     vim.cmd.edit(vim.fn.fnameescape(path))
-
-    -- The configured template cursor counts template lines, and the header is gone.
-    if type(cfg.template_cursor) == "number" then
-        local shifted = vim.tbl_extend("force", cfg, { template_cursor = cfg.template_cursor - header - blanks })
-        utils.place_cursor(shifted)
-    else
-        utils.place_cursor(cfg)
-    end
+    place_cursor(cfg, header, blanks)
 end
 
 ---`:Tuna download sync` — download the problem this scratch was written for and fold the
