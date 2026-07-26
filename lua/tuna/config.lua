@@ -210,6 +210,27 @@ M.defaults = {
         extension = "cpp", -- language of the scratch when no solution buffer says otherwise
         receive = "contest", -- "contest" | "problem"
     },
+
+    -- `:Tuna lib` — copy a piece of your own algorithm library into the current file.
+    -- `path` is where that library lives (a directory, or a list of them); only files
+    -- with the current file's extension are offered, so a C++ problem gets the C++
+    -- library. Nothing has to be maintained in a special format: mark the parts worth
+    -- copying, in place, with a pair of comments carrying `marker`:
+    --
+    --     // TUNALIB: binary exp start
+    --     ll bexp(ll n, ll m) { … }
+    --     // TUNALIB: binary exp end
+    --
+    -- Everything outside the guards (includes, `main`, scratch code) is ignored, and
+    -- the guards work in any language since they are recognized anywhere in a line.
+    -- Three ways in: `:Tuna lib` (file, then snippet), `:Tuna lib snippet` (straight
+    -- from every snippet) and `:Tuna lib search` (the same catalogue in telescope,
+    -- matching names first and code second — needs telescope, the others do not).
+    library = {
+        path = false, -- false | "~/cp/snippets" | { dir, dir, … }
+        marker = "TUNALIB",
+        depth = 3, -- how deep to search below each path
+    },
     date_format = "%c",
     received_files_extension = "cpp",
     received_problems_path = "$(CWD)/$(PROBLEM).$(FEXT)",

@@ -151,6 +151,56 @@ local function map_cancel(bufs, cancel, opts)
     end
 end
 
+--------------------------------------------------------------------------------
+-- Content panes
+--------------------------------------------------------------------------------
+
+-- How much of the editor a chooser's list may take when it comes with a preview, and
+-- the fewest rows it keeps whatever happens. Beyond that the list scrolls, so a long
+-- one (a snippet library of thirty files) doesn't squeeze the pane it exists to feed.
+local MENU_LIST_SHARE, MENU_MIN_ROWS = 0.3, 5
+
+-- Rows between one stacked pane's content and the next one's: its bottom border and
+-- the next one's top border, and nothing else. Panes therefore *touch*, the way the
+-- runner UI tiles its grid — a gap would leave a stripe of the buffer underneath
+-- showing between two floats, and a line of code cutting through a dialog is both ugly
+-- and hard to read past.
+local PANE_STEP = 2
+
+---Put content into a read-only preview pane: the lines, the syntax colouring and the
+---border title. The single place that knows how such a pane is filled, so a fixed
+---preview and one that follows the cursor behave identically (the cursor-following
+---form used to lose the colouring, because only its per-row table was consulted).
+---
+---Colouring goes through 'syntax', never 'filetype': a throwaway preview must not fire
+---FileType autocmds, which would attach an LSP and run ftplugins on it.
+---@param bufnr integer preview buffer
+---@param winid integer? preview window (for the title)
+---@param data { title: string?, lines: string[]?, filetype: string? } what to show
+---@param defaults { title: string?, filetype: string? }? fallbacks for what `data` omits
+local function fill_preview(bufnr, winid, data, defaults)
+    defaults = defaults or {}
+    if not api.nvim_buf_is_valid(bufnr) then
+        return
+    end
+    vim.bo[bufnr].modifiable = true
+    api.nvim_buf_set_lines(bufnr, 0, -1, false, data.lines or {})
+    vim.bo[bufnr].modifiable = false
+
+    local ft = data.filetype or defaults.filetype
+    if ft then
+        pcall(function()
+            vim.bo[bufnr].syntax = ft
+        end)
+    end
+
+    local title = data.title or defaults.title
+    if winid and api.nvim_win_is_valid(winid) then
+        api.nvim_win_set_config(winid, { title = title and (" " .. title .. " ") or nil })
+        pcall(api.nvim_win_set_cursor, winid, { 1, 0 }) -- new content, read from the top
+    end
+end
+
 ---Move the cursor by `delta` rows in a single-column chooser, wrapping around.
 ---@param winid integer
 ---@param count integer number of selectable rows
@@ -219,7 +269,8 @@ function M.input(title, default_text, border, border_highlight, callback_only, o
         input.on_close = on_close
     end
 
-    local vim_width, vim_height = utils.get_ui_size()
+    local vim_width = utils.get_ui_size()
+    local band_row, band_h = utils.float_band()
     local width = math.floor(vim_width * 0.5)
 
     input.bufnr = api.nvim_create_buf(false, true)
@@ -228,7 +279,7 @@ function M.input(title, default_text, border, border_highlight, callback_only, o
     input.winid = open_float(input.bufnr, true, {
         width = width,
         height = 1,
-        row = math.floor((vim_height - 1) / 2),
+        row = band_row + math.max(0, math.floor((band_h - 3) / 2)), -- one content row plus its border
         col = math.floor((vim_width - width) / 2),
         border = input.border,
         border_highlight = input.border_highlight,
@@ -325,9 +376,13 @@ function M.editor(bufnr, tcnum, input_content, output_content, callback, restore
     local cfg = config.get_buffer_config(editor.bufnr)
     local ui = cfg.editor_ui
     local vim_width, vim_height = utils.get_ui_size()
+    local band_row, band_h = utils.float_band()
     local width = math.floor(ui.width * vim_width)
-    local height = math.floor(ui.height * vim_height)
-    local row = math.floor((vim_height - height) / 2)
+    local height = math.max(1, math.min(math.floor(ui.height * vim_height), band_h - 2))
+    -- Centred on the *footprint*: a bordered float's `row` is where its border is
+    -- drawn, so the two border rows count towards the height being centred (see the
+    -- menu). Clamped, so a tall `editor_ui.height` can't push the frame off-screen.
+    local row = band_row + math.max(0, math.floor((band_h - height - 2) / 2))
 
     ---Create one editable pane.
     ---@param title string
@@ -482,10 +537,12 @@ function M.picker(bufnr, tctbl, title, callback, restore_winid)
     vim.bo[picker.menu_buf].modifiable = false
     vim.bo[picker.menu_buf].filetype = "tuna"
 
+    local band_row, band_h = utils.float_band()
+    local picker_h = math.max(1, math.min(math.floor(vim_height * cfg.picker_ui.height), band_h - 2))
     picker.winid = open_float(picker.menu_buf, true, {
         width = math.floor(vim_width * cfg.picker_ui.width),
-        height = math.floor(vim_height * cfg.picker_ui.height),
-        row = math.floor((vim_height - math.floor(vim_height * cfg.picker_ui.height)) / 2),
+        height = picker_h,
+        row = band_row + math.max(0, math.floor((band_h - picker_h - 2) / 2)),
         col = math.floor((vim_width - math.floor(vim_width * cfg.picker_ui.width)) / 2),
         border = cfg.floating_border,
         border_highlight = cfg.floating_border_highlight,
@@ -565,7 +622,8 @@ local menu = { ui_visible = false }
 ---@param on_close fun()? called when the menu is dismissed without a choice (Esc /
 ---  window closed) — so a caller that must always continue (e.g. receive's batch
 ---  processor) isn't left hanging on a cancellation
----@param preview { title: string?, lines: string[], filetype: string?, width: integer? }? content pane
+---@param preview { title: string?, lines: string[]?, filetype: string?, width: integer?, height: integer?, content: (fun(idx: integer): { title: string?, lines: string[], filetype: string? })? }?
+---  content pane; with `content` it follows the highlighted row (pin `width`/`height`)
 ---@param notice { title: string?, lines: string[] }? a read-only pane *above* the menu,
 ---  for something the user needs to know before choosing (e.g. that a scan was partial)
 function M.menu(items, title, on_choice, restore_winid, on_close, preview, notice)
@@ -593,8 +651,21 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
     end
 
     local cfg = config.get_buffer_config(api.nvim_get_current_buf())
-    local vim_width, vim_height = utils.get_ui_size()
+    local vim_width = utils.get_ui_size()
     local pv = menu.preview
+
+    -- A `preview.content(idx)` callback makes the pane follow the highlighted row
+    -- instead of showing one fixed thing: what a chooser of *things to look at* needs
+    -- (the snippet library shows the code under the cursor before it is inserted).
+    -- Such a preview should pin `width`/`height`, or the float resizes on every j/k.
+    local function preview_data(idx)
+        if pv and pv.content then
+            local ok, data = pcall(pv.content, idx)
+            return (ok and type(data) == "table") and data or { lines = {} }
+        end
+        return pv
+    end
+    local shown = preview_data(1)
     -- The user's cursorline, captured before opening any of our floats, so the
     -- preview (read like a normal buffer) can honour it.
     local user_cursorline = api.nvim_get_option_value("cursorline", { scope = "global" })
@@ -611,8 +682,8 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
             width = math.max(width, #l)
         end
         if pv then
-            width = math.max(width, #(pv.title or "") + 4)
-            for _, l in ipairs(pv.lines) do
+            width = math.max(width, #(shown.title or "") + 4)
+            for _, l in ipairs(shown.lines) do
                 width = math.max(width, #l)
             end
         end
@@ -621,31 +692,55 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
     local col = math.floor((vim_width - width) / 2)
 
     -- Lay out the notice (if any) above the menu and the preview below it, centring
-    -- the whole group vertically. Each pane costs 2 rows of border, and consecutive
-    -- panes are separated by a 1-row gap.
+    -- the whole group vertically. Each pane costs 2 rows of border and the panes touch
+    -- (see `PANE_STEP`), so the group reads as one panel.
     local nt = menu.notice
-    local menu_h = math.min(#menu.items, vim_height - 4)
-    local menu_row, pv_h, pv_row, nt_h, nt_row
+    local menu_row, menu_h, pv_h, pv_row, nt_h, nt_row
+
+    -- Heights are handed out in order of who cannot give way: the notice (what the user
+    -- must read), then the list (what they act on), then the preview (what fills the
+    -- rest) — each bounded by what the previous ones left, so the stack always fits,
+    -- down to a 12-row editor.
+    local band_row, band_h = utils.float_band()
+    local budget = band_h
     if nt then
         -- The notice wraps, so its height is counted in *screen* rows, not lines.
         nt_h = 0
         for _, l in ipairs(nt.lines) do
             nt_h = nt_h + math.max(1, math.ceil(#l / math.max(1, width)))
         end
-        nt_h = math.max(1, math.min(nt_h, 6))
+        nt_h = math.max(1, math.min(nt_h, 6, budget - 6)) -- never at the cost of the list
+        budget = budget - (nt_h + PANE_STEP)
     end
+
+    -- With a preview, a long list is capped and scrolls instead of squeezing the pane
+    -- it exists to feed: a 30-file library would otherwise leave two lines of code
+    -- visible. Without one, the list is as tall as it needs to be.
+    local pv_min = pv and (1 + PANE_STEP) or 0
+    local list_max = pv and math.max(MENU_MIN_ROWS, math.floor(band_h * MENU_LIST_SHARE)) or (band_h - 2)
+    menu_h = math.max(1, math.min(#menu.items, list_max, budget - 2 - pv_min))
+
     if nt or pv then
-        local used = (menu_h + 2) + (nt and (nt_h + 3) or 0)
+        local used = menu_h + 2
         if pv then
-            pv_h = math.max(1, math.min(#pv.lines, vim_height - 2 - used - 3))
+            -- Fixed `height` for a pane that must not resize between items; a
+            -- cursor-following one with no height given takes all the room left, since
+            -- its content changes with every keypress and a jumping float is worse than
+            -- an over-tall one. Otherwise the pane is as tall as its content.
+            local avail = math.max(1, budget - used - PANE_STEP)
+            pv_h = math.max(1, math.min(pv.height or (pv.content and avail) or #shown.lines, avail))
         end
-        local total = used + (pv and (pv_h + 3) or 0)
-        local top = math.max(0, math.floor((vim_height - total) / 2))
-        nt_row = nt and top or nil
-        menu_row = top + (nt and (nt_h + 3) or 0)
-        pv_row = pv and (menu_row + menu_h + 3) or nil
+        local total = (nt and (nt_h + PANE_STEP) or 0) + used + (pv and (pv_h + PANE_STEP) or 0)
+        -- A bordered float's `row` is the top of its *footprint* — the border is drawn
+        -- there, content one row below — so a stack of `total` rows starting at `first`
+        -- ends exactly at `first + total - 1`, and no offset is wanted. (Adding one
+        -- pushed the bottom border onto the statusline.)
+        local first = band_row + math.max(0, math.floor((band_h - total) / 2))
+        nt_row = nt and first or nil
+        menu_row = first + (nt and (nt_h + PANE_STEP) or 0)
+        pv_row = pv and (menu_row + menu_h + PANE_STEP) or nil
     else
-        menu_row = math.floor((vim_height - menu_h) / 2)
+        menu_row = band_row + math.max(0, math.floor((band_h - menu_h - 2) / 2))
     end
 
     if nt then
@@ -683,6 +778,10 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
         border = cfg.floating_border,
         border_highlight = cfg.floating_border_highlight,
         title = menu.title,
+        -- A list that fits is pinned at scrolloff 0, so its first and last rows stay
+        -- reachable; one that has to scroll is read like any other buffer, so the
+        -- user's own scrolloff applies.
+        keep_scrolloff = menu_h < #menu.items,
     })
     -- setlocal (scope="local"), not `vim.wo[...] =`: on the *current* window the
     -- latter also writes cursorline's global default, leaking a UI choice into the
@@ -691,7 +790,6 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
 
     if pv then
         menu.preview_buf = api.nvim_create_buf(false, true)
-        api.nvim_buf_set_lines(menu.preview_buf, 0, -1, false, pv.lines)
         menu.preview_win = open_float(menu.preview_buf, false, {
             width = width,
             height = pv_h,
@@ -699,20 +797,32 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
             col = col,
             border = cfg.floating_border,
             border_highlight = cfg.floating_border_highlight,
-            title = pv.title and (" " .. pv.title .. " ") or nil,
             keep_scrolloff = true, -- a file preview, read like a buffer; honour user scrolloff
         })
         vim.wo[menu.preview_win].wrap = false
         -- The preview is read like a normal buffer, so honour the user's cursorline
         -- (style="minimal" forces it off, so restore their setting explicitly).
         api.nvim_set_option_value("cursorline", user_cursorline, { scope = "local", win = menu.preview_win })
-        vim.bo[menu.preview_buf].modifiable = false
-        -- Colour the preview via 'syntax' (not 'filetype') so no FileType autocmds
-        -- fire — a throwaway preview shouldn't attach LSP or run ftplugins.
-        if pv.filetype then
-            pcall(function()
-                vim.bo[menu.preview_buf].syntax = pv.filetype
-            end)
+        fill_preview(menu.preview_buf, menu.preview_win, shown, pv)
+
+        if pv.content then
+            -- Follow the selection. Only the border title is reconfigured (not the
+            -- geometry), so the float doesn't repaint as the cursor moves.
+            menu.preview_idx = 1
+            api.nvim_create_autocmd("CursorMoved", {
+                buffer = menu.menu_buf,
+                callback = function()
+                    if not menu.ui_visible or not api.nvim_win_is_valid(menu.winid) then
+                        return
+                    end
+                    local idx = api.nvim_win_get_cursor(menu.winid)[1]
+                    if idx == menu.preview_idx then
+                        return
+                    end
+                    menu.preview_idx = idx
+                    fill_preview(menu.preview_buf, menu.preview_win, preview_data(idx), pv)
+                end,
+            })
         end
     else
         menu.preview_win, menu.preview_buf = nil, nil
@@ -971,7 +1081,7 @@ function M.form(sections, title, on_submit, restore_winid, on_close)
     end
 
     local cfg = config.get_buffer_config(api.nvim_get_current_buf())
-    local vim_width, vim_height = utils.get_ui_size()
+    local vim_width = utils.get_ui_size()
 
     -- Width = the widest item or section title across the whole form. A custom row
     -- also has to fit its inline label plus the text typed into it.
@@ -987,17 +1097,19 @@ function M.form(sections, title, on_submit, restore_winid, on_close)
     end
     width = math.min(math.max(width + 2, 20), vim_width - 4)
 
-    -- Per-section heights, then vertically centre the whole stack (each section has
-    -- a 2-line border; a 1-line gap separates consecutive sections).
+    -- Per-section heights, then vertically centre the whole stack. Each section costs
+    -- its rows plus a 2-line border, and consecutive sections touch (see `PANE_STEP`).
     local n = #form.sections
-    local per_cap = math.max(1, math.floor((vim_height - 4 - 3 * n) / n))
+    local band_row, band_h = utils.float_band()
+    local per_cap = math.max(1, math.floor((band_h - PANE_STEP * n) / n))
     local heights, total = {}, 0
     for i, s in ipairs(form.sections) do
         heights[i] = math.max(1, math.min(form_rows(s), per_cap))
-        total = total + heights[i] + 2
+        total = total + heights[i] + PANE_STEP
     end
-    total = total + (n - 1)
-    local row = math.max(0, math.floor((vim_height - total) / 2))
+    -- `total` includes every section's border, and a float's `row` is the top of its
+    -- footprint (see the menu), so the stack fits exactly in `total` rows from here.
+    local row = band_row + math.max(0, math.floor((band_h - total) / 2))
     local col = math.floor((vim_width - width) / 2)
 
     form.skip_close = false -- fresh windows: a real close should count again
@@ -1029,7 +1141,7 @@ function M.form(sections, title, on_submit, restore_winid, on_close)
         form.wins[i] = w
         form.bufs[i] = b
         form_label(i)
-        row = row + heights[i] + 3 -- border (2) + gap (1)
+        row = row + heights[i] + PANE_STEP -- next section's border starts where this one ends
     end
     form.ui_visible = true
 

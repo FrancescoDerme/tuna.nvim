@@ -350,13 +350,14 @@ function TCRunner:display_results()
     vim.bo[buf].filetype = "tuna"
 
     local width, height = utils.get_ui_size()
+    local band_row, band_h = utils.float_band()
     local win_w = math.min(math.max(40, width - 8), 100)
-    local win_h = math.min(#lines + 1, math.floor(height * 0.6))
+    local win_h = math.max(1, math.min(#lines + 1, math.floor(height * 0.6), band_h - 2))
     local win = vim.api.nvim_open_win(buf, true, {
         relative = "editor",
         width = win_w,
         height = win_h,
-        row = math.floor((height - win_h) / 2),
+        row = band_row + math.max(0, math.floor((band_h - win_h - 2) / 2)),
         col = math.floor((width - win_w) / 2),
         border = self.config.floating_border,
         title = " Results ",

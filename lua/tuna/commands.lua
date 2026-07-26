@@ -25,6 +25,7 @@ local subcommand_args = {
     compare = { "exact", "squish", "float", "default" },
     submit = { "clear" },
     temp = { "sync" },
+    lib = { "snippet", "search" },
 }
 
 -- Third-level completions: `:Tuna run interactive <Tab>` offers its input sources.
@@ -487,6 +488,19 @@ M.subcommands = {
     end,
     prev = function()
         require("tuna.navigate").prev(api.nvim_get_current_buf())
+    end,
+    -- Two ways into the snippet library, because two things happen in practice: you
+    -- remember the file it is in, or you remember the snippet.
+    lib = function(args)
+        local library = require("tuna.library")
+        local bufnr = api.nvim_get_current_buf()
+        if args[1] == "snippet" then
+            library.pick(bufnr)
+        elseif args[1] == "search" then
+            library.search(bufnr) -- telescope, when installed
+        else
+            library.browse(bufnr)
+        end
     end,
     temp = function(args)
         local temp = require("tuna.temp")

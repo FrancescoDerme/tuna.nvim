@@ -68,10 +68,13 @@ local function compute_layout(config, status_rows)
     local STATUS_HEIGHT = status_rows + 2 -- content rows plus top & bottom border
     local sizes, positions = {}, {}
     local vim_width, vim_height = utils.get_ui_size()
+    -- Everything is laid out inside the float band: a row is kept clear above the grid
+    -- and below it, so the frame never sits against the statusline (see `float_band`).
+    local band_row, band_h = utils.float_band()
     local total_width = math.floor(vim_width * config.popup_ui.total_width + 0.5)
-    local total_height = math.floor(vim_height * config.popup_ui.total_height + 0.5)
+    local total_height = math.min(math.floor(vim_height * config.popup_ui.total_height + 0.5), band_h)
     local col0 = math.floor((vim_width - total_width) / 2 + 0.5)
-    local row0 = math.floor((vim_height - total_height) / 2 + 0.5)
+    local row0 = band_row + math.floor((band_h - total_height) / 2 + 0.5)
 
     -- Lay the whole grid out first, then carve the status strip out of the top of
     -- the Testcases pane only (so it sits above "tc" and not the other panes).
@@ -105,11 +108,13 @@ function M.init_ui(windows, config, _init_winid, status_rows)
             relative = "editor",
             width = math.max(1, s.width),
             height = math.max(1, s.height),
-            -- A native float's row/col anchor the *content*; the border is drawn
-            -- outside it. Offsetting by +1 makes each window's footprint (border
-            -- included) line up exactly with its computed rectangle.
-            col = p.col + 1,
-            row = p.row + 1,
+            -- A bordered float's row/col anchor its whole footprint: the border is drawn
+            -- *at* that row/col and the content one cell in. The computed rectangles
+            -- already include the border, so they are passed through unshifted —
+            -- offsetting by +1 pushed the grid a row down and a column right, which on a
+            -- full-height layout means over the statusline.
+            col = p.col,
+            row = p.row,
             border = config.floating_border,
             title = titles[name],
             title_pos = "center",

@@ -302,6 +302,22 @@ function M.place_cursor(cfg, bufnr)
     end)
 end
 
+-- Rows left clear above and below every floating UI. A frame flush against the top of
+-- the window or against the statusline reads as a rendering glitch, and one row of
+-- breathing room is what makes a dialog look placed rather than crammed.
+M.FLOAT_MARGIN = 1
+
+---The band of editor rows a floating UI may occupy: the first row it may use, and how
+---many rows it has. Every float in the plugin sizes and centres itself inside this, so
+---the margin is decided in one place.
+---@return integer row0 first usable row (0-based)
+---@return integer height rows available between the margins
+function M.float_band()
+    local _, height = M.get_ui_size()
+    local margin = M.FLOAT_MARGIN
+    return margin, math.max(1, height - 2 * margin)
+end
+
 ---Usable editor size: columns, and rows excluding the command line and (when
 ---shown) the global statusline.
 ---@return integer width, integer height

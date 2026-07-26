@@ -38,6 +38,9 @@ M.actions = {
     prev_problem = "Tuna prev",
     temp = "Tuna temp", -- scratch solution to write in before the problem exists
     temp_sync = "Tuna temp sync",
+    library = "Tuna lib", -- copy from your snippet library: file, then snippet
+    library_snippet = "Tuna lib snippet", -- … or straight from every snippet in it
+    library_search = "Tuna lib search", -- … or fuzzily, over names and code, via telescope
 }
 
 -- The ready-made preset, enabled with `keymaps.preset = "<leader>t"` (any prefix).
@@ -49,6 +52,7 @@ M.actions = {
 --   <leader>ttd  delete testcase    <leader>ts  submit         <leader>tdc  contest
 --   <leader>tn   next problem       <leader>tm  dashboard      <leader>tds  temp sync
 --   <leader>tp   previous problem   <leader>tw  temp scratch
+--   <leader>tl   library (file → snippet)
 --
 -- No group prefix is itself a mapping, so none of them costs a `timeoutlen` wait.
 -- `:Tuna clean` is deliberately absent: it is run once in a while, not during a
@@ -67,6 +71,10 @@ M.preset = {
         submit = "s",
         next_problem = "n",
         prev_problem = "p",
+        -- The library inserts into the file you are in, so it is buffer-local like the
+        -- rest of the editing actions. Only the file→snippet route is bound; the flat
+        -- `library_snippet` one is there to map if it suits you better.
+        library = "l",
         receive_testcases = "dt",
     },
     global = {

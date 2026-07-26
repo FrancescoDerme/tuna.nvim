@@ -277,14 +277,15 @@ function RunnerUI:show_viewer(content)
 
     local vim_width, vim_height = utils.get_ui_size()
     local vcfg = self.config.runner_ui.viewer
+    local band_row, band_h = utils.float_band()
     local width = math.floor(vim_width * vcfg.width + 0.5)
-    local height = math.floor(vim_height * vcfg.height + 0.5)
+    local height = math.max(1, math.min(math.floor(vim_height * vcfg.height + 0.5), band_h - 2))
     self.viewer_winid = api.nvim_open_win(source.bufnr, true, {
         relative = "editor",
         width = width,
         height = height,
         col = math.floor((vim_width - width) / 2),
-        row = math.floor((vim_height - height) / 2),
+        row = band_row + math.max(0, math.floor((band_h - height - 2) / 2)),
         border = self.config.floating_border,
         title = source.title,
         title_pos = "center",
@@ -379,15 +380,16 @@ function RunnerUI:show_message(title, text)
     vim.bo[buf].filetype = "tuna"
 
     local vim_width, vim_height = utils.get_ui_size()
+    local band_row, band_h = utils.float_band()
     local vcfg = self.config.runner_ui.viewer
     local width = math.floor(vim_width * vcfg.width + 0.5)
-    local height = math.floor(vim_height * vcfg.height + 0.5)
+    local height = math.max(1, math.min(math.floor(vim_height * vcfg.height + 0.5), band_h - 2))
     local win = api.nvim_open_win(buf, true, {
         relative = "editor",
         width = width,
         height = height,
         col = math.floor((vim_width - width) / 2),
-        row = math.floor((vim_height - height) / 2),
+        row = band_row + math.max(0, math.floor((band_h - height - 2) / 2)),
         border = self.config.floating_border,
         title = title,
         title_pos = "center",
