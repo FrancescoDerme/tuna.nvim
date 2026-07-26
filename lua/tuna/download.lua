@@ -1,12 +1,12 @@
--- lua/tuna/receive.lua
+-- lua/tuna/download.lua
 --
 -- Competitive Companion integration. This module *is* the listener (it folds in
--- what used to be `http.lua`) plus the pipeline that turns received tasks into
+-- what used to be `http.lua`) plus the pipeline that turns downloaded tasks into
 -- files on disk. Three small objects form that pipeline:
 --
---   Receiver ──tasks──▶ TasksCollector ──batches──▶ BatchesSerialProcessor
+--   Listener ──tasks──▶ TasksCollector ──batches──▶ BatchesSerialProcessor
 --
---   * `Receiver` opens a TCP socket Competitive Companion POSTs to. Each POST is
+--   * `Listener` opens a TCP socket Competitive Companion POSTs to. Each POST is
 --     one "task" (one problem). It decodes the JSON and hands the task off.
 --   * `TasksCollector` groups tasks by their `batch.id`. Companion tags every
 --     task in a contest with the same batch id and a `batch.size`; the collector
@@ -14,9 +14,9 @@
 --     reliably tell "one problem" from "a contest of N problems".
 --   * `BatchesSerialProcessor` runs the per-batch handler one batch at a time.
 --     Storing involves user prompts (paths, overwrite confirmations); serializing
---     keeps two contests received back-to-back from interleaving their dialogs.
+--     keeps two contests downloaded back-to-back from interleaving their dialogs.
 --
--- Compared to competitest this also exposes `status()`/`is_receiving()` so a
+-- Compared to competitest this also exposes `status()`/`is_downloading()` so a
 -- lualine component can show, at a glance, whether the listener is live and in
 -- what mode — a quality-of-life win over competitest's notify-only status.
 
@@ -40,20 +40,20 @@ local M = {}
 ---@field batch { id: string, size: integer }
 
 --------------------------------------------------------------------------------
--- Receiver: the TCP listener
+-- Listener: the TCP listener
 --------------------------------------------------------------------------------
 
----@class tuna.Receiver
+---@class tuna.Listener
 ---@field private server uv_tcp_t
-local Receiver = {}
-Receiver.__index = Receiver
+local Listener = {}
+Listener.__index = Listener
 
 ---Start listening on `address:port`, calling `callback` with each decoded task.
 ---@param address string
 ---@param port integer
 ---@param callback fun(task: tuna.CCTask)
----@return tuna.Receiver|string # the receiver, or an error message string
-function Receiver.new(address, port, callback)
+---@return tuna.Listener|string # the listener, or an error message string
+function Listener.new(address, port, callback)
     local server = vim.uv.new_tcp()
     if not server then
         return "failed to create TCP socket"
@@ -66,7 +66,7 @@ function Receiver.new(address, port, callback)
 
     local listening, listen_err = server:listen(128, function(err)
         if err then
-            utils.notify("receiver listen error: " .. err)
+            utils.notify("listener listen error: " .. err)
             return
         end
         local client = vim.uv.new_tcp()
@@ -105,11 +105,11 @@ function Receiver.new(address, port, callback)
         return string.format("cannot listen on %s:%d%s", address, port, listen_err and (": " .. listen_err) or "")
     end
 
-    return setmetatable({ server = server }, Receiver)
+    return setmetatable({ server = server }, Listener)
 end
 
 ---Stop listening and release the socket.
-function Receiver:close()
+function Listener:close()
     if self.server:is_active() and not self.server:is_closing() then
         self.server:close()
     end
@@ -125,7 +125,7 @@ end
 local TasksCollector = {}
 TasksCollector.__index = TasksCollector
 
----@param callback fun(tasks: tuna.CCTask[]) called once per fully-received batch
+---@param callback fun(tasks: tuna.CCTask[]) called once per fully-collected batch
 ---@return tuna.TasksCollector
 function TasksCollector.new(callback)
     return setmetatable({ batches = {}, callback = callback }, TasksCollector)
@@ -195,14 +195,14 @@ end
 -- Storage: turn tasks into files
 --------------------------------------------------------------------------------
 
----Expand tuna receive modifiers (`$(PROBLEM)`, `$(JUDGE)`, ...) in `str`.
+---Expand tuna download modifiers (`$(PROBLEM)`, `$(JUDGE)`, ...) in `str`.
 ---@param str string
 ---@param task tuna.CCTask
 ---@param file_extension string
 ---@param remove_illegal_chars boolean strip characters illegal in filenames
 ---@param cfg table? resolved config (for `judge_parsers` and `date_format`)
 ---@return string? # evaluated string, or `nil` on failure
-local function eval_receive_modifiers(str, task, file_extension, remove_illegal_chars, cfg)
+local function eval_download_modifiers(str, task, file_extension, remove_illegal_chars, cfg)
     -- Split "Judge - Contest" and normalise it via the (user-overridable) judge parsers.
     local judge, contest = judges.parse(task, cfg and cfg.judge_parsers)
     local date_format = cfg and cfg.date_format
@@ -248,7 +248,7 @@ local function eval_path(path, task, file_extension, cfg)
     if type(path) == "function" then
         return path(task, file_extension)
     end
-    return eval_receive_modifiers(path, task, file_extension, true, cfg)
+    return eval_download_modifiers(path, task, file_extension, true, cfg)
 end
 
 ---Convert a task's `tests` list into a 0-indexed testcase table.
@@ -294,7 +294,7 @@ end
 ---@param filepath string source file absolute path
 ---@param task tuna.CCTask
 ---@param cfg table resolved configuration for the target directory
-local function store_received_task(filepath, task, cfg)
+local function store_downloaded_task(filepath, task, cfg)
     local file_extension = vim.fn.fnamemodify(filepath, ":e")
 
     -- Resolve the template: a string is a path with file-format modifiers; a
@@ -318,7 +318,7 @@ local function store_received_task(filepath, task, cfg)
     if template_file then
         if cfg.evaluate_template_modifiers then
             local content = utils.read_file(template_file) or ""
-            local evaluated = eval_receive_modifiers(content, task, file_extension, false, cfg)
+            local evaluated = eval_download_modifiers(content, task, file_extension, false, cfg)
             utils.write_file(filepath, evaluated or "")
         else
             utils.ensure_directory(vim.fn.fnamemodify(filepath, ":h"))
@@ -334,7 +334,7 @@ local function store_received_task(filepath, task, cfg)
     require("tuna.submit").write_task_store(vim.fn.fnamemodify(filepath, ":h"), task, cfg)
 end
 
----Store received testcases into an open buffer (the `testcases` receive mode).
+---Store downloaded testcases into an open buffer (the `testcases` download mode).
 ---@param bufnr integer
 ---@param tclist { input: string, output: string }[]
 ---@param replace boolean replace existing testcases instead of asking
@@ -372,19 +372,25 @@ local function store_testcases_into_buffer(bufnr, tclist, replace, finished)
     end
 
     testcases.buf_write_testcases(bufnr, tctbl)
+    -- The buffer is a problem now (it has testcases), which is what makes it worth
+    -- remembering — record it here rather than waiting for the next `BufEnter`.
+    local path = vim.api.nvim_buf_get_name(bufnr)
+    if path ~= "" then
+        require("tuna.recent").record_problem(path)
+    end
     if finished then
         finished()
     end
 end
 
----Store one received problem, prompting for its path unless configured not to.
+---Store one downloaded problem, prompting for its path unless configured not to.
 ---@param task tuna.CCTask
 ---@param cfg table
 ---@param finished fun()?
 local function store_single_problem(task, cfg, finished)
-    local default_path = eval_path(cfg.received_problems_path, task, cfg.received_files_extension, cfg)
+    local default_path = eval_path(cfg.downloaded_problems_path, task, cfg.downloaded_files_extension, cfg)
     if not default_path then
-        utils.notify("'received_problems_path' evaluation failed for task '" .. task.name .. "'")
+        utils.notify("'downloaded_problems_path' evaluation failed for task '" .. task.name .. "'")
         if finished then
             finished()
         end
@@ -397,15 +403,18 @@ local function store_single_problem(task, cfg, finished)
         default_path,
         cfg.floating_border,
         cfg.floating_border_highlight,
-        not cfg.received_problems_prompt_path,
+        not cfg.downloaded_problems_prompt_path,
         function(filepath)
             -- Re-resolve config at the chosen directory: a `.tuna.lua` there may
             -- change storage layout, templates, etc.
             local local_cfg = config.load_local_config_and_extend(vim.fn.fnamemodify(filepath, ":h"))
 
             local function proceed()
-                store_received_task(filepath, task, local_cfg)
-                if local_cfg.open_received_problems then
+                store_downloaded_task(filepath, task, local_cfg)
+                -- Recorded even when the problem isn't opened, so `:Tuna last problem`
+                -- takes you to what was just downloaded either way.
+                require("tuna.recent").record_problem(filepath, local_cfg)
+                if local_cfg.open_downloaded_problems then
                     vim.cmd.edit(vim.fn.fnameescape(filepath))
                     utils.place_cursor(local_cfg)
                     require("tuna.temp").absorb(filepath, local_cfg)
@@ -441,15 +450,15 @@ local function store_single_problem(task, cfg, finished)
     )
 end
 
----Store a received contest: prompt for the directory, then the file extension,
+---Store a downloaded contest: prompt for the directory, then the file extension,
 ---then write every problem under it.
 ---@param tasks tuna.CCTask[]
 ---@param cfg table
 ---@param finished fun()?
 local function store_contest(tasks, cfg, finished)
-    local default_dir = eval_path(cfg.received_contests_directory, tasks[1], cfg.received_files_extension, cfg)
+    local default_dir = eval_path(cfg.downloaded_contests_directory, tasks[1], cfg.downloaded_files_extension, cfg)
     if not default_dir then
-        utils.notify("'received_contests_directory' evaluation failed")
+        utils.notify("'downloaded_contests_directory' evaluation failed")
         if finished then
             finished()
         end
@@ -462,21 +471,21 @@ local function store_contest(tasks, cfg, finished)
         default_dir,
         cfg.floating_border,
         cfg.floating_border_highlight,
-        not cfg.received_contests_prompt_directory,
+        not cfg.downloaded_contests_prompt_directory,
         function(directory)
             local local_cfg = config.load_local_config_and_extend(directory)
             widgets.input(
                 "Files extension",
-                local_cfg.received_files_extension,
+                local_cfg.downloaded_files_extension,
                 local_cfg.floating_border,
                 local_cfg.floating_border_highlight,
-                not local_cfg.received_contests_prompt_extension,
+                not local_cfg.downloaded_contests_prompt_extension,
                 function(file_extension)
                     -- Resolve every problem's path up front so we can decide once,
                     -- for the whole contest, whether any already exist.
                     local targets, existing = {}, 0
                     for _, task in ipairs(tasks) do
-                        local problem_path = eval_path(local_cfg.received_contests_problems_path, task, file_extension, local_cfg)
+                        local problem_path = eval_path(local_cfg.downloaded_contests_problems_path, task, file_extension, local_cfg)
                         if problem_path then
                             local filepath = directory .. "/" .. problem_path
                             targets[#targets + 1] = { filepath = filepath, task = task }
@@ -485,7 +494,7 @@ local function store_contest(tasks, cfg, finished)
                             end
                         else
                             utils.notify(
-                                "'received_contests_problems_path' evaluation failed for task '" .. task.name .. "'"
+                                "'downloaded_contests_problems_path' evaluation failed for task '" .. task.name .. "'"
                             )
                         end
                     end
@@ -494,13 +503,15 @@ local function store_contest(tasks, cfg, finished)
                     ---  write only the problems missing from the contest directory
                     local function write_all(skip_existing)
                         local opened = false
+                        local first_problem
                         for _, t in ipairs(targets) do
                             if not (skip_existing and utils.file_exists(t.filepath)) then
-                                store_received_task(t.filepath, t.task, local_cfg)
+                                store_downloaded_task(t.filepath, t.task, local_cfg)
+                                first_problem = first_problem or t.filepath
                                 -- Open the first problem actually written, so a partial
                                 -- download lands on something new rather than on a
                                 -- problem that was already there.
-                                if local_cfg.open_received_contests and not opened then
+                                if local_cfg.open_downloaded_contests and not opened then
                                     vim.cmd.edit(vim.fn.fnameescape(t.filepath))
                                     utils.place_cursor(local_cfg)
                                     -- A `:Tuna temp` scratch waiting for this contest
@@ -510,6 +521,11 @@ local function store_contest(tasks, cfg, finished)
                                 end
                             end
                         end
+                        -- This is the one moment the contest directory is known for
+                        -- certain, so record it for `:Tuna last contest` — whether or
+                        -- not a problem was opened.
+                        local _, contest_name = judges.parse(tasks[1], local_cfg.judge_parsers)
+                        require("tuna.recent").record_contest(directory, contest_name, first_problem)
                         if finished then
                             finished()
                         end
@@ -564,97 +580,97 @@ local function store_contest(tasks, cfg, finished)
 end
 
 --------------------------------------------------------------------------------
--- Public receive control
+-- Public download control
 --------------------------------------------------------------------------------
 
----@alias tuna.ReceiveMode "testcases" | "problem" | "contest" | "persistently"
+---@alias tuna.DownloadMode "testcases" | "problem" | "contest" | "persistently"
 
----@class tuna.ReceiveStatus
----@field mode tuna.ReceiveMode
+---@class tuna.DownloadStatus
+---@field mode tuna.DownloadMode
 ---@field port integer
----@field receiver tuna.Receiver
+---@field listener tuna.Listener
 ---@field processor tuna.BatchesSerialProcessor
 
----Current receive state, or `nil` when not receiving.
----@type tuna.ReceiveStatus?
+---Current download state, or `nil` when not downloading.
+---@type tuna.DownloadStatus?
 local rs = nil
 
 ---Whether the listener is currently active.
 ---@return boolean
-function M.is_receiving()
+function M.is_downloading()
     return rs ~= nil
 end
 
----The current receive mode, or `nil`.
----@return tuna.ReceiveMode?
+---The current download mode, or `nil`.
+---@return tuna.DownloadMode?
 function M.mode()
     return rs and rs.mode or nil
 end
 
----A short status string for a lualine component. Empty when not receiving.
+---A short status string for a lualine component. Empty when not downloading.
 ---@return string
 function M.status()
     if not rs then
         return ""
     end
-    return "🐟 receiving " .. rs.mode
+    return "🐟 downloading " .. rs.mode
 end
 
----Show the current receive status via a notification.
+---Show the current download status via a notification.
 function M.show_status()
     if not rs then
-        utils.notify("not receiving.", "INFO")
+        utils.notify("not downloading.", "INFO")
     else
-        utils.notify("receiving " .. rs.mode .. " on port " .. rs.port .. ".", "INFO")
+        utils.notify("downloading " .. rs.mode .. " on port " .. rs.port .. ".", "INFO")
     end
 end
 
----Stop receiving and close the listener.
-function M.stop_receiving()
+---Stop downloading and close the listener.
+function M.stop_downloading()
     if rs then
-        rs.receiver:close()
+        rs.listener:close()
         rs.processor:stop()
         rs = nil
     end
 end
 
----Build the per-batch handler for a receive mode.
----@param mode tuna.ReceiveMode
----@param notify_on_receive boolean
+---Build the per-batch handler for a download mode.
+---@param mode tuna.DownloadMode
+---@param notify_on_download boolean
 ---@param bufnr integer?
 ---@param cfg table
 ---@return fun(tasks: tuna.CCTask[], finished: fun())
-local function make_handler(mode, notify_on_receive, bufnr, cfg)
+local function make_handler(mode, notify_on_download, bufnr, cfg)
     if mode == "testcases" then
         return function(tasks, finished)
-            M.stop_receiving()
-            if notify_on_receive then
-                utils.notify("testcases received successfully!", "INFO")
+            M.stop_downloading()
+            if notify_on_download then
+                utils.notify("testcases downloaded successfully!", "INFO")
             end
-            store_testcases_into_buffer(bufnr, tasks[1].tests, cfg.replace_received_testcases, finished)
+            store_testcases_into_buffer(bufnr, tasks[1].tests, cfg.replace_downloaded_testcases, finished)
         end
     elseif mode == "problem" then
         return function(tasks, finished)
-            M.stop_receiving()
-            if notify_on_receive then
-                utils.notify("problem received successfully!", "INFO")
+            M.stop_downloading()
+            if notify_on_download then
+                utils.notify("problem downloaded successfully!", "INFO")
             end
             store_single_problem(tasks[1], cfg, finished)
         end
     elseif mode == "contest" then
         return function(tasks, finished)
-            M.stop_receiving()
-            if notify_on_receive then
-                utils.notify("contest (" .. #tasks .. " tasks) received successfully!", "INFO")
+            M.stop_downloading()
+            if notify_on_download then
+                utils.notify("contest (" .. #tasks .. " tasks) downloaded successfully!", "INFO")
             end
             store_contest(tasks, cfg, finished)
         end
     else -- persistently: keep listening, decide per batch what to store
         return function(tasks, finished)
-            if notify_on_receive then
+            if notify_on_download then
                 local n = #tasks
                 utils.notify(
-                    (n > 1 and ("contest (" .. n .. " tasks)") or "one task") .. " received successfully!",
+                    (n > 1 and ("contest (" .. n .. " tasks)") or "one task") .. " downloaded successfully!",
                     "INFO"
                 )
             end
@@ -662,7 +678,7 @@ local function make_handler(mode, notify_on_receive, bufnr, cfg)
                 store_contest(tasks, cfg, finished)
             else
                 local choice = vim.fn.confirm(
-                    "Received '" .. tasks[1].name .. "'.\nStore testcases only, or the full problem?",
+                    "Downloaded '" .. tasks[1].name .. "'.\nStore testcases only, or the full problem?",
                     "&Testcases\n&Problem\n&Cancel",
                     1
                 )
@@ -670,7 +686,7 @@ local function make_handler(mode, notify_on_receive, bufnr, cfg)
                     store_testcases_into_buffer(
                         vim.api.nvim_get_current_buf(),
                         tasks[1].tests,
-                        cfg.replace_received_testcases,
+                        cfg.replace_downloaded_testcases,
                         finished
                     )
                 elseif choice == 2 then
@@ -683,37 +699,37 @@ local function make_handler(mode, notify_on_receive, bufnr, cfg)
     end
 end
 
----Start receiving tasks from Competitive Companion.
----@param mode tuna.ReceiveMode
+---Start downloading tasks from Competitive Companion.
+---@param mode tuna.DownloadMode
 ---@param port integer port Competitive Companion is configured to POST to
 ---@param notify_on_start boolean
----@param notify_on_receive boolean
+---@param notify_on_download boolean
 ---@param bufnr integer? required when `mode == "testcases"`
 ---@param cfg table current tuna configuration
 ---@return string? # an error message on failure, otherwise `nil`
-function M.start_receiving(mode, port, notify_on_start, notify_on_receive, bufnr, cfg)
+function M.start_downloading(mode, port, notify_on_start, notify_on_download, bufnr, cfg)
     if rs then
-        return "already receiving; stop it before changing mode"
+        return "already downloading; stop it before changing mode"
     end
     if mode == "testcases" and not bufnr then
-        return "a buffer is required to receive testcases"
+        return "a buffer is required to download testcases"
     end
 
-    local handler = make_handler(mode, notify_on_receive, bufnr, cfg)
+    local handler = make_handler(mode, notify_on_download, bufnr, cfg)
     local processor = BatchesSerialProcessor.new(vim.schedule_wrap(handler))
     local collector = TasksCollector.new(function(tasks)
         processor:enqueue(tasks)
     end)
-    local receiver = Receiver.new("127.0.0.1", port, function(task)
+    local listener = Listener.new("127.0.0.1", port, function(task)
         collector:insert(task)
     end)
-    if type(receiver) == "string" then
-        return receiver
+    if type(listener) == "string" then
+        return listener
     end
 
-    rs = { mode = mode, port = port, receiver = receiver, processor = processor }
+    rs = { mode = mode, port = port, listener = listener, processor = processor }
     if notify_on_start then
-        utils.notify("ready to receive " .. mode .. ". Press the green plus button in your browser.", "INFO")
+        utils.notify("ready to download " .. mode .. ". Press the green plus button in your browser.", "INFO")
     end
     return nil
 end

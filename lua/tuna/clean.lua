@@ -177,8 +177,8 @@ local function source_exts(cfg)
             exts[ext] = true
         end
     end
-    if cfg.received_files_extension then
-        exts[cfg.received_files_extension] = true
+    if cfg.downloaded_files_extension then
+        exts[cfg.downloaded_files_extension] = true
     end
     return exts
 end
@@ -311,8 +311,8 @@ local function candidate_dirs(cfg)
     end
     local cwd = vim.fs.normalize(vim.fn.getcwd())
     add(cwd, ("cwd (%s)"):format(cwd))
-    add(base_dir_of(cfg.received_problems_path))
-    add(base_dir_of(cfg.received_contests_directory))
+    add(base_dir_of(cfg.downloaded_problems_path))
+    add(base_dir_of(cfg.downloaded_contests_directory))
     if type(cfg.template_file) == "string" then
         add(base_dir_of(cfg.template_file))
     elseif type(cfg.template_file) == "table" then

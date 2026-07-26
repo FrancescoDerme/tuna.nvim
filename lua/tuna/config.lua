@@ -170,10 +170,10 @@ M.defaults = {
     testcases_directory_input = "input.txt",
     testcases_directory_output = "output.txt",
 
-    -- receive (Competitive Companion integration)
+    -- download (Competitive Companion integration)
     companion_port = 27121,
-    receive_print_message = true,
-    start_receiving_persistently_on_setup = false,
+    download_print_message = true,
+    start_downloading_persistently_on_setup = false,
     -- Per-judge parsing of Competitive Companion's `task.group` ("Judge - Contest")
     -- into the $(JUDGE)/$(CONTEST) modifiers. Add a parser for a new judge, override
     -- a built-in, or disable one with `false`. A parser gets
@@ -188,7 +188,7 @@ M.defaults = {
     template_file = false, -- false | string with modifiers | { [ext] = path }
     evaluate_template_modifiers = false,
     -- Where the cursor lands when tuna opens a solution made from the template — a
-    -- received problem/contest, a problem stepped onto with `:Tuna next`/`prev`, or
+    -- downloaded problem/contest, a problem stepped onto with `:Tuna next`/`prev`, or
     -- the scratch file of `:Tuna temp`. Templates open on their header, which is never
     -- where one starts typing.
     --   false                          leave the cursor at the top (default)
@@ -200,15 +200,21 @@ M.defaults = {
     -- A pattern that matches nothing leaves the cursor alone, so one written for a
     -- given language does no harm to templates in another.
     template_cursor = false,
+    -- How `:Tuna last problem` / `:Tuna last contest` change Neovim's directory when
+    -- they take you back to a problem or a contest: "cd" (global), "tcd" (this tab),
+    -- "lcd" (this window), or false to jump to the file without touching the
+    -- directory. Global by default, so everything else — `:e`, a fuzzy finder,
+    -- `:Tuna run all` from a scratch buffer — follows you to the problem too.
+    cd_command = "cd",
     -- `:Tuna temp` — a scratch solution to start writing in before the problem exists
     -- (typing during the countdown, then folding the code into the real file with
-    -- `:Tuna temp sync` once the contest is received). The scratch is the template
-    -- minus its modifier header, since that header can only be filled in by a real
-    -- problem. `file` is where it lives; `receive` is what `sync` downloads.
+    -- `:Tuna download sync` once the contest is downloaded). The scratch is the
+    -- template minus its modifier header, since that header can only be filled in by
+    -- a real problem. `file` is where it lives; `download` is what `sync` fetches.
     temp = {
         file = vim.fn.stdpath("cache") .. "/tuna_temp.$(FEXT)",
         extension = "cpp", -- language of the scratch when no solution buffer says otherwise
-        receive = "contest", -- "contest" | "problem"
+        download = "contest", -- "contest" | "problem"
     },
 
     -- `:Tuna lib` — copy a piece of your own algorithm library into the current file.
@@ -232,16 +238,16 @@ M.defaults = {
         depth = 3, -- how deep to search below each path
     },
     date_format = "%c",
-    received_files_extension = "cpp",
-    received_problems_path = "$(CWD)/$(PROBLEM).$(FEXT)",
-    received_problems_prompt_path = true,
-    received_contests_directory = "$(CWD)",
-    received_contests_problems_path = "$(PROBLEM).$(FEXT)",
-    received_contests_prompt_directory = true,
-    received_contests_prompt_extension = true,
-    open_received_problems = true,
-    open_received_contests = true,
-    replace_received_testcases = false,
+    downloaded_files_extension = "cpp",
+    downloaded_problems_path = "$(CWD)/$(PROBLEM).$(FEXT)",
+    downloaded_problems_prompt_path = true,
+    downloaded_contests_directory = "$(CWD)",
+    downloaded_contests_problems_path = "$(PROBLEM).$(FEXT)",
+    downloaded_contests_prompt_directory = true,
+    downloaded_contests_prompt_extension = true,
+    open_downloaded_problems = true,
+    open_downloaded_contests = true,
+    replace_downloaded_testcases = false,
 
     -- submit (:Tuna submit) — hand the current solution to an external submit tool.
     submit = {
@@ -257,14 +263,14 @@ M.defaults = {
         url = "submit at:%s*(%S+)",
         url_scan_lines = 10,
         -- Optional header markers to backfill the sidecar's contest/name (like `url`
-        -- above) when a problem was set up outside the receive flow. Each is a Lua
+        -- above) when a problem was set up outside the download flow. Each is a Lua
         -- pattern scanned over the same header lines (first capture wins); nil to
         -- disable. These match the labels the default template writes
-        -- (`// contest: …` / `// problem: …`); a received problem's sidecar already
+        -- (`// contest: …` / `// problem: …`); a downloaded problem's sidecar already
         -- carries the authoritative values, so these only fill a missing field.
         group = "contest:%s*(.-)%s*$",
         name = "problem:%s*(.-)%s*$",
-        url_store_file = ".tuna.json", -- receive writes {url,name,group} here per problem
+        url_store_file = ".tuna.json", -- download writes {url,name,group} here per problem
         -- filetype -> the language name your submit tool expects
         languages = { cpp = "C++", c = "C", python = "Python 3", java = "Java", rust = "Rust" },
         terminal = "auto", -- "auto" (toggleterm if installed, else split) | "toggleterm" | "split"
@@ -364,7 +370,7 @@ M.defaults = {
     --   keymaps = { preset = "<leader>t" }
     -- giving <leader>tr run, <leader>tu show ui, <leader>tt{a,e,d} testcases,
     -- <leader>ts submit, <leader>tn/tp next/previous problem, <leader>tm dashboard,
-    -- <leader>tw scratch + <leader>tds sync, and <leader>td{t,p,c} receive
+    -- <leader>tw scratch + <leader>tds sync, and <leader>td{t,p,c} download
     -- testcases/problem/contest (see keymaps.lua `M.preset`).
     --
     -- `mappings`/`global` map individual actions to a left-hand side (a string or a
@@ -374,7 +380,7 @@ M.defaults = {
     --   * `mappings` — buffer-local, set on solution files (filetypes in `filetypes`)
     --     via a FileType autocmd, so they follow you from one solution to the next.
     --   * `global`   — always available, set once regardless of the current buffer
-    --     (for what you reach for when no solution is open: receive, dashboard, …).
+    --     (for what you reach for when no solution is open: download, dashboard, …).
     -- Example:
     --   keymaps = {
     --     preset   = "<leader>t",

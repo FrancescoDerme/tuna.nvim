@@ -3,7 +3,7 @@
 -- Interactive floating-window widgets, built on Neovim's native window API
 -- instead of nui.nvim (see DIFFERENCES.md). The widgets exposed:
 --
---   * `input`  — a single-line prompt (used by receive to confirm paths)
+--   * `input`  — a single-line prompt (used by download to confirm paths)
 --   * `editor` — side-by-side input/output buffers for editing a testcase
 --   * `picker` — a list to choose a testcase from
 --   * `menu`   — a single-choice chooser (dashboard, confirmations; optional
@@ -18,7 +18,7 @@
 --
 -- Every widget is dismissed through `map_cancel`, which is the single place cancel
 -- keys are bound (see the dismissal contract there): the same keypress means the same
--- thing whether the widget in front of you is a receive path prompt, a testcase
+-- thing whether the widget in front of you is a download path prompt, a testcase
 -- editor or a clean confirmation.
 --
 -- A few native APIs used throughout, briefly:
@@ -114,7 +114,7 @@ end
 --     half-written testcase closes on the same key as a menu.
 --   * By default `<Esc>` **while inserting only leaves insert mode**, which is what the
 --     key means everywhere else in vim. Cancelling something being typed into therefore
---     takes a second, deliberate press — the reason a stray Esc in a receive path
+--     takes a second, deliberate press — the reason a stray Esc in a download path
 --     prompt no longer throws away a whole download.
 --   * Both lists are `config.cancel_keys`, so a user who prefers Esc to cancel straight
 --     from insert mode says so once (`cancel_keys.insert = { "<Esc>" }`) and every
@@ -620,7 +620,7 @@ local menu = { ui_visible = false }
 ---@param on_choice fun(idx: integer)? called with the chosen index
 ---@param restore_winid integer? window to refocus once the menu closes
 ---@param on_close fun()? called when the menu is dismissed without a choice (Esc /
----  window closed) — so a caller that must always continue (e.g. receive's batch
+---  window closed) — so a caller that must always continue (e.g. download's batch
 ---  processor) isn't left hanging on a cancellation
 ---@param preview { title: string?, lines: string[]?, filetype: string?, width: integer?, height: integer?, content: (fun(idx: integer): { title: string?, lines: string[], filetype: string? })? }?
 ---  content pane; with `content` it follows the highlighted row (pin `width`/`height`)

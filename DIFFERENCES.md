@@ -125,6 +125,13 @@ testcases.
   (`files`/`single_file`/`directory`) "auto" can't pick a unique target, so
   `:Tuna convert <target>` always takes a target; the *source* is still
   auto-detected.
+- **"download", not "receive".** competitest's `:CompetiTest receive <mode>` and its
+  `received_*` options are named after the plugin's point of view (it *receives* an
+  HTTP POST from the browser extension). tuna names them after the user's:
+  `:Tuna download <testcases|problem|contest|sync|persistently|status|stop>`,
+  `downloaded_*` options, `download_print_message`,
+  `start_downloading_persistently_on_setup`, `temp.download`, and the module
+  `download.lua` (`is_downloading()`/`status()` for lualine).
 - **Python default is `python3`.** competitest defaults the Python run command
   to `python`, which is Python 2 on some systems; tuna uses `python3`.
 - **Local config search.** Both plugins walk up the directory tree for a local
@@ -136,14 +143,14 @@ testcases.
 
 ---
 
-## Receive: live listener status for lualine
+## Download: live listener status for lualine
 
-✅ **Decision:** `receive.lua` exposes `status()`, `is_receiving()` and `mode()`,
+✅ **Decision:** `download.lua` exposes `status()`, `is_downloading()` and `mode()`,
 and `require("tuna").lualine_component` renders `status()` — an empty string when
-idle, or e.g. `🐟 receiving contest` while the listener is live.
+idle, or e.g. `🐟 downloading contest` while the listener is live.
 
 **Why:** competitest only offers `show_status()`, a one-shot notification you have
-to ask for. With a persistent receive mode it's easy to forget the listener is
+to ask for. With a persistent download mode it's easy to forget the listener is
 running (or to think it is when it isn't). Surfacing the state continuously in the
 statusline is a small but real quality-of-life win, and it costs nothing — the
 component is just a string read from module state.
@@ -154,7 +161,7 @@ component is just a string read from module state.
 
 ✅ **Done (Workstream 3).** competitest normalized Competitive Companion's
 `task.group` ("Judge - Contest") into folder names with a **hardcoded** block that
-only knew Codeforces and AtCoder, buried in the receive path — to support another
+only knew Codeforces and AtCoder, buried in the download path — to support another
 judge you had to patch the plugin. tuna extracts this into `judges.lua`: a
 `judge_parsers` config table of per-judge **parser functions**, with the CF/AtCoder
 logic shipped as built-in defaults.
@@ -174,7 +181,7 @@ A parser receives `{ judge, contest, group, task }` (judge/contest already split
 lowercased) and returns `{ judge?, contest? }` overrides — nil fields keep the parsed
 values, so a parser only states what it changes. Resolution per judge is **user
 parser → built-in → user `["*"]` catch-all**, and a parser is `pcall`-guarded so a
-buggy one warns and falls back to the raw contest instead of breaking a receive. The
+buggy one warns and falls back to the raw contest instead of breaking a download. The
 built-in Codeforces/AtCoder normalizers are unchanged in behaviour from competitest —
 they're just now defaults you can replace.
 
@@ -210,13 +217,13 @@ Design notes:
   runs it in a terminal.
 - **URL resolution** is header-marker-first with a sidecar fallback: it scans the
   file header for a configurable marker (e.g. `submit at: <url>`, which a template
-  embeds via the existing `$(URL)` receive modifier), and if absent reads a
-  per-problem sidecar (`.tuna.json`) that the receive path now writes with the task's
-  URL. So both templated and freshly-received problems are submittable with no manual
+  embeds via the existing `$(URL)` download modifier), and if absent reads a
+  per-problem sidecar (`.tuna.json`) that the download path now writes with the task's
+  URL. So both templated and freshly-downloaded problems are submittable with no manual
   URL entry.
 - **Terminal** prefers a cached toggleterm (mirroring the common setup) but falls back
   to a native `:terminal` split, so toggleterm is detected-and-used, never required.
-- **lualine verdict (watch mode)**, matching the receiver's `status()`/`is_receiving()`.
+- **lualine verdict (watch mode)**, matching the listener's `status()`/`is_downloading()`.
   With `submit.watch = true` the command runs as a tracked `vim.system` job (no
   terminal); tuna strips ANSI from its stdout, takes the latest `\r`/`\n` status
   segment, and classifies it via the ordered `submit.verdicts` `{ pattern → state }`
@@ -286,7 +293,7 @@ first-class results UI for a few dozen lines instead of a fourth copy of the run
   `nvim_create_autocmd` under a cleared `Tuna` augroup, and `nvim_set_hl` with
   `default = true` (the API equivalent of `hi! def`). Completion is a Lua
   function in `commands.complete`, not Vimscript.
-- **`once = true` VimEnter.** Persistent-receive-on-setup before startup is wired
+- **`once = true` VimEnter.** Persistent-download-on-setup before startup is wired
   with a one-shot `VimEnter` autocmd instead of a self-persisting `autocmd
   VimEnter` line; it fires exactly once and needs no manual cleanup.
 - **Lazy requires in callbacks.** The command and completion callbacks
@@ -533,7 +540,7 @@ at-a-glance status) it will grow into.
 
 ## Clean unused files (`clean.lua`, `:Tuna clean`)
 
-✅ **Done (W5).** A competitive-programming workflow accretes clutter: every received
+✅ **Done (W5).** A competitive-programming workflow accretes clutter: every downloaded
 or templated problem drops a solution file, and `:Tuna scaffold` drops helper stubs —
 many of which are never touched. `:Tuna clean` sweeps them up. The catch competitest
 never had to solve is that these files **aren't empty** — they carry a template — so
@@ -546,7 +553,7 @@ template-less file is unused only when empty. The entire interaction runs throug
 tuna's **floating widgets, not `vim.ui.input`/`confirm` command-line prompts**: a
 single **form** (three stacked lists shown at once — Tab / `<M-j>`/`<M-k>` switch,
 `<CR>` submits all) picks the directory (prefilled with the roots derived from the
-`received_*`/`template_file` config, plus "Other directory…"), the recursion depth
+`downloaded_*`/`template_file` config, plus "Other directory…"), the recursion depth
 (infinite by default, or a custom number), *and* the **match threshold** — because
 "unused" is measured as a **similarity percentage** to the template (a line-LCS
 ratio), the user can erase files that are, say, ≥ 95% the template (full match / 95% /
@@ -571,14 +578,40 @@ optional integrations (toggleterm/lualine). It is read-only — it never spawns 
 compiler or touches state. competitest had no health check; users diagnosed broken
 setups by trial and error.
 
-## Receive duplicate handling in the floating UI
+## Download duplicate handling in the floating UI
 
-✅ **Done.** When a received problem or contest would overwrite existing files,
-competitest asked with a command-line `confirm`. tuna keeps the whole receive flow in
+✅ **Done.** When a downloaded problem or contest would overwrite existing files,
+competitest asked with a command-line `confirm`. tuna keeps the whole download flow in
 its floating widgets: a duplicate **problem** shows an `Override`/`Stop` menu, and a
 **contest** shows a *single* `Override all`/`Stop` menu for the whole batch (resolved
 up front by scanning every target path) rather than one prompt per problem — decide
 once for the contest. Dismissing either (Esc) counts as "stop" and, via the menu's new
 `on_close` hook, still advances the batch processor so a cancellation never wedges it.
 
+## Getting around: contest navigation and `:Tuna last …`
+
+✅ **Done (W6).** competitest could download a contest but had nothing for *moving
+around* one: finding the next problem, or getting back to what you were doing after
+closing the editor, was `:e` and a file browser. tuna ships both.
+
+`:Tuna next` / `:Tuna prev` (`navigate.lua`) step to the problem either side of the
+current one — the sibling directory in name order — opening the file that matches
+what you are leaving (same name, then same extension, then any runnable non-helper
+source), so a contest is walked without leaving the editor and a problem attempted in
+another language is still reachable.
+
+`:Tuna last problem` / `:Tuna last contest` (`recent.lua`) go back to what you were
+working on, **and change Neovim's directory to it** (`cd_command`: `cd` by default,
+or `tcd`/`lcd`/`false`). The cd is half the feature: coming back to a problem means
+working *in* it, so `:e`, a fuzzy finder and `:Tuna run all` from a scratch buffer
+should all be pointed at that problem rather than at wherever the editor was started.
+The state is persisted under `stdpath("state")`, so this survives a restart — the case
+it exists for. It is not limited to what tuna itself opened: any solution buffer whose
+directory holds testcases or a downloaded-problem sidecar counts as "the problem you are
+on", while a template, a library file or the `:Tuna temp` scratch never does. The
+contest is recorded outright when one is downloaded, and otherwise inferred from the
+sidecar `group` only when a *sibling* problem agrees on it — without that check "the
+parent directory" would call a judge folder a contest.
+
 <!-- Add new entries above this line as decisions are made. -->
+

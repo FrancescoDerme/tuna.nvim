@@ -8,8 +8,8 @@
 -- runs it in a terminal (toggleterm if installed, else a native `:terminal` split).
 --
 -- The problem URL is found by scanning the file header for a configurable marker
--- (e.g. `submit at: <url>`, embedded by a template at receive time) and, failing
--- that, from a per-problem sidecar (`.tuna.json`) that the receive path writes.
+-- (e.g. `submit at: <url>`, embedded by a template at download time) and, failing
+-- that, from a per-problem sidecar (`.tuna.json`) that the download path writes.
 
 local config = require("tuna.config")
 local utils = require("tuna.utils")
@@ -17,7 +17,7 @@ local utils = require("tuna.utils")
 local M = {}
 
 --------------------------------------------------------------------------------
--- Per-problem sidecar (written by receive, read as a URL fallback here)
+-- Per-problem sidecar (written by download, read as a URL fallback here)
 --------------------------------------------------------------------------------
 
 ---Absolute path of a directory's task sidecar.
@@ -56,7 +56,7 @@ local function write_store(dir, cfg, store)
     end
 end
 
----Persist a received task's metadata (url/name/group) beside its source, so submit
+---Persist a downloaded task's metadata (url/name/group) beside its source, so submit
 ---can recover the URL even when the file has no header marker. Merges into any
 ---existing sidecar (keeps stored submit verdicts). No-op without a URL.
 ---@param dir string problem directory
@@ -91,11 +91,11 @@ local function scan_header(bufnr, pattern, scan_lines)
 end
 
 ---Ensure a problem's sidecar records its metadata, creating the sidecar if the
----problem was set up outside the receive flow (e.g. a hand-made file that only has
+---problem was set up outside the download flow (e.g. a hand-made file that only has
 ---the template header markers). Merges — the submit-verdict map is preserved — and
 ---is cheap when nothing changed. The `url` is synced from the resolved value; the
 ---`group` (contest) and `name` (problem) are backfilled from the header markers
----**only when the sidecar lacks them**, so a received problem keeps the authoritative
+---**only when the sidecar lacks them**, so a downloaded problem keeps the authoritative
 ---Competitive Companion values.
 ---@param ctx table submit context (bufnr/filepath/url/cfg)
 local function persist_task(ctx)
@@ -249,7 +249,7 @@ end
 
 ---Whether `url` looks like a real submission URL: an `http(s)://host…` address with
 ---no leftover `$(…)` template modifier. Guards the common "wrong URL" case — a raw
----template or a problem set up before it was received resolves the marker/sidecar to
+---template or a problem set up before it was downloaded resolves the marker/sidecar to
 ---the literal placeholder `$(URL)`, which must never be handed to the submitter.
 ---@param url any
 ---@return boolean
@@ -327,7 +327,7 @@ function M.context(bufnr)
         end
         return nil,
             "no submission URL found, add a URL marker to the header (see `submit.url`), "
-                .. "or receive the problem so its URL is stored in the sidecar."
+                .. "or download the problem so its URL is stored in the sidecar."
     end
     -- Now that we know the URL (hence the judge), fold in any per-judge override.
     local scfg = judge_scfg(cfg.submit, url)
@@ -617,7 +617,7 @@ end
 ---lualine `color` for the current (or given) buffer's verdict, from `verdict_hl[state]`.
 ---That value may be a **color table** (e.g. `{ fg = "#ff6c6b" }`, returned as-is so it
 ---can match your palette exactly) or a **highlight-group name** (its foreground is
----resolved into a foreground-only `{ fg, gui = "bold" }` table — matching the receive
+---resolved into a foreground-only `{ fg, gui = "bold" }` table — matching the download
 ---component's style, so the verdict is coloured without painting a section background).
 ---@param bufnr integer?
 ---@return table|string|nil
@@ -1085,7 +1085,7 @@ function M.submit(bufnr)
         return
     end
     -- Backfill the sidecar (url + contest/name from the header markers for a hand-made
-    -- problem), so the verdict can be persisted/restored even when it wasn't received.
+    -- problem), so the verdict can be persisted/restored even when it wasn't downloaded.
     persist_task(ctx)
     provider(ctx) -- the provider drives the per-buffer submit state
 end

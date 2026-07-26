@@ -79,6 +79,8 @@ function M.setup(user_opts)
     })
 
     require("tuna.keymaps").setup()
+    -- Track the problem/contest to come back to with `:Tuna last …`.
+    require("tuna.recent").setup()
 
     vim.api.nvim_create_autocmd("BufReadPost", {
         group = augroup,
@@ -88,27 +90,27 @@ function M.setup(user_opts)
         desc = "Restore a persisted Tuna submit verdict for a solution buffer",
     })
 
-    if config.current_setup.start_receiving_persistently_on_setup then
+    if config.current_setup.start_downloading_persistently_on_setup then
         if vim.v.vim_did_enter == 1 then
-            require("tuna.commands").receive("persistently")
+            require("tuna.commands").download("persistently")
         else
             vim.api.nvim_create_autocmd("VimEnter", {
                 group = augroup,
                 once = true,
                 callback = function()
-                    require("tuna.commands").receive("persistently")
+                    require("tuna.commands").download("persistently")
                 end,
-                desc = "Start Tuna persistent receiving on startup",
+                desc = "Start Tuna persistent downloading on startup",
             })
         end
     end
 end
 
----lualine component: shows the receive listener's state, or nothing when idle.
+---lualine component: shows the download listener's state, or nothing when idle.
 ---The submit verdict is a separate component (`require("tuna.submit").status`)
 ---so it can carry its own per-verdict color — see the lualine snippet in CLAUDE.md.
 function M.lualine_component()
-    return require("tuna.receive").status()
+    return require("tuna.download").status()
 end
 
 return M

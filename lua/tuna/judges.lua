@@ -1,7 +1,7 @@
 -- lua/tuna/judges.lua
 --
 -- Turns Competitive Companion's `task.group` ("Judge - Contest") into a tidy
--- `judge` + `contest` pair used by the receive-path modifiers ($(JUDGE)/$(CONTEST))
+-- `judge` + `contest` pair used by the download-path modifiers ($(JUDGE)/$(CONTEST))
 -- and thus the on-disk folder names.
 --
 -- A *parser* normalizes one judge's contest names. Built-in parsers ship for

@@ -10,7 +10,7 @@
 --     filetypes via a `FileType` autocmd, so they follow the user from one problem
 --     to the next (what an ftplugin used to give).
 --   * `keymaps.global`   — always-available maps set once at setup, regardless of
---     the current buffer (handy for buffer-agnostic actions like `dashboard`/`receive_*`).
+--     the current buffer (handy for buffer-agnostic actions like `dashboard`/`download_*`).
 --
 -- Nothing is mapped unless the user opts in (both tables empty by default).
 
@@ -30,14 +30,18 @@ M.actions = {
     delete_testcase = "Tuna delete_testcase",
     submit = "Tuna submit",
     submit_clear = "Tuna submit clear", -- dismiss a lingering lualine verdict / cancel a submit
-    receive_testcases = "Tuna receive testcases",
-    receive_problem = "Tuna receive problem",
-    receive_contest = "Tuna receive contest",
+    download_testcases = "Tuna download testcases",
+    download_problem = "Tuna download problem",
+    download_contest = "Tuna download contest",
     clean = "Tuna clean",
     next_problem = "Tuna next", -- step to the next/previous problem of a contest
     prev_problem = "Tuna prev",
+    last_problem = "Tuna last problem", -- back to the problem/contest last worked on
+    last_contest = "Tuna last contest",
     temp = "Tuna temp", -- scratch solution to write in before the problem exists
-    temp_sync = "Tuna temp sync",
+    -- A download like the others, except it folds the `:Tuna temp` scratch into the
+    -- problem it opens — hence its name and its place in the download group.
+    download_sync = "Tuna download sync",
     library = "Tuna lib", -- copy from your snippet library: file, then snippet
     library_snippet = "Tuna lib snippet", -- … or straight from every snippet in it
     library_search = "Tuna lib search", -- … or fuzzily, over names and code, via telescope
@@ -47,12 +51,13 @@ M.actions = {
 -- Suffixes are grouped by subject, so which-key shows one "Tuna" group with a
 -- "testcases" and a "download" subgroup under it:
 --
---   <leader>tta  add testcase       <leader>tr  run            <leader>tdt  testcases
---   <leader>tte  edit testcase      <leader>tu  show ui        <leader>tdp  problem
---   <leader>ttd  delete testcase    <leader>ts  submit         <leader>tdc  contest
---   <leader>tn   next problem       <leader>tm  dashboard      <leader>tds  temp sync
+--   <leader>tta  add testcase       <leader>tr  run            <leader>tdt  download testcases
+--   <leader>tte  edit testcase      <leader>tu  show ui        <leader>tdp  download problem
+--   <leader>ttd  delete testcase    <leader>ts  submit         <leader>tdc  download contest
+--   <leader>tn   next problem       <leader>tm  dashboard      <leader>tds  download sync
 --   <leader>tp   previous problem   <leader>tw  temp scratch
 --   <leader>tl   library (file → snippet)
+--   <leader>tgp  go to last problem <leader>tgc go to last contest
 --
 -- No group prefix is itself a mapping, so none of them costs a `timeoutlen` wait.
 -- `:Tuna clean` is deliberately absent: it is run once in a while, not during a
@@ -75,14 +80,19 @@ M.preset = {
         -- rest of the editing actions. Only the file→snippet route is bound; the flat
         -- `library_snippet` one is there to map if it suits you better.
         library = "l",
-        receive_testcases = "dt",
+        download_testcases = "dt",
     },
     global = {
         dashboard = "m",
         temp = "w", -- w for write-ahead: the scratch written before the problem exists
-        temp_sync = "ds",
-        receive_problem = "dp",
-        receive_contest = "dc",
+        download_sync = "ds",
+        download_problem = "dp",
+        download_contest = "dc",
+        -- "go to": back to where you were working. Global, and deliberately so —
+        -- these are what you press right after starting Neovim, with no solution
+        -- open yet.
+        last_problem = "gp",
+        last_contest = "gc",
     },
 }
 

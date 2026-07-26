@@ -2,9 +2,9 @@
 --
 -- Contest navigation: `:Tuna next` / `:Tuna prev` step from one problem of a contest
 -- to the next, without leaving the editor to find the file. A contest downloaded by
--- `receive contest` is a directory of problem directories, so "the next problem" is
--- simply the next sibling directory in name order, and the file to open in it is the
--- solution beside its testcases.
+-- `:Tuna download contest` is a directory of problem directories, so "the next
+-- problem" is simply the next sibling directory in name order, and the file to open
+-- in it is the solution beside its testcases.
 --
 -- The solution is picked to match what is currently open: the same file name first
 -- (a contest of `A/main.cpp`, `B/main.cpp`, … keeps you on `main.cpp`), then the same
@@ -41,12 +41,13 @@ end
 
 ---The solution file to open inside `dir`, preferring the one that matches the file
 ---being left (same name, then same extension), so stepping through a contest keeps
----opening the same kind of file.
+---opening the same kind of file. Exported because `recent.lua` picks a problem to
+---land on the same way when it re-enters a contest.
 ---@param dir string
 ---@param like string? path of the current solution
 ---@param cfg table
 ---@return string? path
-local function solution_in(dir, like, cfg)
+function M.solution_in(dir, like, cfg)
     local want_name = like and vim.fn.fnamemodify(like, ":t")
     local want_ext = like and vim.fn.fnamemodify(like, ":e")
 
@@ -105,7 +106,7 @@ function M.go(offset, bufnr)
     end
 
     local target_dir = vim.fs.dirname(dir) .. "/" .. target
-    local file = solution_in(target_dir, path, cfg)
+    local file = M.solution_in(target_dir, path, cfg)
     if not file then
         utils.notify("navigate: no solution file in '" .. target .. "'.", "WARN")
         return

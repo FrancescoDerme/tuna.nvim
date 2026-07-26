@@ -4,7 +4,7 @@
 -- argument list to a handler; `complete` provides context-aware tab-completion
 -- (subcommand names, then per-subcommand argument lists). The heavier handlers
 -- (`edit_testcase`, `delete_testcase`, `convert_testcases`, `run_testcases`,
--- `receive`) live as module functions so they're easy to call and test.
+-- `download`) live as module functions so they're easy to call and test.
 
 local api = vim.api
 local config = require("tuna.config")
@@ -19,13 +19,13 @@ local M = {}
 local subcommand_args = {
     run = tools.MODES,
     convert = { "files", "single_file", "directory" },
-    receive = { "testcases", "problem", "contest", "persistently", "status", "stop" },
+    download = { "testcases", "problem", "contest", "sync", "persistently", "status", "stop" },
     scaffold = { "checker", "generator", "brute", "interactor" },
     checker = { "on", "off", "toggle" },
     compare = { "exact", "squish", "float", "default" },
     submit = { "clear" },
-    temp = { "sync" },
     lib = { "snippet", "search" },
+    last = { "problem", "contest" },
 }
 
 -- Third-level completions: `:Tuna run interactive <Tab>` offers its input sources.
@@ -368,31 +368,35 @@ function M.set_compare(bufnr, args)
 end
 
 --------------------------------------------------------------------------------
--- Receiving
+-- Downloading
 --------------------------------------------------------------------------------
 
----Drive the Competitive Companion receiver.
----@param mode string "testcases" | "problem" | "contest" | "persistently" | "status" | "stop"
-function M.receive(mode)
-    local receive = require("tuna.receive")
+---Drive the Competitive Companion listener.
+---@param mode string "testcases" | "problem" | "contest" | "sync" | "persistently" | "status" | "stop"
+function M.download(mode)
+    local download = require("tuna.download")
     local err
-    if mode == "stop" then
-        receive.stop_receiving()
+    if mode == "sync" then
+        -- A download that folds the `:Tuna temp` scratch into the problem it opens:
+        -- `temp.sync` arms the merge and starts the download itself.
+        require("tuna.temp").sync(api.nvim_get_current_buf())
+    elseif mode == "stop" then
+        download.stop_downloading()
     elseif mode == "status" then
-        receive.show_status()
+        download.show_status()
     elseif mode == "testcases" then
         local bufnr = api.nvim_get_current_buf()
         config.load_buffer_config(bufnr)
         local cfg = config.get_buffer_config(bufnr)
-        err = receive.start_receiving("testcases", cfg.companion_port, cfg.receive_print_message, cfg.receive_print_message, bufnr, cfg)
+        err = download.start_downloading("testcases", cfg.companion_port, cfg.download_print_message, cfg.download_print_message, bufnr, cfg)
     elseif mode == "problem" or mode == "contest" or mode == "persistently" then
         local cfg = config.load_local_config_and_extend(vim.fn.getcwd())
-        err = receive.start_receiving(mode, cfg.companion_port, cfg.receive_print_message, cfg.receive_print_message, nil, cfg)
+        err = download.start_downloading(mode, cfg.companion_port, cfg.download_print_message, cfg.download_print_message, nil, cfg)
     else
         err = "unrecognized mode '" .. tostring(mode) .. "'"
     end
     if err then
-        utils.notify("receive: " .. err)
+        utils.notify("download: " .. err)
     end
 end
 
@@ -434,12 +438,14 @@ M.subcommands = {
             M.show_results_ui(bufnr)
         end
     end,
-    receive = function(args)
+    download = function(args)
         if not args[1] then
-            utils.notify("receive: a mode is required (testcases | problem | contest | persistently | status | stop).")
+            utils.notify(
+                "download: a mode is required (testcases | problem | contest | sync | persistently | status | stop)."
+            )
             return
         end
-        M.receive(args[1])
+        M.download(args[1])
     end,
     checker = function(args)
         local want = nil
@@ -489,6 +495,18 @@ M.subcommands = {
     prev = function()
         require("tuna.navigate").prev(api.nvim_get_current_buf())
     end,
+    -- Back to what you were working on, across restarts: the solution itself, or the
+    -- contest it belongs to. Both also move Neovim's directory there (`cd_command`),
+    -- since coming back to a problem means working *in* it. Bare `:Tuna last` is the
+    -- problem — the one reached for most often.
+    last = function(args)
+        local recent = require("tuna.recent")
+        if args[1] == "contest" then
+            recent.open_contest()
+        else
+            recent.open_problem()
+        end
+    end,
     -- Two ways into the snippet library, because two things happen in practice: you
     -- remember the file it is in, or you remember the snippet.
     lib = function(args)
@@ -502,13 +520,10 @@ M.subcommands = {
             library.browse(bufnr)
         end
     end,
-    temp = function(args)
-        local temp = require("tuna.temp")
-        if args[1] == "sync" then
-            temp.sync(api.nvim_get_current_buf())
-        else
-            temp.start(api.nvim_get_current_buf())
-        end
+    -- The scratch itself. Folding it back into a real problem is a *download*
+    -- (`:Tuna download sync`), since that is what it does — it downloads.
+    temp = function()
+        require("tuna.temp").start(api.nvim_get_current_buf())
     end,
     dashboard = function()
         require("tuna.dashboard").open(api.nvim_get_current_buf())

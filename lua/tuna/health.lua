@@ -91,14 +91,14 @@ local function check_toolchains(cfg)
     end
 end
 
-local function check_receive(cfg)
+local function check_download(cfg)
     health.start("tuna: Competitive Companion")
-    local receive = require("tuna.receive")
+    local download = require("tuna.download")
     health.info(("listener port: %d"):format(cfg.companion_port))
-    if receive.is_receiving() then
-        health.ok(("listening (mode: %s)"):format(receive.mode() or "on"))
+    if download.is_downloading() then
+        health.ok(("listening (mode: %s)"):format(download.mode() or "on"))
     else
-        health.info("not currently listening — start with `:Tuna receive <mode>`")
+        health.info("not currently listening — start with `:Tuna download <mode>`")
     end
     health.info(
         ("point the Competitive Companion browser extension at port %d"):format(cfg.companion_port)
@@ -182,7 +182,7 @@ function M.check()
     check_neovim()
     local cfg = check_setup()
     check_toolchains(cfg)
-    check_receive(cfg)
+    check_download(cfg)
     check_submit(cfg)
     check_integrations()
 end

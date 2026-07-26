@@ -4,28 +4,28 @@
 --
 -- The minutes before a contest opens are dead time one would rather spend typing the
 -- parts of a solution that never change. The obstacle is the template's header: those
--- `$(JUDGE)`/`$(PROBLEM)`/`$(URL)` lines can only be filled in by a real received
+-- `$(JUDGE)`/`$(PROBLEM)`/`$(URL)` lines can only be filled in by a real downloaded
 -- problem, so a file started by hand either carries a header full of unevaluated
 -- modifiers (which `:Tuna submit` refuses, and `:Tuna clean` would offer to delete) or
 -- has no header at all.
 --
--- So the scratch is the template *minus* its modifier header, and `:Tuna temp sync`
--- puts the two halves back together: it starts a receive, and the first problem that
+-- So the scratch is the template *minus* its modifier header, and `:Tuna download sync`
+-- puts the two halves back together: it starts a download, and the first problem that
 -- lands keeps its freshly evaluated header while its body is replaced by whatever was
 -- written in the scratch. The cursor is carried across, the scratch file is removed,
--- and what remains is an ordinary received problem — testcases, sidecar and all.
+-- and what remains is an ordinary downloaded problem — testcases, sidecar and all.
 
 local utils = require("tuna.utils")
 local config = require("tuna.config")
 
 local M = {}
 
----A scratch waiting to be folded into the next received problem: the lines written in
+---A scratch waiting to be folded into the next downloaded problem: the lines written in
 ---it, the cursor row, and the buffer to wipe once it has been absorbed.
 ---@type { lines: string[], row: integer, bufnr: integer }?
 M.pending = nil
 
----Resolve the template path for `ext`, the way `receive` does (a string is a path with
+---Resolve the template path for `ext`, the way `download` does (a string is a path with
 ---file-format modifiers, a table maps extension → path).
 ---@param ext string
 ---@param cfg table
@@ -88,7 +88,7 @@ local function scratch_ext(bufnr, cfg)
     if ext ~= "" and (cfg.run_command or {})[vim.bo[bufnr].filetype] then
         return ext
     end
-    return (cfg.temp or {}).extension or cfg.received_files_extension or "cpp"
+    return (cfg.temp or {}).extension or cfg.downloaded_files_extension or "cpp"
 end
 
 ---`:Tuna temp` — open the scratch solution, creating it from the template's body.
@@ -105,7 +105,10 @@ function M.start(bufnr)
 
     if utils.file_exists(path) then
         vim.cmd.edit(vim.fn.fnameescape(path))
-        utils.notify("temp: resumed the existing scratch — ':Tuna temp sync' folds it into a problem.", "INFO")
+        utils.notify(
+            "temp: resumed the existing scratch, use ':Tuna download sync' to fold it into a problem or contest.",
+            "INFO"
+        )
         return
     end
 
@@ -133,9 +136,9 @@ function M.start(bufnr)
     end
 end
 
----`:Tuna temp sync` — download the problem this scratch was written for and fold the
+---`:Tuna download sync` — download the problem this scratch was written for and fold the
 ---scratch into it. Run from the scratch buffer; the merge happens in `absorb`, once
----the receive opens the problem.
+---the download opens the problem.
 ---@param bufnr integer? defaults to the current buffer
 function M.sync(bufnr)
     bufnr = bufnr or vim.api.nvim_get_current_buf()
@@ -145,7 +148,7 @@ function M.sync(bufnr)
     local name = vim.fs.normalize(vim.api.nvim_buf_get_name(bufnr))
     local ext = name ~= "" and vim.fn.fnamemodify(name, ":e") or ""
     if name == "" or name ~= vim.fs.normalize(scratch_path(ext, cfg)) then
-        utils.notify("temp: run ':Tuna temp sync' from the scratch buffer (':Tuna temp' opens it).", "WARN")
+        utils.notify("temp: run ':Tuna download sync' from the scratch buffer (':Tuna temp' opens it).", "WARN")
         return
     end
 
@@ -156,12 +159,12 @@ function M.sync(bufnr)
         bufnr = bufnr,
     }
 
-    local mode = (cfg.temp or {}).receive or "contest"
-    local err = require("tuna.receive").start_receiving(
+    local mode = (cfg.temp or {}).download or "contest"
+    local err = require("tuna.download").start_downloading(
         mode,
         cfg.companion_port,
-        cfg.receive_print_message,
-        cfg.receive_print_message,
+        cfg.download_print_message,
+        cfg.download_print_message,
         bufnr,
         cfg
     )
@@ -171,10 +174,10 @@ function M.sync(bufnr)
     end
 end
 
----Fold a waiting scratch into the problem `receive` has just opened: the problem keeps
----its evaluated header, the scratch supplies the body. Called by `receive`; a no-op
----unless `:Tuna temp sync` armed it.
----@param filepath string the received problem just opened
+---Fold a waiting scratch into the problem `download` has just opened: the problem keeps
+---its evaluated header, the scratch supplies the body. Called by `download`; a no-op
+---unless `:Tuna download sync` armed it.
+---@param filepath string the downloaded problem just opened
 ---@param cfg table resolved configuration for that directory
 function M.absorb(filepath, cfg)
     local pending = M.pending
@@ -185,7 +188,7 @@ function M.absorb(filepath, cfg)
 
     local buf = vim.fn.bufnr(filepath)
     if buf == -1 or not vim.api.nvim_buf_is_valid(buf) then
-        utils.notify("temp: the received problem is not open, so the scratch was left alone.", "WARN")
+        utils.notify("temp: the downloaded problem is not open, so the scratch was left alone.", "WARN")
         return
     end
 
