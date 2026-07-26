@@ -57,8 +57,13 @@ local function open_float(bufnr, enter, opts)
     -- `scrolloff` (e.g. 999, to keep normal buffers centred) fights list navigation
     -- by refusing to let the cursor reach the top/bottom rows, so pin it off here —
     -- `scrolloff`/`sidescrolloff` are global-local, so this only affects this window.
-    vim.wo[winid].scrolloff = 0
-    vim.wo[winid].sidescrolloff = 0
+    -- A scrollable *content* pane (e.g. clean's file preview) is read like a normal
+    -- buffer, not navigated as a list, so it opts out via `keep_scrolloff` and keeps
+    -- the user's own scrolloff (by leaving it unset, the window inherits the global).
+    if not opts.keep_scrolloff then
+        vim.wo[winid].scrolloff = 0
+        vim.wo[winid].sidescrolloff = 0
+    end
     return winid
 end
 
@@ -90,12 +95,15 @@ end
 ---@param count integer number of selectable rows
 ---@param delta integer -1 (previous) or +1 (next)
 local function move_cursor(winid, count, delta)
+    -- Clamp to what the buffer actually holds: a widget whose rows are being repaired
+    -- (the form's edit guard) can briefly hold fewer lines than it has choices.
+    count = math.min(count, api.nvim_buf_line_count(api.nvim_win_get_buf(winid)))
     if count <= 0 then
         return
     end
     local row = api.nvim_win_get_cursor(winid)[1]
     row = (row - 1 + delta) % count + 1
-    api.nvim_win_set_cursor(winid, { row, 0 })
+    pcall(api.nvim_win_set_cursor, winid, { row, 0 })
 end
 
 ---Read a whole buffer as a single newline-joined string.
@@ -415,8 +423,9 @@ function M.picker(bufnr, tctbl, title, callback, restore_winid)
         border_highlight = cfg.floating_border_highlight,
         title = picker.title,
     })
-    -- Highlight the active row; cursor movement (j/k, arrows) is native.
-    vim.wo[picker.winid].cursorline = true
+    -- Highlight the active row; cursor movement (j/k, arrows) is native. setlocal, so
+    -- it doesn't leak cursorline's global default off this float (see the menu note).
+    api.nvim_set_option_value("cursorline", true, { scope = "local", win = picker.winid })
     picker.ui_visible = true
 
     ---@param tcnum integer? chosen testcase, or nil if cancelled
@@ -470,6 +479,9 @@ end
 ---@field preview { title: string?, lines: string[], filetype: string?, width: integer? }?
 ---@field preview_win integer?
 ---@field preview_buf integer?
+---@field notice { title: string?, lines: string[] }?
+---@field notice_win integer?
+---@field notice_buf integer?
 local menu = { ui_visible = false }
 
 ---Open a generic single-choice menu (drives the `:Tuna` dashboard). `on_choice`
@@ -486,7 +498,9 @@ local menu = { ui_visible = false }
 ---  window closed) — so a caller that must always continue (e.g. receive's batch
 ---  processor) isn't left hanging on a cancellation
 ---@param preview { title: string?, lines: string[], filetype: string?, width: integer? }? content pane
-function M.menu(items, title, on_choice, restore_winid, on_close, preview)
+---@param notice { title: string?, lines: string[] }? a read-only pane *above* the menu,
+---  for something the user needs to know before choosing (e.g. that a scan was partial)
+function M.menu(items, title, on_choice, restore_winid, on_close, preview, notice)
     if items == nil then -- resize
         if not menu.ui_visible then
             return
@@ -496,6 +510,7 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview)
         menu.skip_close = true
         close_win(menu.winid)
         close_win(menu.preview_win)
+        close_win(menu.notice_win)
     else
         if #items == 0 then
             return
@@ -506,11 +521,15 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview)
         menu.on_close = on_close
         menu.restore_winid = restore_winid
         menu.preview = preview
+        menu.notice = notice
     end
 
     local cfg = config.get_buffer_config(api.nvim_get_current_buf())
     local vim_width, vim_height = utils.get_ui_size()
     local pv = menu.preview
+    -- The user's cursorline, captured before opening any of our floats, so the
+    -- preview (read like a normal buffer) can honour it.
+    local user_cursorline = api.nvim_get_option_value("cursorline", { scope = "global" })
 
     local width
     if pv and pv.width then
@@ -533,18 +552,54 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview)
     end
     local col = math.floor((vim_width - width) / 2)
 
-    -- Lay out the menu (and, if present, the preview stacked beneath it), centring
-    -- the whole group vertically.
+    -- Lay out the notice (if any) above the menu and the preview below it, centring
+    -- the whole group vertically. Each pane costs 2 rows of border, and consecutive
+    -- panes are separated by a 1-row gap.
+    local nt = menu.notice
     local menu_h = math.min(#menu.items, vim_height - 4)
-    local menu_row, pv_h, pv_row
-    if pv then
-        local avail = vim_height - 4 - (menu_h + 2) - 2 - 1 -- rows left for preview interior
-        pv_h = math.max(1, math.min(#pv.lines, avail))
-        local total = (menu_h + 2) + 1 + (pv_h + 2)
-        menu_row = math.max(0, math.floor((vim_height - total) / 2))
-        pv_row = menu_row + menu_h + 2 + 1
+    local menu_row, pv_h, pv_row, nt_h, nt_row
+    if nt then
+        -- The notice wraps, so its height is counted in *screen* rows, not lines.
+        nt_h = 0
+        for _, l in ipairs(nt.lines) do
+            nt_h = nt_h + math.max(1, math.ceil(#l / math.max(1, width)))
+        end
+        nt_h = math.max(1, math.min(nt_h, 6))
+    end
+    if nt or pv then
+        local used = (menu_h + 2) + (nt and (nt_h + 3) or 0)
+        if pv then
+            pv_h = math.max(1, math.min(#pv.lines, vim_height - 2 - used - 3))
+        end
+        local total = used + (pv and (pv_h + 3) or 0)
+        local top = math.max(0, math.floor((vim_height - total) / 2))
+        nt_row = nt and top or nil
+        menu_row = top + (nt and (nt_h + 3) or 0)
+        pv_row = pv and (menu_row + menu_h + 3) or nil
     else
         menu_row = math.floor((vim_height - menu_h) / 2)
+    end
+
+    if nt then
+        -- A read-only pane for something the user must know before choosing. It is
+        -- deliberately outside the focus cycle: it carries no action, and putting it
+        -- in the way of the menu would slow every confirmation down.
+        menu.notice_buf = api.nvim_create_buf(false, true)
+        api.nvim_buf_set_lines(menu.notice_buf, 0, -1, false, nt.lines)
+        vim.bo[menu.notice_buf].modifiable = false
+        menu.notice_win = open_float(menu.notice_buf, false, {
+            width = width,
+            height = nt_h,
+            row = nt_row,
+            col = col,
+            border = cfg.floating_border,
+            border_highlight = cfg.floating_border_highlight,
+            title = nt.title and (" " .. nt.title .. " ") or nil,
+        })
+        vim.wo[menu.notice_win].wrap = true
+        api.nvim_set_option_value("cursorline", false, { scope = "local", win = menu.notice_win })
+    else
+        menu.notice_win, menu.notice_buf = nil, nil
     end
 
     menu.menu_buf = api.nvim_create_buf(false, true)
@@ -561,7 +616,10 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview)
         border_highlight = cfg.floating_border_highlight,
         title = menu.title,
     })
-    vim.wo[menu.winid].cursorline = true
+    -- setlocal (scope="local"), not `vim.wo[...] =`: on the *current* window the
+    -- latter also writes cursorline's global default, leaking a UI choice into the
+    -- user's editor. scope="local" keeps it to this float.
+    api.nvim_set_option_value("cursorline", true, { scope = "local", win = menu.winid })
 
     if pv then
         menu.preview_buf = api.nvim_create_buf(false, true)
@@ -574,9 +632,12 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview)
             border = cfg.floating_border,
             border_highlight = cfg.floating_border_highlight,
             title = pv.title and (" " .. pv.title .. " ") or nil,
+            keep_scrolloff = true, -- a file preview, read like a buffer; honour user scrolloff
         })
         vim.wo[menu.preview_win].wrap = false
-        vim.wo[menu.preview_win].cursorline = false
+        -- The preview is read like a normal buffer, so honour the user's cursorline
+        -- (style="minimal" forces it off, so restore their setting explicitly).
+        api.nvim_set_option_value("cursorline", user_cursorline, { scope = "local", win = menu.preview_win })
         vim.bo[menu.preview_buf].modifiable = false
         -- Colour the preview via 'syntax' (not 'filetype') so no FileType autocmds
         -- fire — a throwaway preview shouldn't attach LSP or run ftplugins.
@@ -598,6 +659,7 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview)
         menu.ui_visible = false
         close_win(menu.winid)
         close_win(menu.preview_win)
+        close_win(menu.notice_win)
         if menu.restore_winid and api.nvim_win_is_valid(menu.restore_winid) then
             api.nvim_set_current_win(menu.restore_winid)
         end
@@ -690,11 +752,16 @@ end
 -- Multi-choice form (several single-choice lists visible at once)
 --------------------------------------------------------------------------------
 
+---@class tuna.FormCustom
+---@field label string inline virtual-text prefix shown before the editable value
+---@field default string initial text of the editable row
+---@field validate fun(text: string): any?, string? returns the parsed value, or nil + an error
+
 ---@class tuna.FormWidget
 ---@field ui_visible boolean
----@field sections { title: string, items: string[], sel: integer }[]
+---@field sections { title: string, items: string[], custom: tuna.FormCustom?, sel: integer, text: string? }[]
 ---@field title string?
----@field on_submit fun(indices: integer[])?
+---@field on_submit fun(results: { index: integer, custom: any? }[])?
 ---@field on_close fun()?
 ---@field skip_close boolean swallow WinClosed events during a resize/teardown
 ---@field restore_winid integer?
@@ -703,20 +770,104 @@ end
 ---@field bufs integer[]
 local form = { ui_visible = false }
 
+local form_ns = api.nvim_create_namespace("tuna_form")
+
+-- Normal-mode keys that start an edit. On the editable row they act natively; on a
+-- fixed choice they do nothing, so the list can't be typed over. (`o`/`O` would add a
+-- row, so they are inert everywhere.) `guard_section` is the backstop for anything
+-- not listed here.
+local FORM_EDIT_KEYS = { "i", "I", "a", "A", "c", "C", "s", "S", "R", "x", "X", "d", "D", "p", "P", "r", "~", "J" }
+
+---The number of selectable rows in a section (its fixed items plus, if any, the
+---editable custom row that always sits last).
+---@param s table
+---@return integer
+local function form_rows(s)
+    return #s.items + (s.custom and 1 or 0)
+end
+
+---Draw the inline label in front of a section's editable row. Uses a fixed extmark id
+---so it updates in place, and is re-applied after any repair that rewrites the buffer.
+---@param i integer section index
+local function form_label(i)
+    local s, b = form.sections[i], form.bufs[i]
+    if not (s.custom and b and api.nvim_buf_is_valid(b)) then
+        return
+    end
+    pcall(api.nvim_buf_set_extmark, b, form_ns, #s.items, 0, {
+        id = 1,
+        virt_text = { { s.custom.label, "Comment" } },
+        virt_text_pos = "inline",
+        -- Pin the label to the start of the line: with the default right gravity the
+        -- mark is pushed along by text inserted at column 0, so what was typed would
+        -- appear to the *left* of the label instead of after it.
+        right_gravity = false,
+    })
+end
+
+---Keep a section's buffer matching its model: the fixed choices are restored verbatim
+---and the row count is pinned, so only the custom row's text is ever really editable.
+---The label is virtual text, so it is outside the buffer and can't be edited at all.
+---@param i integer section index
+local function guard_section(i)
+    local s, b, w = form.sections[i], form.bufs[i], form.wins[i]
+    if not (s.custom and b and api.nvim_buf_is_valid(b)) then
+        return
+    end
+    local n = #s.items
+    local lines = api.nvim_buf_get_lines(b, 0, -1, false)
+    local intact = #lines == n + 1
+    if intact then
+        for j = 1, n do
+            if lines[j] ~= s.items[j] then
+                intact = false
+                break
+            end
+        end
+    end
+    if intact then
+        s.text = lines[n + 1] -- a valid state: remember what was typed
+        return
+    end
+    -- Something outside the custom row changed (a deleted line, a paste, an undo):
+    -- rebuild from the model, keeping the typed text when it survived intact.
+    if #lines == n + 1 then
+        s.text = lines[n + 1]
+    end
+    local desired = vim.list_slice(s.items, 1, n)
+    desired[n + 1] = s.text or s.custom.default
+    local cur = api.nvim_win_is_valid(w) and api.nvim_win_get_cursor(w) or { n + 1, 0 }
+    api.nvim_buf_set_lines(b, 0, -1, false, desired)
+    form_label(i)
+    if api.nvim_win_is_valid(w) then
+        local r = math.min(cur[1], n + 1)
+        pcall(api.nvim_win_set_cursor, w, { r, math.min(cur[2], #desired[r]) })
+    end
+end
+
 ---Open a vertical stack of single-choice lists, all visible at once. Move within a
 ---list with `j`/`k` (arrows), switch lists with the plugin-wide pane-navigation keys
 ---(`switch_window_keys`, default `<C-hjkl>`) or `<Tab>`/`<S-Tab>`,
----`<CR>` submits every list's current selection (a 1-based index per section), Esc
----cancels. Unlike a chain of `menu`s, the user sees and sets all choices together.
----The focused section is the active window (cursor + cursorline), like every other
----multi-pane tuna float.
----@param sections { title: string, items: string[] }[]? sections, or `nil` to resize
+---`<CR>` submits every list's current selection, Esc cancels. Unlike a chain of
+---`menu`s, the user sees and sets all choices together. The focused section is the
+---active window (cursor + cursorline), like every other multi-pane tuna float.
+---
+---A section may end with a `custom` row that is **edited in place**: its label is
+---inline virtual text (outside the buffer, so it can't be touched) and the row holds
+---just the value. Any normal edit key works on it while the fixed choices above stay
+---read-only. `<CR>` in insert mode only leaves insert — it does not submit — so
+---several sections can be customized in one pass. On submit each selected custom row
+---is `validate`d; a failure keeps the form open, reports the error and parks the
+---cursor on the offending row, so nothing typed is lost.
+---@param sections { title: string, items: string[], custom: tuna.FormCustom? }[]? sections, or `nil` to resize
 ---@param title string? overall form title (unused chrome for now; kept for parity)
----@param on_submit fun(indices: integer[])? receives one 1-based index per section
+---@param on_submit fun(results: { index: integer, custom: any? }[])? one result per
+---  section: the chosen 1-based row, plus the validated value when that row is the
+---  custom one
 ---@param restore_winid integer? window to refocus once the form closes
 ---@param on_close fun()? called when the form is dismissed without submitting
 function M.form(sections, title, on_submit, restore_winid, on_close)
-    if sections == nil then -- resize: keep each section's current selection
+    if sections == nil then -- resize: keep each section's selection and typed text
         if not form.ui_visible then
             return
         end
@@ -724,6 +875,7 @@ function M.form(sections, title, on_submit, restore_winid, on_close)
             if api.nvim_win_is_valid(w) then
                 form.sections[i].sel = api.nvim_win_get_cursor(w)[1]
             end
+            guard_section(i) -- refreshes `text` from the buffer
         end
         form.skip_close = true
         for _, w in ipairs(form.wins) do
@@ -735,7 +887,13 @@ function M.form(sections, title, on_submit, restore_winid, on_close)
         end
         form.sections = {}
         for _, s in ipairs(sections) do
-            form.sections[#form.sections + 1] = { title = s.title, items = s.items, sel = 1 }
+            form.sections[#form.sections + 1] = {
+                title = s.title,
+                items = s.items,
+                custom = s.custom,
+                sel = 1,
+                text = s.custom and s.custom.default or nil,
+            }
         end
         form.title = title
         form.on_submit = on_submit
@@ -747,12 +905,16 @@ function M.form(sections, title, on_submit, restore_winid, on_close)
     local cfg = config.get_buffer_config(api.nvim_get_current_buf())
     local vim_width, vim_height = utils.get_ui_size()
 
-    -- Width = the widest item or section title across the whole form.
+    -- Width = the widest item or section title across the whole form. A custom row
+    -- also has to fit its inline label plus the text typed into it.
     local width = 0
     for _, s in ipairs(form.sections) do
         width = math.max(width, #s.title + 4)
         for _, it in ipairs(s.items) do
             width = math.max(width, #it)
+        end
+        if s.custom then
+            width = math.max(width, #s.custom.label + #(s.text or s.custom.default) + 8)
         end
     end
     width = math.min(math.max(width + 2, 20), vim_width - 4)
@@ -763,7 +925,7 @@ function M.form(sections, title, on_submit, restore_winid, on_close)
     local per_cap = math.max(1, math.floor((vim_height - 4 - 3 * n) / n))
     local heights, total = {}, 0
     for i, s in ipairs(form.sections) do
-        heights[i] = math.max(1, math.min(#s.items, per_cap))
+        heights[i] = math.max(1, math.min(form_rows(s), per_cap))
         total = total + heights[i] + 2
     end
     total = total + (n - 1)
@@ -774,8 +936,14 @@ function M.form(sections, title, on_submit, restore_winid, on_close)
     form.wins, form.bufs = {}, {}
     for i, s in ipairs(form.sections) do
         local b = api.nvim_create_buf(false, true)
-        api.nvim_buf_set_lines(b, 0, -1, false, s.items)
-        vim.bo[b].modifiable = false
+        local lines = vim.list_slice(s.items, 1, #s.items)
+        if s.custom then
+            lines[#lines + 1] = s.text or s.custom.default
+        end
+        api.nvim_buf_set_lines(b, 0, -1, false, lines)
+        -- Only a section with a custom row is writable at all; `guard_section` then
+        -- confines the writing to that one row.
+        vim.bo[b].modifiable = s.custom ~= nil
         vim.bo[b].filetype = "tuna"
         local w = open_float(b, i == form.focused, {
             width = width,
@@ -786,10 +954,13 @@ function M.form(sections, title, on_submit, restore_winid, on_close)
             border_highlight = cfg.floating_border_highlight,
             title = " " .. s.title .. " ",
         })
-        vim.wo[w].cursorline = true
-        api.nvim_win_set_cursor(w, { math.min(s.sel, #s.items), 0 })
+        -- setlocal, so the focused (current) section doesn't leak cursorline's global
+        -- default off this float (see the menu note).
+        api.nvim_set_option_value("cursorline", true, { scope = "local", win = w })
+        api.nvim_win_set_cursor(w, { math.min(s.sel, form_rows(s)), 0 })
         form.wins[i] = w
         form.bufs[i] = b
+        form_label(i)
         row = row + heights[i] + 3 -- border (2) + gap (1)
     end
     form.ui_visible = true
@@ -811,13 +982,34 @@ function M.form(sections, title, on_submit, restore_winid, on_close)
         if not form.ui_visible then
             return
         end
-        local sels = {}
+        if api.nvim_get_mode().mode:sub(1, 1) == "i" then
+            vim.cmd("stopinsert")
+        end
+        local results = {}
         for i, w in ipairs(form.wins) do
-            sels[i] = api.nvim_win_is_valid(w) and api.nvim_win_get_cursor(w)[1] or form.sections[i].sel
+            local s = form.sections[i]
+            local idx = api.nvim_win_is_valid(w) and api.nvim_win_get_cursor(w)[1] or s.sel
+            results[i] = { index = idx }
+            if s.custom and idx == #s.items + 1 then
+                guard_section(i) -- pick up the latest typed text
+                local value, err = s.custom.validate(s.text or "")
+                if err then
+                    -- Keep everything on screen and park on the offending row, so a
+                    -- typo costs a correction rather than the whole form.
+                    utils.notify(err, "WARN")
+                    if api.nvim_win_is_valid(w) then
+                        form.focused = i
+                        api.nvim_set_current_win(w)
+                        pcall(api.nvim_win_set_cursor, w, { idx, #(s.text or "") })
+                    end
+                    return
+                end
+                results[i].custom = value
+            end
         end
         teardown()
         if form.on_submit then
-            form.on_submit(sels)
+            form.on_submit(results)
         end
     end
 
@@ -841,6 +1033,22 @@ function M.form(sections, title, on_submit, restore_winid, on_close)
         end
     end
 
+    ---Switching panes mid-edit, so the pane keys work in insert mode as they do
+    ---everywhere else in the plugin. Insert mode carries over only when the section
+    ---landed on is sitting on its editable row — otherwise typing would go into a
+    ---read-only choice — and the landing row is never moved, so a switch can't quietly
+    ---change what another section has selected.
+    local function refocus_insert(delta)
+        refocus(delta)
+        local s, w = form.sections[form.focused], form.wins[form.focused]
+        local on_custom = s.custom
+            and api.nvim_win_is_valid(w)
+            and api.nvim_win_get_cursor(w)[1] == #s.items + 1
+        if not on_custom then
+            vim.cmd("stopinsert")
+        end
+    end
+
     -- Switch lists with the plugin-wide pane-navigation keys (`switch_window_keys`,
     -- also used to move between result panes; default <C-hjkl>), given as
     -- { left, down, up, right }: down/right go to the next list, up/left to the
@@ -855,11 +1063,12 @@ function M.form(sections, title, on_submit, restore_winid, on_close)
     end
 
     for i, b in ipairs(form.bufs) do
+        local s = form.sections[i]
         map_keys({ "j", "<down>" }, "n", b, function()
-            move_cursor(form.wins[i], #form.sections[i].items, 1)
+            move_cursor(form.wins[i], form_rows(s), 1)
         end)
         map_keys({ "k", "<up>" }, "n", b, function()
-            move_cursor(form.wins[i], #form.sections[i].items, -1)
+            move_cursor(form.wins[i], form_rows(s), -1)
         end)
         map_keys(next_keys, "n", b, function()
             refocus(1)
@@ -869,6 +1078,48 @@ function M.form(sections, title, on_submit, restore_winid, on_close)
         end)
         map_keys("<CR>", "n", b, submit)
         map_keys({ "<Esc>", "<C-c>", "q", "Q" }, "n", b, cancel)
+
+        if s.custom then
+            local edit_row = #s.items + 1
+            -- An edit key acts natively on the custom row and is inert on the fixed
+            -- choices above it. These are `expr` maps returning the key itself, so an
+            -- operator such as `c`/`d` still waits for its motion as usual; re-feeding
+            -- the key instead would race with the pending input.
+            for _, key in ipairs(FORM_EDIT_KEYS) do
+                vim.keymap.set("n", key, function()
+                    return api.nvim_win_get_cursor(form.wins[i])[1] == edit_row and key or ""
+                end, { buffer = b, expr = true, noremap = true, nowait = true })
+            end
+            map_keys({ "o", "O" }, "n", b, function() end) -- would add a row: always inert
+            -- <CR> submits from insert mode too, as it would in any other prompt; it
+            -- must be mapped either way, since inserting a line break here would split
+            -- the row. Other sections keep whatever was typed into them, so setting
+            -- several custom values before submitting still works.
+            map_keys("<CR>", "i", b, submit)
+            -- The pane keys keep working while typing, like the rest of the plugin's UI.
+            map_keys(next_keys, "i", b, function()
+                refocus_insert(1)
+            end)
+            map_keys(prev_keys, "i", b, function()
+                refocus_insert(-1)
+            end)
+            -- `nvim_buf_attach` sees *every* change, including ones no mapping can
+            -- intercept (`:1d`, a paste, an undo), which `TextChanged` alone misses.
+            -- The repair is scheduled because the buffer is locked during the callback.
+            api.nvim_buf_attach(b, false, {
+                on_lines = function()
+                    if not (form.ui_visible and api.nvim_buf_is_valid(b)) then
+                        return true -- detach
+                    end
+                    vim.schedule(function()
+                        if form.ui_visible and form.bufs[i] == b then
+                            guard_section(i)
+                        end
+                    end)
+                end,
+            })
+        end
+
         api.nvim_create_autocmd("WinClosed", {
             buffer = b,
             callback = function()

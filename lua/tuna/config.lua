@@ -128,6 +128,23 @@ M.defaults = {
     clean = {
         min_width = 0.5, -- floor, as a fraction of the editor width
         max_width = 0.7, -- ceiling, as a fraction of the editor width
+        -- Safety rail for a scan pointed at a huge tree (a whole home directory holds
+        -- hundreds of thousands of entries). The walk stops after this many filesystem
+        -- entries and reports that it was cut short, rather than blocking the editor.
+        max_entries = 20000,
+        -- Directories never descended into: build outputs, dependency trees and the
+        -- like hold no solutions and dwarf everything else. Dot-directories (`.git`,
+        -- `.cache`, …) are always skipped as well, since their files are never
+        -- candidates anyway.
+        skip_dirs = { "node_modules", "target", "build", "dist", "vendor", "__pycache__", "venv" },
+        -- Extra directories never offered for deletion, on top of the ones protected
+        -- unconditionally: the scanned root, the cwd, the directory the command was
+        -- launched from, every root configured here, the home directory with its
+        -- standard sub-directories (`Desktop`, `Documents`, … — read from
+        -- `user-dirs.dirs` when present, so localized names count too) and the system's
+        -- own directories (`/`, `/usr`, `/tmp`, …). An emptied protected directory is
+        -- left alone, and so is every directory above it.
+        protected_dirs = {},
     },
 
     -- testcase storage (see DIFFERENCES.md: layout is fully customizable)
