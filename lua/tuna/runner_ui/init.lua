@@ -16,11 +16,15 @@
 
 local api = vim.api
 local utils = require("tuna.utils")
+local diff = require("tuna.diff")
 local SKIP = require("tuna.runner.core").SKIP
 
 local M = {}
 
 local ns = api.nvim_create_namespace("tuna_runner_ui")
+-- Its own namespace, so the diff can be painted and cleared without touching the
+-- selector's status highlights.
+local diff_ns = api.nvim_create_namespace("tuna_runner_diff")
 local augroup_counter = 0
 
 -- The four detail panes a viewer can enlarge, and the friendly names used in
@@ -94,11 +98,12 @@ function RunnerUI:cursor_tc()
 end
 
 ---@private
----Which selector row the UI should open on. Row 1 — the Compile step — normally,
----since a compilation that had something to say (warnings, an error) is the first
----thing to read. But a compile that printed nothing leaves four empty panes in front
----of someone who ran their solution to see a verdict, so when the first testcase
----already carries a result the cursor starts there instead.
+---Which selector row the UI should open on. The first testcase, whenever the Compile
+---step has nothing to say: an empty compile row leaves four empty panes in front of
+---someone who opened the UI to read a verdict — or, before any run, to read the
+---testcase itself. Row 1 (Compile) is kept for the two cases where it is the row worth
+---reading: a compilation that printed warnings or errors, and a run still in flight,
+---where the cursor must not be moved out from under the user as results land.
 ---@return integer
 function RunnerUI:initial_row()
     local first = self.runner.tcdata[1]
@@ -109,12 +114,17 @@ function RunnerUI:initial_row()
         return 1
     end
     local tc = self.runner.tcdata[2]
-    -- A recorded result, not merely a listed testcase: `time` is set when a run
-    -- finishes, and a row still running or being judged has no verdict yet.
-    if tc and tc.time and not tc.running and not tc.judging then
-        return 2
+    if not tc then
+        return 1
     end
-    return 1
+    -- Settled rows only: `running`/`judging` mean a run is under way, so the compile
+    -- row is still the one being written to.
+    for _, row in ipairs({ first, tc }) do
+        if row.running or row.judging then
+            return 1
+        end
+    end
+    return 2
 end
 
 ---Show the UI, building it if needed and focusing the selector.
@@ -244,9 +254,11 @@ function RunnerUI:show_ui()
         end)
     end
 
+    -- A rebuilt UI (after a resize) keeps the diff it had. Only the binding is
+    -- re-armed here: the panes are filled on the scheduled render queued just above,
+    -- which paints the marks itself rather than painting over empty buffers.
     if self.diff_view then
-        self.diff_view = false
-        self:toggle_diff_view()
+        self:set_diff_bind(true)
     end
 
     -- Let the runner augment the freshly-built UI (interactive makes the Input pane
@@ -257,27 +269,115 @@ function RunnerUI:show_ui()
 end
 
 ---@private
----Enable/disable Vim diff on a window.
-local function win_set_diff(winid, enable)
-    if winid and api.nvim_win_is_valid(winid) then
-        api.nvim_win_call(winid, function()
-            vim.cmd(enable and "diffthis" or "diffoff")
-            vim.wo.foldlevel = 1
+---Bind the two compared panes together, so scrolling or moving in one follows in
+---the other. With a positional diff the panes are already line-for-line aligned, so
+---this needs none of the filler lines `:diffthis` inserts to fake that alignment.
+---@param enable boolean
+function RunnerUI:set_diff_bind(enable)
+    for _, name in ipairs({ "so", "eo" }) do
+        local w = self.windows[name]
+        if w and w.winid and api.nvim_win_is_valid(w.winid) then
+            vim.wo[w.winid].scrollbind = enable
+            vim.wo[w.winid].cursorbind = enable
+        end
+    end
+    if enable and self.windows.so and api.nvim_win_is_valid(self.windows.so.winid) then
+        api.nvim_win_call(self.windows.so.winid, function()
+            vim.cmd("syncbind")
         end)
     end
 end
 
----Toggle a diff between the Output and Expected Output panes.
+---@private
+---Paint one pane's diff marks. Line highlights run to the edge of the window (as a
+---diff does), with the disagreeing spans on top of them.
+---@param bufnr integer?
+---@param marks table<integer, tuna.DiffMark>
+local function paint_diff(bufnr, marks)
+    if not (bufnr and api.nvim_buf_is_valid(bufnr)) then
+        return
+    end
+    local last = api.nvim_buf_line_count(bufnr)
+    for lnum, mark in pairs(marks) do
+        if lnum <= last then
+            local line = api.nvim_buf_get_lines(bufnr, lnum - 1, lnum, false)[1] or ""
+            api.nvim_buf_set_extmark(bufnr, diff_ns, lnum - 1, 0, {
+                end_col = #line,
+                hl_group = mark.hl,
+                hl_eol = true,
+                priority = 190,
+            })
+            for _, span in ipairs(mark.spans) do
+                api.nvim_buf_set_extmark(bufnr, diff_ns, lnum - 1, math.min(span[1], #line), {
+                    end_col = math.min(span[2], #line),
+                    hl_group = diff.TEXT,
+                    priority = 200,
+                })
+            end
+        end
+    end
+end
+
+---@private
+---Re-highlight the Output and Expected Output panes for the selected testcase.
+---Cheap enough to redo on every render, which is what keeps the marks correct as
+---the selection moves or a re-run replaces the output.
+---@return integer? first the first differing line, if any
+function RunnerUI:render_diff()
+    local so, eo = self.windows.so, self.windows.eo
+    for _, w in ipairs({ so, eo }) do
+        if w and w.bufnr and api.nvim_buf_is_valid(w.bufnr) then
+            api.nvim_buf_clear_namespace(w.bufnr, diff_ns, 0, -1)
+        end
+    end
+    if not (self.diff_view and so and eo) then
+        return nil
+    end
+
+    local tc = self.runner.tcdata[self.update_testcase or 1]
+    if not tc then
+        return nil
+    end
+    -- Through the pane seam, so a mode that rewrites these panes is diffed on what
+    -- it actually shows; a pane it owns outright is left alone.
+    local output = self.runner:pane_content(tc, "so")
+    local expected = self.runner:pane_content(tc, "eo")
+    if output == SKIP or expected == SKIP or expected == nil then
+        return nil -- nothing to compare against (no expected output, or a mode's own pane)
+    end
+
+    local res = diff.compute(output, expected, self.runner:effective_compare())
+    paint_diff(so.bufnr, res.out)
+    paint_diff(eo.bufnr, res.exp)
+    return res.first
+end
+
+---Toggle the comparison between the Output and Expected Output panes.
 function RunnerUI:toggle_diff_view()
     self.diff_view = not self.diff_view
-    win_set_diff(self.windows.eo and self.windows.eo.winid, self.diff_view)
-    win_set_diff(self.windows.so and self.windows.so.winid, self.diff_view)
+    local first = self:render_diff()
+    self:set_diff_bind(self.diff_view)
+    if first then
+        -- Land on the first disagreement: with a hundred lines of output, finding it
+        -- is the whole reason the diff was asked for.
+        for _, w in ipairs({ self.windows.so, self.windows.eo }) do
+            if w and w.winid and api.nvim_win_is_valid(w.winid) then
+                local line_count = api.nvim_buf_line_count(w.bufnr)
+                pcall(api.nvim_win_set_cursor, w.winid, { math.min(first, line_count), 0 })
+            end
+        end
+    end
 end
 
 ---@private
 function RunnerUI:disable_diff_view()
-    win_set_diff(self.windows.eo and self.windows.eo.winid, false)
-    win_set_diff(self.windows.so and self.windows.so.winid, false)
+    self:set_diff_bind(false)
+    for _, name in ipairs({ "so", "eo" }) do
+        local w = self.windows[name]
+        if w and w.bufnr and api.nvim_buf_is_valid(w.bufnr) then
+            api.nvim_buf_clear_namespace(w.bufnr, diff_ns, 0, -1)
+        end
+    end
 end
 
 ---@private
@@ -634,6 +734,11 @@ function RunnerUI:update_ui()
                     if content ~= SKIP then
                         set_buf(self.windows[name].bufnr, content)
                     end
+                end
+                -- The panes were just rewritten, so the marks on them are stale:
+                -- re-diff whatever they now hold.
+                if self.diff_view then
+                    self:render_diff()
                 end
             end
         end

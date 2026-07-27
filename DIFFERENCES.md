@@ -286,8 +286,41 @@ first-class results UI for a few dozen lines instead of a fourth copy of the run
 the first row, which is the compile step. A compilation that printed warnings or
 failed is worth landing on — but a silent one leaves four empty panes in front of
 someone who opened the UI to see a verdict, one keypress away from the row they
-wanted. So `initial_row()` starts on the first testcase when the compile step has no
-output *and* that testcase already carries a result; otherwise nothing has changed.
+wanted — and the same is true before any run, where `:Tuna show_ui` doubles as a
+testcase viewer and the testcase is the whole point of opening it. So `initial_row()`
+starts on the first testcase whenever the compile step has no output. The compile row
+is kept only when it printed something, or while a run is still in flight — moving the
+cursor as results land would take it out from under the user.
+
+**A diff that doesn't re-align (`diff.lua`).** competitest's diff view is Vim's
+`:diffthis` over the Output and Expected Output panes, so it computes an *edit
+script*: it may decide a line was inserted or deleted and re-pair everything after
+it. That is right for source code and wrong for a program's output. With `2 2 0 2`
+against `2 2 2 5` it reports line 3 as deleted and then pairs your line 4 with the
+answer's line 3 — two wrong values become one deletion plus a coincidence, and the
+rest of the output drifts out of step with the answer sheet.
+
+Competitive-programming output is **positional**: the i-th line answers the i-th
+line, and inside a line the i-th token answers the i-th token. So tuna computes the
+comparison itself, in lockstep, and never re-aligns: it marks the values that
+disagree exactly where they are and judges the following lines on their own merits.
+The lines one side has and the other does not are marked as such, in place, instead
+of shifting anything.
+
+The granularity **follows the compare method in effect**, so the highlighting can
+never contradict the verdict: `exact` descends to characters (a stray space is
+marked, because it loses the testcase), `squish` and `{ "float", tol }` compare
+tokens — spacing is not a difference, and a value within tolerance is not one either.
+A custom compare function gets the token view, as a reading aid.
+
+Presentation-wise the two panes stay side by side (this is the choice
+[issue #86](https://github.com/xeluxee/competitest.nvim/issues/86) asked to revisit;
+the pane layout was never the problem, the alignment was). They need none of the
+filler lines `:diffthis` inserts, since line *i* faces line *i* by construction — so
+they are simply `scrollbind`/`cursorbind`ed together. Toggling the diff on also jumps
+both panes to the first disagreement, which with a hundred lines of output is the
+reason one opens a diff at all. Colours come from `TunaDiffChange`/`TunaDiffText`/
+`TunaDiffAdd`/`TunaDiffDelete`, linked by default to the editor's own diff groups.
 
 ---
 

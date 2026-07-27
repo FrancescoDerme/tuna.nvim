@@ -14,6 +14,12 @@ function M.setup_highlight_groups()
         TunaCorrect = { ctermfg = "green", fg = "#00ff00" },
         TunaWarning = { ctermfg = "yellow", fg = "orange" },
         TunaWrong = { ctermfg = "red", fg = "#ff0000" },
+        -- The results-UI diff. Linked to the editor's own diff groups, so it wears
+        -- whatever the colorscheme already uses for the same idea.
+        TunaDiffChange = { link = "DiffChange" }, -- a line whose counterpart disagrees
+        TunaDiffText = { link = "DiffText" }, -- the tokens/characters that disagree
+        TunaDiffAdd = { link = "DiffAdd" }, -- a line the expected output doesn't have
+        TunaDiffDelete = { link = "DiffDelete" }, -- a line missing from the output
     }
     for name, val in pairs(groups) do
         val.default = true
