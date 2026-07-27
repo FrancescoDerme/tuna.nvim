@@ -5,19 +5,47 @@ local M = {}
 
 local loaded = false
 
+---@private
+---Lay `fg` over `bg` at `alpha` opacity, both 24-bit RGB. Used to tint a highlight
+---towards a colour without painting it at full strength.
+---@param fg integer
+---@param bg integer
+---@param alpha number 0–1
+---@return integer
+local function blend(fg, bg, alpha)
+    local out = 0
+    for _, shift in ipairs({ 16, 8, 0 }) do
+        local unit = 2 ^ shift
+        local a, b = math.floor(fg / unit) % 256, math.floor(bg / unit) % 256
+        out = out + math.floor(a * alpha + b * (1 - alpha) + 0.5) * unit
+    end
+    return out
+end
+
 ---Create Tuna's highlight groups. Defined with `default = true` so user/colorscheme
 ---overrides win; re-applied on every `ColorScheme` so they survive a theme switch.
 function M.setup_highlight_groups()
+    -- The wrong values in the diff are marked by tinting the background red rather
+    -- than filling it: a saturated block is louder than the thing it is pointing at.
+    -- Mixing into the editor's own background keeps the tint at the strength a diff
+    -- highlight normally has, and follows the theme from dark to light. A transparent
+    -- background leaves nothing to mix with, so fall back to a dark red.
+    local normal = vim.api.nvim_get_hl(0, { name = "Normal", link = false })
+    local wrong_bg = normal.bg and blend(0xff0000, normal.bg, 0.35) or 0x5f0000
     local groups = {
         TunaRunning = { bold = true },
         TunaDone = {},
         TunaCorrect = { ctermfg = "green", fg = "#00ff00" },
         TunaWarning = { ctermfg = "yellow", fg = "orange" },
         TunaWrong = { ctermfg = "red", fg = "#ff0000" },
-        -- The results-UI diff. Linked to the editor's own diff groups, so it wears
-        -- whatever the colorscheme already uses for the same idea.
+        -- The results-UI diff. The line-level groups follow the editor's own diff
+        -- colours, so they wear whatever the colorscheme uses for the same idea. The
+        -- values that actually disagree do not: `DiffText` is a neutral background in
+        -- most themes, so over an already-highlighted line it reads as "selected"
+        -- rather than "wrong". They keep the text's own colour and take a red-tinted
+        -- background instead (see `wrong_bg` above).
         TunaDiffChange = { link = "DiffChange" }, -- a line whose counterpart disagrees
-        TunaDiffText = { link = "DiffText" }, -- the tokens/characters that disagree
+        TunaDiffText = { bg = wrong_bg, ctermbg = 52 }, -- the tokens/characters that disagree
         TunaDiffAdd = { link = "DiffAdd" }, -- a line the expected output doesn't have
         TunaDiffDelete = { link = "DiffDelete" }, -- a line missing from the output
     }

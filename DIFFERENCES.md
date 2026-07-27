@@ -319,8 +319,19 @@ the pane layout was never the problem, the alignment was). They need none of the
 filler lines `:diffthis` inserts, since line *i* faces line *i* by construction — so
 they are simply `scrollbind`/`cursorbind`ed together. Toggling the diff on also jumps
 both panes to the first disagreement, which with a hundred lines of output is the
-reason one opens a diff at all. Colours come from `TunaDiffChange`/`TunaDiffText`/
-`TunaDiffAdd`/`TunaDiffDelete`, linked by default to the editor's own diff groups.
+reason one opens a diff at all.
+
+Colours: the line-level groups (`TunaDiffChange`, `TunaDiffAdd`, `TunaDiffDelete`)
+link to the editor's own diff groups, so a diffed line looks like a diffed line in
+whatever colorscheme is loaded. The disagreeing values (`TunaDiffText`) deliberately
+do **not** link to `DiffText`: in most themes that is a *neutral* background, and a
+neutral background laid over an already-highlighted line reads as *selected* rather
+than *wrong*. Instead the text keeps its own colour and the background behind it is
+**tinted red** — the `WRONG` red mixed into the editor's own `Normal` background at
+roughly a third, so the mark is unmistakably red without a saturated block shouting
+louder than the value it points at, and it lands at the same strength on a dark theme
+as on a light one. It is re-derived on every `ColorScheme`, so a theme switch retints
+it rather than leaving a colour from the old palette.
 
 ---
 
