@@ -282,6 +282,26 @@ or `SKIP` to leave it alone) and `runner:on_ui_shown(ui)` (augment the built UI,
 interactive making the Input pane editable). This is what lets interactive get a
 first-class results UI for a few dozen lines instead of a fourth copy of the runner.
 
+**A layout may leave panes out.** competitest builds the results UI by walking a
+fixed set of panes and asking the layout where each one goes, so a layout that omits
+one — the Errors pane, say — breaks:
+[issue #85](https://github.com/xeluxee/competitest.nvim/issues/85) is someone trying
+to arrange `tc | so | eo` over `si` and finding they cannot drop `se`. Which panes to
+show is exactly the kind of thing a layout option exists to decide.
+
+In tuna a pane always gets a **buffer** and only sometimes a **window**: the buffer is
+where the runner's output goes, so an unplaced pane still collects its content and can
+still be opened in the viewer (`e` for the errors, and a failing compilation still pops
+its stderr up) — it just isn't on screen taking room. `runner_ui/layout.lua` resolves a
+configured layout once, shared by both interfaces, and reports which panes it places;
+the interfaces open windows for those and skip the rest.
+
+The same resolver validates: unknown pane names, a pane placed twice, malformed
+`{ ratio, child }` entries, or a layout without `tc` (the selector owns the cursor and
+the keymaps, so it is the one pane that cannot be dropped) fall back to the shipped
+default with a single warning naming the problem. A typo in a layout costs the
+arrangement, not the results UI.
+
 **The UI opens on what there is to read.** competitest always parked the cursor on
 the first row, which is the compile step. A compilation that printed warnings or
 failed is worth landing on — but a silent one leaves four empty panes in front of

@@ -171,13 +171,17 @@ function RunnerUI:show_ui()
                 end, { buffer = w.bufnr, nowait = true })
             end
         end
-        api.nvim_create_autocmd("WinClosed", {
-            group = self.augroup,
-            pattern = tostring(w.winid),
-            callback = function()
-                self:delete()
-            end,
-        })
+        -- A pane the layout left out has a buffer but no window, so there is nothing
+        -- to watch for it (its content is still reachable through the viewer).
+        if w.winid then
+            api.nvim_create_autocmd("WinClosed", {
+                group = self.augroup,
+                pattern = tostring(w.winid),
+                callback = function()
+                    self:delete()
+                end,
+            })
+        end
     end
 
     -- Selector-only actions.

@@ -123,6 +123,13 @@ function InteractiveRunner:on_ui_shown(ui)
     if not (w and api.nvim_buf_is_valid(w.bufnr)) then
         return
     end
+    if not w.winid then
+        -- A layout may leave the Input pane out, which is fine for every other mode:
+        -- here it is the pane you type into, so say so instead of leaving the user
+        -- pressing keys at a window that isn't on screen.
+        utils.notify("interactive: the 'si' (Input) pane is not in your layout, so there is nowhere to type.", "WARN")
+        return
+    end
     vim.bo[w.bufnr].modifiable = true
     api.nvim_buf_set_lines(w.bufnr, 0, -1, false, { "" })
 

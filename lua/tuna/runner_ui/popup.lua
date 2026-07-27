@@ -11,17 +11,11 @@
 
 local api = vim.api
 local utils = require("tuna.utils")
+local layout_util = require("tuna.runner_ui.layout")
 
 local M = {}
 
-local titles = {
-    st = " Run ",
-    tc = " Testcases ",
-    so = " Output ",
-    eo = " Expected Output ",
-    si = " Input ",
-    se = " Errors ",
-}
+local titles = layout_util.titles
 
 ---Assign rectangles to leaves by recursively subdividing `width`×`height`.
 ---@param layout table|string a sub-layout, or a leaf window name
@@ -63,8 +57,9 @@ end
 
 ---@param config table
 ---@param status_rows integer content rows of the "Run" pane (border added here)
+---@param layout table the (validated) layout to lay out
 ---@return table sizes, table positions
-local function compute_layout(config, status_rows)
+local function compute_layout(config, status_rows, layout)
     local STATUS_HEIGHT = status_rows + 2 -- content rows plus top & bottom border
     local sizes, positions = {}, {}
     local vim_width, vim_height = utils.get_ui_size()
@@ -78,7 +73,7 @@ local function compute_layout(config, status_rows)
 
     -- Lay the whole grid out first, then carve the status strip out of the top of
     -- the Testcases pane only (so it sits above "tc" and not the other panes).
-    rec_compute_layout(config.popup_ui.layout, false, total_width, total_height, col0, row0, sizes, positions)
+    rec_compute_layout(layout, false, total_width, total_height, col0, row0, sizes, positions)
 
     local tc_pos, tc_size = positions.tc, sizes.tc
     if tc_pos and tc_size then
@@ -98,36 +93,46 @@ end
 ---@param _init_winid integer? unused (popup anchors to the editor)
 ---@param status_rows integer? content rows of the "Run" pane (default 2)
 function M.init_ui(windows, config, _init_winid, status_rows)
-    local sizes, positions = compute_layout(config, status_rows or 2)
+    local defaults = require("tuna.config").defaults.popup_ui.layout
+    local layout = layout_util.resolve(config.popup_ui.layout, "popup_ui.layout", defaults)
+    local sizes, positions = compute_layout(config, status_rows or 2, layout)
+
     for name in pairs(titles) do
         local buf = api.nvim_create_buf(false, true)
         vim.bo[buf].filetype = "tuna"
         vim.bo[buf].modifiable = false
+
+        -- A pane the layout doesn't place gets a buffer but no window: its content is
+        -- still collected (and still openable in the viewer), it just isn't drawn.
+        local win
         local s, p = sizes[name], positions[name]
-        local win = api.nvim_open_win(buf, false, {
-            relative = "editor",
-            width = math.max(1, s.width),
-            height = math.max(1, s.height),
-            -- A bordered float's row/col anchor its whole footprint: the border is drawn
-            -- *at* that row/col and the content one cell in. The computed rectangles
-            -- already include the border, so they are passed through unshifted —
-            -- offsetting by +1 pushed the grid a row down and a column right, which on a
-            -- full-height layout means over the statusline.
-            col = p.col,
-            row = p.row,
-            border = config.floating_border,
-            title = titles[name],
-            title_pos = "center",
-            style = "minimal",
-            zindex = 50,
-        })
-        require("tuna.utils").set_border_highlight(win, config.floating_border_highlight)
-        local selector = name == "tc"
-        vim.wo[win].number = selector and config.runner_ui.selector_show_nu or config.runner_ui.show_nu
-        vim.wo[win].relativenumber = selector and config.runner_ui.selector_show_rnu or config.runner_ui.show_rnu
-        vim.wo[win].wrap = false
-        vim.wo[win].spell = false
-        vim.wo[win].cursorline = selector
+        if s and p then
+            win = api.nvim_open_win(buf, false, {
+                relative = "editor",
+                width = math.max(1, s.width),
+                height = math.max(1, s.height),
+                -- A bordered float's row/col anchor its whole footprint: the border is drawn
+                -- *at* that row/col and the content one cell in. The computed rectangles
+                -- already include the border, so they are passed through unshifted —
+                -- offsetting by +1 pushed the grid a row down and a column right, which on a
+                -- full-height layout means over the statusline.
+                col = p.col,
+                row = p.row,
+                border = config.floating_border,
+                title = titles[name],
+                title_pos = "center",
+                style = "minimal",
+                zindex = 50,
+            })
+            utils.set_border_highlight(win, config.floating_border_highlight)
+            local selector = name == "tc"
+            vim.wo[win].number = selector and config.runner_ui.selector_show_nu or config.runner_ui.show_nu
+            vim.wo[win].relativenumber = selector and config.runner_ui.selector_show_rnu
+                or config.runner_ui.show_rnu
+            vim.wo[win].wrap = false
+            vim.wo[win].spell = false
+            vim.wo[win].cursorline = selector
+        end
         windows[name] = { bufnr = buf, winid = win, title = titles[name] }
     end
 end

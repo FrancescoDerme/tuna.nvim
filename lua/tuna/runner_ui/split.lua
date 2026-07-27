@@ -15,17 +15,11 @@
 
 local api = vim.api
 local utils = require("tuna.utils")
+local layout_util = require("tuna.runner_ui.layout")
 
 local M = {}
 
-local titles = {
-    st = " Run ",
-    tc = " Testcases ",
-    so = " Output ",
-    eo = " Expected Output ",
-    si = " Input ",
-    se = " Errors ",
-}
+local titles = layout_util.titles
 
 -- config `position` → native split direction
 local dir_map = { left = "left", right = "right", top = "above", bottom = "below" }
@@ -57,7 +51,9 @@ function M.init_ui(windows, config, init_winid, status_rows)
     end
 
     local vertical = config.split_ui.position == "left" or config.split_ui.position == "right"
-    local layout = config.split_ui[(vertical and "vertical" or "horizontal") .. "_layout"]
+    local key = (vertical and "vertical" or "horizontal") .. "_layout"
+    local defaults = require("tuna.config").defaults.split_ui[key]
+    local layout = layout_util.resolve(config.split_ui[key], "split_ui." .. key, defaults)
 
     -- Recursively split `winid` (which already shows the sub-layout's first leaf)
     -- to realise `layout`, fixing sizes as we go.

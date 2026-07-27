@@ -472,6 +472,11 @@ M.defaults = {
     popup_ui = {
         total_width = 0.8,
         total_height = 0.8,
+        -- A layout is a list of `{ ratio, pane-or-sub-layout }` pairs; nesting
+        -- alternates direction (the top level splits into columns). Panes:
+        -- `tc` testcases, `so` output, `eo` expected output, `si` input, `se` errors.
+        -- Any of them but `tc` may be left out — what is left simply divides the
+        -- space, and an omitted pane's content stays reachable in the viewer.
         layout = {
             { 3, "tc" },
             { 4, { { 1, "so" }, { 1, "si" } } },
@@ -482,6 +487,8 @@ M.defaults = {
         position = "right", -- "top" | "bottom" | "left" | "right"
         relative_to_editor = true,
         total_width = 0.3,
+        -- Same format and same freedom as `popup_ui.layout` above; the layout used
+        -- depends on whether `position` puts the frame beside or below the editor.
         vertical_layout = {
             { 1, "tc" },
             { 1, { { 1, "so" }, { 1, "eo" } } },
