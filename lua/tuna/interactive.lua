@@ -56,6 +56,18 @@ end
 
 local InteractiveRunner = core.extend()
 
+-- The Input pane here is the thing you talk to the solution through, not a stored
+-- testcase's input, so the results UI must not make it an editor.
+InteractiveRunner.editable_testcases = false
+
+---In live mode the Input pane is typed into, so the UI must leave its letters alone
+---(no `q`-to-close on it) even though testcases aren't editable in this mode.
+---@param name string
+---@return boolean
+function InteractiveRunner:owns_pane(name)
+    return name == "si" and self.source == "live"
+end
+
 ---One extra "Run" pane row: which side is playing the interactor.
 ---@return string[][]
 function InteractiveRunner:status_tail()

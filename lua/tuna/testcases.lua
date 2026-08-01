@@ -139,52 +139,81 @@ end
 ---@param input_format string|string[] one format, or an ordered list; the first
 ---  format that discovers any testcase wins (see config docs for the rationale).
 ---@param output_format string|string[] paired with `input_format` by index
-function M.files.load(directory, filepath, input_format, output_format)
-    if not utils.directory_exists(directory) then
-        return {}
-    end
+---Which of the configured format pairs this directory is *actually* using: the first
+---one that matches a file already there, else the first configured (canonical) pair.
+---
+---Both loading and writing go through this, so a testcase added to a folder whose
+---testcases are named by a fallback format (the shared, un-prefixed `input<N>.txt` a
+---download or another solution wrote) joins that set instead of starting a second,
+---source-named one beside it — which, since the first format to match anything wins
+---on load, would have hidden every testcase already there.
+---@param directory string
+---@param filepath string
+---@param input_format string|string[]
+---@param output_format string|string[]
+---@return string[]? in_parts, string[]? out_parts
+function M.files.active_parts(directory, filepath, input_format, output_format)
     local in_formats = normalize_formats(input_format)
     local out_formats = normalize_formats(output_format)
 
-    -- Read the directory once, then try each input/output format pair in order.
     local entries = {}
-    for name, type_ in vim.fs.dir(directory) do
-        if type_ == "file" then
-            entries[#entries + 1] = name
+    if utils.directory_exists(directory) then
+        for name, type_ in vim.fs.dir(directory) do
+            if type_ == "file" then
+                entries[#entries + 1] = name
+            end
         end
     end
 
+    local first_in, first_out
     for i, in_fmt in ipairs(in_formats) do
         local in_parts = eval_format_parts(filepath, in_fmt)
         local out_parts = eval_format_parts(filepath, out_formats[i] or out_formats[1])
         if in_parts and out_parts then
+            first_in = first_in or in_parts
+            first_out = first_out or out_parts
             local match_in = make_matcher(in_parts)
             local match_out = make_matcher(out_parts)
-            local tctbl = {}
-            local found = false
             for _, name in ipairs(entries) do
-                -- A testcase may have only an input or only an output (an output with
-                -- no matching input still runs — the solution is fed empty stdin).
-                local tcnum = match_in(name)
-                if tcnum then
-                    tctbl[tcnum] = tctbl[tcnum] or {}
-                    tctbl[tcnum].input = utils.read_file(directory .. name)
-                    found = true
-                else
-                    tcnum = match_out(name)
-                    if tcnum then
-                        tctbl[tcnum] = tctbl[tcnum] or {}
-                        tctbl[tcnum].output = utils.read_file(directory .. name)
-                        found = true
-                    end
+                if match_in(name) or match_out(name) then
+                    return in_parts, out_parts
                 end
-            end
-            if found then
-                return tctbl
             end
         end
     end
-    return {}
+    return first_in, first_out
+end
+
+function M.files.load(directory, filepath, input_format, output_format)
+    if not utils.directory_exists(directory) then
+        return {}
+    end
+    local in_parts, out_parts = M.files.active_parts(directory, filepath, input_format, output_format)
+    if not (in_parts and out_parts) then
+        return {}
+    end
+
+    local match_in = make_matcher(in_parts)
+    local match_out = make_matcher(out_parts)
+    local tctbl = {}
+    for name, type_ in vim.fs.dir(directory) do
+        if type_ == "file" then
+            -- A testcase may have only an input or only an output (an output with no
+            -- matching input still runs — the solution is fed empty stdin).
+            local tcnum = match_in(name)
+            if tcnum then
+                tctbl[tcnum] = tctbl[tcnum] or {}
+                tctbl[tcnum].input = utils.read_file(directory .. name)
+            else
+                tcnum = match_out(name)
+                if tcnum then
+                    tctbl[tcnum] = tctbl[tcnum] or {}
+                    tctbl[tcnum].output = utils.read_file(directory .. name)
+                end
+            end
+        end
+    end
+    return tctbl
 end
 
 ---@param directory string testcase directory (with trailing slash)
@@ -193,9 +222,10 @@ end
 ---@param input_format string
 ---@param output_format string
 function M.files.write(directory, tctbl, filepath, input_format, output_format)
-    -- Always write with the first (canonical) format, even if load matched a later one.
-    local in_parts = eval_format_parts(filepath, normalize_formats(input_format)[1])
-    local out_parts = eval_format_parts(filepath, normalize_formats(output_format)[1])
+    -- Write with the format this directory already uses (the canonical first one when
+    -- it holds no testcases yet), so a new testcase joins the set that is there rather
+    -- than starting a rival one under another name.
+    local in_parts, out_parts = M.files.active_parts(directory, filepath, input_format, output_format)
     if not in_parts or not out_parts then
         return
     end
@@ -336,13 +366,70 @@ end
 
 ---------------- BUFFER LAYER ----------------
 
+---@private
+---Paths already warned about, so the notice below is shown once per session.
+---@type table<string, true>
+local warned_shared = {}
+
+---@private
+---An absolute `testcases_directory` carrying no modifier is the *same* directory for
+---every problem, and every storage backend names its files after the source
+---(`$(FNOEXT)_input0.txt`, `tests/0`, …) — so two problems silently overwrite each
+---other's testcases there. Say so once, with the fix, rather than letting the data
+---go. A value coming from a directory's own `.tuna.lua` already scopes itself to that
+---tree, so only a globally configured one is worth flagging.
+---@param raw string the configured value
+---@param expanded string the same value after modifier/`~` expansion
+local function warn_if_shared(raw, expanded)
+    if warned_shared[raw] or raw:find("$(", 1, true) or not utils.is_absolute(expanded) then
+        return
+    end
+    if raw ~= (config.current_setup or config.defaults).testcases_directory then
+        return -- a local config's value: scoped to its own tree by construction
+    end
+    warned_shared[raw] = true
+    utils.notify(
+        "testcases_directory '"
+            .. raw
+            .. "' is an absolute path with no per-problem component, so every problem stores its "
+            .. "testcases there and overwrites the others'. Add a modifier, e.g. '"
+            .. raw
+            .. "/$(DIRNAME)'.",
+        vim.log.levels.WARN
+    )
+end
+
+---Absolute testcase base directory for a source file (with trailing slash).
+---
+---`testcases_directory` is evaluated for file modifiers — so `$(DIRNAME)`, `$(HOME)`,
+---`$(CWD)`, `$(FNOEXT)`… can build a per-problem path — and the result is used as-is
+---when it is absolute, joined onto the source's directory when it is not. competitest
+---joined unconditionally, which made an absolute path unreachable and turned
+---`~/cp/testcases` into a directory literally named `~` beside the source
+---(competitest#78).
+---@param source_dir string directory holding the source file
+---@param filepath string source file path, which the modifiers are computed from
+---@param cfg table resolved configuration
+---@return string # absolute directory, with exactly one trailing slash
+function M.tc_directory(source_dir, filepath, cfg)
+    local raw = cfg.testcases_directory or "."
+    local expanded = utils.eval_string(filepath, raw)
+    if not expanded then
+        utils.notify("testcases_directory: could not evaluate '" .. raw .. "'.", vim.log.levels.WARN)
+        expanded = raw
+    end
+    expanded = vim.fs.normalize(expanded) -- expands a leading `~`
+    warn_if_shared(raw, expanded)
+    return (utils.normalize_path(expanded, source_dir):gsub("/*$", "")) .. "/"
+end
+
 ---Absolute testcase base directory for a buffer (with trailing slash).
 ---@param bufnr integer
 ---@return string
 local function buf_tc_directory(bufnr)
     local cfg = config.get_buffer_config(bufnr)
-    local source_dir = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(bufnr), ":p:h")
-    return vim.fs.normalize(source_dir .. "/" .. cfg.testcases_directory) .. "/"
+    local filepath = vim.api.nvim_buf_get_name(bufnr)
+    return M.tc_directory(vim.fn.fnamemodify(filepath, ":p:h"), filepath, cfg)
 end
 
 -- files

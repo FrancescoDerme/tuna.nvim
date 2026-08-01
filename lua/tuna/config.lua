@@ -147,8 +147,23 @@ M.defaults = {
         protected_dirs = {},
     },
 
+    -- The per-problem sidecar (`sidecar.lua`): what tuna knows about a problem and
+    -- can't recover from the source — the downloaded task's url/name/group, the last
+    -- submit verdict per file, and the per-file run state (`:Tuna compare`, the
+    -- checker toggle, the chosen run mode / interactive source). Written beside the
+    -- solution so it travels with the problem and `:Tuna clean` disposes of it along
+    -- with it.
+    problem_store_file = ".tuna.json",
+
     -- testcase storage (see DIFFERENCES.md: layout is fully customizable)
-    testcases_directory = ".", -- where testcases live, relative to the source file
+    -- Where testcases live. Evaluated for file modifiers, then used as an absolute
+    -- path when it is one and taken relative to the source file when it is not — so
+    -- `"."` keeps them beside the source, `"tests"` puts them in a sub-directory, and
+    -- `"$(HOME)/cp/testcases/$(DIRNAME)"` keeps them out of the source tree entirely.
+    -- An absolute path needs a per-problem component (`$(DIRNAME)` — the name of the
+    -- problem's own directory — or `$(FNOEXT)`): the storage backends name their files
+    -- after the source, so problems sharing one directory overwrite each other.
+    testcases_directory = ".",
     testcases_storage = "files", -- "files" | "single_file" | "directory"
     testcases_auto_detect = true, -- if the chosen mode finds nothing, try the others
     -- "single_file" mode: one msgpack-encoded file
@@ -270,7 +285,6 @@ M.defaults = {
         -- carries the authoritative values, so these only fill a missing field.
         group = "contest:%s*(.-)%s*$",
         name = "problem:%s*(.-)%s*$",
-        url_store_file = ".tuna.json", -- download writes {url,name,group} here per problem
         -- filetype -> the language name your submit tool expects
         languages = { cpp = "C++", c = "C", python = "Python 3", java = "Java", rust = "Rust" },
         terminal = "auto", -- "auto" (toggleterm if installed, else split) | "toggleterm" | "split"
@@ -402,6 +416,7 @@ M.defaults = {
     -- itself so it works across floats, where the built-in `<C-w>hjkl` can't reach.
     -- Given as { left, down, up, right }. (The testcase editor keeps its own 2-pane
     -- `editor_ui.*_mappings.switch_window`, which also has an insert-mode variant.)
+    switch_window_keys = { "<C-h>", "<C-j>", "<C-k>", "<C-l>" },
     -- Plugin-wide keys that dismiss a floating widget (prompt, picker, menu, chooser
     -- form, testcase editor), bound in one place so the same press means the same thing
     -- in all of them. The default `insert` list is empty on purpose: `<Esc>` there
@@ -443,6 +458,14 @@ M.defaults = {
     },
     runner_ui = {
         interface = "popup", -- "popup" | "split"
+        -- The border and title colour of the panes you can *type* into (Input and
+        -- Expected Output), so they read as different from the ones you can only read.
+        -- Any highlight group; `false` turns the accent off. The default `TunaEditable`
+        -- is a bold magenta — the one hue tuna doesn't already spend on verdicts — and
+        -- is defined with `default = true`, so a colorscheme that defines it wins.
+        -- Borders and titles are a floating-window thing, so this has no effect with
+        -- `interface = "split"`.
+        editable_border_highlight = "TunaEditable",
         selector_show_nu = false,
         selector_show_rnu = false,
         show_nu = true,
@@ -460,6 +483,13 @@ M.defaults = {
             view_stderr = { "e", "E" },
             toggle_diff = { "d", "D" },
             close = { "q", "Q" },
+            -- Inline testcase management, from the selector. Editing itself needs no
+            -- key: the Input and Expected Output panes are ordinary editable buffers
+            -- and `:w` saves the testcase and re-runs it.
+            add_testcase = "n",
+            delete_testcase = "x",
+            undo_delete = "u",
+            help = "?",
         },
         viewer = {
             width = 0.5,

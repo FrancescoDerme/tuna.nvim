@@ -48,6 +48,19 @@ function M.setup_highlight_groups()
         TunaDiffText = { bg = wrong_bg, ctermbg = 52 }, -- the tokens/characters that disagree
         TunaDiffAdd = { link = "DiffAdd" }, -- a line the expected output doesn't have
         TunaDiffDelete = { link = "DiffDelete" }, -- a line missing from the output
+        -- The accent on the results UI's *editable* panes (Input, Expected Output):
+        -- their border and title, so the two panes you can type into are told apart
+        -- from the four you can only read, at a glance and without a legend.
+        --
+        -- A concrete colour rather than a link: linking to a semantic group (`Question`
+        -- and friends) gave a pale tint a shade away from the grey `FloatBorder` it has
+        -- to be told apart from, which defeats the purpose. Magenta is the one hue this
+        -- plugin doesn't already spend — green is CORRECT, red WRONG, amber
+        -- WARNING/EDITED — and it reads as "special" rather than as a verdict. Bold,
+        -- since a border is one cell thin. `default = true`, so a colorscheme defining
+        -- `TunaEditable` still wins, and `runner_ui.editable_border_highlight` points
+        -- at any group you like.
+        TunaEditable = { ctermfg = "magenta", fg = "#c678dd", bold = true },
     }
     for name, val in pairs(groups) do
         val.default = true

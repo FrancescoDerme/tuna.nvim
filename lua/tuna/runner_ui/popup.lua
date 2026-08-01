@@ -133,6 +133,7 @@ function M.init_ui(windows, config, _init_winid, status_rows)
             vim.wo[win].spell = false
             vim.wo[win].cursorline = selector
         end
+        utils.name_float_buffer(buf, "runner")
         windows[name] = { bufnr = buf, winid = win, title = titles[name] }
     end
 end

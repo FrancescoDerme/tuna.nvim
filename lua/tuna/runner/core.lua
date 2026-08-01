@@ -287,4 +287,137 @@ function RunnerCore:kill_all_processes()
     end
 end
 
+--------------------------------------------------------------------------------
+-- Inline testcase editing (what the UI's always-editable panes drive)
+--------------------------------------------------------------------------------
+
+---Whether this mode's testcases can be edited from the results UI. True for every
+---mode whose rows *are* the stored testcases (normal, stress, run-all); interactive
+---turns it off — it owns the Input pane as the thing you type at the solution.
+RunnerCore.editable_testcases = true
+
+---Whether a given row stands for a stored testcase, and so can be edited, re-saved
+---or deleted. Excludes the `Compile` pseudo-row and run-all's solution headers
+---without either having to be special-cased anywhere else.
+---@param tc table?
+---@return boolean
+function RunnerCore:row_editable(tc)
+    return self.editable_testcases and tc ~= nil and type(tc.tcnum) == "number"
+end
+
+---A stable identity for a row, so the UI can reopen on the row you left even after
+---the rows themselves were rebuilt (a re-run, or `show_ui` reloading testcases).
+---@param tc table
+---@return string
+function RunnerCore:row_id(tc)
+    return tostring(tc.tcnum)
+end
+
+---The buffer testcase paths are resolved against. Normally the solution the runner
+---was started from; run-all overrides it, since it can be launched from a scratch
+---buffer that is not itself a solution.
+---@return integer
+function RunnerCore:edit_bufnr()
+    return self.bufnr
+end
+
+---Whether no run is in flight. Structural edits (adding or deleting a testcase)
+---wait for one, since they renumber the rows the running lanes are indexing.
+---@return boolean
+function RunnerCore:idle()
+    return self.completed ~= false
+end
+
+---Every row index standing for testcase `tcnum` (one for most modes; in run-all's
+---matrix, one per solution).
+---@param tcnum integer
+---@return integer[]
+function RunnerCore:rows_for(tcnum)
+    local idxs = {}
+    for i, tc in ipairs(self.tcdata) do
+        if tc.tcnum == tcnum and self:row_editable(tc) then
+            idxs[#idxs + 1] = i
+        end
+    end
+    return idxs
+end
+
+---The lowest unused testcase number, counting both what is on disk and the rows
+---already added in this session but not yet saved.
+---@return integer
+function RunnerCore:next_tcnum()
+    local used = {}
+    for n in pairs(require("tuna.testcases").buf_get_testcases(self:edit_bufnr())) do
+        used[n] = true
+    end
+    for _, tc in ipairs(self.tcdata) do
+        if type(tc.tcnum) == "number" then
+            used[tc.tcnum] = true
+        end
+    end
+    local n = 0
+    while used[n] do
+        n = n + 1
+    end
+    return n
+end
+
+---Append a row for a new testcase. Modes whose rows are a plain list just add one;
+---run-all overrides this to add the testcase to every solution.
+---@param tcnum integer
+function RunnerCore:add_testcase_row(tcnum)
+    local timelimit = (self.config.maximum_time and self.config.maximum_time > 0) and self.config.maximum_time or nil
+    table.insert(self.tcdata, {
+        tcnum = tcnum,
+        stdin = "",
+        expected = "",
+        timelimit = timelimit,
+        status = "NOT RUN",
+        hlgroup = "TunaDone",
+    })
+    self.tc_size = #self.tcdata
+end
+
+---Drop every row standing for `tcnum`.
+---@param tcnum integer
+function RunnerCore:remove_testcase_rows(tcnum)
+    for i = #self.tcdata, 1, -1 do
+        local tc = self.tcdata[i]
+        if tc.tcnum == tcnum and self:row_editable(tc) then
+            table.remove(self.tcdata, i)
+        end
+    end
+    self.tc_size = #self.tcdata
+end
+
+---Save an edited testcase to disk, refresh the rows that show it, and re-run them.
+---Nothing is re-run for a UI that was only *listing* testcases (`:Tuna show_ui`
+---before any run): there is no build to run yet, so the rows stay `NOT RUN`.
+---@param tcnum integer
+---@param input string
+---@param expected string
+---@return boolean # whether the write succeeded
+function RunnerCore:save_testcase(tcnum, input, expected)
+    local ok, err = pcall(function()
+        require("tuna.testcases").buf_save_testcase(self:edit_bufnr(), tcnum, input, expected)
+    end)
+    if not ok then
+        utils.notify("could not save testcase " .. tcnum .. ": " .. tostring(err))
+        return false
+    end
+    local rows = self:rows_for(tcnum)
+    for _, i in ipairs(rows) do
+        self.tcdata[i].stdin = input
+        self.tcdata[i].expected = expected
+    end
+    if self.preloaded or not self:idle() then
+        self:update_ui(true)
+    else
+        for _, i in ipairs(rows) do
+            self:run_single(i)
+        end
+    end
+    return true
+end
+
 return M

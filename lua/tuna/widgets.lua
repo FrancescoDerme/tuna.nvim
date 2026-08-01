@@ -52,8 +52,15 @@ local function open_float(bufnr, enter, opts)
         title = opts.title,
         title_pos = opts.title and "center" or nil,
         style = "minimal",
+        -- Above every layer the runner UI draws: its pane grid (50 — which is also
+        -- Neovim's default, so a widget left unset would *share* that layer and the
+        -- two would fight, showing up as a pane vanishing behind the dialog), its
+        -- viewer (60) and its message float (70). A widget is a dialog: it is
+        -- always the thing the user is being asked to act on, so it goes on top.
+        zindex = 80,
     })
-    require("tuna.utils").set_border_highlight(winid, opts.border_highlight)
+    utils.set_border_highlight(winid, opts.border_highlight)
+    utils.name_float_buffer(bufnr, opts.kind or "widget")
     -- Tag this plugin's floats with a "tuna" filetype so users (and other plugins) can target
     -- them. For example add "tuna" to scrollEOF.nvim's "disabled_filetypes" so it doesn't
     -- write the *global* "scrolloff" off a transient float's height
@@ -392,11 +399,11 @@ function M.editor(bufnr, tcnum, input_content, output_content, callback, restore
     local function make_pane(title, col, lines)
         local b = api.nvim_create_buf(false, true)
         -- `acwrite` makes `:w` route through our BufWriteCmd autocmd instead of
-        -- trying (and failing) to write the scratch buffer to disk. The buffer
-        -- still needs a name, or `:w` aborts with E32 before BufWriteCmd fires.
+        -- trying (and failing) to write the scratch buffer to disk. (The name `:w`
+        -- also needs, or it aborts with E32 before BufWriteCmd fires, is given by
+        -- `open_float` below — see `utils.name_float_buffer`.)
         vim.bo[b].buftype = "acwrite"
         vim.bo[b].filetype = "tuna"
-        api.nvim_buf_set_name(b, "tuna://testcase/" .. title:lower() .. "/" .. b)
         api.nvim_buf_set_lines(b, 0, -1, false, lines)
         vim.bo[b].modified = false
         local w = open_float(b, false, {

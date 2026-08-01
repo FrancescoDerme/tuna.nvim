@@ -113,7 +113,7 @@ end
 ---@param cfg table
 ---@return string?
 local function sidecar_group(dir, cfg)
-    local file = dir .. "/" .. ((cfg.submit or {}).url_store_file or ".tuna.json")
+    local file = require("tuna.sidecar").path(dir, cfg)
     local content = utils.read_file(file)
     if not content then
         return nil

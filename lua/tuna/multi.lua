@@ -58,7 +58,7 @@ end
 ---@param cfg table resolved buffer config
 ---@return table<integer, { input: string?, output: string? }>
 local function load_dir_testcases(source_dir, anchor, cfg)
-    local tcdir = vim.fs.normalize(source_dir .. "/" .. cfg.testcases_directory) .. "/"
+    local tcdir = testcases.tc_directory(source_dir, anchor, cfg)
     local loaders = {
         files = function()
             return testcases.files.load(
@@ -205,6 +205,105 @@ function MultiRunner:load_rows()
             table.insert(sol.case_idxs, #self.tcdata)
         end
     end
+end
+
+---Testcases are shared by every solution here, so one row per solution shows each
+---of them; the identity the UI reopens on has to name both.
+---@param tc table
+---@return string
+function MultiRunner:row_id(tc)
+    if tc.kind == "solution" then
+        return tc.name
+    end
+    return (tc.sol and tc.sol.name or "?") .. "#" .. tostring(tc.tcnum)
+end
+
+---`run all` may be launched from a buffer that isn't a solution at all (a scratch
+---buffer in the problem folder), so testcase paths are resolved against the
+---solution it anchored on instead.
+---@return integer
+function MultiRunner:edit_bufnr()
+    if not self.edit_anchor then
+        return self.bufnr
+    end
+    return vim.fn.bufadd(self.edit_anchor)
+end
+
+---@private
+---Re-create the matrix after a testcase was added or removed, reusing each
+---solution's existing rows so the results already on screen survive; only the row
+---for a brand-new testcase starts empty.
+function MultiRunner:rebuild_rows()
+    local headers, cases = {}, {}
+    for _, tc in ipairs(self.tcdata) do
+        if tc.kind == "solution" then
+            headers[tc.name] = tc
+        else
+            cases[tostring(tc.sol and tc.sol.name) .. "\0" .. tostring(tc.tcnum)] = tc
+        end
+    end
+
+    self.tcdata = {}
+    for _, sol in ipairs(self.files) do
+        table.insert(self.tcdata, headers[sol.name] or {
+            kind = "solution",
+            name = sol.name,
+            sol = sol,
+            status = "",
+            hlgroup = "TunaRunning",
+            time_label = "",
+        })
+        sol.header_idx = #self.tcdata
+        sol.case_idxs = {}
+        for _, n in ipairs(self.nums) do
+            local row = cases[sol.name .. "\0" .. tostring(n)]
+                or {
+                    kind = "case",
+                    tcnum = n,
+                    sol = sol,
+                    stdin = self.tctbl[n].input or "",
+                    expected = self.tctbl[n].output,
+                    status = "NOT RUN",
+                    hlgroup = "TunaDone",
+                }
+            table.insert(self.tcdata, row)
+            table.insert(sol.case_idxs, #self.tcdata)
+        end
+        self:recompute_header(sol)
+    end
+end
+
+---A testcase added from the results UI belongs to every solution in the matrix.
+---@param tcnum integer
+function MultiRunner:add_testcase_row(tcnum)
+    self.tctbl[tcnum] = { input = "", output = "" }
+    table.insert(self.nums, tcnum)
+    table.sort(self.nums)
+    self:rebuild_rows()
+end
+
+---…and deleting one removes it from every solution.
+---@param tcnum integer
+function MultiRunner:remove_testcase_rows(tcnum)
+    self.tctbl[tcnum] = nil
+    for i, n in ipairs(self.nums) do
+        if n == tcnum then
+            table.remove(self.nums, i)
+            break
+        end
+    end
+    self:rebuild_rows()
+end
+
+---Keep the shared testcase table in step with an edit, so a later rebuild (or a
+---full re-run) uses the saved text rather than what was loaded at startup.
+---@param tcnum integer
+---@param input string
+---@param expected string
+---@return boolean
+function MultiRunner:save_testcase(tcnum, input, expected)
+    self.tctbl[tcnum] = { input = input, output = expected }
+    return core.RunnerCore.save_testcase(self, tcnum, input, expected)
 end
 
 ---Recompute a solution header row's `correct/total` from its testcase rows.
@@ -559,6 +658,9 @@ function M.run(bufnr)
         nums = nums,
         tctbl = tctbl,
         dir = dir,
+        -- Testcase edits from the UI are resolved against a real solution: the
+        -- invoking buffer may be a scratch one that owns no testcases of its own.
+        edit_anchor = not curpath and paths[1].path or nil,
         rundir = vim.fs.normalize(dir .. "/" .. cfg.running_directory) .. "/",
         compdir = vim.fs.normalize(dir .. "/" .. cfg.compile_directory) .. "/",
         timeout = timeout,

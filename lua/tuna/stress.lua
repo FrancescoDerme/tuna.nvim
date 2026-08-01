@@ -61,6 +61,15 @@ function StressRunner:aborted()
     return self.stopped or self.finished
 end
 
+---A stress run has no `completed` flag — it ends when the search is stopped or a
+---threshold is hit — so "idle enough to add or delete a testcase" is that, not the
+---base class's per-run flag. A live search appends counterexamples as rows, which is
+---exactly what must not happen underneath a structural edit.
+---@return boolean
+function StressRunner:idle()
+    return self:aborted()
+end
+
 ---Load the existing testcases into `tcdata` (pending), resetting the counters
 ---that decide where new counterexamples are numbered.
 function StressRunner:load_testcases()

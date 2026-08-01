@@ -448,7 +448,7 @@ local function disposable_patterns(cfg)
     add(cfg.testcases_single_file_format)
     add(cfg.testcases_directory_input)
     add(cfg.testcases_directory_output)
-    add((cfg.submit or {}).url_store_file or ".tuna.json")
+    add(cfg.problem_store_file or ".tuna.json")
     return pats
 end
 

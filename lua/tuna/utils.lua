@@ -32,19 +32,22 @@ end
 ---`border.highlight` option.
 ---@param winid integer
 ---@param hl string? highlight group whose foreground is used for the border
-function M.set_border_highlight(winid, hl)
+function M.set_border_highlight(winid, hl, group)
     hl = hl or "FloatBorder"
+    -- One derived group per source highlight, so a window using an accent (the runner
+    -- UI's editable panes) doesn't overwrite the one every other float is using.
+    group = group or "TunaFloatBorder"
     local border = vim.api.nvim_get_hl(0, { name = hl, link = false })
     local float = vim.api.nvim_get_hl(0, { name = "NormalFloat", link = false })
     local normal = vim.api.nvim_get_hl(0, { name = "Normal", link = false })
-    vim.api.nvim_set_hl(0, "TunaFloatBorder", {
+    vim.api.nvim_set_hl(0, group, {
         fg = border.fg,
         bg = float.bg or normal.bg,
         sp = border.sp,
         bold = border.bold,
         italic = border.italic,
     })
-    vim.wo[winid].winhighlight = "FloatBorder:TunaFloatBorder"
+    vim.wo[winid].winhighlight = "FloatBorder:" .. group
 end
 
 ---------------- STRING MODIFIERS ----------------
@@ -117,6 +120,9 @@ M.file_format_modifiers = {
     HOME = function()
         return vim.uv.os_homedir()
     end,
+    CWD = function()
+        return vim.fn.getcwd()
+    end,
     FNAME = function(filepath)
         return vim.fn.fnamemodify(filepath, ":t")
     end,
@@ -131,6 +137,13 @@ M.file_format_modifiers = {
     end,
     ABSDIR = function(filepath)
         return vim.fn.fnamemodify(filepath, ":p:h")
+    end,
+    -- The name of the directory the file lives in, not its path: for a downloaded
+    -- problem that is the problem itself ("D. Permutation Cuts"), which is what makes
+    -- a shared testcase root (`~/cp/testcases/$(DIRNAME)`) collision-free even when
+    -- every problem's source is called `main.cpp`.
+    DIRNAME = function(filepath)
+        return vim.fn.fnamemodify(filepath, ":p:h:t")
     end,
 }
 
@@ -229,6 +242,31 @@ function M.delete_file(path)
     return vim.uv.fs_unlink(path) ~= nil
 end
 
+---Name one of the plugin's scratch buffers.
+---
+---Every tuna window is a throwaway buffer, and a statusline shows `%:t` — the *last*
+---path component. Left nameless they render as `[No Name]`; named after themselves
+---they render as whatever came last, which for a `<bufnr>` suffix is a bare number.
+---Either way the statusline rewrites itself as you move between panes, over buffers
+---that are not files and have nothing to say about themselves. So the last component
+---is always `tuna`: constant, so moving around the UI never changes it, while the
+---middle keeps the name unique (Vim requires that) and still identifies the float in
+---`:ls`. Buffers that take a `:w` (the testcase editor, the runner's editable panes)
+---need *a* name regardless — `:w` aborts with E32 before `BufWriteCmd` without one.
+---@param bufnr integer
+---@param kind string? what this float is, for `:ls` (default "float")
+function M.name_float_buffer(bufnr, kind)
+    pcall(vim.api.nvim_buf_set_name, bufnr, ("tuna://%s/%d/tuna"):format(kind or "float", bufnr))
+end
+
+---Whether `path` is absolute. Checked after `vim.fs.normalize`, so a Windows path
+---has already been folded to forward slashes and a leading `~` expanded.
+---@param path string
+---@return boolean
+function M.is_absolute(path)
+    return path:sub(1, 1) == "/" or path:match("^%a:/") ~= nil or path:sub(1, 2) == "//"
+end
+
 ---Resolve `path` to an absolute path. Relative paths are taken against
 ---`base_dir` (defaulting to the cwd). Absolute paths are returned unchanged.
 ---@param path string
@@ -238,8 +276,9 @@ function M.normalize_path(path, base_dir)
     if type(path) ~= "string" or path == "" then
         return base_dir or "."
     end
-    if path:sub(1, 1) == "/" then
-        return vim.fs.normalize(path)
+    path = vim.fs.normalize(path)
+    if M.is_absolute(path) then
+        return path
     end
     return vim.fs.normalize(vim.fn.fnamemodify((base_dir or ".") .. "/" .. path, ":p"))
 end

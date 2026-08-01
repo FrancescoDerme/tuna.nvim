@@ -101,6 +101,47 @@ empty does the shared fallback apply. `files.buf_clear` conversely deletes files
 matching **any** configured format, so `convert` still cleans up fallback-named
 testcases.
 
+**Writing follows the format already in use.** Both load and write resolve the format
+pair through `files.active_parts` — the first that matches a file already in the
+directory, else the canonical first one. Writing always-canonically would split an
+existing set: add a testcase in a folder whose testcases are the shared
+`input<N>.txt` and it would land as `sol_input3.txt`, after which the
+first-format-wins load rule finds *only* that one and every testcase already there
+disappears from view. A fresh directory is unaffected and still gets the canonical
+name.
+
+### `testcases_directory` may be absolute, and takes modifiers (competitest [#78](https://github.com/xeluxee/competitest.nvim/issues/78))
+
+competitest joins `testcases_directory` onto the current file's directory
+**unconditionally**, so it can only ever name a place *inside* the problem: an
+absolute `/abs/tc` is silently swallowed into `<source dir>/abs/tc`, and the
+reported `~/cp/testcases` creates a directory literally named `~` beside the
+source. Modifiers aren't expanded there either.
+
+tuna resolves it through one shared `testcases.tc_directory(source_dir, filepath,
+cfg)` (used by the buffer layer, `download.lua` and `multi.lua` alike): the value
+is evaluated for file modifiers, a leading `~` is expanded, and the result is used
+**as-is when it is absolute** and joined onto the source's directory when it is
+not. The default `"."` is unchanged, so nothing moves for anyone.
+
+That makes a testcase store outside the source tree expressible:
+
+```lua
+testcases_directory = "$(HOME)/cp/testcases/$(DIRNAME)"
+```
+
+**`$(DIRNAME)`** (the *name* of the directory the source lives in — for a
+downloaded problem, the problem itself) and **`$(CWD)`** are new general file
+modifiers added for this; `$(CWD)` previously existed only for download paths.
+
+A per-problem component is what makes such a store work: every backend names its
+files after the source (`$(FNOEXT)_input0.txt`, `tests/0`, …), so an absolute path
+without one has every problem writing over the last — and, with the shared
+`input<N>.txt` fallback above, reading each other's testcases too. Rather than let
+that corrupt data quietly, an absolute `testcases_directory` carrying **no**
+modifier raises one warning naming the fix. It is suppressed for a value coming
+from a directory's own `.tuna.lua`, which is scoped to that tree by construction.
+
 ---
 
 ## Smaller config differences
@@ -353,6 +394,61 @@ louder than the value it points at, and it lands at the same strength on a dark 
 as on a light one. It is re-derived on every `ColorScheme`, so a theme switch retints
 it rather than leaving a colour from the old palette.
 
+### Always-editable testcases in the results UI (competitest [#76](https://github.com/xeluxee/competitest.nvim/issues/76))
+
+competitest can only add, edit or delete a testcase from *outside* the results UI,
+through a separate editor popup. [#76](https://github.com/xeluxee/competitest.nvim/issues/76)
+asks for that to happen inline instead, and its
+[PR #84](https://github.com/xeluxee/competitest.nvim/pull/84) (closed, unmerged)
+proposes a `NEW` row plus `<CR>`/`<C-s>`/`<C-CR>`/`x` bindings.
+
+tuna already listed testcases in the results UI before any run (`:Tuna show_ui`
+doubles as a testcase viewer), so the missing half was making that view writable.
+It does so **without inventing an editing mode or an editing key**: the Input and
+Expected Output panes are plain modifiable buffers, and
+
+```
+move into the pane · type · :w
+```
+
+saves the testcase and re-runs it. `:w` is a `BufWriteCmd`, so it is the same gesture
+that saves any other buffer in Vim — no `<C-s>`, and in particular no `<C-CR>`, which
+most terminals cannot even deliver (the sole reviewer of PR #84 hit exactly that).
+
+Everything else follows from treating the panes as buffers:
+
+- **Nothing reaches disk until `:w`.** Unwritten edits are held per testcase number,
+  so switching rows keeps them (the row shows its own pending text when you come
+  back, and the diff compares what is on screen), a `VimResized` rebuild keeps them,
+  and results landing on a row you are editing cannot overwrite what you typed.
+- **One dialog, on close only** — Save / Discard / Keep editing — because closing is
+  the one moment an unsaved edit would actually be lost. Routine editing never asks
+  anything, which is the request's spirit; silently discarding it would not be.
+- **Adding and deleting** get a key each, since a selector row carries no text you
+  could author: `n` appends a row and drops you in the Input pane, `x` deletes.
+  Deletion is **immediate but undoable** (`u`) rather than confirmed — an undo is
+  cheaper to press than a dialog *and* recoverable, which a dialog is not. Both wait
+  for a run in flight, as they renumber the rows its lanes are indexing.
+- **No phantom `NEW` row.** PR #84's trailing row lives in the testcase list's own
+  coordinate space, so `get_testcase_index_by_line` returns the *string* `"NEW"` and
+  five call sites have to guard against it. Discoverability instead comes from one
+  row in the "Run" pane — a key hint when clean, the unsaved-testcase warning when
+  not — and `?` for the full legend, which also documents the eight pre-existing keys
+  that had no legend at all.
+- **Scope is a runner property, not a special case.** Normal, stress and run-all are
+  editable; interactive is not (its Input pane is the channel to the solution). A row
+  is editable only if it carries a numeric testcase number, which excludes the
+  Compile row and run-all's solution headers without naming them anywhere. In
+  run-all's matrix a testcase belongs to every solution, so adding or deleting one
+  does so for all of them and a save re-runs each solution's row for it.
+- On an editable pane the single-letter mappings are **not** bound (`q` is the letter
+  q there), and the pane-switch keys work from insert mode, so a pane you are typing
+  in is still leavable.
+
+The UI also now **reopens on the row you were last on** (matched by row identity, so
+it survives the rows being rebuilt by a re-run), falling back to the existing
+"skip a silent Compile row" rule on a runner's first open.
+
 ---
 
 ## `init.lua`
@@ -404,6 +500,31 @@ needs are later deleted, tuna falls back to auto-detection rather than failing o
 now-impossible mode. A **checker toggle** (`:Tuna checker [on|off]`, or the menu)
 turns special judging off for a buffer without deleting `checker.cpp`. competitest
 had a single `:CompetiTest run` and no notion of modes or helper discovery.
+
+### The run state persists per problem
+
+How a problem is run — its compare method (`:Tuna compare float`), the checker
+toggle, the pinned mode and the interactive source — is a property of **that
+problem**, not of the editor session. So it is stored in the per-problem sidecar
+(`sidecar.lua`, `problem_store_file`) and comes back after a restart. The case that
+forced it: a float-tolerant problem where you set `:Tuna compare float`, iterate for
+an hour, restart Neovim, and silently go back to exact comparison — every testcase
+then reads as wrong for reasons that have nothing to do with your solution.
+
+The sidecar was already there (the downloaded task's url/name/group, the last submit
+verdict per file), so this adds a `run` section beside them, keyed by file basename
+like the verdicts — which also keeps two problems that share a directory (`a.cpp`,
+`b.cpp`) apart. It is deliberately not a global registry under `stdpath("state")`:
+that would key on absolute paths that go stale the moment a contest folder moves,
+would accumulate an entry for every problem ever opened, and would not travel with
+the problem. (`recent.lua` uses exactly that state file, correctly — "where was I" is
+per machine, not per problem.)
+
+Nothing is written until a setting differs from the defaults, and clearing one back
+(`:Tuna compare default`) removes its entry and, when nothing else remains, the file
+— so an untouched problem never grows a sidecar. Reads are validated, because the
+file is plain JSON a user may edit or copy between problems; and a pinned mode still
+degrades to auto-detection when the helper files it needs are gone.
 
 ## Pluggable checkers (`checker.lua`)
 

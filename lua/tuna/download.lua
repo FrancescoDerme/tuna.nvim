@@ -270,7 +270,7 @@ end
 ---@param cfg table resolved configuration for the target directory
 local function store_task_testcases(filepath, tctbl, cfg)
     local dir = vim.fn.fnamemodify(filepath, ":h")
-    local tcdir = vim.fs.normalize(dir .. "/" .. cfg.testcases_directory) .. "/"
+    local tcdir = testcases.tc_directory(dir, filepath, cfg)
     if cfg.testcases_storage == "single_file" then
         testcases.single_file.write(tcdir .. utils.eval_string(filepath, cfg.testcases_single_file_format), tctbl)
     elseif cfg.testcases_storage == "directory" then

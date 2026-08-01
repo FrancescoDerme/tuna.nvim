@@ -90,10 +90,14 @@ function M.delete_testcase(tcnum)
             utils.notify("delete_testcase: testcase " .. tostring(n) .. " doesn't exist.")
             return
         end
-        if vim.fn.confirm("Delete Testcase " .. n .. "?", "&Yes\n&No", 2) ~= 1 then
-            return
-        end
-        testcases.buf_delete_testcase(bufnr, n)
+        -- A float like every other tuna prompt, not `vim.fn.confirm`: a command-line
+        -- question in the middle of a floating UI is exactly what the download path
+        -- stopped doing.
+        require("tuna.widgets").menu({ "Delete", "Keep" }, "delete testcase " .. n .. "?", function(idx)
+            if idx == 1 then
+                testcases.buf_delete_testcase(bufnr, n)
+            end
+        end, api.nvim_get_current_win())
     end
 
     if tcnum then

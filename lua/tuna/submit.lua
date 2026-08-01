@@ -20,41 +20,10 @@ local M = {}
 -- Per-problem sidecar (written by download, read as a URL fallback here)
 --------------------------------------------------------------------------------
 
----Absolute path of a directory's task sidecar.
----@param dir string problem directory
----@param cfg table
----@return string
-local function store_path(dir, cfg)
-    return vim.fs.normalize(dir) .. "/" .. (cfg.submit.url_store_file or ".tuna.json")
-end
-
----Read a directory's sidecar as a table (empty table if absent/unreadable), so
----writers can merge their field without clobbering the others (url/name/group vs
----the per-file submit verdicts).
----@param dir string
----@param cfg table
----@return table
-local function read_store(dir, cfg)
-    local content = utils.read_file(store_path(dir, cfg))
-    if content then
-        local ok, decoded = pcall(vim.json.decode, content)
-        if ok and type(decoded) == "table" then
-            return decoded
-        end
-    end
-    return {}
-end
-
----Write a sidecar table back to disk.
----@param dir string
----@param cfg table
----@param store table
-local function write_store(dir, cfg, store)
-    local ok, encoded = pcall(vim.json.encode, store)
-    if ok then
-        utils.write_file(store_path(dir, cfg), encoded)
-    end
-end
+-- The sidecar itself lives in `sidecar.lua`: it is no longer a submit detail now that
+-- it also carries the per-problem run state (`tools.lua`).
+local sidecar = require("tuna.sidecar")
+local read_store, write_store = sidecar.read, sidecar.write
 
 ---Persist a downloaded task's metadata (url/name/group) beside its source, so submit
 ---can recover the URL even when the file has no header marker. Merges into any
@@ -130,12 +99,7 @@ end
 ---@param cfg table
 ---@return { url: string?, name: string?, group: string?, submit: table? }?
 function M.read_task_store(dir, cfg)
-    local content = utils.read_file(store_path(dir, cfg))
-    if not content then
-        return nil
-    end
-    local ok, decoded = pcall(vim.json.decode, content)
-    return ok and type(decoded) == "table" and decoded or nil
+    return sidecar.read_or_nil(dir, cfg)
 end
 
 ---A friendly name for a solution in the submit status, resolved exactly like the URL:

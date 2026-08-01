@@ -388,12 +388,123 @@ M.MODES = { "normal", "all", "stress", "interactive" }
 ---@type table<string, { mode: string, explicit: boolean, checker: boolean, source: string?, compare: tuna.CompareSpec? }>
 local state = {}
 
+local DEFAULT_STATE = { mode = "normal", explicit = false, checker = true, source = nil, compare = nil }
+
+---@private
+---Whether an entry says anything the defaults don't, so an untouched problem never
+---gets a sidecar written for it.
+---@param s table
+---@return boolean
+local function is_default(s)
+    return s.mode == DEFAULT_STATE.mode
+        and s.explicit == DEFAULT_STATE.explicit
+        and s.checker == DEFAULT_STATE.checker
+        and s.source == nil
+        and s.compare == nil
+end
+
+---@private
+---A compare spec as something JSON survives. `{ "float", tol = 1e-6 }` has both an
+---array part and a hash part, and JSON has no such shape: encoding it turns the
+---builtin's name into the *string* key `"1"`, so a decoded spec would no longer
+---answer `method[1]` and `compare.lua` would stop recognising it. Store it named
+---instead. A custom compare *function* can't be persisted at all (and can't be set
+---from `:Tuna compare`), so it is simply dropped.
+---@param method tuna.CompareSpec?
+---@return string|table|nil
+local function encode_compare(method)
+    if type(method) == "string" then
+        return method
+    end
+    if type(method) == "table" and type(method[1]) == "string" then
+        local out = { method = method[1] }
+        for k, v in pairs(method) do
+            if k ~= 1 then
+                out[k] = v
+            end
+        end
+        return out
+    end
+    return nil
+end
+
+---@private
+---@param stored string|table|nil
+---@return tuna.CompareSpec?
+local function decode_compare(stored)
+    if type(stored) == "string" then
+        return stored
+    end
+    if type(stored) == "table" and type(stored.method) == "string" then
+        local out = { stored.method }
+        for k, v in pairs(stored) do
+            if k ~= "method" then
+                out[k] = v
+            end
+        end
+        return out
+    end
+    return nil
+end
+
+---@private
+---How this problem is run — the compare method, the checker toggle, the chosen mode
+---and interactive source — is a property of the *problem*, so it lives in the
+---per-problem sidecar and comes back after a restart. (`recent.lua`'s state file is
+---for the opposite kind of thing: where *you* were, which is per machine.)
+---
+---Hydrated lazily on the first access for a path, so there is no session load step
+---and no autocmd: any entry point that reads or writes the state gets it.
 ---@param path string
+---@return table
 local function state_for(path)
     if not state[path] then
-        state[path] = { mode = "normal", explicit = false, checker = true, source = nil, compare = nil }
+        local s = vim.tbl_extend("force", {}, DEFAULT_STATE)
+        if path ~= "" then
+            local stored = require("tuna.sidecar").get_entry(path, "run")
+            if stored then
+                -- Validated on the way in: the sidecar is a plain file a user may edit
+                -- (or copy between problems), and a nonsense mode would send a bare
+                -- `:Tuna run` somewhere impossible.
+                if vim.tbl_contains(M.MODES, stored.mode) then
+                    s.mode = stored.mode
+                    s.explicit = stored.explicit == true
+                end
+                if type(stored.checker) == "boolean" then
+                    s.checker = stored.checker
+                end
+                if vim.tbl_contains({ "live", "feed", "interactor" }, stored.source) then
+                    s.source = stored.source
+                end
+                s.compare = decode_compare(stored.compare)
+            end
+        end
+        state[path] = s
     end
     return state[path]
+end
+
+---@private
+---Write a path's state back to its sidecar. Entries that say nothing beyond the
+---defaults are removed rather than stored, so turning a setting off again leaves no
+---trace (and `sidecar.set_entry` drops the file entirely once nothing else is in it).
+---@param path string
+local function persist(path)
+    if path == "" then
+        return
+    end
+    local s = state[path]
+    if not s or is_default(s) then
+        require("tuna.sidecar").set_entry(path, "run", nil)
+        return
+    end
+    require("tuna.sidecar").set_entry(path, "run", {
+        mode = s.mode,
+        explicit = s.explicit,
+        checker = s.checker,
+        source = s.source,
+        compare = encode_compare(s.compare),
+    })
 end
 
 ---@param path string
@@ -409,6 +520,7 @@ function M.set_mode(path, mode)
     local s = state_for(path)
     s.mode = mode
     s.explicit = true
+    persist(path)
 end
 
 ---Auto-detect a run mode from the helper files sitting beside the solution:
@@ -463,6 +575,7 @@ end
 ---@param enabled boolean
 function M.set_checker(path, enabled)
     state_for(path).checker = enabled
+    persist(path)
 end
 
 ---The buffer's chosen interactive source ("live"|"feed"|"interactor"), or nil when
@@ -478,6 +591,7 @@ end
 ---@param source string
 function M.set_source(path, source)
     state_for(path).source = source
+    persist(path)
 end
 
 ---The buffer's runtime compare-method override (set via `:Tuna compare …`), or nil
@@ -493,6 +607,7 @@ end
 ---@param method tuna.CompareSpec?
 function M.set_compare(path, method)
     state_for(path).compare = method
+    persist(path)
 end
 
 return M
