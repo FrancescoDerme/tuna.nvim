@@ -16,6 +16,7 @@
 
 local api = vim.api
 local utils = require("tuna.utils")
+local surface = require("tuna.surface")
 local diff = require("tuna.diff")
 local SKIP = require("tuna.runner.core").SKIP
 
@@ -25,6 +26,10 @@ local ns = api.nvim_create_namespace("tuna_runner_ui")
 -- Its own namespace, so the diff can be painted and cleared without touching the
 -- selector's status highlights.
 local diff_ns = api.nvim_create_namespace("tuna_runner_diff")
+
+--- How long after the last keystroke the expensive answers are worked out (ms): what
+--- the panes really hold, and the diff marks over them.
+local SETTLE_DELAY = 120
 local augroup_counter = 0
 
 -- The four detail panes a viewer can enlarge, and the friendly names used in
@@ -94,50 +99,33 @@ end
 -- Every abbreviation of the commands that would close a pane (or the editor) out from
 -- under an unsaved testcase edit. `:wq`/`:x` are deliberately absent: they write
 -- first, which through the pane's `BufWriteCmd` *is* saving the testcase.
+--- The commands that close *this window*: a `:q` in a pane is a request to put the
+--- results UI away, so the UI closes itself rather than letting one pane be torn out
+--- of the grid. Kept apart from the quit-everything commands below, which mean what
+--- they say and are only intercepted when an unsaved edit would be lost.
 local QUIT_COMMANDS = {}
-for _, name in ipairs({ "q", "qu", "qui", "quit", "qa", "qal", "qall", "quita", "quitall", "clo", "clos", "close" }) do
-    QUIT_COMMANDS[name] = true
-end
-
--- Keys that begin a change. On a read-only pane they can only end in `E21: Cannot
--- make changes, 'modifiable' is off` — sometimes a keystroke later, from a mode the
--- user never meant to enter — so they are made inert wherever nothing else claims
--- them. (`u`/`<C-r>` are not here: undo on an unchangeable buffer is harmless, and
--- both are the plugin's own actions in this UI.)
-local INERT_KEYS = {
-    "i", "I", "a", "A", "o", "O", "c", "C", "s", "S", "r", "R", "x", "X", "d", "D",
-    "p", "P", "J", "~", "v", "V", "<C-v>", "<Insert>", "gi", "gI", "gp", "gP", "gJ", "g~",
-}
-
----@private
----Make the change-starting keys inert on a buffer that cannot take a change. Bound
----only where nothing is mapped yet, so a pane's real actions (`i`/`a`/`o`/`e` opening
----the viewer, `x`/`R`/`u` acting on a testcase) keep their meanings — which is why this
----runs *after* the actions are set. Every read-only surface the plugin puts in front of
----the user goes through it: the panes, the legend and the message float alike.
----@param bufnr integer
-local function make_inert(bufnr)
-    local taken = {}
-    for _, m in ipairs(api.nvim_buf_get_keymap(bufnr, "n")) do
-        taken[m.lhs] = true
-    end
-    for _, key in ipairs(INERT_KEYS) do
-        if not taken[key] then
-            vim.keymap.set("n", key, "<Nop>", { buffer = bufnr, nowait = true })
-        end
+local function quit_cmds(names, scope, write)
+    for _, name in ipairs(names) do
+        QUIT_COMMANDS[name] = { scope = scope, write = write }
     end
 end
+quit_cmds({ "q", "qu", "qui", "quit", "clo", "clos", "close" }, "window", false)
+quit_cmds({ "wq", "x", "xi", "xit", "exi", "exit" }, "window", true)
+quit_cmds({ "qa", "qal", "qall", "quita", "quitall" }, "all", false)
+quit_cmds({ "wqa", "wqal", "wqall", "xa", "xal", "xall" }, "all", true)
 
 ---@private
----Whether a typed command line is one of those, and whether it carried a `!`.
+---Whether a typed command line is one of those — what it closes, whether it writes
+---first, and whether it carried a `!`.
 ---@param line string
----@return boolean? # nil when it isn't a quit command, else true if forced
+---@return { scope: "window"|"all", write: boolean }? nil when it isn't a quit command
+---@return boolean forced
 local function quit_command(line)
     local cmd, bang = line:match("^%s*(%a+)(!?)%s*$")
     if cmd and QUIT_COMMANDS[cmd] then
-        return bang == "!"
+        return QUIT_COMMANDS[cmd], bang == "!"
     end
-    return nil
+    return nil, false
 end
 
 ---@private
@@ -288,9 +276,15 @@ end
 ---a float like every other tuna dialog, and it is the only one in this flow: routine
 ---editing never asks anything.
 ---@param torn boolean? the windows are already gone (a `:q` on one pane)
-function RunnerUI:request_close(torn)
+---@param on_closed fun()? run once the UI is actually closed — how a `:qa` that was
+---cancelled to ask about an edit gets to finish afterwards. Not run on "Keep editing":
+---the answer there is that the command should not happen.
+function RunnerUI:request_close(torn, on_closed)
     if not self:has_pending() then
         self:delete()
+        if on_closed then
+            on_closed()
+        end
         return
     end
     local nums = self:unsaved_testcases()
@@ -333,6 +327,9 @@ function RunnerUI:request_close(torn)
             elseif idx == 2 then
                 self:discard_pending()
                 self:delete()
+            end
+            if on_closed and idx ~= 3 then
+                on_closed()
             end
         end,
         back_to,
@@ -379,10 +376,16 @@ function RunnerUI:with_pending_settled(tcnum, what, proceed)
 end
 
 ---@private
----Whether the row shown in the panes is a stored testcase, i.e. editable.
+---Whether a buffer is one of this UI's panes (the viewer borrows one, so it counts).
+---@param bufnr integer
 ---@return boolean
-function RunnerUI:editing_row()
-    return self.runner:row_editable(self:current_row())
+function RunnerUI:owns_buf(bufnr)
+    for _, w in pairs(self.windows) do
+        if w.bufnr == bufnr then
+            return true
+        end
+    end
+    return false
 end
 
 ---@private
@@ -398,23 +401,155 @@ function RunnerUI:pane_text(name)
 end
 
 ---@private
+---Whether anything may have happened to the editable panes since they were last
+---rendered — Vim's `modified` flag, or an edit already held for the row on screen.
+---Free whatever the size of the testcase, and only ever a gate on the real question
+---below: `modified` cannot tell text typed *back* to the original from text still
+---changed, and it is cleared behind Vim's back (see `clear_pane_modified`).
+---@return boolean
+function RunnerUI:panes_dirty()
+    if self.pane_tcnum ~= nil and self.pending[self.pane_tcnum] then
+        return true
+    end
+    for _, name in ipairs({ "si", "eo" }) do
+        local w = self.windows[name]
+        if w and w.bufnr and api.nvim_buf_is_valid(w.bufnr) and vim.bo[w.bufnr].modified then
+            return true
+        end
+    end
+    return false
+end
+
+---@private
+---Whether the editable panes actually differ from the **stored** testcase they are a
+---view of — the real question, and the only one that survives text retyped by hand.
+---Costs a comparison against the stored lines, so it runs where that is affordable (a
+---repoint, or the settle after typing stops), never per keystroke.
+---@return boolean
+function RunnerUI:panes_changed()
+    if not self:panes_dirty() then
+        return false
+    end
+    for _, name in ipairs({ "si", "eo" }) do
+        local w = self.windows[name]
+        if w and w.bufnr and api.nvim_buf_is_valid(w.bufnr) then
+            if not (w.baseline and surface.same_lines(w.bufnr, w.baseline)) then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+---@private
+---Tell Vim the pane buffers are saved, because as far as Vim is concerned they are:
+---an unwritten testcase edit lives in `pending`, not in a buffer waiting to be flushed
+---to disk. Left `modified`, these `acwrite` buffers count as unsaved *files*, and any
+---quit typed outside the UI — where the command-line guard cannot reach — comes back as
+---`E37: No write since last change` / `E162: … for buffer "tuna://runner/…"`, about a
+---scratch buffer the user never opened. Pressing `n` was enough to arm it. Our own state
+---keeps the edit safe (and offers to save it on the way out), so the flag is noise.
+function RunnerUI:clear_pane_modified()
+    for _, name in ipairs({ "si", "eo" }) do
+        local w = self.windows[name]
+        if w and w.bufnr and api.nvim_buf_is_valid(w.bufnr) and vim.bo[w.bufnr].modified then
+            vim.bo[w.bufnr].modified = false
+        end
+    end
+end
+
+---@private
 ---Move an edit in progress out of the (shared) pane buffers and into `pending`,
 ---before anything repoints those panes at a different row.
+---
+---This reads both panes out in full, so it is **not** something to do per keystroke:
+---on a 500 000-line testcase that was ~127 ms of work behind every character typed,
+---which is an editor that has stopped responding. It runs where a pane is actually
+---about to be repointed (a row switch, a render, a save, a close, a teardown);
+---while you type, `on_pane_edit` keeps the row's `EDITED` state honest for free.
 function RunnerUI:capture_pending()
-    if not self:editing_row() then
+    -- Attributed to the row the panes were last *rendered* for, not to the selected
+    -- one: between choosing a row and the render that repoints the panes, the two
+    -- differ, and the text still on screen belongs to the row it came from.
+    local n = self.pane_tcnum
+    if n == nil then
         return
     end
-    local tc = self:current_row()
-    local si, eo = self.windows.si, self.windows.eo
-    local dirty = (si and si.bufnr and api.nvim_buf_is_valid(si.bufnr) and vim.bo[si.bufnr].modified)
-        or (eo and eo.bufnr and api.nvim_buf_is_valid(eo.bufnr) and vim.bo[eo.bufnr].modified)
-    if not dirty then
-        -- Undone (or redone) back to the saved text: there is no edit any more, and the
-        -- row must stop reading `EDITED`.
-        self.pending[tc.tcnum] = nil
+    if not self:panes_changed() then
+        -- Back to the stored text — undone, or retyped by hand. Either way
+        -- there is no edit any more, and the row must stop reading `EDITED`. A row added
+        -- with `n` keeps its entry: it is unsaved by existing, not by differing.
+        self.pane_edited = false
+        if not (self.pending[n] and self.pending[n].fresh) then
+            self.pending[n] = nil
+        end
+        self:clear_pane_modified()
         return
     end
-    self.pending[tc.tcnum] = { stdin = self:pane_text("si"), expected = self:pane_text("eo") }
+    self.pane_edited = true
+    self.pending[n] = {
+        stdin = self:pane_text("si"),
+        expected = self:pane_text("eo"),
+        fresh = self.pending[n] and self.pending[n].fresh or nil,
+    }
+    -- The edit is ours now, so the buffers are not carrying anything Vim has to worry
+    -- about on the way out.
+    self:clear_pane_modified()
+end
+
+---@private
+---What a keystroke in an editable pane costs. Deliberately O(1) in the size of the
+---testcase: the text itself is only read out when a pane is about to be repointed
+---(`capture_pending`), never here. All that has to be true *while* typing is that the
+---row reads `EDITED` from the first keystroke; whether it still deserves to is settled
+---a moment later, by comparison. Re-renders **only when the set of edited rows actually
+---changed**, since rewriting the selector and status buffers on every character is the
+---other half of the same cost.
+function RunnerUI:on_pane_edit()
+    -- Raised, never lowered: something was typed, which is all that can be known for
+    -- free. Whether the text is *back* to the stored testcase — by undo or by hand — is
+    -- a comparison, and that is the settle pass's job.
+    if self.pane_tcnum ~= nil then
+        self.pane_edited = true
+    end
+    self:schedule_settle()
+    if table.concat(self:unsaved_testcases(), ",") == self.edited_sig then
+        return
+    end
+    self:render_selector()
+    self:update_status_line()
+end
+
+---@private
+---The pass that runs shortly after typing stops, where the answers that cost something
+---are worked out: whether the panes still differ from the stored testcase (an
+---edit typed back to the original by hand leaves Vim's `modified` set, so only a
+---comparison can tell), and the diff marks, which describe what is on screen. Debounced
+---rather than immediate because both are proportional to the size of the testcase, and
+---that is exactly the per-keystroke cost the edit path was freed of.
+function RunnerUI:schedule_settle()
+    if not self.settle_timer then
+        self.settle_timer = vim.uv.new_timer()
+    end
+    self.settle_timer:stop()
+    self.settle_timer:start(
+        SETTLE_DELAY,
+        0,
+        vim.schedule_wrap(function()
+            if not self.ui_visible then
+                return
+            end
+            local was = self.pane_edited
+            self:capture_pending() -- re-decides `pane_edited` from the text itself
+            if self.pane_edited ~= was then
+                self:render_selector()
+                self:update_status_line()
+            end
+            if self.diff_view then
+                self:render_diff()
+            end
+        end)
+    )
 end
 
 ---@private
@@ -451,15 +586,9 @@ end
 ---@return integer[]
 function RunnerUI:unsaved_testcases()
     local nums = vim.tbl_keys(self.pending)
-    local tc = self:current_row()
-    if self:editing_row() and not self.pending[tc.tcnum] then
-        for _, name in ipairs({ "si", "eo" }) do
-            local w = self.windows[name]
-            if w and w.bufnr and api.nvim_buf_is_valid(w.bufnr) and vim.bo[w.bufnr].modified then
-                nums[#nums + 1] = tc.tcnum
-                break
-            end
-        end
+    local n = self.pane_tcnum
+    if n ~= nil and not self.pending[n] and self.pane_edited then
+        nums[#nums + 1] = n
     end
     table.sort(nums)
     return nums
@@ -471,6 +600,7 @@ end
 ---way out, so clearing the table alone would see the edits captured straight back.
 function RunnerUI:discard_pending()
     self.pending = {}
+    self.pane_edited = false
     for _, name in ipairs({ "si", "eo" }) do
         local w = self.windows[name]
         if w and w.bufnr and api.nvim_buf_is_valid(w.bufnr) then
@@ -485,7 +615,9 @@ end
 function RunnerUI:save_testcase(tcnum)
     local p = self.pending[tcnum]
     local input, expected
-    if p and tcnum ~= (self:current_row() or {}).tcnum then
+    -- The panes hold this testcase's text only while they are showing it; for any
+    -- other one, what was captured when they stopped showing it is the truth.
+    if p and tcnum ~= self.pane_tcnum then
         input, expected = p.stdin, p.expected
     else
         input, expected = self:pane_text("si"), self:pane_text("eo")
@@ -496,8 +628,9 @@ function RunnerUI:save_testcase(tcnum)
     self.pending[tcnum] = nil
     for _, name in ipairs({ "si", "eo" }) do
         local w = self.windows[name]
-        if w and w.bufnr and api.nvim_buf_is_valid(w.bufnr) and tcnum == (self:current_row() or {}).tcnum then
+        if w and w.bufnr and api.nvim_buf_is_valid(w.bufnr) and tcnum == self.pane_tcnum then
             vim.bo[w.bufnr].modified = false
+            self.pane_edited = false
         end
     end
     self.update_windows = true
@@ -528,7 +661,9 @@ function RunnerUI:add_testcase()
     self:capture_pending()
     local n = self.runner:next_tcnum()
     self.runner:add_testcase_row(n)
-    self.pending[n] = { stdin = "", expected = "" }
+    -- `fresh`: unsaved by existing, not by differing — a row added here has no file
+    -- behind it, so it stays pending even while its (empty) panes match their render.
+    self.pending[n] = { stdin = "", expected = "", fresh = true }
     self.update_windows = true
     self:update_ui()
     -- The row only exists on screen after the scheduled render.
@@ -753,69 +888,115 @@ function RunnerUI:show_ui()
         end
     end
 
-    -- `:q` (or `:close`, or `:qa`) typed in a pane holding an unsaved testcase edit is
-    -- **cancelled before it runs**, and the same Save / Discard / Keep prompt is shown
-    -- instead. Cancelling at the command line is what makes this silent and still: the
-    -- window is never closed, so there is nothing to flash back into place, and Vim
-    -- never gets far enough to raise its own red "E37: No write since last change" —
-    -- which would be shouting about something the prompt is already handling. (The
-    -- abort has to be set from Vimscript: `vim.v.event` reads back a *copy* in Lua, so
-    -- assigning to it there is silently lost — verified.) A `!` is an explicit
-    -- discard, so it is honoured: drop the edits and let the command through.
+    -- `:q` (or `:close`) typed in **any** pane is **cancelled before it runs** and turned
+    -- into a close of the whole UI, which is what it was asking for: a results grid is
+    -- one thing, not six windows to dismiss one at a time. Cancelling at the command
+    -- line is what makes it silent and still — the window is never closed, so no pane
+    -- flashes out and back as the grid is rebuilt around the hole, and Vim never gets
+    -- far enough to raise its own red "E37: No write since last change" about an edit
+    -- the prompt is already handling. (The abort has to be set from Vimscript:
+    -- `vim.v.event` reads back a *copy* in Lua, so assigning to it there is silently
+    -- lost — verified.) Two things are deliberately left alone: a `!`, an explicit
+    -- discard (the edits are dropped and the command runs), and `:qa`, which means
+    -- "leave Neovim" — intercepted only when it would throw an unsaved edit away.
     api.nvim_create_autocmd("CmdlineLeave", {
         group = self.augroup,
         callback = function()
             if not self.ui_visible then
                 return
             end
-            local buf = api.nvim_get_current_buf()
-            local editing = false
-            for _, name in ipairs({ "si", "eo" }) do
-                local w = self.windows[name]
-                if w and w.bufnr == buf and self:writable_pane(name) then
-                    editing = true
+            local cmd, forced = quit_command(vim.fn.getcmdline())
+            if cmd == nil then
+                return
+            end
+            -- Closing *this window* is only our business when the cursor is in one of
+            -- our panes. Leaving Neovim is our business wherever it is typed: the UI is
+            -- open somewhere with an edit in it, and Vim's own complaint would name a
+            -- scratch buffer instead of the testcase.
+            if cmd.scope == "window" then
+                if not self:owns_buf(api.nvim_get_current_buf()) then
+                    return
                 end
-            end
-            if not editing then
-                return
-            end
-            local forced = quit_command(vim.fn.getcmdline())
-            if forced == nil or not self:has_pending() then
-                return
+                -- The viewer is a window of its own, over the grid: `:q` there means
+                -- close the viewer, and that is exactly what Vim is about to do.
+                if self.viewer_winid and api.nvim_get_current_win() == self.viewer_winid then
+                    return
+                end
             end
             if forced then
                 self:discard_pending()
                 return
             end
+            if cmd.scope == "all" then
+                -- `:qa`/`:xa` mean leave Neovim, so they are let through: written first
+                -- if that is what was asked (each pane is `acwrite`, and a save that has
+                -- nothing to write does nothing), and stopped to ask only when quitting
+                -- would throw an edit away.
+                if cmd.write then
+                    self:save_all_pending()
+                elseif self:has_pending() then
+                    local line = vim.fn.getcmdline()
+                    vim.cmd("let v:event.abort = v:true")
+                    vim.schedule(function()
+                        -- Answered, the quit carries on by itself: cancelling it was
+                        -- only ever a way to ask, not a refusal.
+                        self:request_close(false, function()
+                            vim.schedule(function()
+                                pcall(vim.cmd, line)
+                            end)
+                        end)
+                    end)
+                end
+                return
+            end
             vim.cmd("let v:event.abort = v:true")
             vim.schedule(function()
-                self:request_close()
+                if cmd.write then
+                    -- `:wq` here is "Save and close", which is what it means anywhere.
+                    self:save_all_pending()
+                    self:delete()
+                else
+                    self:request_close()
+                end
             end)
         end,
     })
 
-    -- `:w` in an editable pane saves that testcase — the same gesture as saving any
-    -- other buffer, which is the whole point of leaving the panes modifiable.
-    for _, name in ipairs({ "si", "eo" }) do
-        local w = self.windows[name]
-        if w and w.bufnr and self:writable_pane(name) and self.runner.editable_testcases then
-            -- `acwrite` routes `:w` through the autocmd below instead of trying to
-            -- write a scratch buffer to disk. (The name `:w` also needs, or it aborts
-            -- with E32 before the autocmd fires, comes from the interface — see
-            -- `utils.name_float_buffer`.)
+    -- `:w` saves the testcase being edited **from whichever pane you type it in** — the
+    -- same gesture as saving any other buffer, which is the whole point of leaving the
+    -- editable panes modifiable. It works from the read-only panes too because the row
+    -- being saved is well defined wherever you are looking, and a `:w` that answers
+    -- with `E382: Cannot write, 'buftype' option is set` in one pane and saves in the
+    -- next is the same inconsistency the action keys were spread out to remove.
+    for name, w in pairs(self.windows) do
+        if w.bufnr then
+            -- `acwrite` routes `:w` through the autocmd below instead of refusing to
+            -- write a scratch buffer. (The name `:w` also needs, or it aborts with E32
+            -- before the autocmd fires, comes from the interface — see
+            -- `utils.name_float_buffer`.) A read-only pane stays read-only: `acwrite`
+            -- says how a write is handled, not that the buffer can be changed. Every
+            -- pane gets it, in every mode — a mode with nothing to save (interactive)
+            -- says so, which is still better than Vim's `E382`.
             vim.bo[w.bufnr].buftype = "acwrite"
             api.nvim_create_autocmd("BufWriteCmd", {
                 group = self.augroup,
                 buffer = w.bufnr,
                 callback = function()
-                    local tc = self:current_row()
-                    if self.runner:row_editable(tc) then
-                        self:save_testcase(tc.tcnum)
-                    else
+                    local tcnum = self.pane_tcnum
+                    if not self.runner.editable_testcases then
+                        utils.notify("this run mode has no testcase to save.", "WARN")
+                    elseif tcnum == nil then
                         utils.notify("this row is not a testcase, so there is nothing to save.", "WARN")
+                    elseif self:panes_changed() or self.pending[tcnum] then
+                        self:save_testcase(tcnum)
                     end
+                    -- Nothing changed since the last write: saving would only re-run the
+                    -- testcase, which is what `R` is for. Also what keeps a `:wqa`
+                    -- (one write per pane) from re-running it six times over.
                 end,
             })
+        end
+        if w.bufnr and self:writable_pane(name) and self.runner.editable_testcases then
             -- The "unsaved" warning has to appear as you type, not at the next render:
             -- the "Run" pane is the only place that says an edit is uncommitted, and a
             -- hint that arrives after the fact is no hint at all.
@@ -827,9 +1008,7 @@ function RunnerUI:show_ui()
                     -- under the cursor with an identical copy and throw the cursor back
                     -- to line 1 on every keystroke. `TextChanged` also fires on undo and
                     -- redo, which is what keeps `EDITED` honest in both directions.
-                    self:capture_pending()
-                    self:render_selector()
-                    self:update_status_line()
+                    self:on_pane_edit()
                 end,
             })
         end
@@ -916,7 +1095,7 @@ function RunnerUI:show_ui()
     -- the next keystroke raises `E21: Cannot make changes, 'modifiable' is off` — an
     -- error about an editing session the user never meant to start.
     for _, buf in ipairs(action_bufs) do
-        make_inert(buf)
+        surface.read_only(buf)
     end
 
     -- Moving in the selector switches which testcase the detail panes show.
@@ -1012,17 +1191,50 @@ local function paint_diff(bufnr, marks)
 end
 
 ---@private
+---The two texts the marks describe. **What is on screen**, literally: while the panes
+---are showing this row they *are* the text — an expected output typed but not written
+---is what you are looking at, so it is what gets compared, and the marks follow it as
+---you type rather than describing the file until the next `:w`. For any other row (the
+---Compile row, a mode's own pane) it goes through the `pane_content` seam, which may
+---return `SKIP`.
+---@param tc table the row being shown
+---@return string|nil output
+---@return string|nil expected
+function RunnerUI:diff_texts(tc)
+    local output = self.runner:pane_content(tc, "so")
+    local expected = self.runner:pane_content(tc, "eo")
+    if output ~= SKIP and expected ~= SKIP and self.pane_tcnum ~= nil and self.pane_tcnum == tc.tcnum then
+        return self:pane_text("so"), self:pane_text("eo")
+    end
+    return output, expected
+end
+
+---@private
 ---Re-highlight the Output and Expected Output panes for the selected testcase.
 ---Cheap enough to redo on every render, which is what keeps the marks correct as
 ---the selection moves or a re-run replaces the output.
----Records on `self.diff_note` *why* it painted nothing, when it painted nothing
----(`"no_expected"` — this row has no answer to compare against, i.e. the Compile row
----or an input-only testcase — or `"match"`, the two agree), so the "Run" pane can say
----so rather than leaving the user looking at an unchanged screen.
+---Paints nothing, quietly, on a row there is nothing to compare on: one that has no
+---answer (the Compile row, an input-only testcase), one a mode owns outright, one that
+---has never run, and one whose two texts agree. The panes themselves show which of
+---those it is, so none of it is narrated anywhere.
 ---@return integer? first the first differing line, if any
 function RunnerUI:render_diff()
-    self.diff_note = nil
     local so, eo = self.windows.so, self.windows.eo
+    if self.diff_view and so and eo then
+        -- Same two texts as last time, same method: the marks on the panes are still
+        -- the right ones, so neither the walk nor the repaint has anything to do. This
+        -- runs on *every* detail render, and a positional diff of a 500 000-line output
+        -- is ~1.5 s of work — one to skip whenever a render didn't change the texts.
+        local tc = self.runner.tcdata[self.update_testcase or 1]
+        local c = self.diff_cache
+        if c and tc and c.tc == tc then
+            local out, exp = self:diff_texts(tc)
+            if c.out == out and c.exp == exp then
+                return c.first
+            end
+        end
+    end
+    self.diff_cache = nil
     for _, w in ipairs({ so, eo }) do
         if w and w.bufnr and api.nvim_buf_is_valid(w.bufnr) then
             api.nvim_buf_clear_namespace(w.bufnr, diff_ns, 0, -1)
@@ -1036,29 +1248,30 @@ function RunnerUI:render_diff()
     if not tc then
         return nil
     end
-    -- Through the pane seam, so a mode that rewrites these panes is diffed on what
-    -- it actually shows; a pane it owns outright is left alone. An unsaved edit to the
-    -- expected output is what the pane shows, so it is also what gets diffed —
-    -- otherwise the marks would describe text that isn't on screen.
-    local output = self.runner:pane_content(tc, "so")
-    local pending = self.runner:row_editable(tc) and self.pending[tc.tcnum] or nil
-    local expected = pending and pending.expected or self.runner:pane_content(tc, "eo")
-    if output == SKIP or expected == SKIP or expected == nil or expected == "" then
-        self.diff_note = "no_expected" -- nothing to compare against, or a mode's own pane
+    if tc.start_time == nil then
+        -- Never run: there is no output to compare an answer against, so every line of
+        -- what you are typing into Expected would be marked as a difference from an
+        -- empty pane. A testcase added with `n` starts here, and it is the one moment
+        -- the marks would be pure noise — wait until the solution has had a go at it.
         return nil
+    end
+    local output, expected = self:diff_texts(tc)
+    if output == SKIP or expected == SKIP or expected == nil or expected == "" then
+        return nil -- nothing to compare against, or a mode's own pane
     end
 
     local res = diff.compute(output, expected, self.runner:effective_compare())
     paint_diff(so.bufnr, res.out)
     paint_diff(eo.bufnr, res.exp)
-    if res.first == nil then
-        self.diff_note = "match"
-    end
+    self.diff_cache = { tc = tc, out = output, exp = expected, first = res.first }
     return res.first
 end
 
 ---Toggle the comparison between the Output and Expected Output panes.
 function RunnerUI:toggle_diff_view()
+    -- The marks are about to be cleared or painted from scratch, so what was cached
+    -- for them no longer describes the screen.
+    self.diff_cache = nil
     self.diff_view = not self.diff_view
     local first = self:render_diff()
     self:set_diff_bind(self.diff_view)
@@ -1080,6 +1293,7 @@ end
 
 ---@private
 function RunnerUI:disable_diff_view()
+    self.diff_cache = nil
     self:set_diff_bind(false)
     for _, name in ipairs({ "so", "eo" }) do
         local w = self.windows[name]
@@ -1126,22 +1340,20 @@ function RunnerUI:show_viewer(content)
     local band_row, band_h = utils.float_band()
     local width = math.floor(vim_width * vcfg.width + 0.5)
     local height = math.max(1, math.min(math.floor(vim_height * vcfg.height + 0.5), band_h - 2))
-    self.viewer_winid = api.nvim_open_win(source.bufnr, true, {
-        relative = "editor",
+    self.viewer_winid = surface.float(source.bufnr, {
+        layer = surface.LAYER.viewer, -- over the pane grid
         width = width,
         height = height,
         col = math.floor((vim_width - width) / 2),
         row = band_row + math.max(0, math.floor((band_h - height - 2) / 2)),
         border = self.config.floating_border,
+        border_highlight = self.config.floating_border_highlight,
         title = source.title,
-        title_pos = "center",
-        style = "minimal",
-        zindex = 60, -- above the popup grid (50)
+        enter = true,
+        keep_scrolloff = true, -- read like a buffer, not navigated like a list
     })
-    require("tuna.utils").set_border_highlight(self.viewer_winid, self.config.floating_border_highlight)
     vim.wo[self.viewer_winid].number = vcfg.show_nu
     vim.wo[self.viewer_winid].relativenumber = vcfg.show_rnu
-    vim.wo[self.viewer_winid].wrap = false
     -- The source buffer already maps the close key to close_or_viewer (set in
     -- show_ui), which closes the viewer when it's open — no extra keymap needed.
     -- Handle the viewer being closed with ":q" so our state stays consistent.
@@ -1170,7 +1382,14 @@ function RunnerUI:delete()
     -- moved into `pending` first — that is what lets a resize (which tears the UI
     -- down and rebuilds it) and a close-and-reopen keep an edit in progress.
     self:capture_pending()
+    self.pane_tcnum = nil -- the panes are going away; nothing is on screen to capture
+    self.pane_edited = false
     self.ui_visible = false
+    if self.settle_timer then
+        self.settle_timer:stop()
+        self.settle_timer:close()
+        self.settle_timer = nil
+    end
     if self.augroup then
         pcall(api.nvim_del_augroup_by_id, self.augroup)
         self.augroup = nil
@@ -1231,28 +1450,24 @@ function RunnerUI:show_message(title, text, highlights)
         pcall(api.nvim_buf_set_extmark, buf, ns, h.line, h.col, { end_col = h.end_col, hl_group = h.hl })
     end
     vim.bo[buf].modifiable = false
-    vim.bo[buf].filetype = "tuna"
-    utils.name_float_buffer(buf, "message")
+    surface.adopt(buf, "message")
 
     local vim_width, vim_height = utils.get_ui_size()
     local band_row, band_h = utils.float_band()
     local vcfg = self.config.runner_ui.viewer
     local width = math.floor(vim_width * vcfg.width + 0.5)
     local height = math.max(1, math.min(math.floor(vim_height * vcfg.height + 0.5), band_h - 2))
-    local win = api.nvim_open_win(buf, true, {
-        relative = "editor",
+    local win = surface.float(buf, {
+        layer = surface.LAYER.overlay, -- over the grid and the viewer
         width = width,
         height = height,
         col = math.floor((vim_width - width) / 2),
         row = band_row + math.max(0, math.floor((band_h - height - 2) / 2)),
         border = self.config.floating_border,
+        border_highlight = self.config.floating_border_highlight,
         title = title,
-        title_pos = "center",
-        style = "minimal",
-        zindex = 70,
+        enter = true,
     })
-    utils.set_border_highlight(win, self.config.floating_border_highlight)
-    vim.wo[win].wrap = false
     for _, key in ipairs(as_list(self.config.runner_ui.mappings.close)) do
         vim.keymap.set("n", key, function()
             if api.nvim_win_is_valid(win) then
@@ -1260,7 +1475,7 @@ function RunnerUI:show_message(title, text, highlights)
             end
         end, { buffer = buf, nowait = true })
     end
-    make_inert(buf) -- read-only, like every other surface here
+    surface.read_only(buf) -- read-only, like every other surface here
 end
 
 ---@private
@@ -1382,35 +1597,32 @@ function RunnerUI:show_help()
         local buf = api.nvim_create_buf(false, true)
         api.nvim_buf_set_lines(buf, 0, -1, false, c.lines)
         vim.bo[buf].modifiable = false
-        vim.bo[buf].filetype = "tuna"
-        utils.name_float_buffer(buf, "help")
-        local win = api.nvim_open_win(buf, false, {
-            relative = "editor",
+        surface.adopt(buf, "help")
+        local win = surface.float(buf, {
+            layer = surface.LAYER.overlay,
             width = c.width,
             height = height,
             col = at,
             row = row,
             border = self.config.floating_border,
+            border_highlight = c.hl,
             -- The title takes the *derived* group, whose background is the border's —
             -- see `accent_editable_panes` for why the configured one won't do.
+            border_group = c.group,
             title = { { c.title, c.group } },
-            title_pos = "center",
-            style = "minimal",
-            zindex = 70,
         })
-        utils.set_border_highlight(win, c.hl, c.group)
-        vim.wo[win].wrap = false
         wins[#wins + 1] = { win = win, buf = buf }
         at = at + c.width + 2 -- the columns touch, as the runner UI's own panes do
     end
 
-    local function close_all()
-        for _, w in ipairs(wins) do
-            if api.nvim_win_is_valid(w.win) then
-                api.nvim_win_close(w.win, true)
-            end
-        end
+    -- The columns are one legend, so whichever way one of them goes — the close key, a
+    -- `:q`, a `:close` — the other goes with it.
+    local wins_only = {}
+    for _, w in ipairs(wins) do
+        wins_only[#wins_only + 1] = w.win
     end
+    local close_all = surface.group(wins_only)
+
     local switch = as_list(self.config.switch_window_keys or {})
     for _, w in ipairs(wins) do
         for _, key in ipairs(as_list(self.config.runner_ui.mappings.close)) do
@@ -1428,7 +1640,7 @@ function RunnerUI:show_help()
         end
         -- The legend is as read-only as the panes are, so it gets the same treatment:
         -- an `i` or a `c` here can only end in `E21` a keystroke later.
-        make_inert(w.buf)
+        surface.read_only(w.buf)
     end
     api.nvim_set_current_win(wins[1].win)
 end
@@ -1452,10 +1664,12 @@ end
 function RunnerUI:status_lines()
     -- Each entry is a { label, value } pair; the colons are aligned by padding
     -- every label to the widest one.
-    -- Third row: whether the comparison is on. It is a *state*, not an event, so it
-    -- belongs on screen rather than in a message — and it carries the reason when the
-    -- diff is on but has nothing to paint, which is otherwise indistinguishable from
-    -- the key not working.
+    -- Third row: whether the comparison is on, and nothing else. It is a *state*, not an
+    -- event, so it belongs on screen rather than in a message — and pressing the key
+    -- always visibly does something, even on a row with nothing to paint. Why a row has
+    -- nothing to paint is deliberately not spelled out here: it changes as you move
+    -- between rows, which turns a state row into a running commentary, and the panes
+    -- themselves already say it (no answer, no run, or two texts that agree).
     local diff_state = self.diff_view and "on" or "off"
     local entries = {
         { "mode", self.runner.mode or "normal" },
@@ -1489,9 +1703,7 @@ function RunnerUI:update_status_line()
     if not (w and w.bufnr and api.nvim_buf_is_valid(w.bufnr)) then
         return
     end
-    vim.bo[w.bufnr].modifiable = true
-    api.nvim_buf_set_lines(w.bufnr, 0, -1, false, self:status_lines())
-    vim.bo[w.bufnr].modifiable = false
+    surface.render(w.bufnr, self:status_lines())
 end
 
 ---@private
@@ -1511,7 +1723,14 @@ function RunnerUI:focus_dir(dir)
                 r = pos[1] + api.nvim_win_get_height(w.winid) / 2,
                 c = pos[2] + api.nvim_win_get_width(w.winid) / 2,
             }
-            targets[#targets + 1] = t
+            -- The "Run" pane is a **read-out**, not a place to be: it holds no testcase,
+            -- no keys of its own and nothing to select, so stepping into it only costs a
+            -- press to step back out. It stays a possible *source* — a stray click or
+            -- `<C-w>w` can still put the cursor there, and the directional keys have to
+            -- get you out — but never a destination.
+            if name ~= "st" then
+                targets[#targets + 1] = t
+            end
             if w.winid == cur then
                 from = t
             end
@@ -1552,30 +1771,6 @@ function RunnerUI:focus_dir(dir)
 end
 
 ---@private
----Replace a buffer's content. A pane left `editable` stays modifiable afterwards.
----`modified` is cleared **always**, whether or not this row is editable, because the
----flag's one job is to mean "the user typed here" and a render is not typing: a
----non-editable row (`Compile`, run-all's solution headers) used to leave the panes
----dirty behind it, which the next row then reported as an unsaved edit of its own.
-local function set_buf(bufnr, content, editable)
-    if not (bufnr and api.nvim_buf_is_valid(bufnr)) then
-        return
-    end
-    vim.bo[bufnr].modifiable = true
-    -- Renders are not edits, so they must not land in the undo history: with a dozen
-    -- of them behind you (every re-run, every row you looked at), `u` in an editable
-    -- pane walked back through *our* writes before reaching yours — it looked like the
-    -- undo had failed. `undolevels = -1` around the write drops both the entry and the
-    -- history before it, so one `u` undoes what the user typed and no more.
-    local undolevels = vim.bo[bufnr].undolevels
-    vim.bo[bufnr].undolevels = -1
-    api.nvim_buf_set_lines(bufnr, 0, -1, false, vim.split(content or "", "\n", { plain = true }))
-    vim.bo[bufnr].undolevels = undolevels
-    vim.bo[bufnr].modifiable = editable == true
-    vim.bo[bufnr].modified = false
-end
-
----@private
 ---Redraw the testcase selector from `tcdata`. Split out of `update_ui` because
 ---typing in a pane has to refresh the rows' `EDITED` state *without* re-rendering
 ---the detail panes — rewriting the buffer under the cursor on every keystroke would
@@ -1584,8 +1779,12 @@ function RunnerUI:render_selector()
     if not (self.ui_visible and self.windows.tc and api.nvim_buf_is_valid(self.windows.tc.bufnr)) then
         return
     end
+    local edited = self:unsaved_testcases()
+    -- What `on_pane_edit` compares against: as long as the same rows are edited, a
+    -- keystroke has nothing to redraw here.
+    self.edited_sig = table.concat(edited, ",")
     local unsaved = {}
-    for _, n in ipairs(self:unsaved_testcases()) do
+    for _, n in ipairs(edited) do
         unsaved[n] = true
     end
     local lines, regions = {}, {}
@@ -1606,10 +1805,12 @@ function RunnerUI:render_selector()
         -- its verdict: the verdict describes the *saved* testcase, so while the
         -- two disagree it would be a claim about text that is no longer there.
         -- It says so on the row it is about, and lasts until the edit is saved
-        -- (which re-runs it) or undone away.
+        -- (which re-runs it) or undone away. Unstyled (`TunaDone`, as `NOT RUN` is):
+        -- it is the *absence* of a verdict, not a bad one, and the amber it used to
+        -- wear is the plugin's warning colour — nothing is wrong with an edit.
         local status, hlgroup = tc.status, tc.hlgroup
         if unsaved[tc.tcnum] then
-            status, hlgroup = "EDITED", "TunaWarning"
+            status, hlgroup = "EDITED", "TunaDone"
         end
         table.insert(lines, fit(10, header) .. fit(10, status) .. timestr)
         table.insert(regions, { line = i - 1, hlgroup = hlgroup, len = #status })
@@ -1631,9 +1832,7 @@ function RunnerUI:render_selector()
     end
 
     local buf = self.windows.tc.bufnr
-    vim.bo[buf].modifiable = true
-    api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-    vim.bo[buf].modifiable = false
+    surface.render(buf, lines)
     api.nvim_buf_clear_namespace(buf, ns, 0, -1)
     for _, r in ipairs(regions) do
         if r.len > 0 then
@@ -1648,10 +1847,27 @@ end
 ---Re-render the UI from the runner's `tcdata`. Honours the `update_windows` /
 ---`update_details` one-shot flags set by `TCRunner:update_ui`.
 function RunnerUI:update_ui()
+    -- One render per tick, however many updates ask for it. The flags below are
+    -- cumulative and the render reads the runner's current `tcdata`, so a queued
+    -- render already covers every call that arrives before it runs — a fast runner
+    -- (stress, or a batch of testcases landing together) used to queue one full
+    -- rebuild per event.
+    if self.render_scheduled then
+        return
+    end
+    self.render_scheduled = true
     vim.schedule(function()
+        self.render_scheduled = false
         if not self.ui_visible then
             return
         end
+        -- Anything typed into a pane and not yet written has to be in `pending` before
+        -- this render touches the panes, or the saved text would be pasted over it.
+        -- Here, at the top, because it is attributed to the row the panes are *showing*
+        -- and a compile failure below can move `update_testcase` off it. (Nothing
+        -- captures while you type — see `on_pane_edit` — so this is where that cost is
+        -- paid: once per render, not once per keystroke.)
+        self:capture_pending()
         -- Always refresh the status line (stress progress updates even before any
         -- testcase/counterexample exists).
         self:update_status_line()
@@ -1680,19 +1896,36 @@ function RunnerUI:update_ui()
                 -- editable Input pane while you're typing into it.
                 for _, name in ipairs(detail_windows) do
                     local writable = editable and (name == "si" or name == "eo")
-                    local content = self.runner:pane_content(tc, name)
+                    -- What is stored, and what to show: the two differ exactly when an
+                    -- unwritten edit is being restored into the pane.
+                    local base = self.runner:pane_content(tc, name)
+                    local content = base
                     if pending and name == "si" then
                         content = pending.stdin
                     elseif pending and name == "eo" then
                         content = pending.expected
                     end
                     if content ~= SKIP then
-                        set_buf(self.windows[name].bufnr, content, writable)
-                        if pending and writable then
-                            vim.bo[self.windows[name].bufnr].modified = true
-                        end
+                        local shown = surface.render(self.windows[name].bufnr, content, { modifiable = writable })
+                        -- Deliberately *not* marked modified when an unwritten edit is
+                        -- restored: `pending` is what says the row is unsaved, and a
+                        -- pane left modified is a scratch buffer Vim then refuses to
+                        -- quit past (see `clear_pane_modified`).
+                        -- The baseline an edit is measured against is the **stored**
+                        -- text, never the pending text just put on screen: measured
+                        -- against the latter, a restored edit would compare equal to
+                        -- itself and stop counting as unsaved.
+                        self.windows[name].baseline = content == base and shown
+                            or vim.split(base ~= SKIP and base or "", "\n", { plain = true })
                     end
                 end
+                -- Which testcase the panes are now showing, i.e. whom a later edit of
+                -- them belongs to. `nil` on a row with nothing to edit (`Compile`,
+                -- run-all's solution headers), so nothing can be captured for it.
+                self.pane_tcnum = editable and tc.tcnum or nil
+                -- The panes now hold exactly what they were given, so the only unwritten
+                -- edit on screen is one restored from `pending`.
+                self.pane_edited = pending ~= nil
                 -- The panes were just rewritten, so the marks on them are stale:
                 -- re-diff whatever they now hold.
                 if self.diff_view then

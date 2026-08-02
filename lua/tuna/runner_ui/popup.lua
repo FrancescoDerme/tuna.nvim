@@ -12,6 +12,7 @@
 local api = vim.api
 local utils = require("tuna.utils")
 local layout_util = require("tuna.runner_ui.layout")
+local surface = require("tuna.surface")
 
 local M = {}
 
@@ -99,7 +100,10 @@ function M.init_ui(windows, config, _init_winid, status_rows)
 
     for name in pairs(titles) do
         local buf = api.nvim_create_buf(false, true)
-        vim.bo[buf].filetype = "tuna"
+        -- Named, tagged, and answering `:w` instead of erroring — the shared surface
+        -- contract, so a pane cannot be born missing a piece of it. What a write *does*
+        -- here is the runner's business, added on top in `show_ui`.
+        require("tuna.surface").adopt(buf, "runner")
         vim.bo[buf].modifiable = false
 
         -- A pane the layout doesn't place gets a buffer but no window: its content is
@@ -107,33 +111,28 @@ function M.init_ui(windows, config, _init_winid, status_rows)
         local win
         local s, p = sizes[name], positions[name]
         if s and p then
-            win = api.nvim_open_win(buf, false, {
-                relative = "editor",
-                width = math.max(1, s.width),
-                height = math.max(1, s.height),
-                -- A bordered float's row/col anchor its whole footprint: the border is drawn
-                -- *at* that row/col and the content one cell in. The computed rectangles
-                -- already include the border, so they are passed through unshifted —
-                -- offsetting by +1 pushed the grid a row down and a column right, which on a
-                -- full-height layout means over the statusline.
+            win = surface.float(buf, {
+                layer = surface.LAYER.grid,
+                width = s.width,
+                height = s.height,
+                -- A bordered float's row/col anchor its whole footprint: the border is
+                -- drawn *at* that row/col and the content one cell in. The computed
+                -- rectangles already include the border, so they are passed through
+                -- unshifted — offsetting by +1 pushed the grid a row down and a column
+                -- right, which on a full-height layout means over the statusline.
                 col = p.col,
                 row = p.row,
                 border = config.floating_border,
+                border_highlight = config.floating_border_highlight,
                 title = titles[name],
-                title_pos = "center",
-                style = "minimal",
-                zindex = 50,
             })
-            utils.set_border_highlight(win, config.floating_border_highlight)
             local selector = name == "tc"
             vim.wo[win].number = selector and config.runner_ui.selector_show_nu or config.runner_ui.show_nu
             vim.wo[win].relativenumber = selector and config.runner_ui.selector_show_rnu
                 or config.runner_ui.show_rnu
-            vim.wo[win].wrap = false
             vim.wo[win].spell = false
             vim.wo[win].cursorline = selector
         end
-        utils.name_float_buffer(buf, "runner")
         windows[name] = { bufnr = buf, winid = win, title = titles[name] }
     end
 end

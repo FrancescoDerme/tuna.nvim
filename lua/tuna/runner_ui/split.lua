@@ -45,9 +45,8 @@ function M.init_ui(windows, config, init_winid, status_rows)
     local STATUS_HEIGHT = status_rows or 2
     for name in pairs(titles) do
         local buf = api.nvim_create_buf(false, true)
-        vim.bo[buf].filetype = "tuna"
+        require("tuna.surface").adopt(buf, "runner") -- the shared surface contract
         vim.bo[buf].modifiable = false
-        require("tuna.utils").name_float_buffer(buf, "runner")
         windows[name] = { bufnr = buf, winid = nil, title = titles[name] }
     end
 

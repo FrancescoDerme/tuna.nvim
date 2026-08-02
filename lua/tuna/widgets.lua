@@ -32,6 +32,7 @@
 
 local api = vim.api
 local utils = require("tuna.utils")
+local surface = require("tuna.surface")
 local config = require("tuna.config")
 
 local M = {}
@@ -42,39 +43,37 @@ local M = {}
 ---@param opts table { width, height, row, col, border, border_highlight, title }
 ---@return integer winid
 local function open_float(bufnr, enter, opts)
-    local winid = api.nvim_open_win(bufnr, enter, {
-        relative = "editor",
+    -- A widget is a dialog: always the thing the user is being asked to act on, so it is
+    -- drawn above every layer the runner UI uses — including 50, Neovim's default for a
+    -- float and the grid's own, where the two would fight and a pane would appear to
+    -- vanish behind the dialog.
+    local winid = surface.float(bufnr, {
+        layer = surface.LAYER.dialog,
         width = opts.width,
         height = opts.height,
         row = opts.row,
         col = opts.col,
         border = opts.border,
+        border_highlight = opts.border_highlight,
         title = opts.title,
-        title_pos = opts.title and "center" or nil,
-        style = "minimal",
-        -- Above every layer the runner UI draws: its pane grid (50 — which is also
-        -- Neovim's default, so a widget left unset would *share* that layer and the
-        -- two would fight, showing up as a pane vanishing behind the dialog), its
-        -- viewer (60) and its message float (70). A widget is a dialog: it is
-        -- always the thing the user is being asked to act on, so it goes on top.
-        zindex = 80,
+        enter = enter,
+        -- A scrollable *content* pane (clean's file preview, the library's snippet
+        -- preview) is read like a normal buffer rather than navigated as a list, so it
+        -- keeps the user's own scrolloff.
+        keep_scrolloff = opts.keep_scrolloff,
     })
-    utils.set_border_highlight(winid, opts.border_highlight)
-    utils.name_float_buffer(bufnr, opts.kind or "widget")
-    -- Tag this plugin's floats with a "tuna" filetype so users (and other plugins) can target
-    -- them. For example add "tuna" to scrollEOF.nvim's "disabled_filetypes" so it doesn't
-    -- write the *global* "scrolloff" off a transient float's height
-    vim.bo[bufnr].filetype = "tuna"
-    -- These floats are short, navigable lists (menu/picker/editor). A large global
-    -- `scrolloff` (e.g. 999, to keep normal buffers centred) fights list navigation
-    -- by refusing to let the cursor reach the top/bottom rows, so pin it off here —
-    -- `scrolloff`/`sidescrolloff` are global-local, so this only affects this window.
-    -- A scrollable *content* pane (e.g. clean's file preview) is read like a normal
-    -- buffer, not navigated as a list, so it opts out via `keep_scrolloff` and keeps
-    -- the user's own scrolloff (by leaving it unset, the window inherits the global).
-    if not opts.keep_scrolloff then
-        vim.wo[winid].scrolloff = 0
-        vim.wo[winid].sidescrolloff = 0
+    -- Everything Vim has to be told about a scratch surface — the name, the `tuna`
+    -- filetype other plugins target, and a `:w` that answers instead of erroring — comes
+    -- from one place, so a widget added later cannot be born missing a piece of it. A
+    -- buffer the user *types* into keeps `modified` clear as they go (`keep_clean`):
+    -- there is nothing to save in a prompt, and an `acwrite` buffer left modified is one
+    -- Vim refuses to quit past.
+    surface.adopt(bufnr, opts.kind or "widget", { keep_clean = vim.bo[bufnr].modifiable })
+    -- A list is read by moving through it, never edited, so the keys that would try are
+    -- made inert here rather than left to raise `E21` a keystroke later. Run before the
+    -- widget binds its own keys, which simply take precedence.
+    if not vim.bo[bufnr].modifiable then
+        surface.read_only(bufnr)
     end
     return winid
 end

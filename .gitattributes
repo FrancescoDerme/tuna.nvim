@@ -1,0 +1,7 @@
+# Files that exist for developing the plugin, not for running it. `export-ignore` keeps
+# them out of `git archive` output — which is what GitHub's release tarballs/zips are
+# built from, so anyone installing that way gets only the plugin itself.
+# A plugin manager that *clones* still receives them. It costs nothing at runtime, though.
+tests/          export-ignore
+tests/**        export-ignore
+.gitattributes  export-ignore
