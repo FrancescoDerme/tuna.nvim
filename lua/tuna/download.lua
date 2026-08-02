@@ -32,7 +32,8 @@ local M = {}
 ---@class tuna.CCTask
 ---@field name string
 ---@field group string judge + contest, e.g. "Codeforces - Round 1000"
----@field url string
+---@field url string the *canonical* problem URL (see `canonicalize_task`)
+---@field mirror string? the mirror it was downloaded from, if any ("m1"/"m2"/"m3")
 ---@field tests { input: string, output: string }[]
 ---@field timeLimit number
 ---@field memoryLimit number
@@ -42,6 +43,50 @@ local M = {}
 --------------------------------------------------------------------------------
 -- Listener: the TCP listener
 --------------------------------------------------------------------------------
+
+---Give a task the URL that should *identify* the problem, and remember separately
+---where it was actually browsed from.
+---
+---Codeforces runs **mirrors** (`m1`/`m2`/`m3.codeforces.com`) that carry a live round,
+---and Competitive Companion reports whichever host you were on. A mirror is not a
+---second address for the same pages, though: it has **no per-problem URLs at all** —
+---`…/contest/<id>/problem/A` 404s exactly as `…/submit/A` does, it serves the contest
+---and one contest-wide submit page — and it stops carrying the contest once the round
+---is over. Writing that URL into the source header and the sidecar therefore stores a
+---link that is dead the moment it is written and dead permanently afterwards.
+---
+---So the identity URL is canonicalised to the main site, which does serve per-problem
+---pages and keeps them forever, and the mirror is kept as `task.mirror` so a
+---submission can still be routed through it for as long as it lasts.
+---@param task tuna.CCTask
+---@return tuna.CCTask
+local function canonicalize_task(task)
+    local url = type(task.url) == "string" and task.url or ""
+    local mirror = url:match("^https?://(m%d+)%.codeforces%.com/")
+    if mirror then
+        task.mirror = mirror
+        url = url:gsub("^(https?://)m%d+%.codeforces%.com", "%1codeforces.com", 1)
+        task.url = url
+    end
+
+    -- Restore the problem index when the page did not carry it. Competitive Companion
+    -- reads the name off whatever page you were on, and a mirror's does not put the
+    -- index in front of the title the way the main site does: the same problem arrives
+    -- as "You Delete, I Delete" rather than "A. You Delete, I Delete". Since the name is
+    -- what `$(PROBLEM)` names the folder, a whole contest then sorts by title and stops
+    -- saying which problem is which — and `:Tuna next`/`prev`, which walk the problem
+    -- directories in name order, walk them in the wrong order. The index is in the URL
+    -- either way, so take it from there.
+    local index = url:match("^https?://codeforces%.com/contest/%d+/problem/(%w+)")
+    if index and type(task.name) == "string" and task.name ~= "" then
+        -- Only when it is genuinely absent: the main site already supplies it, and a
+        -- name that starts with the index must not collect a second copy.
+        if not task.name:lower():match("^" .. index:lower() .. "[%.%s%)%-]") then
+            task.name = index .. ". " .. task.name
+        end
+    end
+    return task
+end
 
 ---@class tuna.Listener
 ---@field private server uv_tcp_t
@@ -96,7 +141,7 @@ function Listener.new(address, port, callback)
             if body then
                 local ok_decode, task = pcall(vim.json.decode, body)
                 if ok_decode and type(task) == "table" then
-                    callback(task)
+                    callback(canonicalize_task(task))
                 end
             end
         end)
@@ -419,6 +464,12 @@ local function store_single_problem(task, cfg, finished)
                     utils.place_cursor(local_cfg)
                     require("tuna.temp").absorb(filepath, local_cfg)
                 end
+                -- After the open, so an `lcd` lands on the window the problem was just
+                -- opened in. Like the contest case, independent of whether it was
+                -- opened: which file to show and where to work are separate questions.
+                if local_cfg.cd_downloaded_problems then
+                    require("tuna.recent").change_dir(vim.fn.fnamemodify(filepath, ":h"), local_cfg)
+                end
                 if finished then
                     finished()
                 end
@@ -520,6 +571,16 @@ local function store_contest(tasks, cfg, finished)
                                     opened = true
                                 end
                             end
+                        end
+                        -- Downloading a contest is the moment you start working in it,
+                        -- so move there. Done after the loop, so an `lcd` applies to the
+                        -- window the problem was just opened in rather than to whatever
+                        -- was focused before. Deliberately not tied to
+                        -- `open_downloaded_contests`: which file to show and where to
+                        -- work are separate questions, and everything that is not tuna
+                        -- (`:e`, a fuzzy finder, `:grep`, a terminal) reads the cwd.
+                        if local_cfg.cd_downloaded_contests then
+                            require("tuna.recent").change_dir(directory, local_cfg)
                         end
                         -- This is the one moment the contest directory is known for
                         -- certain, so record it for `:Tuna last contest` — whether or

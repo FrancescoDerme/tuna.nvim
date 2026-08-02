@@ -284,10 +284,12 @@ end
 --------------------------------------------------------------------------------
 
 ---Change Neovim's directory, the way `config.cd_command` asks for (`cd`, `tcd` or
----`lcd`; `false` to leave the directory alone).
+---`lcd`; `false` to leave the directory alone). Exported because `download.lua` moves
+---into a freshly downloaded contest the same way — one place decides what `cd_command`
+---means, so the two cannot drift or validate it differently.
 ---@param dir string
 ---@param cfg table
-local function change_dir(dir, cfg)
+function M.change_dir(dir, cfg)
     local cmd = cfg.cd_command
     if not cmd then
         return
@@ -306,7 +308,7 @@ end
 ---@return table cfg the config resolved at `dir`
 local function open_at(file, dir)
     local cfg = config.load_local_config_and_extend(dir)
-    change_dir(dir, cfg)
+    M.change_dir(dir, cfg)
     if file then
         vim.cmd.edit(vim.fn.fnameescape(file))
         utils.place_cursor(cfg)

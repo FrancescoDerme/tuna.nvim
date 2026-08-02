@@ -64,12 +64,28 @@ function M.adopt(bufnr, kind, opts)
         callback = opts.on_write or function() end,
     })
     if opts.keep_clean then
-        api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
-            buffer = bufnr,
-            callback = function()
+        local function clean()
+            if api.nvim_buf_is_valid(bufnr) then
                 vim.bo[bufnr].modified = false
+            end
+        end
+        api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, { buffer = bufnr, callback = clean })
+        -- `TextChanged` alone is not enough, for the same reason the chooser form needs
+        -- an `on_lines` repair at all: a write that happens *after* it has fired — the
+        -- form restoring its fixed rows behind a paste, a `:1d`, an undo — leaves
+        -- `modified` set with nothing left to clear it. That is an unsaved *file* as far
+        -- as Vim is concerned, so a later quit answered `E37`/`E162` naming a widget
+        -- buffer the user never opened. `on_lines` sees every change; the clearing is
+        -- scheduled because a buffer option cannot be set from inside the callback.
+        api.nvim_buf_attach(bufnr, false, {
+            on_lines = function()
+                if not api.nvim_buf_is_valid(bufnr) then
+                    return true -- detach
+                end
+                vim.schedule(clean)
             end,
         })
+        clean()
     end
     vim.bo[bufnr].modified = false
 end

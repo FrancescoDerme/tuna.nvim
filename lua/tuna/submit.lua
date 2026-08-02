@@ -25,6 +25,10 @@ local M = {}
 local sidecar = require("tuna.sidecar")
 local read_store, write_store = sidecar.read, sidecar.write
 
+-- Forward declaration: `persist_task` below prunes an expired mirror, and the routing
+-- rule that decides what "expired" means lives with the other URL logic further down.
+local live_mirror
+
 ---Persist a downloaded task's metadata (url/name/group) beside its source, so submit
 ---can recover the URL even when the file has no header marker. Merges into any
 ---existing sidecar (keeps stored submit verdicts). No-op without a URL.
@@ -37,6 +41,14 @@ function M.write_task_store(dir, task, cfg)
     end
     local store = read_store(dir, cfg)
     store.url, store.name, store.group = task.url, task.name, task.group
+    -- Where the problem was browsed from, when that is not where its URL points: a
+    -- Codeforces mirror carries a live round but has no per-problem pages, so `url` is
+    -- the canonical one and this is what a submission is routed through while the
+    -- round lasts. Absent for an ordinary download. `mirror_at` is when that was true —
+    -- a mirror stops carrying the contest a day or two after the round, so the routing
+    -- has to expire (see `live_mirror`).
+    store.mirror = task.mirror
+    store.mirror_at = task.mirror and os.time() or nil
     write_store(dir, cfg, store)
 end
 
@@ -87,6 +99,14 @@ local function persist_task(ctx)
         if n then
             store.name, dirty = n, true
         end
+    end
+
+    -- Drop a mirror that has aged out, so the problem stops carrying dead routing and
+    -- the fallback is announced exactly once — a submission quietly changing where it
+    -- goes is worth one line, and after this there is nothing left to announce.
+    if store.mirror and select(2, live_mirror(dir, ctx.cfg)) then
+        store.mirror, store.mirror_at, dirty = nil, nil, true
+        utils.notify("submit: this contest's mirror has expired; submitting to codeforces.com.", "INFO")
     end
 
     if dirty then
@@ -254,6 +274,132 @@ local function resolve_url(bufnr, filepath, cfg)
     return nil, invalid
 end
 
+---Codeforces runs **mirrors** — `m1`/`m2`/`m3.codeforces.com` — that carry the load
+---during a live round. They serve the same contests as the main site, but not the same
+---submit pages: the main site's per-problem `…/contest/<id>/submit/<index>` **404s on a
+---mirror**, which only has the contest-wide `…/contest/<id>/submit` (you pick the
+---problem from a dropdown there — the mirror has no way to preselect it, verified
+---during a live round).
+---
+---That matters here because the CLI submitters this feeds derive their target from the
+---problem URL by swapping `/problem/<index>` for `/submit/<index>` — which is exactly
+---the shape a mirror does not have. Handing such a tool a URL that ends in `/problem/`
+---with **no index** makes it build `…/contest/<id>/submit/`, which the mirror does
+---serve. So that trailing-slash form is what the built-in rewrite produces: it is not a
+---page anyone would open by hand, it is the input that makes a URL-deriving submitter
+---land on the right one.
+---
+---tuna's own `browser` provider needs none of this — it opens a page directly, so the
+---mirror rule for it lives in `browser_submit_url`, which produces the real
+---`…/contest/<id>/submit`.
+local MIRROR_TTL = 24 * 60 * 60 -- a round is hours; its mirror lasts a day or two
+
+---The Codeforces mirror a problem should still be submitted through, or nil.
+---
+---A mirror carries a **live round** and drops the contest a day or two afterwards,
+---quietly redirecting to its homepage — so the routing has to expire or a later submit
+---goes somewhere that silently is not the submit page.
+---
+---This is a clock, not a check, because **there is nothing to check**: Codeforces
+---answers every non-browser request with a JavaScript challenge page, and the reply for
+---a contest the mirror still carries and one it has dropped is byte-for-byte identical
+---(measured: both 10178 bytes of "Please wait. Your browser is being checked…"). A probe
+---cannot see the difference, so guessing from the age of the download is the honest
+---option — and being wrong is cheap in the safe direction: the fallback is the main
+---site, which always works.
+---
+---`submit.mirror_ttl` is the window in seconds (`false` never to expire, `0` never to
+---use a mirror). A `mirror` with no `mirror_at` beside it counts as expired: the pair is
+---written together, so one without the other is not a case to reason about.
+---@param dir string problem directory
+---@param cfg table
+---@return string? mirror, boolean expired
+function live_mirror(dir, cfg)
+    local store = M.read_task_store(dir, cfg)
+    local mirror = store and store.mirror
+    if type(mirror) ~= "string" or not mirror:match("^m%d+$") then
+        return nil, false
+    end
+    local ttl = cfg.submit and cfg.submit.mirror_ttl
+    if ttl == false then
+        return mirror, false
+    end
+    local at = tonumber(store.mirror_at)
+    if not at or (os.time() - at) >= (tonumber(ttl) or MIRROR_TTL) then
+        return nil, true
+    end
+    return mirror, false
+end
+
+---@param url string the identity URL
+---@param ctx { bufnr: integer, filepath: string, cfg: table }?
+---@return string? the URL to submit through, or nil to leave `url` alone
+function M.builtin_url_rewrite(url, ctx)
+    -- A problem downloaded from a mirror keeps the canonical URL (a mirror has no
+    -- per-problem page to point at) and records the mirror in its sidecar. Submitting
+    -- goes back through it, for as long as the round lasts.
+    local id = url:match("^https?://codeforces%.com/contest/(%d+)/problem/")
+    if id and ctx and ctx.filepath then
+        local mirror = live_mirror(vim.fn.fnamemodify(ctx.filepath, ":h"), ctx.cfg)
+        if mirror then
+            return ("https://%s.codeforces.com/contest/%s/problem/"):format(mirror, id)
+        end
+        -- No mirror, or one that has aged out: the main site, where the submitter's own
+        -- `/problem/<index>` → `/submit/<index>` derivation works.
+        return nil
+    end
+    -- A URL still pointing at a mirror — a problem downloaded before URLs were
+    -- canonicalised, or a hand-written `submit at:` marker.
+    local base, mid = url:match("^(https?://m%d+%.codeforces%.com)/contest/(%d+)/problem/")
+    if base and mid then
+        return ("%s/contest/%s/problem/"):format(base, mid)
+    end
+    return nil
+end
+
+---Resolve the URL a problem is **submitted through**, which is not always the URL it is
+---*identified* by (`ctx.url`, what the sidecar stores and what names the problem). A
+---judge can serve submission from another host or another path shape, and the submit
+---tool in the middle may have its own idea of how to get between the two.
+---
+---`submit.url_rewrite` follows the same three-way shape as `judge_parsers`: a user
+---function wins, returning nil falls through to `M.builtin_url_rewrite`, and `false`
+---turns rewriting off entirely. A user function that errors, or returns something that
+---is no longer a valid URL, warns and is ignored — a broken rewrite must never quietly
+---send a submission somewhere else.
+---@param url string the identity URL
+---@param ctx { bufnr: integer, filepath: string, cfg: table }
+---@return string
+local function submit_url_for(url, ctx)
+    local fn = ctx.cfg.submit and ctx.cfg.submit.url_rewrite
+    if fn == false then
+        return url
+    end
+    local out
+    if type(fn) == "function" then
+        local ok, res = pcall(fn, url, ctx)
+        if not ok then
+            utils.notify("submit: `url_rewrite` failed (" .. tostring(res) .. "); using the original URL.", "WARN")
+            return url
+        end
+        out = res
+    end
+    if out == nil then
+        out = M.builtin_url_rewrite(url, ctx)
+    end
+    if out == nil or out == url then
+        return url
+    end
+    if not is_valid_url(out) then
+        utils.notify(
+            "submit: `url_rewrite` returned an invalid URL (" .. vim.inspect(out) .. "); using the original.",
+            "WARN"
+        )
+        return url
+    end
+    return out
+end
+
 ---The submitter's language name for a buffer's filetype (from `submit.languages`).
 ---@param bufnr integer
 ---@param scfg table
@@ -295,6 +441,12 @@ function M.context(bufnr)
     end
     -- Now that we know the URL (hence the judge), fold in any per-judge override.
     local scfg = judge_scfg(cfg.submit, url)
+    -- What the problem is *submitted through*, which is not always what it is
+    -- identified by (see `submit_url_for`). Kept as a second field rather than
+    -- overwriting `url`: `url` is the problem's identity — it is what `persist_task`
+    -- stores in the sidecar and what a verdict is recorded against — so rewriting it
+    -- in place would let a submit-tool quirk overwrite what the download captured.
+    local submit_url = submit_url_for(url, { bufnr = bufnr, filepath = filepath, cfg = cfg })
     local lang = resolve_lang(bufnr, scfg)
     if not lang then
         return nil,
@@ -306,11 +458,24 @@ function M.context(bufnr)
             )
     end
 
-    local modifiers = vim.tbl_extend("force", utils.file_format_modifiers, { URL = url, LANG = lang })
+    -- Two URLs, both offered to the command template, so a setup never has to choose
+    -- between "correct on its face" and "what my tool needs":
+    --   $(URL)         — what to submit *through* (identity, unless a rewrite applies)
+    --   $(PROBLEM_URL) — the problem's own address, always exactly what is in the
+    --                    sidecar and the source header, never reshaped for a tool
+    -- In a submit command `$(URL)` plainly means "the submit target", so the rewrite
+    -- belongs there; `$(PROBLEM_URL)` is the escape hatch for a tool that wants the
+    -- real page (or for anything else in the command that should name the problem).
+    local modifiers = vim.tbl_extend(
+        "force",
+        utils.file_format_modifiers,
+        { URL = submit_url, PROBLEM_URL = url, LANG = lang }
+    )
     return {
         bufnr = bufnr,
         filepath = filepath,
-        url = url,
+        url = url, -- identity: sidecar, verdict record, judge routing
+        submit_url = submit_url, -- where the submission actually goes
         lang = lang,
         cfg = cfg,
         scfg = scfg,
@@ -942,12 +1107,33 @@ end
 ---AtCoder gates submission behind a Cloudflare Turnstile challenge that no headless
 ---client can solve, so `:Tuna submit` there opens the submit page (task preselected)
 ---for the user to paste into. For other hosts we just open the given URL.
+---
+---A **Codeforces mirror** (`m1`/`m2`/`m3`, which carry a live round) gets its
+---contest-wide submit page: the per-problem `…/submit/<index>` that works on the main
+---site 404s on a mirror, and there is no URL that preselects the problem there, so the
+---dropdown on that page is the way in. Note this takes the *identity* URL and derives
+---the real page — unlike `builtin_url_rewrite`, which shapes a URL for a CLI tool to
+---derive from; a browser must be sent somewhere a person can actually use.
 ---@param url string
 ---@return string
-local function browser_submit_url(url)
+local function browser_submit_url(url, ctx)
     local contest, task = url:match("atcoder%.jp/contests/([^/]+)/tasks/([^/?#]+)")
     if contest and task then
         return ("https://atcoder.jp/contests/%s/submit?taskScreenName=%s"):format(contest, task)
+    end
+    local base, id = url:match("^(https?://m%d+%.codeforces%.com)/contest/(%d+)/")
+    if base and id then
+        return ("%s/contest/%s/submit"):format(base, id)
+    end
+    -- A canonical Codeforces URL whose problem is still routed through a live mirror
+    -- opens that mirror's submit page; once the mirror ages out this falls through to
+    -- the main site, which is where submitting works from then on.
+    local cid = url:match("^https?://codeforces%.com/contest/(%d+)/")
+    if cid and ctx and ctx.filepath then
+        local mirror = live_mirror(vim.fn.fnamemodify(ctx.filepath, ":h"), ctx.cfg)
+        if mirror then
+            return ("https://%s.codeforces.com/contest/%s/submit"):format(mirror, cid)
+        end
     end
     return url
 end
@@ -1011,7 +1197,7 @@ end
 M.providers.browser = function(ctx)
     local scfg = ctx.scfg
     local name = display_name(ctx)
-    local page = browser_submit_url(ctx.url)
+    local page = browser_submit_url(ctx.url, ctx)
 
     -- The buffer was already saved by M.context; copy its source to the system
     -- clipboard so the manual submit is just a paste.

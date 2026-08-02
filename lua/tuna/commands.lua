@@ -18,6 +18,7 @@ local M = {}
 -- Sub-argument completions for subcommands that take a second word.
 local subcommand_args = {
     run = tools.MODES,
+    testcase = { "add", "edit", "delete" },
     convert = { "files", "single_file", "directory" },
     download = { "testcases", "problem", "contest", "sync", "persistently", "status", "stop" },
     scaffold = { "checker", "generator", "brute", "interactor" },
@@ -61,7 +62,7 @@ function M.edit_testcase(add, tcnum)
 
     local function start_editor(n)
         if not tctbl[n] then
-            utils.notify("edit_testcase: testcase " .. tostring(n) .. " doesn't exist.")
+            utils.notify("testcase edit: testcase " .. tostring(n) .. " doesn't exist.")
             return
         end
         local function save(tc)
@@ -87,7 +88,7 @@ function M.delete_testcase(tcnum)
 
     local function delete(n)
         if not tctbl[n] then
-            utils.notify("delete_testcase: testcase " .. tostring(n) .. " doesn't exist.")
+            utils.notify("testcase delete: testcase " .. tostring(n) .. " doesn't exist.")
             return
         end
         -- A float like every other tuna prompt, not `vim.fn.confirm`: a command-line
@@ -411,14 +412,26 @@ end
 ---Subcommand handlers. Each receives the trailing argument list.
 ---@type table<string, fun(args: string[])>
 M.subcommands = {
-    add_testcase = function()
-        M.edit_testcase(true)
-    end,
-    edit_testcase = function(args)
-        M.edit_testcase(false, tonumber(args[1]))
-    end,
-    delete_testcase = function(args)
-        M.delete_testcase(tonumber(args[1]))
+    -- `:Tuna testcase [add|edit|delete] [n]` — one subcommand per *subject*, with the
+    -- verb as its argument, matching `run`/`download`/`convert` rather than spelling
+    -- three separate commands whose shared noun the completion could not group.
+    -- Bare `:Tuna testcase` is `edit`: it opens the picker, which is the one that shows
+    -- what is there before asking you to choose.
+    testcase = function(args)
+        local mode = args[1]
+        if mode == nil or mode == "edit" then
+            M.edit_testcase(false, tonumber(args[2]))
+        elseif mode == "add" then
+            M.edit_testcase(true)
+        elseif mode == "delete" then
+            M.delete_testcase(tonumber(args[2]))
+        elseif tonumber(mode) then
+            -- `:Tuna testcase 3` — a bare number is the testcase to edit, since that is
+            -- what the bare form does.
+            M.edit_testcase(false, tonumber(mode))
+        else
+            utils.notify("testcase: unknown mode '" .. tostring(mode) .. "' (add | edit | delete).")
+        end
     end,
     convert = function(args)
         if not args[1] then
@@ -564,6 +577,26 @@ function M.complete(arg_lead, cmd_line, cursor_pos)
         candidates = subcommand_args[words[2]] or {}
     elseif (count == 3 or (count == 4 and not ending_space)) and words[2] == "run" and words[3] == "interactive" then
         candidates = interactive_sources
+    elseif
+        (count == 3 or (count == 4 and not ending_space))
+        and words[2] == "testcase"
+        and (words[3] == "edit" or words[3] == "delete")
+    then
+        -- The numbers that actually exist, so `:Tuna testcase delete <Tab>` never
+        -- offers one the next thing it says is "doesn't exist".
+        candidates = {}
+        local ok, tctbl = pcall(testcases.buf_get_testcases, api.nvim_get_current_buf())
+        if ok then
+            for n in pairs(tctbl) do
+                candidates[#candidates + 1] = tostring(n)
+            end
+            table.sort(candidates, function(a, b)
+                return (tonumber(a) or 0) < (tonumber(b) or 0)
+            end)
+            return vim.tbl_filter(function(c)
+                return c:sub(1, #arg_lead) == arg_lead
+            end, candidates)
+        end
     else
         return {}
     end

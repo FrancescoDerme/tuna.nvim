@@ -215,11 +215,12 @@ M.defaults = {
     -- A pattern that matches nothing leaves the cursor alone, so one written for a
     -- given language does no harm to templates in another.
     template_cursor = false,
-    -- How `:Tuna last problem` / `:Tuna last contest` change Neovim's directory when
-    -- they take you back to a problem or a contest: "cd" (global), "tcd" (this tab),
-    -- "lcd" (this window), or false to jump to the file without touching the
-    -- directory. Global by default, so everything else — `:e`, a fuzzy finder,
-    -- `:Tuna run all` from a scratch buffer — follows you to the problem too.
+    -- How tuna changes Neovim's directory when it takes you somewhere — `:Tuna last
+    -- problem` / `:Tuna last contest`, and a freshly downloaded contest (see
+    -- `cd_downloaded_contests`): "cd" (global), "tcd" (this tab), "lcd" (this window),
+    -- or false to go to the file without touching the directory. Global by default, so
+    -- everything else — `:e`, a fuzzy finder, `:Tuna run all` from a scratch buffer —
+    -- follows you to the problem too.
     cd_command = "cd",
     -- `:Tuna temp` — a scratch solution to start writing in before the problem exists
     -- (typing during the countdown, then folding the code into the real file with
@@ -262,6 +263,17 @@ M.defaults = {
     downloaded_contests_prompt_extension = true,
     open_downloaded_problems = true,
     open_downloaded_contests = true,
+    -- Move Neovim into a freshly downloaded problem's / contest's directory (via
+    -- `cd_command`). Downloading is the moment you start working there, and everything
+    -- that is not tuna — `:e`, a fuzzy finder, `:grep`, a terminal split — works from
+    -- the current directory, so without these you keep landing wherever the editor
+    -- started. Each is independent of its `open_downloaded_*`: which file to show and
+    -- where to work are separate questions. false leaves the directory alone.
+    -- (For a problem this is the directory holding the solution, which is the problem's
+    -- own only if `downloaded_problems_path` gives it one — the default
+    -- `$(CWD)/$(PROBLEM).$(FEXT)` writes into the current directory, so nothing moves.)
+    cd_downloaded_problems = true,
+    cd_downloaded_contests = true,
     replace_downloaded_testcases = false,
 
     -- submit (:Tuna submit) — hand the current solution to an external submit tool.
@@ -277,6 +289,32 @@ M.defaults = {
         -- function(ctx) -> string. Falls back to the per-problem sidecar below.
         url = "submit at:%s*(%S+)",
         url_scan_lines = 10,
+        -- The URL a problem is *identified* by is not always the one it is *submitted*
+        -- through, so `$(URL)` is resolved separately from the identity URL kept in the
+        -- sidecar. nil = tuna's built-in rules (`submit.builtin_url_rewrite`, currently
+        -- the Codeforces-mirror rule below); a `function(url, ctx) -> string?` to add
+        -- your own, returning nil to fall through to the built-ins; `false` to submit
+        -- through the identity URL unchanged. Same shape as `judge_parsers`. A function
+        -- that errors, or returns something that is no longer a valid URL, warns and is
+        -- ignored rather than quietly redirecting a submission. ctx = { bufnr,
+        -- filepath, cfg }.
+        --
+        -- Built in: Codeforces **mirrors** (m1/m2/m3.codeforces.com), which carry a
+        -- live round. They serve only the contest-wide `…/contest/<id>/submit` — the
+        -- per-problem `…/submit/<index>` that works on the main site 404s there, and no
+        -- URL preselects the problem, so you pick it from that page's dropdown.
+        url_rewrite = nil,
+        -- How long after downloading a problem from a mirror to keep submitting through
+        -- it, in seconds. A mirror carries a live round and drops the contest a day or
+        -- two later, redirecting to its homepage — so the routing has to expire, or a
+        -- submit eventually goes to a page that silently is not the submit page. This
+        -- is a clock rather than a check because there is nothing to check: Codeforces
+        -- answers every non-browser request with a JavaScript challenge, identical
+        -- whether or not the mirror still has the contest, so nothing tuna can send
+        -- tells the two apart. Being wrong is cheap in the safe direction — the
+        -- fallback is codeforces.com, which always works. false = never expire,
+        -- 0 = never use a mirror.
+        mirror_ttl = 24 * 60 * 60,
         -- Optional header markers to backfill the sidecar's contest/name (like `url`
         -- above) when a problem was set up outside the download flow. Each is a Lua
         -- pattern scanned over the same header lines (first capture wins); nil to
@@ -592,7 +630,18 @@ end
 ---Initialise configuration from user options.
 ---@param opts table? user options
 function M.setup(opts)
-    M.current_setup = M.update_config_table(M.current_setup, opts)
+    -- Rebuilt from the **defaults**, not layered onto whatever the last call left
+    -- behind, so calling `setup()` again is "this is my config" rather than "add this
+    -- to my config". Layering meant a nested key could not be taken back: dropping
+    -- `submit.judges.codeforces.provider` from your config and re-sourcing it left the
+    -- old value in force, since a merge can add a key but never remove one — which is
+    -- exactly the trap when trying settings out in a running editor. Costs one
+    -- `deepcopy` of the defaults (~0.16 ms, measured) on a call that happens once.
+    --
+    -- The copy is not optional: `update_config_table` writes into its base table (the
+    -- per-language `args` replacement), so handing it `M.defaults` directly would
+    -- quietly poison the defaults for the rest of the session.
+    M.current_setup = M.update_config_table(vim.deepcopy(M.defaults), opts)
     M.buffer_configs = {} -- invalidate caches so buffers re-resolve against new setup
 end
 

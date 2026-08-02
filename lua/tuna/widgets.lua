@@ -68,7 +68,15 @@ local function open_float(bufnr, enter, opts)
     -- buffer the user *types* into keeps `modified` clear as they go (`keep_clean`):
     -- there is nothing to save in a prompt, and an `acwrite` buffer left modified is one
     -- Vim refuses to quit past.
-    surface.adopt(bufnr, opts.kind or "widget", { keep_clean = vim.bo[bufnr].modifiable })
+    -- `keep_clean` unconditionally, for *every* widget buffer. It used to be armed only
+    -- for a buffer that was modifiable at this moment, which is the wrong question twice
+    -- over: a widget can be made editable **after** it is adopted (the chooser form's
+    -- `Custom:` row is typed into inside an otherwise read-only list), and no widget
+    -- reads `modified` for anything — there is nothing in a dialog to save. Sampling
+    -- modifiability here left exactly that row's buffer with the flag set and nothing to
+    -- clear it, so `:Tuna clean` could leave `tuna://widget/N/tuna` behind as an unsaved
+    -- *file* and a later `:qa` answered `E37`/`E162` about it.
+    surface.adopt(bufnr, opts.kind or "widget", { keep_clean = true })
     -- A list is read by moving through it, never edited, so the keys that would try are
     -- made inert here rather than left to raise `E21` a keystroke later. Run before the
     -- widget binds its own keys, which simply take precedence.
@@ -333,8 +341,16 @@ function M.input(title, default_text, border, border_highlight, callback_only, o
         end,
     })
 
-    -- Start in insert mode at the end of the line for an immediate type-over.
-    vim.cmd("startinsert!")
+    -- Opened in **normal** mode, with the cursor at the end of the default so `a` or `A`
+    -- picks up where typing would. It used to `startinsert!`, which was only true of the
+    -- *first* prompt: a chained one (the contest download asks for a directory, then an
+    -- extension) opens from inside the previous prompt's `<CR>` mapping, and the
+    -- `stopinsert` that mapping issues does not take effect until it returns — landing
+    -- after the new prompt's `startinsert!` and dropping the user straight back out. So
+    -- one prompt began in insert and the next in normal, for no reason a user could see.
+    -- Normal is the half that was reachable either way, and it is what the rest of the
+    -- plugin's floats do.
+    pcall(api.nvim_win_set_cursor, input.winid, { 1, math.max(0, #(input.default_text or "")) })
 end
 
 --------------------------------------------------------------------------------

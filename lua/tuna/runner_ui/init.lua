@@ -254,6 +254,12 @@ function RunnerUI:legend_sections()
     local readonly = align({
         { "run again", keys("run_again") },
         { "run all again", keys("run_all_again") },
+        -- Re-running uses the build and the file already on disk; `:Tuna run` is what
+        -- saves first. The label is a space rather than empty because `align` renders
+        -- an empty one as a blank separator line, and the text is kept short so the
+        -- column does not widen past the pane-switch row above it.
+        { " ", "neither saves the file" },
+        { "", "" }, -- the note reads as a note, not as the row below it
         { "stop", keys("stop") },
         { "stop all", keys("stop_all") },
         { "toggle diff", keys("toggle_diff") },

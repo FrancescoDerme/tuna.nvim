@@ -25,9 +25,11 @@ M.actions = {
     run_stress = "Tuna run stress",
     run_interactive = "Tuna run interactive",
     show_ui = "Tuna show_ui",
-    add_testcase = "Tuna add_testcase",
-    edit_testcase = "Tuna edit_testcase",
-    delete_testcase = "Tuna delete_testcase",
+    -- The action names stay per-verb (a key maps to one thing); only the command they
+    -- run gained its subject-first shape.
+    add_testcase = "Tuna testcase add",
+    edit_testcase = "Tuna testcase edit",
+    delete_testcase = "Tuna testcase delete",
     submit = "Tuna submit",
     submit_clear = "Tuna submit clear", -- dismiss a lingering lualine verdict / cancel a submit
     download_testcases = "Tuna download testcases",
@@ -51,13 +53,18 @@ M.actions = {
 -- Suffixes are grouped by subject, so which-key shows one "Tuna" group with a
 -- "testcases" and a "download" subgroup under it:
 --
---   <leader>tta  add testcase       <leader>tr  run            <leader>tdt  download testcases
---   <leader>tte  edit testcase      <leader>tu  show ui        <leader>tdp  download problem
---   <leader>ttd  delete testcase    <leader>ts  submit         <leader>tdc  download contest
---   <leader>tn   next problem       <leader>tm  dashboard      <leader>tds  download sync
---   <leader>tp   previous problem   <leader>tw  temp scratch
---   <leader>tl   library (file → snippet)
---   <leader>tgp  go to last problem <leader>tgc go to last contest
+--   <leader>tta  Add                <leader>tr  Run            <leader>tdt  Testcases
+--   <leader>tte  Edit               <leader>tu  Show ui        <leader>tdp  Problem
+--   <leader>ttd  Delete             <leader>ts  Submit         <leader>tdc  Contest
+--   <leader>tn   Next problem       <leader>tm  Dashboard      <leader>tds  Sync
+--   <leader>tp   Prev problem       <leader>tw  Temp
+--   <leader>tl   Library
+--   <leader>tgp  Problem            <leader>tgc Contest
+--
+-- The labels above are the which-key entries. A key inside a group does not repeat
+-- what the group already says (`tt` "Testcases" → `Add`, `td` "Download" → `Problem`,
+-- `tg` "Go to" → `Contest`); an ungrouped one keeps its full name, since nothing else
+-- supplies the noun. See `M.preset_labels`.
 --
 -- No group prefix is itself a mapping, so none of them costs a `timeoutlen` wait.
 -- `:Tuna clean` is deliberately absent: it is run once in a while, not during a
@@ -96,22 +103,57 @@ M.preset = {
     },
 }
 
+-- Labels for the preset's **grouped** keys, where the group has already said the noun.
+-- A which-key group is a word the user reads before the entry — `<leader>tt` is
+-- "Testcases", `<leader>td` is "Download", `<leader>tg` is "Go to" — so the derived
+-- `Add testcase` / `Download problem` / `Last problem` say it twice. These are used
+-- **only** while an action is still on its preset key: move it out of the group with
+-- your own `mappings` and it goes back to the full label, which is the one that makes
+-- sense standing alone.
+M.preset_labels = {
+    add_testcase = "Add", -- under "Testcases"
+    edit_testcase = "Edit",
+    delete_testcase = "Delete",
+    download_testcases = "Testcases", -- under "Download"
+    download_problem = "Problem",
+    download_contest = "Contest",
+    download_sync = "Sync",
+    last_problem = "Problem", -- under "Go to"
+    last_contest = "Contest",
+}
+
 ---Expand `M.preset` against a prefix, with the user's own tables layered on top so a
 ---single key can be moved (or dropped, by mapping it to `false`) without giving up
 ---the preset.
 ---@param prefix string e.g. "<leader>t"
 ---@param scope "buffer"|"global"
 ---@param user table<string, string|string[]|false>
----@return table<string, string|string[]>
+---@return table<string, string|string[]> mapping, table<string, string> labels
 local function expand_preset(prefix, scope, user)
-    local out = {}
+    local out, groups = {}, {}
     for action, suffix in pairs(M.preset[scope]) do
         out[action] = prefix .. suffix
+        -- A two-character suffix is a group plus a key within it (`ta`, `dp`, `gc`);
+        -- a one-character one sits directly under the prefix and has no group.
+        if #suffix > 1 then
+            groups[action] = prefix .. suffix:sub(1, 1)
+        end
     end
     for action, lhs in pairs(user) do
         out[action] = lhs or nil -- `false` removes a preset entry
     end
-    return out
+
+    local labels = {}
+    for action, group in pairs(groups) do
+        local lhs = out[action]
+        local first = type(lhs) == "table" and lhs[1] or lhs
+        -- Only while the key is still inside its group: a moved one needs the full
+        -- label back, since nothing is left to supply the noun.
+        if type(first) == "string" and first:sub(1, #group) == group and M.preset_labels[action] then
+            labels[action] = M.preset_labels[action]
+        end
+    end
+    return out, labels
 end
 
 ---The configured solution filetypes, with a sane fallback.
@@ -126,14 +168,20 @@ end
 ---Unknown actions are skipped here (they're reported once in `setup`).
 ---@param mapping_tbl table<string, string|string[]>
 ---@param base_opts table
-local function set_maps(mapping_tbl, base_opts)
+---@param labels table<string, string>? short labels for keys whose which-key group
+---  already names the subject (see `M.preset_labels`); the derived name is used for
+---  anything not listed
+local function set_maps(mapping_tbl, base_opts, labels)
     for action, lhs in pairs(mapping_tbl) do
         local rhs = M.actions[action]
         if rhs and lhs then
             -- Bare, capitalized label (no "Tuna:" prefix) — these live under a
             -- dedicated which-key group, so the "Tuna" context is already implied.
-            local label = action:gsub("_", " ")
-            label = label:sub(1, 1):upper() .. label:sub(2)
+            local label = (labels or {})[action]
+            if not label then
+                label = action:gsub("_", " ")
+                label = label:sub(1, 1):upper() .. label:sub(2)
+            end
             for _, key in ipairs(type(lhs) == "table" and lhs or { lhs }) do
                 local opts = vim.tbl_extend("force", base_opts, {
                     silent = true,
@@ -169,11 +217,14 @@ function M.setup()
     end
     local mappings = type(km.mappings) == "table" and km.mappings or {}
     local global = type(km.global) == "table" and km.global or {}
+    -- Short labels for the preset's grouped keys, empty when the preset is off (a
+    -- hand-written mapping has no group behind it to borrow a noun from).
+    local mlabels, glabels = {}, {}
     -- `preset = "<leader>t"` fills both tables with the ready-made set; whatever the
     -- user wrote stays on top of it.
     if type(km.preset) == "string" then
-        mappings = expand_preset(km.preset, "buffer", mappings)
-        global = expand_preset(km.preset, "global", global)
+        mappings, mlabels = expand_preset(km.preset, "buffer", mappings)
+        global, glabels = expand_preset(km.preset, "global", global)
     end
     if vim.tbl_isempty(mappings) and vim.tbl_isempty(global) then
         return
@@ -182,7 +233,7 @@ function M.setup()
     -- Always-available maps: set immediately, once.
     if not vim.tbl_isempty(global) then
         warn_unknown(global, "global")
-        set_maps(global, {})
+        set_maps(global, {}, glabels)
     end
 
     -- Buffer-local maps: applied per solution buffer via FileType.
@@ -193,7 +244,7 @@ function M.setup()
             group = vim.api.nvim_create_augroup("TunaKeymaps", { clear = true }),
             pattern = fts,
             callback = function(ev)
-                set_maps(mappings, { buffer = ev.buf })
+                set_maps(mappings, { buffer = ev.buf }, mlabels)
             end,
             desc = "Set Tuna's opt-in solution keymaps",
         })
@@ -206,7 +257,7 @@ function M.setup()
         end
         for _, buf in ipairs(vim.api.nvim_list_bufs()) do
             if vim.api.nvim_buf_is_loaded(buf) and want[vim.bo[buf].filetype] then
-                set_maps(mappings, { buffer = buf })
+                set_maps(mappings, { buffer = buf }, mlabels)
             end
         end
     end
