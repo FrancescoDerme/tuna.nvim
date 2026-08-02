@@ -17,6 +17,10 @@
 --     ends in `E21` a keystroke later, from a mode the user never meant to enter
 --   * a known zindex layer     — Neovim's default float layer is 50, the same as the
 --     results grid, so an unset dialog fights the grid it is drawn over
+--   * its own keys still act    — making a surface read-only neutralises the keys that
+--     would change it, and one of those (`<C-r>`) is also a real action: matched in the
+--     wrong notation it was mapped to `<Nop>` *over* the action, and "run all" silently
+--     did nothing on every results UI
 --
 -- Run:  nvim --headless -u NONE --cmd "set noswapfile" \
 --         -c "set rtp+=." -c "luafile tests/surfaces.lua" -c "qa!"
@@ -146,6 +150,26 @@ local ui = runner and runner.ui
 ok("results UI: opened", ui ~= nil and ui.ui_visible)
 if ui then
     conforms("results UI panes")
+
+    -- Every key the user configured has to reach its action. Read-only surfaces map the
+    -- change-starting keys to `<Nop>`, and a key that is *both* (`<C-r>`: Vim's redo and
+    -- the UI's "run all") is only told apart by comparing terminal codes rather than the
+    -- written form — get that wrong and the action is silently mapped over.
+    local acting = {}
+    for _, m in ipairs(api.nvim_buf_get_keymap(ui.windows.tc.bufnr, "n")) do
+        if m.callback then
+            acting[api.nvim_replace_termcodes(m.lhs, true, false, true)] = true
+        end
+    end
+    for action, keys in pairs(require("tuna.config").current_setup.runner_ui.mappings) do
+        for _, key in ipairs(type(keys) == "table" and keys or { keys }) do
+            ok(
+                "selector: `" .. key .. "` still runs " .. action,
+                acting[api.nvim_replace_termcodes(key, true, false, true)],
+                "mapped to <Nop> or unmapped"
+            )
+        end
+    end
 
     ui:show_viewer("so")
     settle()

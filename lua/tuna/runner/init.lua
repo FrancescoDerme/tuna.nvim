@@ -198,9 +198,14 @@ end
 ---@param tctbl table<integer, { input: string, output: string? }>? testcases, or nil to re-run
 ---@param do_compile boolean? whether to compile first (defaults to true)
 function TCRunner:run_testcases(tctbl, do_compile)
+    -- A re-run keeps the rows it already has, but a *preloaded* runner has never run at
+    -- all — its source has not been through `save_sources` once, so this is that source's
+    -- first run and it has to be on disk before the compiler is pointed at it.
+    if tctbl or self.preloaded then
+        tools.save_sources(self.bufnr, self.config)
+    end
     self.preloaded = false
     if tctbl then
-        tools.save_sources(self.bufnr, self.config)
         self:build_rows(tctbl, do_compile)
     end
 
@@ -300,6 +305,30 @@ end
 function TCRunner:run_single(tcindex)
     local tc = self.tcdata[tcindex]
     if not tc then
+        return
+    end
+    -- These rows were only ever *listed* (`:Tuna show_ui` before any run), so nothing has
+    -- been built: running one on its own would spawn a binary that does not exist yet and
+    -- report `ENOENT` as the testcase's verdict. Compile first, then run the row — the
+    -- compile step is a row of its own, so the build is watched in the UI either way.
+    local build_first = self.preloaded and self.compile and tcindex ~= 1
+    self.preloaded = false
+    if build_first then
+        tools.save_sources(self.bufnr, self.config)
+        self:reset_row(self.tcdata[1])
+        self:execute_process(1, self.cc, self.compile_directory, { judge = false }, function()
+            if self.tcdata[1].exit_code == 0 then
+                -- Reset only now: a build that fails leaves the row saying `NOT RUN`,
+                -- which is the truth — clearing it up front would blank the row and
+                -- report the compile error as if the testcase itself had no verdict.
+                self:reset_row(tc)
+                self:execute_process(tcindex, self.rc, self.running_directory, {}, function()
+                    self:check_complete()
+                end)
+            else
+                self:check_complete()
+            end
+        end)
         return
     end
     self:reset_row(tc)

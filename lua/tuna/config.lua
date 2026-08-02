@@ -470,13 +470,25 @@ M.defaults = {
         selector_show_rnu = false,
         show_nu = true,
         show_rnu = false,
+        -- Every key here takes **both cases**, without exception, so none of them is a
+        -- thing to remember: the panes these are bound on are read-only, so the letter
+        -- has no other job and there is nothing to be gained by claiming one case of it.
+        -- Each action that has an "…and all of them" variant pairs a letter with the
+        -- same letter under Ctrl (`r`/`<C-r>`, `s`/`<C-s>`). (The `<C-…>` keys need no
+        -- case pair: a terminal sends the same byte for `<C-r>` and `<C-R>`, so one
+        -- mapping already answers both.)
         mappings = {
             -- Pane focus switching is the plugin-wide `switch_window_keys` (above),
             -- shared with the clean form — not a runner-only mapping.
-            run_again = "R",
+            run_again = { "r", "R" },
             run_all_again = "<C-r>",
-            kill = "K",
-            kill_all = "<C-k>",
+            -- "stop", not "kill", because `s` has to mean something — and because that
+            -- is already what this does in stress mode (stop the search). It cannot be
+            -- `k`/`K`: `j`/`k` walk the testcase rows. `<C-s>` reaches Neovim fine —
+            -- raw mode clears the terminal's IXON, so it does not freeze the display
+            -- the way `<C-s>` does in a shell (verified in a real pty).
+            stop = { "s", "S" },
+            stop_all = "<C-s>",
             view_input = { "i", "I" },
             view_output = { "a", "A" },
             view_stdout = { "o", "O" },
@@ -486,9 +498,9 @@ M.defaults = {
             -- Inline testcase management, from the selector. Editing itself needs no
             -- key: the Input and Expected Output panes are ordinary editable buffers
             -- and `:w` saves the testcase and re-runs it.
-            add_testcase = "n",
-            delete_testcase = "x",
-            undo_delete = "u",
+            add_testcase = { "n", "N" },
+            delete_testcase = { "x", "X" },
+            undo_delete = { "u", "U" },
             help = "?",
         },
         viewer = {

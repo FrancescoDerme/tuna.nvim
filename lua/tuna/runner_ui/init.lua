@@ -254,8 +254,8 @@ function RunnerUI:legend_sections()
     local readonly = align({
         { "run again", keys("run_again") },
         { "run all again", keys("run_all_again") },
-        { "kill", keys("kill") },
-        { "kill all", keys("kill_all") },
+        { "stop", keys("stop") },
+        { "stop all", keys("stop_all") },
         { "toggle diff", keys("toggle_diff") },
         { "view output / expected", keys("view_stdout") .. "  " .. keys("view_output") },
         { "view input / errors", keys("view_input") .. "  " .. keys("view_stderr") },
@@ -728,7 +728,10 @@ function RunnerUI:delete_testcase()
     vim.schedule(function()
         self:goto_row(math.min(self:cursor_tc(), #self.runner.tcdata))
     end)
-    utils.notify("testcase " .. n .. " deleted (u to undo).", "INFO")
+    -- Name the key the user actually has: this is the one message that hands out a
+    -- mapping, so it must not go stale when `undo_delete` is remapped.
+    local undo = as_list(self.config.runner_ui.mappings.undo_delete or {})[1] or "u"
+    utils.notify("testcase " .. n .. " deleted (" .. undo .. " to undo).", "INFO")
 end
 
 ---@private
@@ -1037,10 +1040,10 @@ function RunnerUI:show_ui()
         end
     end
 
-    map_tc("kill", function()
+    map_tc("stop", function()
         self.runner:kill_process(self:cursor_tc())
     end)
-    map_tc("kill_all", function()
+    map_tc("stop_all", function()
         self.runner:kill_all_processes()
     end)
     map_tc("run_again", function()

@@ -32,11 +32,12 @@ M.LAYER = {
 
 --- Keys that begin a change. On a buffer that cannot take one they only ever end in
 --- `E21`, sometimes a keystroke later from a mode the user never meant to enter.
---- (`u`/`<C-r>` belong here too: undo on an unchangeable buffer raises it just the same.)
+--- (`u`/`U`/`<C-r>` belong here too: undo on an unchangeable buffer raises it just the
+--- same, and so do the increment/decrement and case/rot13 operators.)
 M.CHANGE_KEYS = {
     "i", "I", "a", "A", "o", "O", "c", "C", "s", "S", "r", "R", "x", "X", "d", "D",
     "p", "P", "J", "~", "v", "V", "<C-v>", "<Insert>", "gi", "gI", "gp", "gP", "gJ", "g~",
-    "u", "<C-r>",
+    "u", "U", "<C-r>", "<C-a>", "<C-x>", "&", "gu", "gU", "g?",
 }
 
 ---Tell Vim what this buffer is: a named, tagged scratch buffer whose writes are ours to
@@ -83,12 +84,19 @@ function M.read_only(bufnr)
     end
     vim.bo[bufnr].modifiable = false
     vim.bo[bufnr].modified = false
+    -- Compared as **terminal codes**, not as written: `nvim_buf_get_keymap` hands back
+    -- what a key really is (`<C-r>` comes back as a raw `\18`), so matching the written
+    -- form against it finds nothing and a surface's own action gets `<Nop>`ed over —
+    -- which is exactly what silently killed the results UI's "run all" key.
+    local function code(key)
+        return api.nvim_replace_termcodes(key, true, false, true)
+    end
     local taken = {}
     for _, m in ipairs(api.nvim_buf_get_keymap(bufnr, "n")) do
-        taken[m.lhs] = true
+        taken[code(m.lhs)] = true
     end
     for _, key in ipairs(M.CHANGE_KEYS) do
-        if not taken[key] then
+        if not taken[code(key)] then
             vim.keymap.set("n", key, "<Nop>", { buffer = bufnr, nowait = true })
         end
     end
