@@ -532,7 +532,13 @@ M.defaults = {
             view_stdout = { "o", "O" },
             view_stderr = { "e", "E" },
             toggle_diff = { "d", "D" },
-            close = { "q", "Q" },
+            -- `<Esc>`/`<C-c>` are what dismisses every other surface in the plugin
+            -- (`cancel_keys`, and `picker_ui.mappings.close`), so they dismiss this
+            -- one too. Bound in normal mode only, as all the close keys are, so an
+            -- `<Esc>` typed while editing a testcase only leaves insert mode; a
+            -- second one closes the UI, and an unsaved edit is caught by the same
+            -- prompt that catches `q`.
+            close = { "<esc>", "<C-c>", "q", "Q" },
             -- Inline testcase management, from the selector. Editing itself needs no
             -- key: the Input and Expected Output panes are ordinary editable buffers
             -- and `:w` saves the testcase and re-runs it.
@@ -542,8 +548,12 @@ M.defaults = {
             help = "?",
         },
         viewer = {
-            width = 0.5,
-            height = 0.5,
+            -- Large on purpose: the viewer exists to escape the cramped detail panes,
+            -- so one that leaves a quarter of the grid showing around it has the same
+            -- problem it was opened to solve. Clamped to the float band, as everything
+            -- else is, so a small editor still gets a frame that fits.
+            width = 0.8,
+            height = 0.8,
             show_nu = true,
             show_rnu = false,
             open_when_compilation_fails = true,
@@ -557,10 +567,14 @@ M.defaults = {
         -- `tc` testcases, `so` output, `eo` expected output, `si` input, `se` errors.
         -- Any of them but `tc` may be left out — what is left simply divides the
         -- space, and an omitted pane's content stays reachable in the viewer.
+        -- Two pairings decide this arrangement: `so`/`eo` share a row because the
+        -- diff compares them line against line, and the two editable panes
+        -- (`eo`/`si`, the accented ones) share a column so what you can type into
+        -- is one block at the edge rather than two corners of a diagonal.
         layout = {
             { 3, "tc" },
-            { 4, { { 1, "so" }, { 1, "si" } } },
-            { 4, { { 1, "eo" }, { 1, "se" } } },
+            { 4, { { 1, "so" }, { 1, "se" } } },
+            { 4, { { 1, "eo" }, { 1, "si" } } },
         },
     },
     split_ui = {
@@ -572,13 +586,13 @@ M.defaults = {
         vertical_layout = {
             { 1, "tc" },
             { 1, { { 1, "so" }, { 1, "eo" } } },
-            { 1, { { 1, "si" }, { 1, "se" } } },
+            { 1, { { 1, "se" }, { 1, "si" } } },
         },
         total_height = 0.4,
         horizontal_layout = {
             { 2, "tc" },
-            { 3, { { 1, "so" }, { 1, "si" } } },
-            { 3, { { 1, "eo" }, { 1, "se" } } },
+            { 3, { { 1, "so" }, { 1, "se" } } },
+            { 3, { { 1, "eo" }, { 1, "si" } } },
         },
     },
 }

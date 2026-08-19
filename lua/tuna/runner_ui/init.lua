@@ -1325,6 +1325,32 @@ function RunnerUI:close_viewer()
 end
 
 ---@private
+---@private
+---The geometry of the two large overlays that cover the grid — the viewer and the
+---message float — both sized from `runner_ui.viewer` and centred on the editor.
+---
+---Both dimensions are bounded by the room there is, and both subtract the two border
+---lines: a bordered float's footprint is its size *plus* its frame, so a `width` or
+---`height` of 1.0 asks for a window two cells larger than the screen. The height is
+---bounded by the float band (a row is kept clear above and below every float), the
+---width by the screen, there being no horizontal margin.
+---@param vcfg table `runner_ui.viewer`
+---@return integer width, integer height, integer col, integer row
+local function overlay_geometry(vcfg)
+    local vim_width, vim_height = utils.get_ui_size()
+    local band_row, band_h = utils.float_band()
+    local width = math.max(1, math.min(math.floor(vim_width * vcfg.width + 0.5), vim_width - 2))
+    local height = math.max(1, math.min(math.floor(vim_height * vcfg.height + 0.5), band_h - 2))
+    -- Centred on the *footprint*, border included — `col`/`row` are where the frame is
+    -- drawn, not where the text starts. Centring on the content width instead left the
+    -- float a column right of centre, and at `width = 1.0` put its right border one
+    -- cell off the screen even with the clamp above.
+    return width,
+        height,
+        math.max(0, math.floor((vim_width - width - 2) / 2)),
+        band_row + math.max(0, math.floor((band_h - height - 2) / 2))
+end
+
 ---Open (or retarget) the viewer: a large float showing one detail pane's buffer.
 ---@param content string? detail window name; nil keeps the current one
 function RunnerUI:show_viewer(content)
@@ -1344,17 +1370,14 @@ function RunnerUI:show_viewer(content)
         return
     end
 
-    local vim_width, vim_height = utils.get_ui_size()
     local vcfg = self.config.runner_ui.viewer
-    local band_row, band_h = utils.float_band()
-    local width = math.floor(vim_width * vcfg.width + 0.5)
-    local height = math.max(1, math.min(math.floor(vim_height * vcfg.height + 0.5), band_h - 2))
+    local width, height, col, row = overlay_geometry(vcfg)
     self.viewer_winid = surface.float(source.bufnr, {
         layer = surface.LAYER.viewer, -- over the pane grid
         width = width,
         height = height,
-        col = math.floor((vim_width - width) / 2),
-        row = band_row + math.max(0, math.floor((band_h - height - 2) / 2)),
+        col = col,
+        row = row,
         border = self.config.floating_border,
         border_highlight = self.config.floating_border_highlight,
         title = source.title,
@@ -1461,17 +1484,13 @@ function RunnerUI:show_message(title, text, highlights)
     vim.bo[buf].modifiable = false
     surface.adopt(buf, "message")
 
-    local vim_width, vim_height = utils.get_ui_size()
-    local band_row, band_h = utils.float_band()
-    local vcfg = self.config.runner_ui.viewer
-    local width = math.floor(vim_width * vcfg.width + 0.5)
-    local height = math.max(1, math.min(math.floor(vim_height * vcfg.height + 0.5), band_h - 2))
+    local width, height, col, row = overlay_geometry(self.config.runner_ui.viewer)
     local win = surface.float(buf, {
         layer = surface.LAYER.overlay, -- over the grid and the viewer
         width = width,
         height = height,
-        col = math.floor((vim_width - width) / 2),
-        row = band_row + math.max(0, math.floor((band_h - height - 2) / 2)),
+        col = col,
+        row = row,
         border = self.config.floating_border,
         border_highlight = self.config.floating_border_highlight,
         title = title,
@@ -1518,10 +1537,12 @@ function RunnerUI:ui_bounds()
     return { row = top, col = left, width = right - left, height = bottom - top }
 end
 
----Show the key legend as the two columns the UI is really made of: the panes you
----type into on the left, wearing their accent, and the ones you only read on the
----right, wearing the ordinary border. Each half is framed in the colour of the panes
----it describes, so which keys apply where needs no explaining.
+---Show the key legend as the two columns the UI is really made of: the panes you only
+---read on the left, wearing the ordinary border, and the ones you type into on the
+---right, wearing their accent. Each half is framed in the colour of the panes it
+---describes, so which keys apply where needs no explaining — and the halves are in the
+---order the grid puts them, the read-only panes filling its left and the editable
+---column down its right edge, so the legend covers each side with its own keys.
 ---
 ---The legend is sized to cover the results UI entirely rather than to its own content:
 ---a small float over the grid leaves the panes showing around it, and a legend read
@@ -1551,15 +1572,15 @@ function RunnerUI:show_help()
     if not (self:writable_pane("si") or self:writable_pane("eo")) then
         columns = { { lines = readonly, title = " Keys ", hl = plain_hl, group = "TunaFloatBorder" } }
     elseif widest(editable) + widest(readonly) + 4 > vim_width - 2 then
-        local lines = { "EDITABLE PANES" }
-        vim.list_extend(lines, editable)
-        vim.list_extend(lines, { "", "READ-ONLY PANES" })
+        local lines = { "READ-ONLY PANES" }
         vim.list_extend(lines, readonly)
+        vim.list_extend(lines, { "", "EDITABLE PANES" })
+        vim.list_extend(lines, editable)
         columns = { { lines = lines, title = " Keys ", hl = plain_hl, group = "TunaFloatBorder" } }
     else
         columns = {
-            { lines = editable, title = " Editable panes ", hl = accent_hl, group = accent_group },
             { lines = readonly, title = " Read-only panes ", hl = plain_hl, group = "TunaFloatBorder" },
+            { lines = editable, title = " Editable panes ", hl = accent_hl, group = accent_group },
         }
     end
 

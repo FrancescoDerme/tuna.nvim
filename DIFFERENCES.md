@@ -343,6 +343,29 @@ the keymaps, so it is the one pane that cannot be dropped) fall back to the ship
 default with a single warning naming the problem. A typo in a layout costs the
 arrangement, not the results UI.
 
+**The default arrangement pairs panes by what they are for.** Two panes in this UI
+can be typed into — Input and Expected Output — and they wear an accent saying so;
+two others are read against each other — Output and Expected Output — because the
+diff is positional and compares line *i* to line *i*. The shipped layouts satisfy
+both: `so`/`eo` share the **top row**, so the comparison is read across rather than
+along a diagonal, and `eo`/`si` share the **right column**, so everything editable is
+one block at the edge instead of two opposite corners:
+
+```
++-----------+----------+----------+
+| Run       | Output   | Expected |  <- accented
+| Testcases |          |          |
+|           +----------+----------+
+|           | Errors   | Input    |  <- accented
++-----------+----------+----------+
+```
+
+Stacking the editable pair *horizontally* is not an alternative arrangement, it is a
+different trade: putting `si` beside `eo` necessarily pushes `so` off that row and
+splits the pair the diff exists to line up. All three shipped layouts
+(`popup_ui.layout`, `split_ui.vertical_layout`, `split_ui.horizontal_layout`) use the
+same pairing, so the grid doesn't rearrange itself when the interface changes.
+
 **The UI opens on what there is to read.** competitest always parked the cursor on
 the first row, which is the compile step. A compilation that printed warnings or
 failed is worth landing on — but a silent one leaves four empty panes in front of
