@@ -129,6 +129,29 @@ local function write_or_delete(path, content)
     end
 end
 
+---The mirror of `write_or_delete`, applied to everything a backend loads: an empty
+---input or answer is stored as `nil`, because storage has no way to say "empty" —
+---`write_or_delete` removes the file rather than writing one, so an empty answer and
+---no answer are the same bytes on disk and must be the same thing in memory.
+---
+---Without this a hand-made (or externally emptied) `out.txt` loaded as `""`, which
+---`compare_output` judges against instead of returning `nil`: a testcase with nothing
+---to be wrong about read WRONG, and went back to DONE the moment the same text was
+---saved through the UI, where `core.answer` already normalized it.
+---@param tctbl table<integer, { input: string?, output: string? }>
+---@return table<integer, { input: string?, output: string? }>
+local function as_stored(tctbl)
+    for _, tc in pairs(tctbl) do
+        if tc.input == "" then
+            tc.input = nil
+        end
+        if tc.output == "" then
+            tc.output = nil
+        end
+    end
+    return tctbl
+end
+
 ---------------- FILES BACKEND (one input/output file per testcase) ----------------
 
 ---@param directory string testcase directory (with trailing slash)
@@ -213,7 +236,7 @@ function M.files.load(directory, filepath, input_format, output_format)
             end
         end
     end
-    return tctbl
+    return as_stored(tctbl)
 end
 
 ---@param directory string testcase directory (with trailing slash)
@@ -247,7 +270,7 @@ function M.single_file.load(path)
     end
     local ok, decoded = pcall(vim.mpack.decode, content)
     if ok and type(decoded) == "table" then
-        return decoded
+        return as_stored(decoded)
     end
     return {}
 end
@@ -332,7 +355,7 @@ function M.directory.load(base_dir, filepath, dir_format, input_name, output_nam
             end
         end
     end
-    return tctbl
+    return as_stored(tctbl)
 end
 
 ---@param base_dir string testcase base directory (with trailing slash)
@@ -406,7 +429,7 @@ end
 ---when it is absolute, joined onto the source's directory when it is not. competitest
 ---joined unconditionally, which made an absolute path unreachable and turned
 ---`~/cp/testcases` into a directory literally named `~` beside the source
----(competitest#78).
+---(the competitest behaviour).
 ---@param source_dir string directory holding the source file
 ---@param filepath string source file path, which the modifiers are computed from
 ---@param cfg table resolved configuration

@@ -25,25 +25,32 @@ local M = {}
 ---@type { lines: string[], row: integer, bufnr: integer }?
 M.pending = nil
 
----Resolve the template path for `ext`, the way `download` does (a string is a path with
----file-format modifiers, a table maps extension → path).
+---Resolve the template to open the scratch from: the first configured candidate that a
+---*task-less* caller can resolve and that exists (see `utils.template_candidates`).
 ---@param ext string
 ---@param cfg table
 ---@return string? path
+---@return boolean configured whether any template was configured for `ext` at all
 local function template_path(ext, cfg)
-    local path
-    if type(cfg.template_file) == "string" then
-        -- The modifiers are file-format ones, so they need a file name to expand
-        -- against; a fictitious one in the cwd is enough to fill `$(FEXT)`.
-        path = utils.eval_string(vim.fn.getcwd() .. "/temp." .. ext, cfg.template_file)
-    elseif type(cfg.template_file) == "table" then
-        path = cfg.template_file[ext]
+    for _, candidate in ipairs(utils.template_candidates(cfg.template_file, ext)) do
+        -- A candidate may name the problem it is for (`~/cp/templates/$(JUDGE).cpp`),
+        -- and a scratch is written before there is a problem to ask. Nothing here can
+        -- fill that in, so such a candidate is skipped and the next one tried — which is
+        -- exactly what a fallback entry is for: list the general template after the
+        -- per-judge ones and the scratch always has something to open.
+        if utils.only_file_modifiers(candidate) then
+            -- The rest are file-format modifiers, which need a file name to expand
+            -- against; a fictitious one in the cwd is enough to fill `$(FEXT)`.
+            local path = utils.eval_string(vim.fn.getcwd() .. "/temp." .. ext, candidate)
+            if path then
+                path = path:gsub("^~", vim.uv.os_homedir())
+                if utils.file_exists(path) then
+                    return path, true
+                end
+            end
+        end
     end
-    if not path then
-        return nil
-    end
-    path = path:gsub("^~", vim.uv.os_homedir())
-    return utils.file_exists(path) and path or nil
+    return nil, #utils.template_candidates(cfg.template_file, ext) > 0
 end
 
 ---Split a template into its header and its body. The header is the run of leading
@@ -147,14 +154,26 @@ function M.start(bufnr)
         return
     end
 
-    local tmpl = template_path(ext, cfg)
-    if not tmpl then
-        utils.notify("temp: no template file configured for '" .. ext .. "'.", "WARN")
-        return
+    -- No template to open from is not a reason to refuse: the scratch is what was
+    -- asked for, and its value is somewhere to type now plus `:Tuna download sync`
+    -- folding it into the problem later — which is written from the template that does
+    -- apply, header and all. So it opens empty, and says so only when a template *was*
+    -- configured and none of the candidates could be used here, since that is the case
+    -- where the user expects one and a fallback entry would fix it.
+    local tmpl, configured = template_path(ext, cfg)
+    local header, blanks, body = 0, 0, { "" }
+    if tmpl then
+        local lines = vim.split(utils.read_file(tmpl) or "", "\n", { plain = true })
+        header, blanks = split_template(lines)
+        body = vim.list_slice(lines, header + blanks + 1)
+    elseif configured then
+        utils.notify(
+            "temp: no template applies to a scratch for '"
+                .. ext
+                .. "', starting empty, add a problem-independent one to `template_file` to change that.",
+            "INFO"
+        )
     end
-    local lines = vim.split(utils.read_file(tmpl) or "", "\n", { plain = true })
-    local header, blanks = split_template(lines)
-    local body = vim.list_slice(lines, header + blanks + 1)
 
     if not utils.write_file(path, table.concat(body, "\n")) then
         utils.notify("temp: could not write the scratch file at '" .. path .. "'.", "WARN")

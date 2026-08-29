@@ -161,6 +161,67 @@ function M.eval_string(filepath, str, tcnum)
     return M.format_modifiers(str, modifiers, filepath)
 end
 
+---Whether every modifier in `str` can be filled from a file path alone, i.e. whether
+---`eval_string` can resolve it.
+---
+---`template_file` is read in three places, and only one of them has a downloaded task
+---to hand: a path like `~/cp/templates/$(JUDGE).cpp` is resolvable while a problem is
+---being downloaded and by nothing else. `:Tuna temp` (a scratch written *before* the
+---problem exists) and `:Tuna clean` (which asks which template a file came from) have
+---no task, so they use this to treat such a path as "no template here" — a quiet nil
+---rather than an "unrecognized modifier" reported once per scanned file, for a
+---configuration that is doing nothing wrong.
+---
+---Stated as "the file set covers it" rather than as a list of the task-only names, so
+---there is no second list to keep in step with `download.lua`'s. The cost is that a
+---genuine typo (`$(PROBELM)`) also reads as task-dependent here and its template is
+---skipped silently; the download path still reports it, which is where a template is
+---actually resolved.
+---@param str string
+---@return boolean
+function M.only_file_modifiers(str)
+    for name in str:gmatch("%$%(([^)]*)%)") do
+        if name ~= "" and name ~= "TCNUM" and M.file_format_modifiers[name] == nil then
+            return false
+        end
+    end
+    return true
+end
+
+---The template paths configured for `ext`, in the order they should be tried.
+---
+---`template_file` is one of: `false`, a path, an **ordered list** of paths, a
+---`{ [ext] = path }` table, or a `{ [ext] = { path, … } }` one. The list is what makes
+---a judge-specific template usable in practice —
+---`{ "~/cp/templates/$(JUDGE).cpp", "~/cp/templates/default.cpp" }` — since a judge you
+---have not written a template for should fall back to the general one rather than to
+---an empty file. It is the same "first one that works wins" shape as
+---`testcases_input_file_format`, deliberately: the plugin should not have two spellings
+---for one idea.
+---@param template_file false|string|string[]|table<string, string|string[]>
+---@param ext string the file extension being written
+---@return string[] # possibly empty
+function M.template_candidates(template_file, ext)
+    local tf = template_file
+    -- A `{ [ext] = … }` table has string keys, a list has `[1]`.
+    if type(tf) == "table" and tf[1] == nil then
+        tf = tf[ext]
+    end
+    if type(tf) == "string" then
+        return { tf }
+    end
+    if type(tf) ~= "table" then
+        return {}
+    end
+    local out = {}
+    for _, p in ipairs(tf) do
+        if type(p) == "string" then
+            out[#out + 1] = p
+        end
+    end
+    return out
+end
+
 ---Like `eval_string`, but resolves the file path from a buffer.
 ---@param bufnr integer buffer number
 ---@param str string string to evaluate

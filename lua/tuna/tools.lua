@@ -161,7 +161,33 @@ function M.solution_bufnr(bufnr, cfg)
     end
 
     local sb = vim.fn.bufadd(chosen)
-    vim.fn.bufload(sb)
+    if not vim.api.nvim_buf_is_loaded(sb) then
+        -- Loading it is a side effect of running from a helper file, not something the
+        -- user asked for, so it must not leave a swapfile behind for a file they never
+        -- opened — a stray `.main.cpp.swp` in the problem directory, and an E325
+        -- ATTENTION prompt about it after a crash. `swapfile` is buffer-local and read
+        -- when the buffer loads, so it has to be off *before* `bufload`; setting it
+        -- afterwards would create the swap and then delete it. Only for a buffer we are
+        -- loading ourselves: one the user already has open keeps the swapfile it came
+        -- with, since turning the option off on a loaded buffer removes it.
+        vim.bo[sb].swapfile = false
+        vim.fn.bufload(sb)
+        -- If it does become a buffer the user is looking at, it is theirs again and
+        -- wants the protection back, at whatever the global default says then — turning
+        -- the option back on creates the swap there and then. Read with `vim.go`, not
+        -- `vim.o`: for a buffer-local option `vim.o` reports the *current* buffer's
+        -- value, which inside this callback is the buffer whose flag was just turned
+        -- off, so it would restore false onto itself and do nothing (it did).
+        vim.api.nvim_create_autocmd("BufWinEnter", {
+            buffer = sb,
+            once = true,
+            callback = function()
+                if vim.api.nvim_buf_is_valid(sb) then
+                    vim.bo[sb].swapfile = vim.go.swapfile
+                end
+            end,
+        })
+    end
     if vim.bo[sb].filetype == "" then
         local ft = vim.filetype.match({ filename = chosen, buf = sb }) or filetype_of(chosen)
         if ft ~= "" then

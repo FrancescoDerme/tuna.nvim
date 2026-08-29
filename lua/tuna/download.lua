@@ -343,8 +343,10 @@ end
 ---@param file_extension string
 ---@param remove_illegal_chars boolean strip characters illegal in filenames
 ---@param cfg table? resolved config (for `judge_parsers` and `date_format`)
+---@param filepath string? the target file, if there is one: with it the file-format
+---   modifiers (`$(FNOEXT)`, `$(DIRNAME)`, …) are available alongside the download set
 ---@return string? # evaluated string, or `nil` on failure
-local function eval_download_modifiers(str, task, file_extension, remove_illegal_chars, cfg)
+local function eval_download_modifiers(str, task, file_extension, remove_illegal_chars, cfg, filepath)
     -- Split "Judge - Contest" and normalise it via the (user-overridable) judge parsers.
     local judge, contest = judges.parse(task, cfg and cfg.judge_parsers)
     local date_format = cfg and cfg.date_format
@@ -377,7 +379,16 @@ local function eval_download_modifiers(str, task, file_extension, remove_illegal
         end
     end
 
-    return utils.format_modifiers(str, modifiers)
+    -- With a target file to hand, the file-format modifiers apply too, so a path may
+    -- mix the two sets ($(JUDGE)/$(FEXT)). Folded in *after* the illegal-character
+    -- pass, which must not touch them: they are real paths, and their values are
+    -- functions rather than strings. The download set wins where the two overlap
+    -- (HOME/CWD/FEXT), which they define identically.
+    if filepath then
+        modifiers = vim.tbl_extend("force", utils.file_format_modifiers, modifiers)
+    end
+
+    return utils.format_modifiers(str, modifiers, filepath)
 end
 
 ---Evaluate a configured path (a string with modifiers, or a function).
@@ -439,22 +450,35 @@ end
 local function store_downloaded_task(filepath, task, cfg)
     local file_extension = vim.fn.fnamemodify(filepath, ":e")
 
-    -- Resolve the template: a string is a path with file-format modifiers; a
-    -- table maps extension → path.
+    -- Resolve the template. Every candidate is evaluated with the *download* modifiers
+    -- as well as the file ones, so a per-judge template is expressible in `setup()`
+    -- alone — `~/cp/templates/$(JUDGE).cpp`. A judge is a property of the problem
+    -- rather than of a directory, and until now the only way to say so was a `.tuna.lua`
+    -- in each judge's folder.
+    --
+    -- They are tried in order and the first that *exists* wins, which is what makes
+    -- that usable: a judge you have not written a template for falls back to the
+    -- general one instead of to an empty file.
+    local candidates = utils.template_candidates(cfg.template_file, file_extension)
     local template_file
-    if type(cfg.template_file) == "string" then
-        template_file = utils.eval_string(filepath, cfg.template_file)
-    elseif type(cfg.template_file) == "table" then
-        template_file = cfg.template_file[file_extension]
-    end
-    if template_file then
-        template_file = string.gsub(template_file, "^~", vim.uv.os_homedir()) -- expand leading ~
-        if not utils.file_exists(template_file) then
-            if type(cfg.template_file) == "table" then
-                utils.notify('template file "' .. template_file .. "\" doesn't exist.", "WARN")
+    local tried = {}
+    for _, candidate in ipairs(candidates) do
+        local path = eval_download_modifiers(candidate, task, file_extension, false, cfg, filepath)
+        if path then
+            path = string.gsub(path, "^~", vim.uv.os_homedir()) -- expand leading ~
+            tried[#tried + 1] = path
+            if utils.file_exists(path) then
+                template_file = path
+                break
             end
-            template_file = nil
         end
+    end
+    -- Configured but none of them is there: worth saying, whichever form was used. The
+    -- alternative is writing an empty solution and leaving the user to work out that
+    -- their template path is wrong — and with a list, naming every path tried is what
+    -- says which fallback was expected to catch it.
+    if not template_file and #tried > 0 then
+        utils.notify("template file " .. table.concat(tried, ", ") .. " doesn't exist.", "WARN")
     end
 
     if template_file then
@@ -895,6 +919,23 @@ end
 -- The two boundary helpers, exposed for the local test suite. They are what keeps a
 -- malformed request from reaching the pipeline at all, and calling them is the only way
 -- to check that without a live listener. Not part of the plugin's interface.
-M._test = { validate_task = validate_task, canonicalize_task = canonicalize_task }
+---Evaluate a configured path against a downloaded task, exactly as the download
+---itself does. Exported for `clean.lua`, which reconstructs a task from a problem's
+---sidecar so it can work out which template a file on disk was written from.
+---@param str string
+---@param task tuna.CCTask
+---@param file_extension string
+---@param cfg table?
+---@param filepath string? the file the path is being resolved for
+---@return string?
+function M.eval_task_path(str, task, file_extension, cfg, filepath)
+    return eval_download_modifiers(str, task, file_extension, false, cfg, filepath)
+end
+
+M._test = {
+    validate_task = validate_task,
+    canonicalize_task = canonicalize_task,
+    eval_download_modifiers = eval_download_modifiers,
+}
 
 return M

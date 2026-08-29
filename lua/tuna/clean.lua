@@ -172,7 +172,9 @@ local function source_exts(cfg)
             end
         end
     end
-    if type(cfg.template_file) == "table" then
+    -- Only the `{ [ext] = … }` form names extensions; a fallback *list* has integer
+    -- keys, which are not extensions.
+    if type(cfg.template_file) == "table" and cfg.template_file[1] == nil then
         for ext in pairs(cfg.template_file) do
             exts[ext] = true
         end
@@ -183,36 +185,65 @@ local function source_exts(cfg)
     return exts
 end
 
----The solution template content that would have produced a file at `full`.
+---The downloaded task a problem directory remembers, for resolving a template path
+---that names the problem it was written for. This is the piece scanning would
+---otherwise have no way to recover: `~/cp/templates/$(JUDGE).cpp` was resolved by the
+---download, which knew the judge, and a file on disk does not carry it — but the
+---sidecar written beside it does (`url`/`name`/`group`, the same fields
+---`judges.parse` reads). Without this a per-judge template would make every untouched
+---solution unrecognizable, and `clean` would quietly stop finding anything but empty
+---files.
+---@param dir string the directory the file lives in
+---@param cache table<string, any> per-scan memo (a directory is asked once)
+---@return tuna.CCTask|false
+local function task_of(dir, cache)
+    local key = "\0task:" .. dir
+    if cache[key] == nil then
+        local data = require("tuna.sidecar").read_or_nil(dir)
+        cache[key] = (data and data.url) and { name = data.name or "", group = data.group or "", url = data.url }
+            or false
+    end
+    return cache[key]
+end
+
+---The solution template contents that could have produced a file at `full` — every
+---configured candidate that can be resolved for it, since a fallback list means more
+---than one may apply and only comparing tells them apart.
 ---@param full string absolute file path
 ---@param ext string its extension
 ---@param cfg table
----@return string?
----@param cache table<string, string|false> memo of already-read templates
-local function solution_template(full, ext, cfg, cache)
-    local tf = cfg.template_file
-    local path
-    if type(tf) == "string" then
-        path = utils.eval_string(full, tf) -- fills $(FEXT)/$(FNOEXT)/… from `full`
-    elseif type(tf) == "table" then
-        path = tf[ext]
-    else
-        return nil
+---@param cache table<string, any> memo of already-read templates
+---@return string[]
+local function solution_templates(full, ext, cfg, cache)
+    local dir = vim.fn.fnamemodify(full, ":h")
+    local out = {}
+    for _, candidate in ipairs(utils.template_candidates(cfg.template_file, ext)) do
+        local path
+        if utils.only_file_modifiers(candidate) then
+            path = utils.eval_string(full, candidate) -- fills $(FEXT)/$(FNOEXT)/… from `full`
+        else
+            local task = task_of(dir, cache)
+            if task then
+                path = require("tuna.download").eval_task_path(candidate, task, ext, cfg, full)
+            end
+        end
+        if path then
+            path = path:gsub("^~", vim.uv.os_homedir())
+            -- `full` may *be* the template file itself (e.g. cleaning the folder that
+            -- holds `template.cpp`); it would trivially match itself 100%. Don't offer
+            -- to delete it.
+            if vim.fs.normalize(path) ~= vim.fs.normalize(full) then
+                -- The same handful of templates back every candidate: read each once.
+                if cache[path] == nil then
+                    cache[path] = utils.read_file(path) or false
+                end
+                if cache[path] then
+                    out[#out + 1] = cache[path]
+                end
+            end
+        end
     end
-    if not path then
-        return nil
-    end
-    path = path:gsub("^~", vim.uv.os_homedir())
-    -- `full` may *be* the template file itself (e.g. cleaning the folder that holds
-    -- `template.cpp`); it would trivially match itself 100%. Don't offer to delete it.
-    if vim.fs.normalize(path) == vim.fs.normalize(full) then
-        return nil
-    end
-    -- The same handful of templates back every candidate: read each one once.
-    if cache[path] == nil then
-        cache[path] = utils.read_file(path) or false
-    end
-    return cache[path] or nil
+    return out
 end
 
 ---Classify a file: return a human-readable "unused" reason, or nil if it looks
@@ -236,25 +267,35 @@ local function classify(full, ext, base, kinds, cfg, threshold, cache)
         return nil
     end
     local kind = kinds[base]
-    local tmpl
+    local tmpls
     if kind then
         local key = "\0kind:" .. kind .. ":" .. ext
         if cache[key] == nil then
             cache[key] = require("tuna.scaffold").template_for(kind, ext, cfg) or false
         end
-        tmpl = cache[key] or nil
+        tmpls = cache[key] and { cache[key] } or {}
     else
-        tmpl = solution_template(full, ext, cfg, cache)
+        tmpls = solution_templates(full, ext, cfg, cache)
     end
     local content = utils.read_file(full)
     if content == nil then
         return nil
     end
-    if tmpl then
-        local sim = similarity(content, tmpl, threshold)
-        if sim >= threshold then
+    if #tmpls > 0 then
+        -- More than one template can apply once `template_file` is a fallback list, and
+        -- which one a file came from is not recorded anywhere. The best match is the
+        -- answer: a file written from one of them matches that one and no other, so
+        -- taking the highest score picks it out without having to know.
+        local best = 0
+        for _, tmpl in ipairs(tmpls) do
+            local sim = similarity(content, tmpl, threshold)
+            if sim > best then
+                best = sim
+            end
+        end
+        if best >= threshold then
             local what = kind and (kind .. " scaffold") or "solution template"
-            return ("%d%% match to %s"):format(math.floor(sim * 100 + 0.5), what), sim
+            return ("%d%% match to %s"):format(math.floor(best * 100 + 0.5), what), best
         end
         return nil
     end
@@ -316,8 +357,11 @@ local function candidate_dirs(cfg)
     if type(cfg.template_file) == "string" then
         add(base_dir_of(cfg.template_file))
     elseif type(cfg.template_file) == "table" then
-        for _, p in pairs(cfg.template_file) do
-            add(base_dir_of(p))
+        for _, entry in pairs(cfg.template_file) do
+            -- An entry is a path, or itself a fallback list of them.
+            for _, p in ipairs(type(entry) == "table" and entry or { entry }) do
+                add(base_dir_of(p))
+            end
         end
     end
     return dirs, labels
@@ -1126,6 +1170,11 @@ end
 ---threshold together (one form, all three lists visible), then confirm each unused
 ---file before deleting it.
 ---@param bufnr integer? defaults to the current buffer
+-- The two pure deciders, exposed for the local test suite: reaching them through
+-- `M.clean` would mean driving a chooser form and a confirmation per file. Not part of
+-- the plugin's interface.
+M._test = { classify = classify, solution_templates = solution_templates, similarity = similarity }
+
 function M.clean(bufnr)
     bufnr = bufnr or api.nvim_get_current_buf()
     config.load_buffer_config(bufnr)

@@ -110,7 +110,32 @@ first-format-wins load rule finds *only* that one and every testcase already the
 disappears from view. A fresh directory is unaffected and still gets the canonical
 name.
 
-### `testcases_directory` may be absolute, and takes modifiers (competitest [#78](https://github.com/xeluxee/competitest.nvim/issues/78))
+### Half a testcase is a testcase
+
+A testcase may carry only an input, only an answer, or an empty one of either, and
+tuna treats all four as ordinary.
+
+competitest passed a testcase's input straight to the child's stdin, so one with no
+input file crashed the run outright — `bad argument #2 to 'write' (data must be
+string or table of strings, got nil)`, then a cascading `attempt to index field
+'process' (a nil value)`. tuna defaults it where the row is built, in every run mode,
+so nothing but a string can reach `vim.system`: an answer-only testcase runs the
+solution against **empty stdin**, which is exactly what an `out.txt`-only folder
+needs. `files.active_parts` matches on the output format too, so such a testcase is
+discovered in the first place.
+
+The other half of it is that **empty is absent**. `write_or_delete` removes an empty
+file rather than writing one, so an empty answer and no answer are the same bytes on
+disk; every backend's `load` therefore normalizes an empty input or answer back to
+`nil` (`as_stored`), the mirror of the `core.answer` rule the rows already applied.
+Without that an `out.txt` that was empty on disk — hand-made, `touch`ed, emptied by
+another tool — loaded as `""`, and since `compare_output` judges against an empty
+answer instead of returning `nil`, a testcase with nothing to be wrong about read
+**WRONG** and quietly became `DONE` again as soon as it was saved through the UI.
+
+---
+
+### `testcases_directory` may be absolute, and takes modifiers
 
 competitest joins `testcases_directory` onto the current file's directory
 **unconditionally**, so it can only ever name a place *inside* the problem: an
@@ -184,6 +209,82 @@ from a directory's own `.tuna.lua`, which is scoped to that tree by construction
 
 ---
 
+## Per-judge templates from `setup()`
+
+`template_file` is evaluated with the **download** modifiers, so the template a
+problem is written from can name the judge it came from:
+
+```lua
+template_file = "~/cp/templates/$(JUDGE).cpp"   -- codeforces.cpp, atcoder.cpp, …
+```
+
+A judge is a property of the *problem*, not of a directory, so configuring one should
+not require a config file in every judge's folder. competitest offers only the
+directory-local route — and, until late 2024, did not load it for a downloaded
+*problem* at all, which two users hit independently; tuna resolves the local config on
+both the problem and the contest path, and always has.
+
+**A per-judge template needs a fallback to be usable**, so `template_file` also takes
+an **ordered list**, tried in order with the first that *exists* winning:
+
+```lua
+template_file = {
+  "~/cp/templates/$(JUDGE).cpp",   -- codeforces.cpp, atcoder.cpp, …
+  "~/cp/templates/default.cpp",    -- …and everything else
+}
+```
+
+Without it, downloading from a judge you have not written a template for gives an
+empty file. It is the same "first that works wins" shape as
+`testcases_input_file_format`, deliberately — the plugin should not have two spellings
+for one idea. The **table** form takes modifiers too, and each of its entries may
+itself be such a list (`{ cpp = { "$(JUDGE).cpp", "default.cpp" } }`); it previously
+took no modifiers at all while the string form took the file ones, a difference with
+nothing behind it. Both modifier sets apply at once, so `$(JUDGE)/$(FNOEXT).$(FEXT)`
+works. Configured but none of the candidates existing is a warning naming every path
+tried — competitest warns only for the table form, so a wrong single path silently
+writes an empty solution.
+
+`template_file` is read in three places and only the download has a task to hand. The
+other two do **not** give up:
+
+**`:Tuna temp`** skips the candidates it cannot resolve and opens from the first one
+left — which is what the fallback entry is for, so the scratch gets the general
+template while the per-judge ones wait for a real problem. It never refuses: with no
+usable template it opens **empty**, because the scratch is what was asked for and its
+value is somewhere to type now plus `:Tuna download sync` folding it into a problem
+later, written from the template that does apply, header and all. (competitest has no
+equivalent command.)
+
+**`:Tuna clean`** resolves a task-dependent candidate from the **sidecar beside the
+file**, which is where the download recorded the judge — the one piece scanning cannot
+otherwise recover. Without it a per-judge template would make every untouched solution
+unrecognizable and clean would quietly find nothing but empty files. With a fallback
+list several templates can apply and nothing records which one a file came from, so it
+compares against all of them and the **best** match decides: a file written from one
+matches that one and no other, so the highest score picks it out without having to
+know. A file with no sidecar and no task-free candidate is simply not classified —
+guessing a judge would be worse than declining to.
+
+### Prompt-free downloads
+
+The same issue's original complaint is that every download asks for a directory and a
+filename. All three prompts are switches, so the layout can be decided once in
+`setup()` and never asked about again:
+
+```lua
+downloaded_problems_prompt_path      = false,
+downloaded_contests_prompt_directory = false,
+downloaded_contests_prompt_extension = false,
+downloaded_problems_path      = "~/cp/$(JUDGE)/$(CONTEST)/$(PROBLEM)/$(PROBLEM).$(FEXT)",
+downloaded_contests_directory = "~/cp/$(JUDGE)/$(CONTEST)",
+```
+
+They default to `true`, matching competitest. `downloaded_contests_directory` is the
+`contest_directory` the issue asks for.
+
+---
+
 ## Download: live listener status for lualine
 
 ✅ **Decision:** `download.lua` exposes `status()`, `is_downloading()` and `mode()`,
@@ -235,9 +336,35 @@ naming without forking the plugin.
 ## Submit integration (`submit.lua`, `:Tuna submit`)
 
 ✅ **Done (Workstream 4).** Brand new — competitest has no submit support at all
-(the community's PR #87 for it is still open upstream). `:Tuna submit` hands the
-current solution to an **external** submit tool through a **provider registry**, so
-it's agnostic to which judge/tool/language you use.
+(a community pull request for it is still open upstream, and users have asked for
+`online-judge-tools/oj` specifically, having been put off by cpbooster's Node
+dependency). `:Tuna submit` hands the current solution to an **external** submit tool
+through a **provider registry**, so it's agnostic to which judge/tool/language you
+use — which is the answer to that request rather than a choice between the two tools:
+`oj` is one line of config, and so is anything else.
+
+```lua
+submit = {
+  command   = "oj submit --no-guess $(PROBLEM_URL) $(FNAME)",
+  languages = { cpp = "54", python = "31" },
+}
+```
+
+**`$(PROBLEM_URL)`, not `$(URL)`, is the one to reach for here**, and the distinction
+is why both exist. `$(URL)` is what the submission is routed *through* — for a
+Codeforces round downloaded from a mirror it is that mirror's, and it is deliberately
+shaped for a submitter that derives its own `…/submit/<index>` from a problem URL, so
+it ends in a bare `/problem/`. `oj` is given a problem's address and works out the
+submit page itself, so it wants the problem's own identity, which is what
+`$(PROBLEM_URL)` always is (verified: the same buffer expands to
+`oj submit … https://codeforces.com/contest/2248/problem/A A.cpp` whether or not the
+sidecar records a live mirror, while `$(URL)` becomes
+`https://m1.codeforces.com/contest/2248/problem/`).
+
+One caveat that is not tuna's to fix: **AtCoder gates submission behind a Cloudflare
+Turnstile challenge** that no headless client solves, `oj` included. That is what the
+`browser` provider is for — `submit.judges.atcoder = { provider = "browser" }` opens
+the preselected submit page and copies the source to the clipboard.
 
 ```lua
 submit = {
@@ -252,7 +379,7 @@ submit = {
 Design notes:
 
 - **Provider registry** (`M.providers[name]`) leaves a clean seam for future
-  first-class providers (e.g. a Kattis provider, per PR #87). The shipped default is
+  first-class providers (e.g. a Kattis provider). The shipped default is
   the `command` provider, which expands a shell command through the modifier engine —
   gaining `$(URL)` and `$(LANG)` on top of the usual `$(FABSPATH)`/`$(FNAME)`/… — and
   runs it in a terminal.
@@ -326,8 +453,7 @@ first-class results UI for a few dozen lines instead of a fourth copy of the run
 **A layout may leave panes out.** competitest builds the results UI by walking a
 fixed set of panes and asking the layout where each one goes, so a layout that omits
 one — the Errors pane, say — breaks:
-[issue #85](https://github.com/xeluxee/competitest.nvim/issues/85) is someone trying
-to arrange `tc | so | eo` over `si` and finding they cannot drop `se`. Which panes to
+someone arranging `tc | so | eo` over `si` finds they cannot drop `se`. Which panes to
 show is exactly the kind of thing a layout option exists to decide.
 
 In tuna a pane always gets a **buffer** and only sometimes a **window**: the buffer is
@@ -398,8 +524,7 @@ tokens — spacing is not a difference, and a value within tolerance is not one 
 A custom compare function gets the token view, as a reading aid.
 
 Presentation-wise the two panes stay side by side (this is the choice
-[issue #86](https://github.com/xeluxee/competitest.nvim/issues/86) asked to revisit;
-the pane layout was never the problem, the alignment was). They need none of the
+users asked to revisit; the pane layout was never the problem, the alignment was). They need none of the
 filler lines `:diffthis` inserts, since line *i* faces line *i* by construction — so
 they are simply `scrollbind`/`cursorbind`ed together. Toggling the diff on also jumps
 both panes to the first disagreement, which with a hundred lines of output is the
@@ -417,13 +542,12 @@ louder than the value it points at, and it lands at the same strength on a dark 
 as on a light one. It is re-derived on every `ColorScheme`, so a theme switch retints
 it rather than leaving a colour from the old palette.
 
-### Always-editable testcases in the results UI (competitest [#76](https://github.com/xeluxee/competitest.nvim/issues/76))
+### Always-editable testcases in the results UI
 
 competitest can only add, edit or delete a testcase from *outside* the results UI,
-through a separate editor popup. [#76](https://github.com/xeluxee/competitest.nvim/issues/76)
-asks for that to happen inline instead, and its
-[PR #84](https://github.com/xeluxee/competitest.nvim/pull/84) (closed, unmerged)
-proposes a `NEW` row plus `<CR>`/`<C-s>`/`<C-CR>`/`x` bindings.
+through a separate editor popup. Users have asked for that to happen inline instead,
+and an upstream pull request (closed, unmerged) proposes a `NEW` row plus
+`<CR>`/`<C-s>`/`<C-CR>`/`x` bindings.
 
 tuna already listed testcases in the results UI before any run (`:Tuna show_ui`
 doubles as a testcase viewer), so the missing half was making that view writable.
@@ -436,7 +560,7 @@ move into the pane · type · :w
 
 saves the testcase and re-runs it. `:w` is a `BufWriteCmd`, so it is the same gesture
 that saves any other buffer in Vim — no `<C-s>`, and in particular no `<C-CR>`, which
-most terminals cannot even deliver (the sole reviewer of PR #84 hit exactly that).
+most terminals cannot even deliver (that proposal's sole reviewer hit exactly that).
 
 Everything else follows from treating the panes as buffers:
 
@@ -452,7 +576,7 @@ Everything else follows from treating the panes as buffers:
   Deletion is **immediate but undoable** (`u`) rather than confirmed — an undo is
   cheaper to press than a dialog *and* recoverable, which a dialog is not. Both wait
   for a run in flight, as they renumber the rows its lanes are indexing.
-- **No phantom `NEW` row.** PR #84's trailing row lives in the testcase list's own
+- **No phantom `NEW` row.** That proposal's trailing row lives in the testcase list's own
   coordinate space, so `get_testcase_index_by_line` returns the *string* `"NEW"` and
   five call sites have to guard against it. Discoverability instead comes from one
   row in the "Run" pane — a key hint when clean, the unsaved-testcase warning when
@@ -703,15 +827,31 @@ orderings are handled explicitly.
 
 ## Multiple-answer problems (the external checker)
 
-✅ **Done.** A problem that accepts several valid outputs (e.g. "print two numbers
-that sum to 3" → both `1 2` and `2 1`) is handled by the checker. competitest's
-custom comparator was `function(output, expected)` — it never saw the **input**, so
-it couldn't validate input-dependent answers. tuna's checker is a **testlib-style
-external program** that receives the input, participant output, and jury answer
-(`checker <input> <output> <answer>`) and decides the verdict — the standard special
-judge every judge/testlib user already knows. It's discovered by convention
-(`checker.*`) or set via `checker = { exec, args }` / a path, and the same capability
-flows through `:Tuna run`, `run stress`, `run interactive`, and `run all`.
+✅ **Done.** A problem that accepts several valid outputs (e.g. "print any shortest
+path", or "print two numbers that sum to 3" → both `1 2` and `2 1`) is handled by the
+checker. competitest's custom comparator was `function(output, expected)` — it never
+saw the **input**, so it couldn't validate input-dependent answers; its maintainer
+proposed passing the input as a third argument in that thread, and it was never
+implemented. tuna's checker is a **testlib-style external program** that receives the
+input, participant output, and jury answer (`checker <input> <output> <answer>`) and
+decides the verdict — the standard special judge every judge/testlib user already
+knows. It's discovered by convention (`checker.*`) or set via
+`checker = { exec, args }` / a path, and the same capability flows through
+`:Tuna run`, `run stress`, `run interactive`, and `run all`.
+
+That last point is the thread's own conclusion, reached over a month of comments: what
+is wanted is something that generates inputs, receives the solution's output, and
+validates it *against the input* — which is stress testing driving the same checker.
+It works out exactly as they describe. On "print any permutation of `1..n`", with a
+sample answer of `1 2 3 4` and a solution printing `4 3 2 1`:
+
+| | plain run | stress, 12 random inputs |
+| --- | --- | --- |
+| builtin comparison | `WRONG` | 4 "counterexamples", all spurious |
+| sibling `checker.cpp` | `CORRECT` | none — `no counterexample found in 12 runs` |
+
+The checker's own message (`ok, a valid permutation of 1..4`) is surfaced in the
+results UI. Nothing is configured in either case: the file is found by name.
 
 ## Multiple solution versions (`multi.lua`, `:Tuna run_all`)
 

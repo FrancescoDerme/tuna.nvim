@@ -209,7 +209,14 @@ M.defaults = {
     --   }
     -- Codeforces and AtCoder have built-in defaults (see `judges.lua`).
     judge_parsers = {},
-    template_file = false, -- false | string with modifiers | { [ext] = path }
+    -- false | a path | an ordered list of paths | { [ext] = path-or-list }.
+    -- Paths take the file modifiers and, when a problem is being downloaded, the
+    -- download ones too — so a per-judge template needs no config file per judge:
+    --   template_file = { "~/cp/templates/$(JUDGE).cpp", "~/cp/templates/default.cpp" }
+    -- The list is tried in order and the first that exists wins, so a judge you have
+    -- not written a template for falls back to the general one. It is also what
+    -- `:Tuna temp` opens from, since a scratch has no problem to name a judge with.
+    template_file = false,
     evaluate_template_modifiers = false,
     -- Where the cursor lands when tuna opens a solution made from the template — a
     -- downloaded problem/contest, a problem stepped onto with `:Tuna next`/`prev`, or

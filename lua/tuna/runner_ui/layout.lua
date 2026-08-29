@@ -6,7 +6,7 @@
 -- A layout names the panes it wants. Leaving one out is a legitimate choice — not
 -- everyone wants the Errors pane taking a quarter of the screen — so an omitted
 -- pane must simply not be drawn, never break the grid around it (competitest
--- issue #85). The pane's *buffer* still exists either way, so its content is kept
+-- upstream). The pane's *buffer* still exists either way, so its content is kept
 -- and stays reachable in the viewer; only the window is skipped.
 --
 -- `tc` is the one exception: the selector is where the cursor lives and where the
