@@ -183,7 +183,7 @@ local function resolve_template(override, ext, builtins, quiet)
             return c
         end
         if not quiet then
-            utils.notify("scaffold: template '" .. override .. "' not found; using the built-in.", "WARN")
+            utils.notify("scaffold: template '" .. override .. "' not found, using the built-in.", "WARN")
         end
     end
     return builtins[ext]
@@ -221,7 +221,7 @@ function M.create(kind, bufnr, ext)
     local bufname = vim.api.nvim_buf_get_name(bufnr)
     ext = ext or vim.fn.fnamemodify(bufname, ":e")
     if ext == "" then
-        utils.notify("scaffold: no language to target — open a solution file, or pass an extension.")
+        utils.notify("scaffold: no language to target, open a solution file or pass an extension.")
         return
     end
 

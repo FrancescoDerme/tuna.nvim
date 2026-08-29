@@ -420,4 +420,90 @@ function RunnerCore:save_testcase(tcnum, input, expected)
     return true
 end
 
+---Lift the cases this row's markers bracket out into rows of their own, writing them
+---to disk as it goes.
+---
+---The rows are what makes this worth having: a case buried in a testcase that fails as
+---a whole gets a verdict of its own, so the answer is on screen instead of somewhere in
+---a wall of output. The row keeps its number and its place, holding what was outside
+---the markers; the lifted cases are appended.
+---
+---Worth knowing when a case passes on its own but the original still fails: that is
+---state left over between cases (an uncleared array, a stale answer), and it is only
+---visible because the two are in front of each other.
+---@param tcnum integer
+---@param char string separator character
+---@param input string? text to split instead of the stored input (an unsaved edit)
+---@param expected string? text to split instead of the stored expected output
+---@return boolean # whether anything was split
+function RunnerCore:split_testcase(tcnum, char, input, expected)
+    local tc_module = require("tuna.testcases")
+    local bufnr = self:edit_bufnr()
+    -- Read before the split, since the split rewrites it. The pane text wins where
+    -- there is one: it is the input the user marked up, and the input being split.
+    local before = input or (tc_module.buf_get_testcases(bufnr)[tcnum] or {}).input
+
+    local numbers, err, summary = tc_module.buf_split_testcase(bufnr, tcnum, char, input, expected)
+    if not numbers then
+        utils.notify("split testcase " .. tcnum .. ": " .. err .. ".")
+        return false
+    end
+
+    for _, n in ipairs(numbers) do
+        if n ~= tcnum then
+            self:add_testcase_row(n)
+        end
+    end
+    self:sync_rows(numbers)
+    self:update_ui(true) -- the new rows show while the question is still up
+    utils.notify(summary .. ".", "INFO")
+    -- Held back until the count question is answered: accepting rewrites the same
+    -- testcases, so running now would judge input that is about to change — and by the
+    -- time the answer came the first run would still be in flight, which is precisely
+    -- when a re-run is refused. `offer_case_counts` settles either way, so the run
+    -- happens whatever the answer, and only once.
+    tc_module.offer_case_counts(bufnr, numbers, before, function()
+        self:run_rows(self:sync_rows(numbers))
+    end)
+    return true
+end
+
+---@private
+---Point the rows for `numbers` at what is now on disk.
+---@param numbers integer[]
+---@return integer[] rows the row indices that stand for them
+function RunnerCore:sync_rows(numbers)
+    local tctbl = require("tuna.testcases").buf_get_testcases(self:edit_bufnr())
+    local rows = {}
+    for _, n in ipairs(numbers) do
+        local case = tctbl[n] or {}
+        for _, i in ipairs(self:rows_for(n)) do
+            self.tcdata[i].stdin = case.input or ""
+            self.tcdata[i].expected = case.output or ""
+            rows[#rows + 1] = i
+        end
+    end
+    return rows
+end
+
+---@private
+---Run the rows a split produced. Splitting exists to get a verdict per case, so the
+---cases run without being asked for a second time.
+---@param rows integer[]
+function RunnerCore:run_rows(rows)
+    if not self:idle() then
+        self:update_ui(true) -- a run is in flight; renumbering its lanes is not safe
+    elseif self.preloaded then
+        -- Nothing has been built yet (`:Tuna show_ui` before any run), so the rows
+        -- cannot be run one at a time: the first `run_single` compiles and clears
+        -- `preloaded`, leaving every row after it to spawn a binary that is not there
+        -- yet. Running the lot builds first, and every mode the UI drives has it.
+        self:run_testcases()
+    else
+        for _, i in ipairs(rows) do
+            self:run_single(i)
+        end
+    end
+end
+
 return M

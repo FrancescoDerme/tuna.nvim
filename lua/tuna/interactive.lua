@@ -711,7 +711,7 @@ function M.run(bufnr, args)
             local ipath = tools.find(dir, "interactor", cfg)
             if not ipath then
                 utils.notify(
-                    "interactive: no interactor found — create a sibling 'interactor.*' file, "
+                    "interactive: no interactor found, create a sibling 'interactor.*' file, "
                         .. "set 'interactive.interactor', or use ':Tuna run interactive live|feed'."
                 )
                 return

@@ -319,7 +319,7 @@ function M.browse(bufnr)
                     bufnr,
                     restore,
                     function(s)
-                        return s.name .. "   (whole file — no guards in it)"
+                        return s.name .. "   (whole file, no guards in it)"
                     end
                 )
                 return
@@ -345,7 +345,7 @@ function M.browse(bufnr)
             for _, s in ipairs(snips) do
                 lines[#lines + 1] = ("%s   (%d lines)"):format(s.name, #s.lines)
             end
-            return { title = f.rel .. " — snippets", lines = lines, filetype = "text" }
+            return { title = f.rel .. ", snippets", lines = lines, filetype = "text" }
         end)
     )
 end
@@ -466,7 +466,7 @@ function M.search(bufnr)
     bufnr = bufnr or vim.api.nvim_get_current_buf()
     local ok, pickers = pcall(require, "telescope.pickers")
     if not ok then
-        utils.notify("library: telescope isn't installed — ':Tuna lib' and ':Tuna lib snippet' need nothing.", "WARN")
+        utils.notify("library: telescope isn't installed, use ':Tuna lib' or ':Tuna lib snippet' instead.", "WARN")
         return
     end
     local finders = require("telescope.finders")

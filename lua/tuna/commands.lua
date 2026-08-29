@@ -18,7 +18,7 @@ local M = {}
 -- Sub-argument completions for subcommands that take a second word.
 local subcommand_args = {
     run = tools.MODES,
-    testcase = { "add", "edit", "delete" },
+    testcase = { "add", "edit", "delete", "split" },
     convert = { "files", "single_file", "directory" },
     download = { "testcases", "problem", "contest", "sync", "persistently", "status", "stop" },
     scaffold = { "checker", "generator", "brute", "interactor" },
@@ -106,6 +106,50 @@ function M.delete_testcase(tcnum)
     else
         require("tuna.widgets").picker(bufnr, tctbl, "Delete a Testcase", delete, api.nvim_get_current_win())
     end
+end
+
+---Lift the cases a testcase's markers bracket out into testcases of their own.
+---
+---`sep` defaults to `testcases_split_markers`, so the common form is just
+---`:Tuna testcase split 0`. Markers come in pairs and what they bracket is the user's
+---call — see `testcases.split_testcase` for why nothing can infer it.
+---@param tcnum integer? testcase to split
+---@param sep string? marker character
+function M.split_testcase(tcnum, sep)
+    local bufnr = api.nvim_get_current_buf()
+    config.load_buffer_config(bufnr)
+    local cfg = config.get_buffer_config(bufnr)
+    sep = (sep and sep ~= "") and sep or cfg.testcases_split_markers
+
+    -- With one testcase there is nothing to choose between, so `:Tuna testcase split`
+    -- means that one. With several, ask the way `edit`/`delete` ask.
+    if not tcnum then
+        local tctbl = testcases.buf_get_testcases(bufnr)
+        local nums = vim.tbl_keys(tctbl)
+        if #nums == 0 then
+            utils.notify("testcase split: there are no testcases to split.")
+            return
+        end
+        if #nums > 1 then
+            require("tuna.widgets").picker(bufnr, tctbl, "Split a Testcase", function(n)
+                M.split_testcase(n, sep)
+            end, api.nvim_get_current_win())
+            return
+        end
+        tcnum = nums[1]
+    end
+
+    -- Read before the split, since the split rewrites it: whether the count offer is
+    -- made at all depends on how the testcase looked going in.
+    local before = (testcases.buf_get_testcases(bufnr)[tcnum] or {}).input
+
+    local numbers, err, summary = testcases.buf_split_testcase(bufnr, tcnum, sep)
+    if not numbers then
+        utils.notify("testcase split: " .. err .. ".")
+        return
+    end
+    utils.notify(summary .. ".", "INFO")
+    testcases.offer_case_counts(bufnr, numbers, before)
 end
 
 ---Convert this buffer's testcases to a different storage backend. Unlike
@@ -425,12 +469,23 @@ M.subcommands = {
             M.edit_testcase(true)
         elseif mode == "delete" then
             M.delete_testcase(tonumber(args[2]))
+        elseif mode == "split" then
+            -- `:Tuna testcase split -` — a first argument that is not a number is the
+            -- marker, since the testcase it would otherwise name can be implied. Spelled
+            -- out rather than with `and`/`or`: the middle value is nil whenever no marker
+            -- was given, which collapses the expression onto the number.
+            local n = tonumber(args[2])
+            if n then
+                M.split_testcase(n, args[3])
+            else
+                M.split_testcase(nil, args[2])
+            end
         elseif tonumber(mode) then
             -- `:Tuna testcase 3` — a bare number is the testcase to edit, since that is
             -- what the bare form does.
             M.edit_testcase(false, tonumber(mode))
         else
-            utils.notify("testcase: unknown mode '" .. tostring(mode) .. "' (add | edit | delete).")
+            utils.notify("testcase: unknown mode '" .. tostring(mode) .. "' (add | edit | delete | split).")
         end
     end,
     convert = function(args)
@@ -580,7 +635,7 @@ function M.complete(arg_lead, cmd_line, cursor_pos)
     elseif
         (count == 3 or (count == 4 and not ending_space))
         and words[2] == "testcase"
-        and (words[3] == "edit" or words[3] == "delete")
+        and (words[3] == "edit" or words[3] == "delete" or words[3] == "split")
     then
         -- The numbers that actually exist, so `:Tuna testcase delete <Tab>` never
         -- offers one the next thing it says is "doesn't exist".

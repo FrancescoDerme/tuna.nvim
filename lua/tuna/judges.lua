@@ -118,7 +118,7 @@ function M.parse(task, judge_parsers)
         local ok, res = pcall(parser, { judge = judge, contest = contest, group = group, task = task })
         if not ok then
             require("tuna.utils").notify(
-                "judge parser for '" .. judge .. "' errored; using the raw contest name.",
+                "judge parser for '" .. judge .. "' errored, using the raw contest name.",
                 "WARN"
             )
         elseif type(res) == "table" then

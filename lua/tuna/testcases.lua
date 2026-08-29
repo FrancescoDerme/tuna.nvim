@@ -626,6 +626,323 @@ function M.buf_delete_testcase(bufnr, tcnum)
     end
 end
 
+--------------------------------------------------------------------------------
+-- Splitting a testcase: lifting out the cases its markers bracket
+--------------------------------------------------------------------------------
+
+---`n` of `thing`, pluralised.
+---@param n integer
+---@param thing string
+---@return string
+local function count(n, thing)
+    return n .. " " .. thing .. (n == 1 and "" or "s")
+end
+
+---Whether `line` is a marker: nothing but repetitions of `char`.
+---
+---Any run of the character counts, so a `-` marker and the `----` people actually
+---type are the same thing, and the count needn't be consistent between markers. The
+---whole line has to be it, or a line like `1 2 -3` would cut a case in half.
+---@param line string
+---@param char string
+---@return boolean
+local function is_marker(line, char)
+    local trimmed = vim.trim(line)
+    return trimmed ~= "" and trimmed:match("^" .. vim.pesc(char) .. "+$") ~= nil
+end
+
+---Join a block of lines back into testcase text, dropping trailing blank lines.
+---@param lines string[]
+---@return string
+local function join(lines)
+    local out = vim.deepcopy(lines)
+    while #out > 0 and vim.trim(out[#out]) == "" do
+        table.remove(out)
+    end
+    return #out > 0 and (table.concat(out, "\n") .. "\n") or ""
+end
+
+---Take `text` apart into the regions its markers bracket and everything else.
+---
+---Markers come in **pairs**: the first opens a region, the second closes it. What is
+---between them is a case in its own right; what is outside every pair — the text
+---before the first marker, between one pair and the next, and after the last — is one
+---piece, concatenated in order. An unclosed pair is reported rather than guessed at.
+---@param text string?
+---@param char string
+---@return { marked: string[], rest: string }? blocks, integer markers
+local function partition(text, char)
+    local marked, rest, current = {}, {}, {}
+    local inside, markers = false, 0
+
+    for _, line in ipairs(vim.split(text or "", "\n", { plain = true })) do
+        if is_marker(line, char) then
+            markers = markers + 1
+            if inside then
+                marked[#marked + 1] = join(current)
+            else
+                vim.list_extend(rest, current)
+            end
+            current, inside = {}, not inside
+        else
+            current[#current + 1] = line
+        end
+    end
+    if inside then
+        return nil, markers -- a marker was opened and never closed
+    end
+    vim.list_extend(rest, current)
+    return { marked = marked, rest = join(rest) }, markers
+end
+
+---Lift the cases a testcase's markers bracket out into cases of their own.
+---
+---Deliberately **mechanical**: where a case ends is a property of the problem's input
+---format, not something that can be read off the text (`4` then four lines is a
+---multitest, but it is equally a 4x4 matrix), so the boundaries are the user's to
+---place and this only honours them. What is between a pair of markers becomes a
+---testcase exactly as written — nothing prepended, stripped or renumbered.
+---
+---Marking is by **pairs** rather than by single separators cutting the text into
+---parts, so nothing becomes a case without having been bracketed on both sides: the
+---text you did not mark is left as one piece, which is what makes it safe to reach for
+---mid-contest on a testcase you have not read closely.
+---@param input string?
+---@param expected string?
+---@param char string marker character
+---@return { rest: { input: string, output: string }, cases: { input: string, output: string }[] }?
+---@return string? err why it could not split
+function M.split_testcase(input, expected, char)
+    if type(char) ~= "string" or char == "" then
+        return nil, "no marker character given"
+    end
+    char = char:sub(1, 1)
+
+    local ins, in_markers = partition(input, char)
+    if in_markers == 0 then
+        return nil, "the input has no '" .. char .. "' marker lines"
+    end
+    if not ins then
+        return nil,
+            ("the input has %s, but markers come in pairs, one to open a case and one to close it"):format(
+                count(in_markers, "'" .. char .. "' marker line")
+            )
+    end
+    for _, case in ipairs(ins.marked) do
+        if case == "" then
+            return nil, "two markers with nothing between them mark an empty case"
+        end
+    end
+
+    -- The expected output is marked up the same way, and has to agree on how many
+    -- cases there are: pairing two lifted inputs with one answer would leave a case
+    -- judged on nothing and call it correct by accident.
+    local outs, out_markers = partition(expected, char)
+    if out_markers == 0 then
+        -- Only the input was marked up. If there are answers there, this is a slip
+        -- worth stopping for: the split rewrites the testcase, so going ahead would
+        -- leave every case unjudged *and* throw the answers away. Refusing costs one
+        -- more edit; the alternative silently destroys them.
+        if vim.trim(expected or "") ~= "" then
+            return nil,
+                ("the input marks %s but the expected output has no '%s' markers, so mark it up too or clear it"):format(
+                    count(#ins.marked, "case"),
+                    char
+                )
+        end
+        -- No answers to begin with: each case runs and shows its own output, which is
+        -- the useful half on its own.
+        local cases = {}
+        for i, text in ipairs(ins.marked) do
+            cases[i] = { input = text, output = "" }
+        end
+        return { rest = { input = ins.rest, output = "" }, cases = cases }
+    end
+    if not outs then
+        return nil,
+            ("the expected output has %s, but markers come in pairs"):format(count(out_markers, "'" .. char .. "' marker line"))
+    end
+    if #outs.marked ~= #ins.marked then
+        return nil,
+            ("the input marks %s but the expected output marks %d"):format(count(#ins.marked, "case"), #outs.marked)
+    end
+
+    local cases = {}
+    for i, text in ipairs(ins.marked) do
+        cases[i] = { input = text, output = outs.marked[i] }
+    end
+    return { rest = { input = ins.rest, output = outs.rest }, cases = cases }
+end
+
+---Split testcase `tcnum` of a buffer, writing the cases back through the backend.
+---
+---`tcnum` keeps the **rest** — the text outside the markers — so the testcase you
+---split stays the testcase it was, minus what you lifted out of it, and the cases take
+---the lowest free numbers. Renumbering the testcases *after* it would rename files of
+---cases the user never touched. Marking the whole testcase (a marker at each end)
+---leaves no rest, and then the first case takes `tcnum` rather than leaving an empty
+---testcase behind.
+---
+---`input`/`expected` override what is stored, for a caller holding text the user has
+---typed but not yet written — the results UI, where the markers are put in by editing
+---the pane. The split writes every case, `tcnum` included, so that edit is committed
+---by the split itself rather than by a save that would first run the marked-up input
+---as if it were a testcase.
+---@param bufnr integer
+---@param tcnum integer
+---@param char string marker character
+---@param input string? text to split instead of the stored input
+---@param expected string? text to split instead of the stored expected output
+---@return integer[]? numbers every testcase number written, `tcnum` first
+---@return string? err
+---@return string? summary what happened, for the caller to report
+function M.buf_split_testcase(bufnr, tcnum, char, input, expected)
+    local tctbl = M.buf_get_testcases(bufnr)
+    local tc = tctbl[tcnum]
+    if not tc and input == nil then
+        return nil, "testcase " .. tostring(tcnum) .. " doesn't exist"
+    end
+    tc = tc or {}
+
+    local split, err = M.split_testcase(input or tc.input, expected or tc.output, char)
+    if not split then
+        return nil, err
+    end
+
+    local kept_rest = split.rest.input ~= "" or split.rest.output ~= ""
+    ---@type { input: string, output: string }[]
+    local write = {}
+    if kept_rest then
+        write[1] = split.rest
+        vim.list_extend(write, split.cases)
+    else
+        write = split.cases
+    end
+
+    local numbers = { tcnum }
+    local n = 0
+    for i = 2, #write do
+        while tctbl[n] or vim.tbl_contains(numbers, n) do
+            n = n + 1
+        end
+        numbers[i] = n
+    end
+    for i, case in ipairs(write) do
+        M.buf_save_testcase(bufnr, numbers[i], case.input, case.output)
+    end
+
+    local lifted = table.concat({ unpack(numbers, kept_rest and 2 or 1) }, ", ")
+    local summary
+    if kept_rest then
+        summary = ("testcase %d: lifted %s out into %s, and testcase %d keeps the rest"):format(
+            tcnum,
+            count(#split.cases, "case"),
+            (#split.cases == 1 and "testcase " or "testcases ") .. lifted,
+            tcnum
+        )
+    else
+        summary = ("testcase %d: everything was inside the markers, so it became %d testcases: %s"):format(
+            tcnum,
+            #split.cases,
+            lifted
+        )
+    end
+    return numbers, nil, summary
+end
+
+---The multitest count a testcase's input begins with, if it begins with one: a first
+---line holding a single non-negative integer and nothing else.
+---
+---That shape is the near-universal Codeforces convention (`t`, then `t` cases), and it
+---is the one thing the split leaves inconsistent — lifting a case out of a multitest
+---makes the count on the line above it wrong. It is only ever a *guess* that the number
+---means what it looks like, which is why it is offered rather than applied.
+---@param text string?
+---@return integer? count
+function M.leading_case_count(text)
+    local first = vim.split(text or "", "\n", { plain = true })[1]
+    local n = first and first:match("^%s*(%d+)%s*$")
+    return n and tonumber(n) or nil
+end
+
+---Make the counts agree again after a split: the kept testcase's first line becomes
+---`remaining`, and each lifted case gets a `1` of its own on top.
+---@param bufnr integer
+---@param numbers integer[] as returned by `buf_split_testcase`, the kept testcase first
+---@param remaining integer
+function M.apply_case_counts(bufnr, numbers, remaining)
+    local tctbl = M.buf_get_testcases(bufnr)
+    local kept = tctbl[numbers[1]]
+    if kept then
+        local lines = vim.split(kept.input or "", "\n", { plain = true })
+        lines[1] = tostring(remaining)
+        M.buf_save_testcase(bufnr, numbers[1], table.concat(lines, "\n"), kept.output)
+    end
+    for i = 2, #numbers do
+        local case = tctbl[numbers[i]]
+        if case then
+            M.buf_save_testcase(bufnr, numbers[i], "1\n" .. (case.input or ""), case.output)
+        end
+    end
+end
+
+---Offer to fix the counts up, when the testcase that was split looks like a multitest.
+---
+---Offered, not done: `3` on the first line is a case count in most Codeforces problems
+---and the first value of the only case in plenty of others, and nothing in the text
+---says which. So it is put in front of the user with the arithmetic spelled out, in the
+---same float every other tuna question uses — and dismissing it is "no", which is the
+---answer that changes nothing.
+---
+---Nothing is offered unless the *original* input began with a count. Reading it off the
+---kept testcase instead would fire on `-\nA\n-\n3\nB`, where the 3 was never a count
+---and only became the first line because the text above it was lifted out.
+---`on_settled` runs once the question is answered **either way** — accepted, declined,
+---or dismissed — and immediately when there is nothing to ask. It is what lets the
+---caller hold the run back until the testcases have stopped changing: running at split
+---time and again on acceptance would either judge the un-adjusted input or, with the
+---first run still in flight, leave the adjusted one unjudged.
+---@param bufnr integer
+---@param numbers integer[] as returned by `buf_split_testcase`
+---@param original_input string? the input as it was before the split
+---@param on_settled fun()? called once, after the answer
+function M.offer_case_counts(bufnr, numbers, original_input, on_settled)
+    on_settled = on_settled or function() end
+    local total = M.leading_case_count(original_input)
+    local lifted = #numbers - 1
+    -- Fewer cases claimed than were lifted out means the number is not a case count.
+    if not total or lifted < 1 or total < lifted then
+        on_settled()
+        return
+    end
+    local remaining = total - lifted
+
+    local answered = false
+    local function settle(accepted)
+        if answered then
+            return
+        end
+        answered = true
+        if accepted then
+            M.apply_case_counts(bufnr, numbers, remaining)
+            utils.notify(
+                ("testcase %d now starts with %d, and each lifted case starts with 1"):format(numbers[1], remaining),
+                "INFO"
+            )
+        end
+        on_settled()
+    end
+
+    require("tuna.widgets").menu({
+        ("Yes: %d becomes %d here, and each new testcase starts with 1"):format(total, remaining),
+        "No, leave the numbers alone",
+    }, ("testcase %d starts with '%d', is that a case count?"):format(numbers[1], total), function(idx)
+        settle(idx == 1)
+    end, vim.api.nvim_get_current_win(), function()
+        settle(false) -- dismissed: "no", the answer that changes nothing
+    end)
+end
+
 ---------------- DEPRECATED / COMPAT ----------------
 -- Keeps the not-yet-ported `add_testcase` command working. Uses the prototype's
 -- ad-hoc `tests/<name>/` layout; removed once that command moves to the backend

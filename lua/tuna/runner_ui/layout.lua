@@ -80,10 +80,10 @@ function M.resolve(layout, option, fallback)
         leaves, err = collect(layout, {})
     end
     if leaves and not vim.tbl_contains(leaves, "tc") then
-        err = "no 'tc' pane — the testcase selector cannot be left out"
+        err = "no 'tc' pane, the testcase selector cannot be left out"
     end
     if err then
-        utils.notify(("%s: %s; using the default layout."):format(option, err), "WARN")
+        utils.notify(("%s: %s, using the default layout."):format(option, err), "WARN")
         leaves = collect(fallback, {}) or {}
         layout = fallback
     end

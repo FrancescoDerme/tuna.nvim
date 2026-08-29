@@ -27,6 +27,17 @@ local judges = require("tuna.judges")
 
 local M = {}
 
+---Notify from a libuv callback. The listener's accept/read handlers run in a **fast
+---event context**, where `vim.notify` is not allowed (verified: it raises), so anything
+---the listener has to say is deferred to the main loop.
+---@param msg string
+---@param level string?
+local function notify_soon(msg, level)
+    vim.schedule(function()
+        utils.notify(msg, level)
+    end)
+end
+
 ---A Competitive Companion task (https://github.com/jmerle/competitive-companion).
 ---Only the fields tuna reads are documented here.
 ---@class tuna.CCTask
@@ -43,6 +54,56 @@ local M = {}
 --------------------------------------------------------------------------------
 -- Listener: the TCP listener
 --------------------------------------------------------------------------------
+
+---Make a decoded POST body safe to put through the pipeline, or reject it.
+---
+---Whatever arrives on the port is untrusted: an old or patched Competitive Companion, a
+---third-party sender, or a stray request from a browser. The pipeline used to index it
+---directly, so a task without a `batch` took the whole listener down inside a libuv
+---callback — a raw Vim traceback rather than a tuna message — and left the batch
+---processor wedged, silently stalling every later download.
+---
+---Only the **name** is required: it is what `$(PROBLEM)` names the file and the folder
+---after, so there is nothing sensible to invent for it. Everything else is repaired,
+---since a missing field has an unambiguous reading — no `batch` means one task on its
+---own, no `tests` means none were parsed.
+---@param task any the decoded JSON
+---@return tuna.CCTask? task, string? reason why it was rejected
+local function validate_task(task)
+    if type(task) ~= "table" then
+        return nil, "it is not a JSON object"
+    end
+    if type(task.name) ~= "string" or task.name == "" then
+        return nil, "it has no problem name"
+    end
+
+    task.url = type(task.url) == "string" and task.url or ""
+    task.group = type(task.group) == "string" and task.group or ""
+    task.languages = type(task.languages) == "table" and task.languages or {}
+
+    -- Keep only entries shaped like a testcase; a half-parsed one is dropped rather
+    -- than written out as the string "nil".
+    local tests = {}
+    for _, tc in ipairs(type(task.tests) == "table" and task.tests or {}) do
+        if type(tc) == "table" then
+            tests[#tests + 1] = {
+                input = type(tc.input) == "string" and tc.input or "",
+                output = type(tc.output) == "string" and tc.output or "",
+            }
+        end
+    end
+    task.tests = tests
+
+    local batch = type(task.batch) == "table" and task.batch or {}
+    local size = tonumber(batch.size)
+    task.batch = {
+        -- A batch with no id is its own batch: an id shared by accident would merge two
+        -- unrelated downloads into one contest.
+        id = type(batch.id) == "string" and batch.id ~= "" and batch.id or ("tuna-" .. vim.uv.hrtime()),
+        size = (size and size >= 1) and math.floor(size) or 1,
+    }
+    return task
+end
 
 ---Give a task the URL that should *identify* the problem, and remember separately
 ---where it was actually browsed from.
@@ -111,7 +172,7 @@ function Listener.new(address, port, callback)
 
     local listening, listen_err = server:listen(128, function(err)
         if err then
-            utils.notify("listener listen error: " .. err)
+            notify_soon("download: the listener stopped accepting connections, " .. err)
             return
         end
         local client = vim.uv.new_tcp()
@@ -137,12 +198,29 @@ function Listener.new(address, port, callback)
             client:close()
             -- The JSON body is the last line, after the blank line ending the
             -- HTTP headers. `vim.json.decode` is safe to call off the main loop.
+            --
+            -- Nothing below may throw: this is a libuv callback, so an error here is a
+            -- raw Vim traceback over a socket read, and the pipeline behind it never
+            -- learns that the task it was waiting for is not coming. A request tuna
+            -- cannot make sense of is therefore reported and dropped, not raised.
             local body = string.match(table.concat(chunks), "^.+\r\n(.+)$")
-            if body then
-                local ok_decode, task = pcall(vim.json.decode, body)
-                if ok_decode and type(task) == "table" then
-                    callback(canonicalize_task(task))
-                end
+            if not body then
+                notify_soon("download: ignored a request with no body.", "WARN")
+                return
+            end
+            local ok_decode, decoded = pcall(vim.json.decode, body)
+            if not ok_decode then
+                notify_soon("download: ignored a request whose body is not JSON.", "WARN")
+                return
+            end
+            local task, reason = validate_task(decoded)
+            if not task then
+                notify_soon("download: ignored a malformed task, " .. reason .. ".", "WARN")
+                return
+            end
+            local ok_task, err_task = pcall(callback, canonicalize_task(task))
+            if not ok_task then
+                notify_soon("download: could not accept task '" .. task.name .. "', " .. tostring(err_task))
             end
         end)
     end)
@@ -204,7 +282,8 @@ end
 local BatchesSerialProcessor = {}
 BatchesSerialProcessor.__index = BatchesSerialProcessor
 
----@param callback fun(tasks: tuna.CCTask[], finished: fun()) must call `finished()` when done
+---@param callback fun(tasks: tuna.CCTask[], finished: fun()) must call `finished()` when
+---done. Run on the main loop, under a guard — see `process`.
 ---@return tuna.BatchesSerialProcessor
 function BatchesSerialProcessor.new(callback)
     return setmetatable({ queue = {}, callback = callback, busy = false, stopped = false }, BatchesSerialProcessor)
@@ -223,13 +302,31 @@ function BatchesSerialProcessor:process()
     end
     self.busy = true
     local batch = table.remove(self.queue, 1)
-    self.callback(
-        batch,
-        vim.schedule_wrap(function()
-            self.busy = false
-            self:process()
-        end)
-    )
+
+    -- `finished` releases the queue, so it must run exactly once however the handler
+    -- ends. Twice would dequeue two batches at the same time and let their dialogs
+    -- interleave, which is the one thing this object exists to prevent.
+    local released = false
+    local finished = vim.schedule_wrap(function()
+        if released then
+            return
+        end
+        released = true
+        self.busy = false
+        self:process()
+    end)
+
+    -- Scheduled here rather than by the caller so the handler — which touches buffers,
+    -- files and floating prompts — runs on the main loop *and* under a guard: an error
+    -- inside it used to leave `busy` set for good, silently stalling every download
+    -- afterwards. Reported like any other tuna failure, and the queue moves on.
+    vim.schedule(function()
+        local ok, err = pcall(self.callback, batch, finished)
+        if not ok then
+            utils.notify("download: storing the batch failed, " .. tostring(err))
+            finished()
+        end
+    end)
 end
 
 function BatchesSerialProcessor:stop()
@@ -770,14 +867,14 @@ end
 ---@return string? # an error message on failure, otherwise `nil`
 function M.start_downloading(mode, port, notify_on_start, notify_on_download, bufnr, cfg)
     if rs then
-        return "already downloading; stop it before changing mode"
+        return "already downloading, stop it before changing mode"
     end
     if mode == "testcases" and not bufnr then
         return "a buffer is required to download testcases"
     end
 
     local handler = make_handler(mode, notify_on_download, bufnr, cfg)
-    local processor = BatchesSerialProcessor.new(vim.schedule_wrap(handler))
+    local processor = BatchesSerialProcessor.new(handler)
     local collector = TasksCollector.new(function(tasks)
         processor:enqueue(tasks)
     end)

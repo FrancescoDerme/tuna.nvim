@@ -295,7 +295,7 @@ function M.change_dir(dir, cfg)
         return
     end
     if cmd ~= "cd" and cmd ~= "tcd" and cmd ~= "lcd" then
-        utils.notify("cd_command must be one of 'cd', 'tcd', 'lcd' or false — got '" .. tostring(cmd) .. "'.", "WARN")
+        utils.notify("cd_command must be one of 'cd', 'tcd', 'lcd' or false, got '" .. tostring(cmd) .. "'.", "WARN")
         return
     end
     vim.cmd(cmd .. " " .. vim.fn.fnameescape(dir))
@@ -330,7 +330,7 @@ function M.open_problem()
     load()
     local p = M.state.problem
     if not p then
-        utils.notify("last: no problem visited yet — download one, or open a solution with its testcases.", "WARN")
+        utils.notify("last: no problem visited yet, download one or open a solution with its testcases.", "WARN")
         return
     end
     if not utils.directory_exists(p.dir) then
@@ -393,7 +393,7 @@ function M.open_contest()
     load()
     local c = M.state.contest
     if not c then
-        utils.notify("last: no contest visited yet — get one with `:Tuna download contest`.", "WARN")
+        utils.notify("last: no contest visited yet, get one with `:Tuna download contest`.", "WARN")
         return
     end
     if not utils.directory_exists(c.dir) then

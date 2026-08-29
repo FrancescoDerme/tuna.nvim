@@ -70,17 +70,17 @@ function M.new(bufnr)
     if cfg.compile_command[filetype] then
         compile_command = eval_command(cfg.compile_command[filetype])
         if not compile_command then
-            utils.notify("compile command for '" .. filetype .. "' is malformed; cannot run.")
+            utils.notify("compile command for '" .. filetype .. "' is malformed, cannot run.")
             return nil
         end
     end
     if not cfg.run_command[filetype] then
-        utils.notify("no run command configured for filetype '" .. filetype .. "'; cannot run.")
+        utils.notify("no run command configured for filetype '" .. filetype .. "', cannot run.")
         return nil
     end
     local run_command = eval_command(cfg.run_command[filetype])
     if not run_command then
-        utils.notify("run command for '" .. filetype .. "' is malformed; cannot run.")
+        utils.notify("run command for '" .. filetype .. "' is malformed, cannot run.")
         return nil
     end
 
@@ -106,14 +106,14 @@ function M.new(bufnr)
         if expanded then
             resolved_checker = tools.checker_spec(expanded, cfg)
         else
-            utils.notify("checker path is malformed; falling back to builtin comparison.", "WARN")
+            utils.notify("checker path is malformed, falling back to builtin comparison.", "WARN")
         end
     elseif type(cfg.checker) == "table" and cfg.checker.exec then
         local exec = utils.buf_eval_string(bufnr, cfg.checker.exec)
         if exec then
             resolved_checker = { exec = exec, args = cfg.checker.args }
         else
-            utils.notify("checker command is malformed; falling back to builtin comparison.", "WARN")
+            utils.notify("checker command is malformed, falling back to builtin comparison.", "WARN")
         end
     end
 

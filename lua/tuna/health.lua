@@ -34,7 +34,7 @@ local function check_neovim()
     else
         health.error(
             "Neovim 0.10+ is required",
-            { "tuna uses vim.system() and vim.uv; upgrade Neovim to 0.10 or newer" }
+            { "tuna uses vim.system() and vim.uv, so upgrade Neovim to 0.10 or newer" }
         )
     end
 end
@@ -48,7 +48,7 @@ local function check_setup()
         return config.current_setup
     end
     health.warn(
-        "require('tuna').setup() has not been called — reporting against defaults",
+        "require('tuna').setup() has not been called, reporting against defaults",
         { "call require('tuna').setup({ ... }) in your config" }
     )
     return config.defaults
@@ -98,7 +98,7 @@ local function check_download(cfg)
     if download.is_downloading() then
         health.ok(("listening (mode: %s)"):format(download.mode() or "on"))
     else
-        health.info("not currently listening — start with `:Tuna download <mode>`")
+        health.info("not currently listening, start with `:Tuna download <mode>`")
     end
     health.info(
         ("point the Competitive Companion browser extension at port %d"):format(cfg.companion_port)
@@ -147,7 +147,7 @@ local function check_submit(cfg)
             local only_browser = providers.browser and vim.tbl_count(providers) == 1
             if not only_browser then
                 health.info(
-                    "submit is unconfigured (submit.command is nil) — `:Tuna submit` will error until set"
+                    "submit is unconfigured (submit.command is nil), so `:Tuna submit` will error until set"
                 )
             end
         end
@@ -159,7 +159,7 @@ local function check_submit(cfg)
         else
             health.warn(
                 "browser provider needs a clipboard tool to copy the source",
-                { "install xclip/xsel/wl-clipboard (Linux) — see :help clipboard" }
+                { "install xclip/xsel/wl-clipboard (Linux), see :help clipboard" }
             )
         end
     end

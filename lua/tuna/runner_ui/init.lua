@@ -131,6 +131,18 @@ end
 ---@private
 ---The testcase index under the selector cursor (1:1 with `tcdata`; the Compile
 ---pseudo-testcase, when present, is row 1).
+---Whether `winid` is one of this UI's panes.
+---@param winid integer
+---@return boolean
+function RunnerUI:owns_win(winid)
+    for _, w in pairs(self.windows) do
+        if w.winid == winid then
+            return true
+        end
+    end
+    return false
+end
+
 function RunnerUI:cursor_tc()
     if not (self.windows.tc and api.nvim_win_is_valid(self.windows.tc.winid)) then
         return 1
@@ -238,7 +250,7 @@ function RunnerUI:legend_sections()
     local editable = {}
     if self.runner.editable_testcases then
         vim.list_extend(editable, {
-            { "edit", "just type — these are ordinary buffers" },
+            { "edit", "just type, these are ordinary buffers" },
             { "save + re-run", ":w" },
             { "", "" },
         })
@@ -248,7 +260,7 @@ function RunnerUI:legend_sections()
         { "close", keys("close") .. "  (normal mode)" },
         { "this legend", keys("help") },
         { "", "" },
-        { "everything else", "Vim's own — d deletes, r replaces, u undoes" },
+        { "everything else", "Vim's own, d deletes, r replaces, u undoes" },
     })
 
     local readonly = align({
@@ -268,6 +280,7 @@ function RunnerUI:legend_sections()
         { "", "" },
         { "new testcase", keys("add_testcase") },
         { "delete testcase", keys("delete_testcase") },
+        { "lift out marked cases", keys("split_testcase") },
         { "undo delete", keys("undo_delete") },
         { "", "" },
         { "switch pane", switch },
@@ -692,6 +705,42 @@ function RunnerUI:add_testcase()
 end
 
 ---@private
+---Lift the cases this row's markers bracket out into rows of their own. The marker is
+---`testcases_split_markers`, since a key cannot carry an argument —
+---`:Tuna testcase split <n> <marker>` takes one.
+function RunnerUI:split_testcase()
+    local tc = self.runner.tcdata[self:cursor_tc()]
+    if not self.runner:row_editable(tc) then
+        return
+    end
+    if not self.runner:idle() then
+        utils.notify("wait for the run to finish before splitting a testcase.", "WARN")
+        return
+    end
+    -- The markers are typed into the Input pane, so an unwritten edit *is* what the
+    -- user means by "this testcase". It is handed to the split rather than saved first:
+    -- saving re-runs what it saves, and the marked-up input is the one text that must
+    -- never be fed to the solution. The split writes every case including this row's,
+    -- so the edit is committed either way.
+    local n = tc.tcnum
+    self:capture_pending()
+    local p = self.pending[n]
+    local input = p and p.stdin or nil
+    local expected = p and p.expected or nil
+    if n == self.pane_tcnum then
+        input, expected = self:pane_text("si"), self:pane_text("eo")
+    end
+
+    if not self.runner:split_testcase(n, self.config.testcases_split_markers, input, expected) then
+        return
+    end
+    self.pending[n] = nil
+    if n == self.pane_tcnum then
+        self.pane_edited = false
+    end
+    self:update_ui(true)
+end
+
 ---Delete the testcase under the cursor. No confirmation: it goes on an undo stack
 ---the runner keeps, and `u` puts it back — cheaper to press than a dialog, and
 ---recoverable, which a dialog does not make it.
@@ -1094,6 +1143,9 @@ function RunnerUI:show_ui()
         map_tc("delete_testcase", function()
             self:delete_testcase()
         end)
+        map_tc("split_testcase", function()
+            self:split_testcase()
+        end)
         map_tc("undo_delete", function()
             self:undo_delete()
         end)
@@ -1106,6 +1158,61 @@ function RunnerUI:show_ui()
     for _, buf in ipairs(action_bufs) do
         surface.read_only(buf)
     end
+
+    -- Coming back to the UI after something else took the screen. Opening a file
+    -- explorer (or any window that steals focus) and closing it again leaves the cursor
+    -- in whatever window Neovim picks, which for a floating grid is the code buffer
+    -- *underneath* it — the UI is still on screen, and with its keys bound only inside
+    -- its own panes there is then no way back to it from the keyboard.
+    --
+    -- So the one hop out is remembered: the pane focus left, and the window it left for.
+    -- If that window is the one that closes, focus goes back to the pane. Deliberately
+    -- narrow — it fires only for the window the UI was actually displaced by, so closing
+    -- an unrelated split, or one entered after moving on somewhere else, does not yank
+    -- the cursor into a UI the user had finished with.
+    api.nvim_create_autocmd("WinLeave", {
+        group = self.augroup,
+        callback = function()
+            local cur = api.nvim_get_current_win()
+            self.leaving_pane = self:owns_win(cur) and cur or nil
+        end,
+    })
+    api.nvim_create_autocmd("WinEnter", {
+        group = self.augroup,
+        callback = function()
+            local cur = api.nvim_get_current_win()
+            if self:owns_win(cur) then
+                self.escaped_from, self.escaped_to = nil, nil -- back inside; nothing owed
+            elseif self.leaving_pane then
+                self.escaped_from, self.escaped_to = self.leaving_pane, cur
+            elseif cur ~= self.escaped_to then
+                self.escaped_from, self.escaped_to = nil, nil -- moved on elsewhere
+            end
+            self.leaving_pane = nil
+        end,
+    })
+    api.nvim_create_autocmd("WinClosed", {
+        group = self.augroup,
+        callback = function(args)
+            if tonumber(args.match) ~= self.escaped_to then
+                return
+            end
+            local pane = self.escaped_from
+            self.escaped_from, self.escaped_to = nil, nil
+            -- Scheduled: this fires *during* the close, and the window Neovim lands on
+            -- is not settled until it is over.
+            vim.schedule(function()
+                if
+                    self.ui_visible
+                    and pane
+                    and api.nvim_win_is_valid(pane)
+                    and not self:owns_win(api.nvim_get_current_win())
+                then
+                    api.nvim_set_current_win(pane)
+                end
+            end)
+        end,
+    })
 
     -- Moving in the selector switches which testcase the detail panes show.
     api.nvim_create_autocmd("CursorMoved", {

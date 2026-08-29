@@ -106,7 +106,7 @@ local function persist_task(ctx)
     -- goes is worth one line, and after this there is nothing left to announce.
     if store.mirror and select(2, live_mirror(dir, ctx.cfg)) then
         store.mirror, store.mirror_at, dirty = nil, nil, true
-        utils.notify("submit: this contest's mirror has expired; submitting to codeforces.com.", "INFO")
+        utils.notify("submit: this contest's mirror has expired, submitting to codeforces.com.", "INFO")
     end
 
     if dirty then
@@ -379,7 +379,7 @@ local function submit_url_for(url, ctx)
     if type(fn) == "function" then
         local ok, res = pcall(fn, url, ctx)
         if not ok then
-            utils.notify("submit: `url_rewrite` failed (" .. tostring(res) .. "); using the original URL.", "WARN")
+            utils.notify("submit: `url_rewrite` failed (" .. tostring(res) .. "), using the original URL.", "WARN")
             return url
         end
         out = res
@@ -392,7 +392,7 @@ local function submit_url_for(url, ctx)
     end
     if not is_valid_url(out) then
         utils.notify(
-            "submit: `url_rewrite` returned an invalid URL (" .. vim.inspect(out) .. "); using the original.",
+            "submit: `url_rewrite` returned an invalid URL (" .. vim.inspect(out) .. "), using the original.",
             "WARN"
         )
         return url
@@ -605,7 +605,7 @@ function M.run_terminal(cmd, scfg)
             return
         end
         if want == "toggleterm" then
-            utils.notify("submit: toggleterm requested but not installed; using a native terminal.", "WARN")
+            utils.notify("submit: toggleterm requested but not installed, using a native terminal.", "WARN")
         end
     end
     run_native(cmd, scfg)
@@ -809,6 +809,72 @@ local function strip_ansi(s)
     return s
 end
 
+-- Query parameters whose *value* must never reach a notification. The Codeforces
+-- API signs every request, so a submit tool that crashes mid-call dumps the URL it
+-- was calling — the user's `apiKey` and `apiSig` with it — into its panic message,
+-- and from there into a message the user may well be screen-sharing. Redacted by
+-- parameter *name* rather than by the shape of the value: a credential is whatever
+-- the query calls one, and guessing from entropy would miss as often as it fired.
+local SECRET_PARAMS = {
+    apikey = true,
+    apisig = true,
+    auth = true,
+    cookie = true,
+    password = true,
+    passwd = true,
+    secret = true,
+    session = true,
+    sessionid = true,
+    token = true,
+}
+
+-- The tool could not reach the judge. Matched on the transport's own words —
+-- these are what a Rust/Go/Python HTTP client says with the network down — since
+-- neither the exit code nor a judge-specific string can tell this case apart.
+local OFFLINE_HINTS = {
+    "dns error",
+    "name resolution",
+    "could not resolve",
+    "failed to lookup address",
+    "temporary failure",
+    "connection refused",
+    "connection reset",
+    "network is unreachable",
+    "no route to host",
+    "connect error",
+    "timed out",
+}
+
+-- A crash, not a message: the tool died on its own bug/assumption rather than
+-- reporting anything about the submission.
+local CRASH_HINTS = { "panicked at", "traceback (most recent call last)", "fatal error:" }
+
+-- A judge's real message is a sentence ("You can submit again in 10 seconds"); past
+-- this length what is being shown is a dump. `submit.log_file` keeps the whole thing.
+local MAX_TAIL = 160
+
+---Blank out the value of any credential-bearing query parameter in `s`.
+---@param s string
+---@return string
+local function redact(s)
+    return (s:gsub("([%w_%-]+)=([^&%s\"'}]+)", function(key, _)
+        if SECRET_PARAMS[key:lower()] then
+            return key .. "=<redacted>"
+        end
+    end))
+end
+
+---Clamp `s` to `MAX_TAIL` characters (not bytes, so a multi-byte character is never
+---cut in half).
+---@param s string
+---@return string
+local function clamp(s)
+    if vim.fn.strchars(s) <= MAX_TAIL then
+        return s
+    end
+    return vim.fn.strcharpart(s, 0, MAX_TAIL - 1) .. "…"
+end
+
 ---Pick the most informative line from a tool's output to show on failure.
 ---A verbose submit CLI logs a wall of `[INFO]`/`[NETWORK]` progress plus a
 ---cookie-save on exit, so the *last* line ("[INFO] save cookie to: …") is noise, not
@@ -868,7 +934,7 @@ local function meaningful_tail(err, out)
                                 or lj:find("alert")
                             )
                         then
-                            return lines[j] .. " — " .. lines[i]
+                            return lines[j] .. ", " .. lines[i]
                         end
                     end
                 end
@@ -885,6 +951,52 @@ local function meaningful_tail(err, out)
         return lines[#lines]
     end
     return pick(err) or pick(out) or ""
+end
+
+---Why the submit failed, in one line fit to be read.
+---
+---`meaningful_tail` exists to surface *the tool's own message*, and it finds it by
+---looking for a line that names an error. A crashed tool has no message, though —
+---only a dump — and that dump names an error on every line, so the heuristic picked
+---the longest, least readable one: a 450-character Rust panic (`reqwest::Error {
+---kind: Request, url: "…apiKey=…&apiSig=…", source: …ConnectFailed… }`), which is
+---not a sentence and carries the user's API credentials into a notification.
+---
+---So the two cases a tool can fail in *without having anything to say* are named
+---here instead, and only what is left falls through to the tail. Both are decided on
+---the transport's own words rather than on the exit code, which is `101` for a Rust
+---panic whatever caused it and says nothing about the network.
+---@param err string raw stderr
+---@param out string raw stdout
+---@param code integer? the tool's exit code
+---@return string message the notification line
+---@return string short a few words for the lualine indicator
+local function failure_reason(err, out, code)
+    local blob = strip_ansi(err .. "\n" .. out):lower()
+    local function mentions(hints)
+        for _, hint in ipairs(hints) do
+            if blob:find(hint, 1, true) then
+                return true
+            end
+        end
+        return false
+    end
+
+    -- Offline first: it is both the likelier cause and the one the user can act on.
+    -- A crash *caused* by being offline is an offline failure, not a crash — which is
+    -- exactly what a submitter that `unwrap()`s its HTTP call does with the wifi off.
+    if mentions(OFFLINE_HINTS) then
+        return "could not reach the judge, is the network up?", "no connection"
+    end
+    if mentions(CRASH_HINTS) then
+        return "the submit tool crashed (see 'submit.log_file' for its output)", "tool crashed"
+    end
+
+    local tail = meaningful_tail(err, out)
+    if tail == "" then
+        return "exited with code " .. tostring(code), "submit failed"
+    end
+    return clamp(redact(tail)), "submit failed"
 end
 
 ---Start index of the last (rightmost) match of Lua pattern `pat` in `hay`, or nil.
@@ -1061,16 +1173,14 @@ local function run_watch(ctx, cmd)
                 return
             end
             -- Surface the tool's actual error line, not its trailing progress noise
-            -- (a verbose CLI ends with lines like "[INFO] save cookie to: …"). Falls
-            -- back to stdout for tools that report the reason there (e.g. the Rust
-            -- submitter's "Unsupported domain: atcoder.jp").
-            local tail = meaningful_tail(err_acc, out_acc)
-            if tail == "" then
-                tail = "exited with code " .. tostring(res.code)
-            end
-            set_state(path, "error", "submit failed", url)
+            -- (a verbose CLI ends with lines like "[INFO] save cookie to: …"), and not
+            -- its crash dump either — see `failure_reason`. Falls back to stdout for
+            -- tools that report the reason there (e.g. the Rust submitter's
+            -- "Unsupported domain: atcoder.jp").
+            local reason, short = failure_reason(err_acc, out_acc, res.code)
+            set_state(path, "error", short, url)
             arm_invalidation(ctx.bufnr) -- a failed verdict is stale once the source changes
-            utils.notify("submit failed — " .. tail, "ERROR")
+            utils.notify("submit failed, " .. reason, "ERROR")
         end)
     end)
     jobs[path] = handle

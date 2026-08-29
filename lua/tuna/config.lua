@@ -185,6 +185,15 @@ M.defaults = {
     testcases_directory_input = "input.txt",
     testcases_directory_output = "output.txt",
 
+    -- `:Tuna testcase split <n> [marker]` — the marker a testcase's cases are bracketed
+    -- with when you have marked them yourself. A line made only of this character (any
+    -- number of them, so both `-` and `----` work) is a marker, in the input and in the
+    -- expected output alike, and they come in **pairs**: one opens a case and the next
+    -- closes it. What a pair brackets becomes a testcase verbatim; everything outside
+    -- every pair stays together as one. Nothing is a case without having been bracketed
+    -- on both sides, so a stray marker cannot quietly turn half a file into a testcase.
+    testcases_split_markers = "-",
+
     -- download (Competitive Companion integration)
     companion_port = 27121,
     download_print_message = true,
@@ -544,6 +553,10 @@ M.defaults = {
             -- and `:w` saves the testcase and re-runs it.
             add_testcase = { "n", "N" },
             delete_testcase = { "x", "X" },
+            -- `c` for cases: `s` is stop, and every other letter this action could
+            -- want is either a cursor key (`j`/`k`) or already an action.
+            split_testcase = { "c", "C" },
+
             undo_delete = { "u", "U" },
             help = "?",
         },
