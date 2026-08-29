@@ -31,6 +31,20 @@ local RunnerCore = {}
 RunnerCore.__index = RunnerCore
 M.RunnerCore = RunnerCore
 
+---The expected output to *store* for `text`: an empty one means the testcase has no
+---answer, not that its answer is empty. That is what reaches the disk — `write_or_delete`
+---removes an empty output file rather than writing one — so a row holding `""` would
+---disagree with what was just saved, and the judge would compare the run against an
+---empty answer and call it WRONG on a testcase that has nothing to be wrong about.
+---@param text string?
+---@return string?
+function M.answer(text)
+    if text == nil or text == "" then
+        return nil
+    end
+    return text
+end
+
 ---Create a subclass table chained to `RunnerCore` (so instances resolve
 ---subclass method → base method).
 ---@return table
@@ -370,7 +384,7 @@ function RunnerCore:add_testcase_row(tcnum)
     table.insert(self.tcdata, {
         tcnum = tcnum,
         stdin = "",
-        expected = "",
+        expected = nil,
         timelimit = timelimit,
         status = "NOT RUN",
         hlgroup = "TunaDone",
@@ -408,7 +422,7 @@ function RunnerCore:save_testcase(tcnum, input, expected)
     local rows = self:rows_for(tcnum)
     for _, i in ipairs(rows) do
         self.tcdata[i].stdin = input
-        self.tcdata[i].expected = expected
+        self.tcdata[i].expected = M.answer(expected)
     end
     if self.preloaded or not self:idle() then
         self:update_ui(true)
@@ -479,7 +493,7 @@ function RunnerCore:sync_rows(numbers)
         local case = tctbl[n] or {}
         for _, i in ipairs(self:rows_for(n)) do
             self.tcdata[i].stdin = case.input or ""
-            self.tcdata[i].expected = case.output or ""
+            self.tcdata[i].expected = M.answer(case.output)
             rows[#rows + 1] = i
         end
     end

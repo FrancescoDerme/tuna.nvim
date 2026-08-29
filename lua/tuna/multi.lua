@@ -302,7 +302,7 @@ end
 ---@param expected string
 ---@return boolean
 function MultiRunner:save_testcase(tcnum, input, expected)
-    self.tctbl[tcnum] = { input = input, output = expected }
+    self.tctbl[tcnum] = { input = input, output = core.answer(expected) }
     return core.RunnerCore.save_testcase(self, tcnum, input, expected)
 end
 

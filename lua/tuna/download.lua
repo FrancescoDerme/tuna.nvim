@@ -892,4 +892,9 @@ function M.start_downloading(mode, port, notify_on_start, notify_on_download, bu
     return nil
 end
 
+-- The two boundary helpers, exposed for the local test suite. They are what keeps a
+-- malformed request from reaching the pipeline at all, and calling them is the only way
+-- to check that without a live listener. Not part of the plugin's interface.
+M._test = { validate_task = validate_task, canonicalize_task = canonicalize_task }
+
 return M

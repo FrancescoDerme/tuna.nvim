@@ -854,10 +854,15 @@ local CRASH_HINTS = { "panicked at", "traceback (most recent call last)", "fatal
 local MAX_TAIL = 160
 
 ---Blank out the value of any credential-bearing query parameter in `s`.
+---
+---By parameter *name*, not by the shape of the value: a credential is whatever the
+---query calls one. A value stops at `?` as well as `&`, since a `?` begins a query —
+---without that the greedy value of an outer parameter (`url=https://x?apiKey=…`)
+---swallowed the credential that followed it, leaving it in the message.
 ---@param s string
 ---@return string
 local function redact(s)
-    return (s:gsub("([%w_%-]+)=([^&%s\"'}]+)", function(key, _)
+    return (s:gsub("([%w_%-]+)=([^&%s\"'}?]+)", function(key, _)
         if SECRET_PARAMS[key:lower()] then
             return key .. "=<redacted>"
         end
@@ -1349,5 +1354,19 @@ function M.submit(bufnr)
     persist_task(ctx)
     provider(ctx) -- the provider drives the per-buffer submit state
 end
+
+-- The pure output-reading helpers, exposed for the local test suite: reaching them
+-- through `M.submit` would mean spawning a real submitter. Not part of the plugin's
+-- interface.
+M._test = {
+    failure_reason = failure_reason,
+    meaningful_tail = meaningful_tail,
+    redact = redact,
+    clamp = clamp,
+    strip_ansi = strip_ansi,
+    scan_verdict = scan_verdict,
+    is_valid_url = is_valid_url,
+    judge_of = judge_of,
+}
 
 return M

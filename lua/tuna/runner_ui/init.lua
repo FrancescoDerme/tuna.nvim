@@ -1167,9 +1167,18 @@ function RunnerUI:show_ui()
     --
     -- So the one hop out is remembered: the pane focus left, and the window it left for.
     -- If that window is the one that closes, focus goes back to the pane. Deliberately
-    -- narrow — it fires only for the window the UI was actually displaced by, so closing
+    -- narrow, it fires only for the window the UI was actually displaced by, so closing
     -- an unrelated split, or one entered after moving on somewhere else, does not yank
     -- the cursor into a UI the user had finished with.
+    --
+    -- What "moved on somewhere else" cannot be read off is a single `WinEnter`, because
+    -- Neovim delivers a close in either of two orders: `WinClosed` for the window going
+    -- away and then `WinEnter` for the one focus falls back to, or the two the other way
+    -- round (neo-tree produces the first order on its first close of a session and the
+    -- second one on every close after it, which is exactly how far a `WinEnter` that
+    -- cleared the state immediately got: it worked once per session and never again).
+    -- The fallback `WinEnter` is part of the close, so moving on is decided a tick later,
+    -- by which time a `WinClosed` under way has been seen and has already restored.
     api.nvim_create_autocmd("WinLeave", {
         group = self.augroup,
         callback = function()
@@ -1185,8 +1194,21 @@ function RunnerUI:show_ui()
                 self.escaped_from, self.escaped_to = nil, nil -- back inside; nothing owed
             elseif self.leaving_pane then
                 self.escaped_from, self.escaped_to = self.leaving_pane, cur
-            elseif cur ~= self.escaped_to then
-                self.escaped_from, self.escaped_to = nil, nil -- moved on elsewhere
+            elseif self.escaped_from and cur ~= self.escaped_to then
+                local from, to = self.escaped_from, self.escaped_to
+                vim.schedule(function()
+                    -- Still the same excursion, its window still there (so this was not
+                    -- a close), and still outside the UI: the user moved on.
+                    if
+                        self.escaped_from == from
+                        and self.escaped_to == to
+                        and to
+                        and api.nvim_win_is_valid(to)
+                        and not self:owns_win(api.nvim_get_current_win())
+                    then
+                        self.escaped_from, self.escaped_to = nil, nil
+                    end
+                end)
             end
             self.leaving_pane = nil
         end,
