@@ -4,21 +4,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-`tuna.nvim` is a Neovim plugin for competitive programming, written in Lua. It is a ground-up rewrite/successor to [competitest.nvim](https://github.com/xeluxee/competitest.nvim), which is no longer actively maintained. The plugin integrates with [Competitive Companion](https://github.com/jmerle/competitive-companion) (a browser extension) to download problems/contests, manages testcases on disk, and compiles/runs solutions against them.
+**What the plugin is and does is in [`README.md`](README.md)** — read that first, and do not
+repeat it here. This file is the other half: why the code is shaped the way it is, which
+invariants are load-bearing, and what was tried and rejected. A statement that would be
+equally at home in the README belongs there instead.
 
 ## Goals
 
 - Written in idiomatic, modern Lua — prefer current Neovim APIs (`vim.uv`, `vim.system`, etc.) over legacy/deprecated patterns.
 - Prioritize speed: async I/O and process spawning wherever possible, minimal startup overhead.
 - Don't just port competitest.nvim's design 1:1 — research current Neovim plugin best practices (structure, config patterns, testing, docs) and apply them, improving on the original where it makes sense.
-- Document changes and improvements with respect to competitest.nvim inside CHANGES.md, this will help to write the final README.md at the end of the project.
 
 ## Roadmap / current phase
 
 The project proceeds in three phases. Update the checklist below as work progresses so each session starts with accurate status.
 
 1. **Review** — read through the existing README and any code already in this repo before making changes, to understand what's been started and why.
-2. **Port** — reimplement competitest.nvim's functionality file-by-file in this repo, modernizing as we go. Modules are listed in **porting order** (bottom-up: each step is testable before the next depends on it). See `DIFFERENCES.md` for decisions that diverge from the original.
+2. **Port** — reimplement competitest.nvim's functionality file-by-file in this repo, modernizing as we go. Modules are listed in **porting order** (bottom-up: each step is testable before the next depends on it). Divergences from the original are recorded in the README's "Coming from competitest.nvim" section for the user-visible ones, and here for the reasoning. (`DIFFERENCES.md` was the scaffolding used to write that; it has been consumed and removed.)
    - [x] 1. `utils.lua` — modifier parser (`$()` state machine), file-format modifiers, `vim.uv`/`vim.fs` file I/O, `notify`, `get_ui_size`
    - [x] 2. `config.lua` — full option schema, buffer-config cache, local-config directory walk, per-language arg replacement on extend
    - [x] 3. `compare.lua` — `exact` / `squish` / custom comparison
@@ -30,7 +32,7 @@ The project proceeds in three phases. Update the checklist below as work progres
    - [x] 9. `commands.lua` — full subcommand surface (`add/edit/delete_testcase`, `convert <storage>`, `run [n…]`, `run_no_compile [n…]`, `show_ui`, `download <mode>`) + context-aware completion; per-buffer runners
    - [x] 10. `init.lua` — finalize `setup()`, highlight groups, `VimResized` resize autocmd, persistent-download-on-setup
    - [x] ~~`http.lua`~~ — folded into `download.lua` and deleted (was not in the original design)
-3. **Extend** — once parity with competitest.nvim is reached, add new features beyond what the original plugin had. Roadmap in `/home/tuna/.claude/plans/lively-hatching-llama.md`. Workstreams:
+3. **Extend** — once parity with competitest.nvim is reached, add new features beyond what the original plugin had. Workstreams:
    - [x] W1. `checker.lua` — pluggable checkers (builtin + testlib-style external)
    - [x] W2. stress testing, interactive problems, multiple-answer (via checker), multiple solution versions (`run all`); plus scaffolding and a mode-switcher menu
    - [x] W2.5. **helper-program rework** (`tools.lua`): helpers (checker/gen/brute/interactor) are same-language source files discovered by filename convention and compiled on demand — no `.tuna.lua` needed; per-buffer run modes via `:Tuna run <mode>` + menu; checker on/off toggle; per-language scaffolding
@@ -40,59 +42,48 @@ The project proceeds in three phases. Update the checklist below as work progres
    - [x] W4. submit integration (`submit.lua` — `:Tuna submit`, provider registry, header-marker/sidecar URL, toggleterm/native terminal)
    - [x] W5. `clean.lua` — `:Tuna clean`, remove files created-but-never-used (untouched templated solutions + scaffolds), via floating widgets
    - [x] W6. opt-in default keymaps **+ contest navigation** — `keymaps.lua` (action→`:Tuna` registry, buffer-local + filetype-scoped, opt-in via `config.keymaps.mappings`) now ships a full **preset** (`keymaps.preset = "<leader>t"`), `navigate.lua` (`:Tuna next`/`prev` between a contest's problems), `recent.lua` (`:Tuna last problem`/`last contest` — back to where you were, cwd included, across restarts), `temp.lua` (`:Tuna temp` scratch, folded into a real problem by `:Tuna download sync`) and `config.template_cursor` — everything that used to live in the maintainer's ftplugin/`lua/core` competitest glue
-   - [~] W7. QoL + community pain points (driven by competitest's issue tracker) — `health.lua` (`:checkhealth tuna`) done; `diff.lua`, the positional (never re-aligning) results diff, done; an absolute/modifier-aware `testcases_directory` via `testcases.tc_directory`, done; `:Tuna testcase split` — lifting the cases a testcase's paired marker lines bracket out into testcases of their own, done; more TBD
+   - [x] W7. QoL + community pain points, from a sweep of competitest's open issues **and** its five open pull requests, all now reviewed — `health.lua` (`:checkhealth tuna`); `diff.lua`, the positional (never re-aligning) results diff; an absolute/modifier-aware `testcases_directory` via `testcases.tc_directory`; `:Tuna testcase split`, lifting the cases a testcase's paired marker lines bracket out into testcases of their own; a run with **no testcases** that builds and runs the program anyway, on an editable row; `~` and absolute paths honoured in every configured path (`utils.expand_home`, `compile_directory`/`running_directory` through `normalize_path`, the download paths through `eval_path`); and `:Tuna clean` disposing of the **build artifact** left beside a solution it removes, which used to keep the whole problem directory alive
    - [x] W9. **snippet library** — `library.lua` (`:Tuna lib` / `:Tuna lib snippet`): copy a marked-up piece of your own algorithm library into the current file, with a cursor-following preview (new `widgets.menu` `preview.content`)
    - [x] W8. `:Tuna` **dashboard / contest hub** — `dashboard.lua` is the single entry point (bare `:Tuna` / `:Tuna dashboard`): two columns in one float, **Recent** (the contest and problem `:Tuna last …` returns to, each with its verdict or local results, `<CR>` to go there) beside **Commands** (what tuna can do from the file you are on, `<CR>` to run it), on the new `widgets.panels`
 
 ### Not planned for the first release
 
-Things tuna deliberately does **not** do yet — some asked of competitest, some wanted
-here. All of them are real gaps rather than decisions against the feature, so they belong
-at the end of the README as potential extensions once it is written, not on the roadmap
-above.
+**What** these five are, and why they are worth wanting, is in the README's
+[Potential extensions](README.md#potential-extensions) — don't repeat it here. What
+belongs here is what building each would actually cost:
 
-- **File-I/O problems** — the IOI/OI format, where the solution `freopen`s `input.txt`
-  and `output.txt` instead of using stdin/stdout. tuna feeds a testcase on stdin and
-  judges what comes back on stdout, so such a solution reads nothing and its answer is
-  never compared. There is no workaround either: `run_command` is an argv handed to
-  `vim.system`, not a shell line, so `< input.txt > output.txt` cannot be written into
-  it. Adding it means a config option naming the two files plus a branch in the run
-  path that writes the input beside the solution and reads the answer back off disk.
-- **Debugger integration** — launching nvim-dap on a *chosen testcase's* input, with a
-  separate slower `-g` build. Most of this belongs to nvim-dap rather than here; the
-  part only tuna can supply is "debug this row", which is why it is worth recording.
-- **Hiding results rows by verdict** — hide correct / hide wrong in the results UI, so a
-  `run all` matrix or a stress run that saved a dozen counterexamples can be narrowed to
-  what went wrong. The smallest and most self-contained of these; left out all the same.
-- **A library that says what a snippet *is*** — a short description and a complexity
-  beside each entry, so the catalogue reads as a reference and not only as a paste
-  buffer. Today a guard carries a name and nothing else (`M.parse` reads one capture
-  out of `<marker>: <name> start`), so `:Tuna lib` can offer the name, the file it came from
-  and a preview of the code, which is enough to *find* a snippet you already know and
-  not enough to choose between two you don't. It would mean extending the guard to carry
-  fields — the marker line is the only place metadata can live if the library is to stay
-  ordinary source files, which is the whole point of the design — the preview pane
-  showing them above the code, and `:Tuna lib search` matching on the description as
-  well as the name and file. The last of those is the real reason to want it: the search
-  already refuses to match on snippet *bodies* (a fuzzy sorter drowns in thousands of
-  characters per entry — measured, "bexp" selected a Fenwick tree), and a one-line
-  description is exactly the searchable middle ground between a name and a body.
-- **Going back further than one problem and one contest** — `:Tuna last problem` /
-  `last contest` return to the single most recent of each, because `recent.json` holds
-  exactly one of each (`M.state.problem`, `M.state.contest`). Wanting the one before it —
-  the round you were on yesterday, the problem you left half-solved on Tuesday — is a
-  history rather than a bookmark: a bounded ring of recent problems and contests,
-  entries pruned as their directories disappear, and a way to walk it. The open question
-  is what "a way to walk it" should be, and it is a real design choice rather than a
-  detail: a picker lists everything at once and costs a selection, while a `<C-o>`/`<C-i>`
-  pair of keys is instant and stateful, and the two suit different moments. Storage is
-  the easy half and is already in the right place — `stdpath("state")/tuna/recent.json`,
-  written debounced and read once per session, so two Neovim instances each follow their
-  own work.
+- **File-I/O problems** — a config option naming the two files, plus a branch in the run
+  path that writes the input beside the solution and reads the answer back off disk
+  instead of using the child's pipes. `run_command` is an argv handed to `vim.system`,
+  never a shell line, so redirection cannot be smuggled in.
+- **Debugger integration** — nvim-dap owns nearly all of it. The piece only tuna can
+  supply is "debug this row": a results-UI action that hands dap the selected testcase's
+  input and a separate unoptimised build.
+- **Hiding results rows by verdict** — a filter over `tcdata` in `render_selector`, plus a
+  state row in the "Run" pane so the filter is visible rather than a mystery. The smallest
+  of the five and entirely self-contained.
+- **A library that says what a snippet is** — fields on the `TUNALIB` guard line (the only
+  place metadata can live if the library is to stay ordinary source files), shown by the
+  preview above the code, and folded into `catalogue()` so `:Tuna lib search` matches on
+  them. That last part is the real motivation: the search deliberately refuses to match
+  snippet *bodies*, because a fuzzy sorter drowns in thousands of characters per entry
+  (measured — "bexp" selected a Fenwick tree), and a one-line description is the
+  searchable middle ground between a name and a body.
+- **Going back further than one problem and one contest** — `recent.json` holds one of
+  each (`M.state.problem`, `M.state.contest`); a bounded ring with entries pruned as their
+  directories disappear is the easy half, and the storage is already in the right place. The
+  open question is the interface: a picker lists everything at once and costs a selection,
+  a `<C-o>`/`<C-i>` pair is instant and stateful, and the two suit different moments.
 
-_(Phase 1 review complete. Phase 2 port complete — all modules ported. Phase 3 (Extend) in progress: W1, W2, and the W2.5 helper-program/run-mode rework done.)_
+_(Phase 1 review complete. Phase 2 port complete — all modules ported. **Phase 3 complete** — every workstream above is done, and the five items under "Not planned for the first release" are the only known gaps. What remains before a release is documentation: the README, `:help tuna`, an options reference and a submit walkthrough.)_
 
 ## Architecture
+
+**The division of labour with the README:** the README says what each feature *is* and how
+to use it; this section says why the code is shaped the way it is, which invariants are
+load-bearing, and what was tried and rejected. When a module bullet below describes
+behaviour, it is because the behaviour is the consequence of a decision being recorded —
+not as documentation for a user, who has the README.
 
 All Lua lives under `lua/tuna/`. The entry point is `lua/tuna/init.lua`, which calls `config.setup()` and registers the single `:Tuna <subcommand>` user command.
 
@@ -140,15 +131,18 @@ A run begins by writing out every modified file buffer (`save_all_buffers`, repo
 
 ### Command modifiers (template variables)
 
-Used in `compile_command` / `run_command` args, the testcase formats and `testcases_directory`: `$(FNAME)`, `$(FNOEXT)`, `$(FEXT)`, `$(FABSPATH)`, `$(ABSDIR)`, `$(DIRNAME)` (the *name* of the source's directory — the problem, for a downloaded one), `$(HOME)`, `$(CWD)`. Expanded by `utils.eval_string` / `utils.buf_eval_string`. (`download.lua` has its own richer set for download paths — `$(JUDGE)`, `$(PROBLEM)`, `$(CONTEST)`, … — since those are known only while a task is being downloaded.)
-
-### Testcase directory layout
-
-The on-disk layout is chosen by `testcases_storage` (`files` | `single_file` | `directory`) and the matching format options — see `testcases.lua` and DIFFERENCES.md. The default `files` mode keeps an input/output pair beside the source (e.g. `sol_input0.txt` / `sol_output0.txt`) and additionally discovers shared, un-prefixed pairs (`input0.txt` / `output0.txt`) and a numberless single-testcase `in.txt` / `out.txt` as fallbacks, so any solution in the folder can run testcases it didn't create (an `out.txt` with no input runs against empty stdin); `directory` mode uses one sub-directory per testcase (e.g. `tests/0/input.txt` + `output.txt`) and is inherently source-agnostic. **Where** that layout is rooted is `testcases_directory` — relative to the source (the default `"."`), or absolute for a store outside the source tree, with modifiers (`"$(HOME)/cp/testcases/$(DIRNAME)"`); resolved by `testcases.tc_directory`. The runner loads all testcases via `testcases.buf_get_testcases` and runs them together (parallelised), not just the first.
+The **list** of modifiers belongs in the README's options reference; what matters here is that
+there are **two sets** and why. The *file* set (`$(FNAME)`, `$(FNOEXT)`, `$(FEXT)`,
+`$(FABSPATH)`, `$(ABSDIR)`, `$(DIRNAME)`, `$(HOME)`, `$(CWD)`) is resolvable from a path alone
+and is expanded by `utils.eval_string` / `utils.buf_eval_string`; the *download* set adds
+`$(JUDGE)`, `$(CONTEST)`, `$(PROBLEM)` and friends, which exist only while a task is being
+downloaded and so live in `download.lua`. `utils.only_file_modifiers` is the predicate that
+tells them apart, and it exists because three call sites read `template_file` while only one of
+them has a task (see `temp.lua` and `clean.lua`).
 
 ## Development
 
-This is a pure Lua Neovim plugin — no build step and no package manager. Load it in Neovim via your plugin manager pointing at this repo. Local per-project config can be placed in `tuna.lua` or `.tuna.lua` at the project root.
+This is a pure Lua Neovim plugin — no build step and no package manager. Load it in Neovim via your plugin manager pointing at this repo. Per-directory config is a `.tuna.lua` (`local_config_file_name`) returning a table, found by walking **up** from the buffer's file — not only at a project root.
 
 The test suite is **local-only and untracked** (`.gitignore`): it covers a fraction of the plugin, and a partial suite in a public repo reads as a coverage claim it cannot back. Run it with `tests/run.sh` (all files, one `nvim --headless` each, non-zero exit on any failure, so it works as a pre-commit check) or `tests/run.sh submit` for one. Every file prints `N checks, M failures`; `tests/harness.lua` is the shared `ok`/`eq`/`has`/`report`.
 

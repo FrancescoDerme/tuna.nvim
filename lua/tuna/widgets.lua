@@ -1,7 +1,7 @@
 -- lua/tuna/widgets.lua
 --
 -- Interactive floating-window widgets, built on Neovim's native window API
--- instead of nui.nvim (see DIFFERENCES.md). The widgets exposed:
+-- instead of nui.nvim. The widgets exposed:
 --
 --   * `input`  — a single-line prompt (used by download to confirm paths)
 --   * `editor` — side-by-side input/output buffers for editing a testcase

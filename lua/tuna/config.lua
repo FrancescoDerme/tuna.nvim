@@ -155,7 +155,7 @@ M.defaults = {
     -- with it.
     problem_store_file = ".tuna.json",
 
-    -- testcase storage (see DIFFERENCES.md: layout is fully customizable)
+    -- testcase storage (the on-disk layout is fully customizable)
     -- Where testcases live. Evaluated for file modifiers, then used as an absolute
     -- path when it is one and taken relative to the source file when it is not — so
     -- `"."` keeps them beside the source, `"tests"` puts them in a sub-directory, and

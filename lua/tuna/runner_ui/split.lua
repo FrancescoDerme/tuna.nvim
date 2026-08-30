@@ -9,7 +9,7 @@
 -- the editor edge, then recursively subdivide it, fixing each window's size so
 -- Neovim's automatic equalisation doesn't undo the ratios.
 --
--- Note (see DIFFERENCES.md): `relative_to_editor` splits off the runner's window
+-- Note: `relative_to_editor` splits off the runner's window
 -- rather than a true editor-relative anchor; with the usual single-window CP
 -- layout these coincide.
 

@@ -154,7 +154,7 @@ end
 
 ---Convert this buffer's testcases to a different storage backend. Unlike
 ---competitest's two-way single-file↔files switch, tuna converts to any of the
----three storage modes (see DIFFERENCES.md).
+---three storage modes.
 ---@param target string "files" | "single_file" | "directory"
 function M.convert_testcases(target)
     if not testcases.backends[target] then
