@@ -1,5 +1,9 @@
 <div align="center">
 
+![Neovim](https://img.shields.io/badge/NeoVim-0.10+-%2357A143.svg?&style=for-the-badge&logo=neovim)
+![Lua](https://img.shields.io/badge/Lua-%232C2D72.svg?style=for-the-badge&logo=lua)
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)
+
 <pre>
   ██████████  ███    ███  ███     ███     ██████   
   ██████████  ███    ███  ████    ███    ███  ███  
@@ -9,50 +13,30 @@
    ███       ████████   ███     ███  ███      ███  
 </pre>
 
-**Competitive programming in Neovim.** Download a problem, run it against its testcases,
-stress-test it against a brute force, submit it — without leaving the editor.
-
-![Neovim](https://img.shields.io/badge/NeoVim-0.10+-%2357A143.svg?&style=for-the-badge&logo=neovim)
-![Lua](https://img.shields.io/badge/Lua-%232C2D72.svg?style=for-the-badge&logo=lua)
-![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)
-
 </div>
 
----
-
-`tuna.nvim` is a ground-up rewrite of and successor to
-[competitest.nvim](https://github.com/xeluxee/competitest.nvim), which is no longer
-actively maintained. It keeps what that plugin got right — testcase management,
-[Competitive Companion](https://github.com/jmerle/competitive-companion) integration, a
-results UI — and rebuilds it on modern Neovim APIs (`vim.system`, `vim.uv`, native
-floats, no `nui.nvim` dependency), then goes well past it: stress testing, interactive
-problems, special judges, multiple solution versions, submission, a snippet library, and
-a dashboard to tie them together.
-
-If you are coming from competitest, [Coming from competitest.nvim](#coming-from-competitestnvim)
-lists what is named or shaped differently, and why.
+`tuna.nvim` is a competitive programming plugin that handles testcase management,
+intregrates with [Competitive companion](https://github.com/jmerle/competitive-companion) to download contests,
+supports stress testing, and much more.
 
 ## Contents
 
 [Requirements](#requirements) · [Installation](#installation) · [Quick start](#quick-start) ·
 [Commands](#commands) · [Features](#features) · [Configuration](#configuration) ·
-[Submitting, step by step](#submitting-step-by-step) ·
+[Submitting](#submitting) ·
 [Coming from competitest.nvim](#coming-from-competitestnvim) ·
 [Potential extensions](#potential-extensions)
 
 ## Requirements
 
-- **Neovim 0.10+** (tuna uses `vim.system()` and `vim.uv`)
-- A compiler or interpreter for the languages you use — nothing is bundled
-- Optional: the [Competitive Companion](https://github.com/jmerle/competitive-companion)
+- **Neovim 0.10+**
+- A compiler or interpreter for the languages you use
+- Optional: the [Competitive companion](https://github.com/jmerle/competitive-companion)
   browser extension, to download problems and contests
 - Optional: [toggleterm.nvim](https://github.com/akinsho/toggleterm.nvim) for the submit
   terminal, [lualine.nvim](https://github.com/nvim-lualine/lualine.nvim) for the download
   and verdict indicators, [telescope.nvim](https://github.com/nvim-telescope/telescope.nvim)
-  for `:Tuna lib search`
-
-No plugin is required. Every optional integration is detected at runtime and its feature
-falls back to something native when it is absent.
+  for searching the library
 
 ## Installation
 
@@ -61,81 +45,103 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim):
 ```lua
 {
     "FrancescoDerme/tuna.nvim",
-    -- `setup()` registers `:Tuna`, so a lazy-load key or `cmd = "Tuna"` works too.
-    opts = {},
+    config = function()
+        require("tuna").setup({})
+    end,
 }
 ```
 
-Or, with any manager:
-
-```lua
-require("tuna").setup({})
-```
-
-`setup()` is what registers the `:Tuna` command, the highlight groups and the autocommands,
-so it has to run. Called with no arguments it uses the defaults, which are chosen to work
-for C/C++/Rust/Java/Python out of the box.
-
 ## Quick start
 
-```vim
-:Tuna
-```
-
-Bare `:Tuna` opens the dashboard: on the left, the contest and problem you were last
-working on, each with how it went; on the right, everything tuna can do from the file you
-are in. Both columns are lists — `j`/`k` to move, `<CR>` to act, `<C-h>`/`<C-l>` (or Tab)
-to switch between them.
-
-The loop it exists to serve:
-
-1. **`:Tuna download problem`** — then press the green **+** in Competitive Companion.
-   The solution file is created from your template, the testcases are written beside it,
-   Neovim moves into the problem's directory, and the file opens. (Set `template_cursor`
-   and it opens with the cursor already where you start typing, rather than on the
-   template's header.)
-2. **`:Tuna run`** — compiles, runs the testcases in parallel (as many at once as you
-   have cores, by default), and opens the results grid. `j`/`k` walks the testcases, the
-   four panes show output, expected output, input and stderr, and `d` toggles a
-   positional diff of the two that disagree.
-3. Wrong answer? Edit the **Input** or **Expected Output** pane in place and `:w` — it
-   saves the testcase and re-runs it. `n` adds a testcase, `x` deletes one, `u` undoes
-   that.
-4. **`:Tuna submit`** — hands the solution to whichever submit tool you have configured,
-   reads that tool's output as it runs, and puts the judge's verdict in your statusline
-   (`Running (on test 6)` → `Accepted`) instead of a terminal you have to go and look at.
-   The verdict stays there until you submit again, survives a restart, and disappears the
-   moment you edit the solution.
-
-Nothing above needs a testcase to exist first: `:Tuna run` on a file with none simply
-builds it and runs it on empty input, as an editable row you can type the first testcase
-straight into.
+1. **`:Tuna`** opens the dashboard,
+2. **`:Tuna download problem`** begins listening for a problem from Competitive companion,
+   press the green plus in your browser to download.
+   A solution file is created from your template, the testcases are written beside it,
+   Neovim moves into the problem's directory, and the file opens.
+3. **`:Tuna run`** compiles, runs the testcases in parallel, and opens the results grid.
+   The four panes show output, expected output, input and stderr. This UI can do a lot,
+   for example `d` toggles a diff of the two outputs.
+4. **`:Tuna submit`** hands the solution to whichever submit tool you have configured,
+   reads that tool's output as it runs, and puts the judge's verdict in your statusline.
 
 ## Commands
 
-Everything is one `:Tuna <subcommand>`, with tab-completion at every position (a lowercase
-`:tuna` expands to it). Bare `:Tuna` opens the dashboard.
+Every command is a subcommand of `:Tuna` with tab-completion.
 
-| command | |
-|---|---|
-| `:Tuna` / `:Tuna dashboard` | the dashboard |
-| `:Tuna run [normal\|all\|stress\|interactive] [n…]` | run — a mode keyword switches the problem's mode and sticks; numbers limit it to those testcases |
-| `:Tuna run_no_compile [n…]` | run the existing build |
-| `:Tuna show_ui` | re-open the results UI — before any run it lists the testcases, so it doubles as a viewer |
-| `:Tuna testcase [add\|edit\|delete] [n]` | manage testcases; bare `:Tuna testcase` opens the picker |
-| `:Tuna testcase split [n] [marker]` | lift the cases a testcase's marker lines bracket into testcases of their own |
-| `:Tuna convert <files\|single_file\|directory>` | rewrite the testcases into another layout |
-| `:Tuna compare <exact\|squish\|float [tol]\|default>` | override the comparison for this problem |
-| `:Tuna checker [on\|off\|toggle]` | use the discovered special judge, or don't |
-| `:Tuna download <testcases\|problem\|contest\|sync\|persistently\|status\|stop>` | Competitive Companion |
-| `:Tuna scaffold <checker\|generator\|brute\|interactor> [ext]` | drop in a starter helper |
-| `:Tuna submit [clear]` | submit, or dismiss the verdict / cancel a running submit |
-| `:Tuna next` / `:Tuna prev` | the problem either side of this one |
-| `:Tuna last [problem\|contest]` | back to what you were working on |
-| `:Tuna temp` | the scratch solution for before a contest opens |
-| `:Tuna lib [snippet\|search]` | insert from your algorithm library |
-| `:Tuna clean` | remove files created and never used |
-| `:checkhealth tuna` | what tuna can see: Neovim version, compilers on `PATH`, the listener port, optional integrations |
+<table>
+<tr>
+  <td><code>:Tuna</code> / <code>:Tuna dashboard</code></td>
+  <td>the dashboard</td>
+</tr>
+<tr>
+  <td><code>:Tuna run [normal|all|stress|interactive] [n…]</code></td>
+  <td>run; mode keyword switches the problem's mode, numbers limit the run to those testcases</td>
+</tr>
+<tr>
+  <td><code>:Tuna run_no_compile [n…]</code></td>
+  <td>run the existing build</td>
+</tr>
+<tr>
+  <td><code>:Tuna show_ui</code></td>
+  <td>open the results UI</td>
+</tr>
+<tr>
+  <td><code>:Tuna testcase [add|edit|delete] [n]</code></td>
+  <td>manage testcases</td>
+</tr>
+<tr>
+  <td><code>:Tuna testcase split [n] [marker]</code></td>
+  <td>lift the testcases inside marker lines into testcases of their own</td>
+</tr>
+<tr>
+  <td><code>:Tuna convert &lt;files|single_file|directory&gt;</code></td>
+  <td>rewrite the testcases into another layout</td>
+</tr>
+<tr>
+  <td><code>:Tuna compare &lt;exact|squish|float [tol]|default&gt;</code></td>
+  <td>override the comparison for this problem</td>
+</tr>
+<tr>
+  <td><code>:Tuna checker [on|off|toggle]</code></td>
+  <td>toggle the special judge</td>
+</tr>
+<tr>
+  <td><code>:Tuna download &lt;testcases|problem|contest|sync|persistently|status|stop&gt;</code></td>
+  <td>download from Competitive companion</td>
+</tr>
+<tr>
+  <td><code>:Tuna scaffold &lt;checker|generator|brute|interactor&gt; [ext]</code></td>
+  <td>drop in a starter file</td>
+</tr>
+<tr>
+  <td><code>:Tuna submit [clear]</code></td>
+  <td>submit or dismiss the verdict / cancel a running submit</td>
+</tr>
+<tr>
+  <td><code>:Tuna next</code> / <code>:Tuna prev</code></td>
+  <td>go to the problem either side of this one in a contest</td>
+</tr>
+<tr>
+  <td><code>:Tuna last [problem|contest]</code></td>
+  <td>go back to what you were working on</td>
+</tr>
+<tr>
+  <td><code>:Tuna temp</code></td>
+  <td>drop in a scratch solution for before a contest opens</td>
+</tr>
+<tr>
+  <td><code>:Tuna lib [snippet|search]</code></td>
+  <td>insert code from your algorithms library</td>
+</tr>
+<tr>
+  <td><code>:Tuna clean</code></td>
+  <td>remove files created and never used</td>
+</tr>
+<tr>
+  <td><code>:checkhealth tuna</code></td>
+  <td>check Neovim version, compilers on <code>PATH</code>, the listener port, optional integrations</td>
+</tr>
+</table>
 
 ## Features
 
@@ -144,11 +150,11 @@ Everything is one `:Tuna <subcommand>`, with tab-completion at every position (a
 Testcases live on disk beside your solution, in whichever layout you already use. Three
 storage backends, chosen with `testcases_storage`:
 
-| | layout |
-|---|---|
-| `files` (default) | `main_input0.txt` / `main_output0.txt` beside the source |
-| `single_file` | every testcase in one msgpack file, `main.testcases` |
-| `directory` | one sub-directory per testcase, `tests/0/input.txt` + `output.txt` |
+|                   | layout                                                             |
+| ----------------- | ------------------------------------------------------------------ |
+| `files` (default) | `main_input0.txt` / `main_output0.txt` beside the source           |
+| `single_file`     | every testcase in one msgpack file, `main.testcases`               |
+| `directory`       | one sub-directory per testcase, `tests/0/input.txt` + `output.txt` |
 
 The file-name formats are yours (`testcases_input_file_format` and friends, with
 `$(FNOEXT)`, `$(TCNUM)` and the rest), and where the store is rooted is
@@ -194,7 +200,7 @@ cores, by default — and opens the results grid:
 └───────────────┴─────────────────────┴─────────────────────┘
 ```
 
-Output faces Expected Output across the top, because the comparison is read *across*;
+Output faces Expected Output across the top, because the comparison is read _across_;
 Errors and Input sit under them, and the two editable panes end up as one column down the
 right-hand edge. The whole grid is `popup_ui.layout`, a nested `{ weight, pane }` tree, if
 you want it arranged differently — or `runner_ui.interface = "split"` for real windows
@@ -204,18 +210,18 @@ Each testcase is a row and the four panes show that run. The compile step is a r
 so its warnings are somewhere you can read them, and a compile failure pops its errors up
 by itself.
 
-| key | |
-|---|---|
-| `j` / `k` | walk the testcases |
-| `r` / `<C-r>` | re-run this one / all of them |
-| `s` / `<C-s>` | stop this one / all of them |
-| `d` | toggle the diff |
-| `i` `a` `o` `e` | open input / expected / stdout / stderr full-screen |
-| `n` `x` `u` | add a testcase, delete one, undo that |
-| `c` | split this testcase on its marker lines |
-| `<C-h>` `<C-j>` `<C-k>` `<C-l>` | move between panes |
-| `q` | close |
-| `?` | the full legend, which is the authority — these are just the defaults |
+| key                             |                                                                       |
+| ------------------------------- | --------------------------------------------------------------------- |
+| `j` / `k`                       | walk the testcases                                                    |
+| `r` / `<C-r>`                   | re-run this one / all of them                                         |
+| `s` / `<C-s>`                   | stop this one / all of them                                           |
+| `d`                             | toggle the diff                                                       |
+| `i` `a` `o` `e`                 | open input / expected / stdout / stderr full-screen                   |
+| `n` `x` `u`                     | add a testcase, delete one, undo that                                 |
+| `c`                             | split this testcase on its marker lines                               |
+| `<C-h>` `<C-j>` `<C-k>` `<C-l>` | move between panes                                                    |
+| `q`                             | close                                                                 |
+| `?`                             | the full legend, which is the authority — these are just the defaults |
 
 **The Input and Expected Output panes are editable.** They are ordinary buffers with an
 accent on their border, so there is no key to learn: move in, type, and `:w`. That writes
@@ -225,8 +231,8 @@ moving to another row, and closing with one pending asks rather than dropping it
 **The diff is positional.** Vim's own diff may decide a line was deleted and re-pair
 everything after it, which for `2 2 0 2` against `2 2 2 5` reports one deletion and then
 compares your fourth line with the answer's third. Competitive-programming output is
-positional, so tuna walks both sides in lockstep — line *i* against line *i*, token *i*
-against token *i* — and never re-aligns. Its granularity follows the comparison in force,
+positional, so tuna walks both sides in lockstep — line _i_ against line _i_, token _i_
+against token _i_ — and never re-aligns. Its granularity follows the comparison in force,
 so the marks can never contradict the verdict.
 
 Comparison is `output_compare_method`: `"exact"`, `"squish"` (whitespace-insensitive, the
@@ -240,20 +246,20 @@ the problem rather than a different command to remember. Helper programs are dis
 **by filename**, beside your solution and in the same language, and compiled on demand —
 there is no manifest to maintain:
 
-| you write | `:Tuna run` becomes | what happens |
-|---|---|---|
-| nothing | **normal** | every testcase, in parallel |
-| `gen.cpp` + `brute.cpp` | **stress test** | generate an input, run both, compare, repeat until they disagree — then save the counterexample as a testcase |
-| `interactor.cpp` | **interactive** | your solution and the interactor cross-wired, the exchange in the transcript |
-| — | **run all** | every sibling solution against the shared testcases, as a solution×testcase matrix |
-| `checker.cpp` | *(any of the above)* | a testlib-style special judge decides correctness instead of string comparison |
+| you write               | `:Tuna run` becomes  | what happens                                                                                                  |
+| ----------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------- |
+| nothing                 | **normal**           | every testcase, in parallel                                                                                   |
+| `gen.cpp` + `brute.cpp` | **stress test**      | generate an input, run both, compare, repeat until they disagree — then save the counterexample as a testcase |
+| `interactor.cpp`        | **interactive**      | your solution and the interactor cross-wired, the exchange in the transcript                                  |
+| —                       | **run all**          | every sibling solution against the shared testcases, as a solution×testcase matrix                            |
+| `checker.cpp`           | _(any of the above)_ | a testlib-style special judge decides correctness instead of string comparison                                |
 
 `:Tuna run stress`, `:Tuna run interactive`, `:Tuna run all` pick one explicitly and it
 sticks. `:Tuna scaffold generator|brute|interactor|checker` drops in a dependency-free
 starter file in your language.
 
 **Run all** is for the shape where you have `main.cpp` and `main2.cpp` and want to know
-which one is right — including when they are in *different languages*, since each is
+which one is right — including when they are in _different languages_, since each is
 compiled and run with its own filetype's commands. **Stress testing** is for the shape
 where you know one is right and slow. **Checkers** are for problems with more than one
 correct answer.
@@ -444,89 +450,137 @@ sets, and which one applies depends on whether a downloaded problem is involved.
 
 **File modifiers** — available anywhere a path or command is evaluated:
 
-| | |
-|---|---|
-| `$(FNAME)` | `main.cpp` |
-| `$(FNOEXT)` | `main` |
-| `$(FEXT)` | `cpp` |
-| `$(FABSPATH)` | `/home/you/cp/A/main.cpp` |
-| `$(ABSDIR)` | `/home/you/cp/A` |
-| `$(DIRNAME)` | `A` — the *name* of the directory, which for a downloaded problem is the problem |
-| `$(HOME)`, `$(CWD)` | your home directory, the current directory |
-| `$(TCNUM)` | the testcase number (testcase file formats only) |
-| `$()` | a literal `$` |
+<table>
+<tr>
+  <td><code>$(FNAME)</code></td>
+  <td><code>main.cpp</code></td>
+</tr>
+<tr>
+  <td><code>$(FNOEXT)</code></td>
+  <td><code>main</code></td>
+</tr>
+<tr>
+  <td><code>$(FEXT)</code></td>
+  <td><code>cpp</code></td>
+</tr>
+<tr>
+  <td><code>$(FABSPATH)</code></td>
+  <td><code>/home/you/cp/A/main.cpp</code></td>
+</tr>
+<tr>
+  <td><code>$(ABSDIR)</code></td>
+  <td><code>/home/you/cp/A</code></td>
+</tr>
+<tr>
+  <td><code>$(DIRNAME)</code></td>
+  <td><code>A</code> — the <em>name</em> of the directory, which for a downloaded problem is the problem</td>
+</tr>
+<tr>
+  <td><code>$(HOME)</code>, <code>$(CWD)</code></td>
+  <td>your home directory, the current directory</td>
+</tr>
+<tr>
+  <td><code>$(TCNUM)</code></td>
+  <td>the testcase number (testcase file formats only)</td>
+</tr>
+<tr>
+  <td><code>$()</code></td>
+  <td>a literal <code>$</code></td>
+</tr>
+</table>
 
 **Download modifiers** — additionally available in `downloaded_*` paths and in
 `template_file`, because they only exist while a problem is being downloaded:
 
-| | |
-|---|---|
-| `$(PROBLEM)` | the problem's name |
-| `$(JUDGE)`, `$(CONTEST)` | as parsed from what the extension sent (see `judge_parsers`) |
-| `$(GROUP)` | the raw, unparsed group |
-| `$(URL)` | the problem's address |
-| `$(TIMELIM)`, `$(MEMLIM)` | the judge's limits, in ms and MB |
-| `$(JAVA_MAIN_CLASS)`, `$(JAVA_TASK_CLASS)` | for Java scaffolding |
-| `$(DATE)` | now, formatted with `date_format` |
+<table>
+<tr>
+  <td><code>$(PROBLEM)</code></td>
+  <td>the problem's name</td>
+</tr>
+<tr>
+  <td><code>$(JUDGE)</code>, <code>$(CONTEST)</code></td>
+  <td>as parsed from what the extension sent (see <code>judge_parsers</code>)</td>
+</tr>
+<tr>
+  <td><code>$(GROUP)</code></td>
+  <td>the raw, unparsed group</td>
+</tr>
+<tr>
+  <td><code>$(URL)</code></td>
+  <td>the problem's address</td>
+</tr>
+<tr>
+  <td><code>$(TIMELIM)</code>, <code>$(MEMLIM)</code></td>
+  <td>the judge's limits, in ms and MB</td>
+</tr>
+<tr>
+  <td><code>$(JAVA_MAIN_CLASS)</code>, <code>$(JAVA_TASK_CLASS)</code></td>
+  <td>for Java scaffolding</td>
+</tr>
+<tr>
+  <td><code>$(DATE)</code></td>
+  <td>now, formatted with <code>date_format</code></td>
+</tr>
+</table>
 
 Characters that cannot appear in a filename are replaced with `_` in every modifier that
 becomes part of a path.
 
 ### Compiling and running
 
-| option | default | |
-|---|---|---|
-| `compile_command` | gcc / g++ / rustc / javac | per filetype, `{ exec, args }`; a filetype with no entry is not compiled |
-| `run_command` | `./$(FNOEXT)`, `python3`, `java` | per filetype, `{ exec, args }` |
-| `compile_directory` | `"."` | where the compiler runs, relative to the source — or an absolute path, to keep binaries out of the problem folder |
-| `running_directory` | `"."` | likewise, for the solution |
-| `multiple_testing` | `-1` | testcases at once: `-1` your core count, `0` all of them, `n` exactly n |
-| `maximum_time` | `5000` | per-process limit in ms; past it the process is killed and the row reads `TIMEOUT` |
-| `output_compare_method` | `"squish"` | `"exact"`, `"squish"`, `{ "float", tol = 1e-6 }`, or `function(output, expected) -> boolean` |
-| `checker` | `"builtin"` | `"builtin"`, a path to a testlib-style checker, or `{ exec, args }` |
-| `save_current_file` | `true` | write the buffer before running |
-| `save_all_files` | `false` | write every buffer before running |
+| option                  | default                          |                                                                                                                   |
+| ----------------------- | -------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `compile_command`       | gcc / g++ / rustc / javac        | per filetype, `{ exec, args }`; a filetype with no entry is not compiled                                          |
+| `run_command`           | `./$(FNOEXT)`, `python3`, `java` | per filetype, `{ exec, args }`                                                                                    |
+| `compile_directory`     | `"."`                            | where the compiler runs, relative to the source — or an absolute path, to keep binaries out of the problem folder |
+| `running_directory`     | `"."`                            | likewise, for the solution                                                                                        |
+| `multiple_testing`      | `-1`                             | testcases at once: `-1` your core count, `0` all of them, `n` exactly n                                           |
+| `maximum_time`          | `5000`                           | per-process limit in ms; past it the process is killed and the row reads `TIMEOUT`                                |
+| `output_compare_method` | `"squish"`                       | `"exact"`, `"squish"`, `{ "float", tol = 1e-6 }`, or `function(output, expected) -> boolean`                      |
+| `checker`               | `"builtin"`                      | `"builtin"`, a path to a testlib-style checker, or `{ exec, args }`                                               |
+| `save_current_file`     | `true`                           | write the buffer before running                                                                                   |
+| `save_all_files`        | `false`                          | write every buffer before running                                                                                 |
 
 These are argv, not shell lines: `exec` is the program and `args` is a list, so nothing is
 word-split or glob-expanded behind your back.
 
 ### Testcases
 
-| option | default | |
-|---|---|---|
-| `testcases_storage` | `"files"` | `"files"`, `"single_file"`, `"directory"` |
-| `testcases_auto_detect` | `true` | if the configured backend finds none, try the others before giving up |
-| `testcases_directory` | `"."` | where the store is rooted, relative to the source or absolute |
-| `testcases_input_file_format` | `{ "$(FNOEXT)_input$(TCNUM).txt", "input$(TCNUM).txt", "in.txt" }` | `files` backend; a list is tried in order and the first that finds anything wins, the first entry being what new testcases are written as |
-| `testcases_output_file_format` | `{ "$(FNOEXT)_output$(TCNUM).txt", "output$(TCNUM).txt", "out.txt" }` | as above |
-| `testcases_single_file_format` | `"$(FNOEXT).testcases"` | `single_file` backend |
-| `testcases_directory_format` | `"tests/$(TCNUM)"` | `directory` backend |
-| `testcases_directory_input` / `_output` | `"input.txt"` / `"output.txt"` | filenames inside each testcase directory |
-| `testcases_split_markers` | `"-"` | the character `:Tuna testcase split` brackets cases with |
-| `problem_store_file` | `".tuna.json"` | the per-problem sidecar: the downloaded task, the last submit verdict, and how the problem is run |
+| option                                  | default                                                               |                                                                                                                                           |
+| --------------------------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `testcases_storage`                     | `"files"`                                                             | `"files"`, `"single_file"`, `"directory"`                                                                                                 |
+| `testcases_auto_detect`                 | `true`                                                                | if the configured backend finds none, try the others before giving up                                                                     |
+| `testcases_directory`                   | `"."`                                                                 | where the store is rooted, relative to the source or absolute                                                                             |
+| `testcases_input_file_format`           | `{ "$(FNOEXT)_input$(TCNUM).txt", "input$(TCNUM).txt", "in.txt" }`    | `files` backend; a list is tried in order and the first that finds anything wins, the first entry being what new testcases are written as |
+| `testcases_output_file_format`          | `{ "$(FNOEXT)_output$(TCNUM).txt", "output$(TCNUM).txt", "out.txt" }` | as above                                                                                                                                  |
+| `testcases_single_file_format`          | `"$(FNOEXT).testcases"`                                               | `single_file` backend                                                                                                                     |
+| `testcases_directory_format`            | `"tests/$(TCNUM)"`                                                    | `directory` backend                                                                                                                       |
+| `testcases_directory_input` / `_output` | `"input.txt"` / `"output.txt"`                                        | filenames inside each testcase directory                                                                                                  |
+| `testcases_split_markers`               | `"-"`                                                                 | the character `:Tuna testcase split` brackets cases with                                                                                  |
+| `problem_store_file`                    | `".tuna.json"`                                                        | the per-problem sidecar: the downloaded task, the last submit verdict, and how the problem is run                                         |
 
-A format without `$(TCNUM)` names a *single* testcase, which is what makes a bare
+A format without `$(TCNUM)` names a _single_ testcase, which is what makes a bare
 `in.txt` / `out.txt` pair work.
 
 ### Downloading
 
-| option | default | |
-|---|---|---|
-| `companion_port` | `27121` | the port Competitive Companion posts to |
-| `downloaded_files_extension` | `"cpp"` | the language new solutions are created in |
-| `downloaded_problems_path` | `"$(CWD)/$(PROBLEM).$(FEXT)"` | where a single problem is written |
-| `downloaded_contests_directory` | `"$(CWD)"` | the contest's own folder |
-| `downloaded_contests_problems_path` | `"$(PROBLEM).$(FEXT)"` | each problem, relative to that folder |
-| `downloaded_problems_prompt_path` | `true` | ask before writing, with the computed path filled in |
-| `downloaded_contests_prompt_directory` / `_extension` | `true` | likewise for a contest |
-| `open_downloaded_problems` / `_contests` | `true` | open what was written |
-| `cd_downloaded_problems` / `_contests` | `true` | move Neovim into it (`cd_command`) |
-| `cd_command` | `"cd"` | `"cd"`, `"tcd"`, `"lcd"`, or `false` to never change directory |
-| `replace_downloaded_testcases` | `false` | overwrite existing testcases instead of appending |
-| `download_print_message` | `true` | report what was downloaded |
-| `start_downloading_persistently_on_setup` | `false` | open the listener at startup and leave it open |
-| `judge_parsers` | `{}` | `{ [judge] = function(info) -> { judge?, contest? } }`; `false` disables normalizing for that judge, `"*"` is a catch-all |
-| `date_format` | `"%c"` | for `$(DATE)` |
+| option                                                | default                       |                                                                                                                           |
+| ----------------------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `companion_port`                                      | `27121`                       | the port Competitive Companion posts to                                                                                   |
+| `downloaded_files_extension`                          | `"cpp"`                       | the language new solutions are created in                                                                                 |
+| `downloaded_problems_path`                            | `"$(CWD)/$(PROBLEM).$(FEXT)"` | where a single problem is written                                                                                         |
+| `downloaded_contests_directory`                       | `"$(CWD)"`                    | the contest's own folder                                                                                                  |
+| `downloaded_contests_problems_path`                   | `"$(PROBLEM).$(FEXT)"`        | each problem, relative to that folder                                                                                     |
+| `downloaded_problems_prompt_path`                     | `true`                        | ask before writing, with the computed path filled in                                                                      |
+| `downloaded_contests_prompt_directory` / `_extension` | `true`                        | likewise for a contest                                                                                                    |
+| `open_downloaded_problems` / `_contests`              | `true`                        | open what was written                                                                                                     |
+| `cd_downloaded_problems` / `_contests`                | `true`                        | move Neovim into it (`cd_command`)                                                                                        |
+| `cd_command`                                          | `"cd"`                        | `"cd"`, `"tcd"`, `"lcd"`, or `false` to never change directory                                                            |
+| `replace_downloaded_testcases`                        | `false`                       | overwrite existing testcases instead of appending                                                                         |
+| `download_print_message`                              | `true`                        | report what was downloaded                                                                                                |
+| `start_downloading_persistently_on_setup`             | `false`                       | open the listener at startup and leave it open                                                                            |
+| `judge_parsers`                                       | `{}`                          | `{ [judge] = function(info) -> { judge?, contest? } }`; `false` disables normalizing for that judge, `"*"` is a catch-all |
+| `date_format`                                         | `"%c"`                        | for `$(DATE)`                                                                                                             |
 
 Downloading a problem whose target already exists asks before overwriting; downloading a
 contest asks **once** for the whole batch, and offers to write only the problems that are
@@ -534,29 +588,29 @@ missing — which is what re-downloading a contest you are half-way through shou
 
 ### Templates
 
-| option | default | |
-|---|---|---|
-| `template_file` | `false` | a path, a `{ [ext] = path }` table, or a list tried until one exists |
-| `evaluate_template_modifiers` | `false` | expand `$(...)` inside the template's *contents*, not just its path |
-| `template_cursor` | `false` | where to put the cursor in a freshly created solution |
+| option                        | default |                                                                      |
+| ----------------------------- | ------- | -------------------------------------------------------------------- |
+| `template_file`               | `false` | a path, a `{ [ext] = path }` table, or a list tried until one exists |
+| `evaluate_template_modifiers` | `false` | expand `$(...)` inside the template's _contents_, not just its path  |
+| `template_cursor`             | `false` | where to put the cursor in a freshly created solution                |
 
 `template_cursor` takes a line number, a Lua pattern to search for, `{ pattern, offset }`
-for *n* lines below the match, or a function. A pattern that matches nothing leaves the
+for _n_ lines below the match, or a function. A pattern that matches nothing leaves the
 cursor alone, so one written for C++ is harmless to a Python template.
 
 ### Run modes and helper programs
 
-| option | default | |
-|---|---|---|
-| `tool_names` | `checker`/`check`, `gen`/`generator`, `brute`/`reference`, `interactor`/`interact` | the basenames tuna looks for beside your solution |
-| `stress.count` | `100` | iterations per run |
-| `stress.seed_arg` | `true` | pass the iteration number to the generator as an argument |
-| `stress.saves_per_run` | `1` | stop after saving this many counterexamples |
-| `stress.max_saved` | `10` | stop once the problem has this many testcases in total |
-| `stress.generator` / `.reference` | `nil` | explicit paths, if you would rather not use the filename convention |
-| `interactive.interactor` | `nil` | likewise |
-| `scaffold.files` | `checker`, `gen`, `brute`, `interactor` | basenames `:Tuna scaffold` creates |
-| `scaffold.templates` | `nil` per kind | your own starter files, `{ [ext] = path }` |
+| option                            | default                                                                            |                                                                     |
+| --------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `tool_names`                      | `checker`/`check`, `gen`/`generator`, `brute`/`reference`, `interactor`/`interact` | the basenames tuna looks for beside your solution                   |
+| `stress.count`                    | `100`                                                                              | iterations per run                                                  |
+| `stress.seed_arg`                 | `true`                                                                             | pass the iteration number to the generator as an argument           |
+| `stress.saves_per_run`            | `1`                                                                                | stop after saving this many counterexamples                         |
+| `stress.max_saved`                | `10`                                                                               | stop once the problem has this many testcases in total              |
+| `stress.generator` / `.reference` | `nil`                                                                              | explicit paths, if you would rather not use the filename convention |
+| `interactive.interactor`          | `nil`                                                                              | likewise                                                            |
+| `scaffold.files`                  | `checker`, `gen`, `brute`, `interactor`                                            | basenames `:Tuna scaffold` creates                                  |
+| `scaffold.templates`              | `nil` per kind                                                                     | your own starter files, `{ [ext] = path }`                          |
 
 ### Keymaps
 
@@ -579,19 +633,19 @@ the rest. The preset groups keys by subject, so which-key shows a `t` testcases 
 
 ### Appearance and widgets
 
-| option | default | |
-|---|---|---|
-| `floating_border` | `"rounded"` | passed to `nvim_open_win` |
-| `floating_border_highlight` | `"FloatBorder"` | |
-| `switch_window_keys` | `{ "<C-h>", "<C-j>", "<C-k>", "<C-l>" }` | move between panes, everywhere in the plugin |
-| `cancel_keys` | `{ normal = { "<Esc>", "<C-c>" }, insert = {} }` | how every widget is dismissed; `<Esc>` in insert mode leaves insert by default, so dismissing something you are typing into takes a second, deliberate press |
-| `runner_ui.interface` | `"popup"` | `"popup"` for floats, `"split"` for real windows |
-| `runner_ui.mappings` | see the key table above | |
-| `runner_ui.viewer` | `0.8` × `0.8` | the full-screen pane view; `open_when_compilation_fails` pops it on a build error |
-| `runner_ui.editable_border_highlight` | `"TunaEditable"` | the accent on the two editable panes; `false` turns it off |
-| `popup_ui.layout` | three columns | a nested `{ weight, pane }` tree over `tc`, `so`, `eo`, `si`, `se`; a pane you leave out is simply not drawn, and stays reachable in the viewer |
-| `split_ui` | `"right"`, `0.3` | position and size when `interface = "split"` |
-| `editor_ui`, `picker_ui` | | the standalone testcase editor and picker |
+| option                                | default                                          |                                                                                                                                                              |
+| ------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `floating_border`                     | `"rounded"`                                      | passed to `nvim_open_win`                                                                                                                                    |
+| `floating_border_highlight`           | `"FloatBorder"`                                  |                                                                                                                                                              |
+| `switch_window_keys`                  | `{ "<C-h>", "<C-j>", "<C-k>", "<C-l>" }`         | move between panes, everywhere in the plugin                                                                                                                 |
+| `cancel_keys`                         | `{ normal = { "<Esc>", "<C-c>" }, insert = {} }` | how every widget is dismissed; `<Esc>` in insert mode leaves insert by default, so dismissing something you are typing into takes a second, deliberate press |
+| `runner_ui.interface`                 | `"popup"`                                        | `"popup"` for floats, `"split"` for real windows                                                                                                             |
+| `runner_ui.mappings`                  | see the key table above                          |                                                                                                                                                              |
+| `runner_ui.viewer`                    | `0.8` × `0.8`                                    | the full-screen pane view; `open_when_compilation_fails` pops it on a build error                                                                            |
+| `runner_ui.editable_border_highlight` | `"TunaEditable"`                                 | the accent on the two editable panes; `false` turns it off                                                                                                   |
+| `popup_ui.layout`                     | three columns                                    | a nested `{ weight, pane }` tree over `tc`, `so`, `eo`, `si`, `se`; a pane you leave out is simply not drawn, and stays reachable in the viewer              |
+| `split_ui`                            | `"right"`, `0.3`                                 | position and size when `interface = "split"`                                                                                                                 |
+| `editor_ui`, `picker_ui`              |                                                  | the standalone testcase editor and picker                                                                                                                    |
 
 Highlight groups: `TunaCorrect`, `TunaWrong`, `TunaWarning`, `TunaRunning`, `TunaDone`,
 `TunaEditable`, and `TunaDiffChange` / `TunaDiffText` / `TunaDiffAdd` / `TunaDiffDelete`.
@@ -600,25 +654,25 @@ they follow your theme.
 
 ### Library, scratch, dashboard, clean
 
-| option | default | |
-|---|---|---|
-| `library.path` | `false` | a directory or a list of them; `false` turns `:Tuna lib` off |
-| `library.marker` | `"TUNALIB"` | the word a guard comment carries |
-| `library.depth` | `3` | how deep to search below each path |
-| `temp.file` | `stdpath("cache") .. "/tuna_temp.$(FEXT)"` | where `:Tuna temp` writes its scratch |
-| `temp.extension` / `temp.download` | `"cpp"` / `"contest"` | the scratch's language, and what `:Tuna download sync` downloads |
-| `dashboard.header` | `nil` | your own banner lines, or `false` for none |
-| `clean.min_width` / `max_width` | `0.5` / `0.7` | the confirmation float's size bounds |
-| `clean.max_entries` | `20000` | how much of a tree a scan may walk before reporting itself partial |
-| `clean.skip_dirs` | `node_modules`, `target`, `build`, … | never descended into |
-| `clean.protected_dirs` | `{}` | never offered for removal (your home directory, its standard sub-directories and the system's own are protected already) |
+| option                             | default                                    |                                                                                                                          |
+| ---------------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `library.path`                     | `false`                                    | a directory or a list of them; `false` turns `:Tuna lib` off                                                             |
+| `library.marker`                   | `"TUNALIB"`                                | the word a guard comment carries                                                                                         |
+| `library.depth`                    | `3`                                        | how deep to search below each path                                                                                       |
+| `temp.file`                        | `stdpath("cache") .. "/tuna_temp.$(FEXT)"` | where `:Tuna temp` writes its scratch                                                                                    |
+| `temp.extension` / `temp.download` | `"cpp"` / `"contest"`                      | the scratch's language, and what `:Tuna download sync` downloads                                                         |
+| `dashboard.header`                 | `nil`                                      | your own banner lines, or `false` for none                                                                               |
+| `clean.min_width` / `max_width`    | `0.5` / `0.7`                              | the confirmation float's size bounds                                                                                     |
+| `clean.max_entries`                | `20000`                                    | how much of a tree a scan may walk before reporting itself partial                                                       |
+| `clean.skip_dirs`                  | `node_modules`, `target`, `build`, …       | never descended into                                                                                                     |
+| `clean.protected_dirs`             | `{}`                                       | never offered for removal (your home directory, its standard sub-directories and the system's own are protected already) |
 
-## Submitting, step by step
+## Submitting
 
 tuna does not talk to judges itself. Owning a judge's protocol means owning its login, its
 cookies, its CSRF tokens and its rate limits, and re-owning them every time it changes a
 page — once per judge. So `:Tuna submit` drives whichever command-line submitter you
-already trust, and concentrates on the part an editor is actually good at: knowing *which*
+already trust, and concentrates on the part an editor is actually good at: knowing _which_
 problem you are on, and putting the verdict where you can see it.
 
 ### 1. Point it at your tool
@@ -634,9 +688,9 @@ require("tuna").setup({
 
 `command` is expanded with the file modifiers plus three of its own:
 
-- **`$(URL)`** — what to submit *through*.
+- **`$(URL)`** — what to submit _through_.
 - **`$(PROBLEM_URL)`** — the problem's own address, always, never reshaped for a tool.
-- **`$(LANG)`** — `submit.languages[filetype]`, the name *your tool* uses for the language.
+- **`$(LANG)`** — `submit.languages[filetype]`, the name _your tool_ uses for the language.
 
 The two URLs exist separately because the address that identifies a problem is not always
 the one you submit through. Use `$(URL)` unless your tool needs the literal problem page.
@@ -733,7 +787,7 @@ differently. If you are porting a config:
   and every `received_*` option is `downloaded_*`. The old name describes the plugin's point
   of view (it receives an HTTP POST); the new one describes yours.
 - **`convert` takes a target.** With three storage backends instead of two, `auto` cannot
-  pick a unique direction, so `:Tuna convert <backend>` is explicit. The *source* is still
+  pick a unique direction, so `:Tuna convert <backend>` is explicit. The _source_ is still
   detected for you.
 - **`testcases_use_single_file` is `testcases_storage`**, an enum over the three backends.
 - **`editor_ui.popup_width` / `popup_height` are `editor_ui.width` / `height`**, matching
@@ -747,7 +801,7 @@ differently. If you are porting a config:
   them — lualine's `disabled_filetypes`, for instance.
 - **`~` works in paths.** `$(HOME)` still does; so does a leading `~`, in every option that
   becomes a path. And `compile_directory` / `running_directory` are joined onto the source's
-  directory only when they are *relative*, so an absolute build directory means what it says.
+  directory only when they are _relative_, so an absolute build directory means what it says.
 - **Neovim 0.10+** rather than 0.5+, since tuna is built on `vim.system` and `vim.uv`.
 
 Behaviour differences worth knowing about, rather than renames: testcase discovery falls
@@ -766,12 +820,12 @@ something is missing is worth as much as knowing what is there.
   what comes back on stdout, so such a solution reads nothing and its answer is never
   compared — and there is no workaround, because `run_command` is an argv handed to the OS,
   not a shell line, so `< input.txt > output.txt` cannot be smuggled into it.
-- **Debugger integration.** Launching nvim-dap on a *chosen testcase's* input, with a
+- **Debugger integration.** Launching nvim-dap on a _chosen testcase's_ input, with a
   separate unoptimised build. Most of this belongs to nvim-dap rather than here; the part
   only tuna can supply is "debug this row".
 - **Hiding results rows by verdict.** Hide correct, hide wrong — so a `run all` matrix, or a
   stress run that saved a dozen counterexamples, can be narrowed to what went wrong.
-- **A library that says what a snippet *is*.** A short description and a complexity beside
+- **A library that says what a snippet _is_.** A short description and a complexity beside
   each entry, so the catalogue reads as a reference and not only as a paste buffer — and so
   `:Tuna lib search` has something to match on between a name and a whole body.
 - **Going back further than one problem and one contest.** `:Tuna last …` returns to the
@@ -781,5 +835,4 @@ something is missing is worth as much as knowing what is there.
 
 ## Acknowledgements
 
-A massive thank you to [xeluxee](https://github.com/xeluxee) and all the contributors to
-`competitest.nvim` for the great work this is built on the shoulders of.
+`tuna.nvim` is a ground-up rewrite of and successor to [competitest.nvim](https://github.com/xeluxee/competitest.nvim), which is no longer mantained. A massive thank you to [xeluxee](https://github.com/xeluxee) and all the contributors to `competitest.nvim` for their great work.

@@ -1000,31 +1000,4 @@ function M.offer_case_counts(bufnr, numbers, original_input, on_settled)
     end)
 end
 
----------------- DEPRECATED / COMPAT ----------------
--- Keeps the not-yet-ported `add_testcase` command working. Uses the prototype's
--- ad-hoc `tests/<name>/` layout; removed once that command moves to the backend
--- API above (step 9).
-
----@deprecated use the backend API
-function M.add(project_root, name)
-    project_root = project_root or vim.fn.getcwd()
-    name = name or "sample"
-
-    local testcase_dir = project_root .. "/tests/" .. name
-    if not utils.ensure_directory(testcase_dir) then
-        return false, "failed to create testcase directory"
-    end
-
-    local input_path = testcase_dir .. "/input.txt"
-    local output_path = testcase_dir .. "/output.txt"
-    if not utils.file_exists(input_path) then
-        utils.write_file(input_path, "")
-    end
-    if not utils.file_exists(output_path) then
-        utils.write_file(output_path, "")
-    end
-
-    return true, testcase_dir
-end
-
 return M

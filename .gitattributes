@@ -1,4 +1,6 @@
-# `.gitattributes` itself is developer-only: `export-ignore` keeps it out of
-# `git archive` output, which is what GitHub's release tarballs and zips are built
-# from, so anyone installing that way gets only the plugin itself.
+# `.gitattributes` itself and `CLAUDE.md` (the maintainer's design record) are
+# developer-only: `export-ignore` keeps them out of `git archive` output, which is
+# what GitHub's release tarballs and zips are built from, so anyone installing that
+# way gets only the plugin itself.
 .gitattributes  export-ignore
+CLAUDE.md       export-ignore
