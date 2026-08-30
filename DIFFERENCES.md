@@ -422,6 +422,20 @@ Design notes:
   edit the buffer (`TextChanged`), because a verdict no longer describes changed
   source. So the indicator is genuinely bound to *this* problem's *submitted* state.
 
+Watch mode is **on by default**, which is the whole point of submitting from the editor:
+the tools people configure here poll the judge and print the verdict, so tuna reads it and
+puts it in the statusline rather than in a terminal you have to go and look at. What makes
+that default safe is what silence means. A watched submit whose tool exits **0** without
+printing anything tuna recognises is *not* a failure — tuna not knowing the words a tool
+used is tuna's ignorance — so the indicator is cleared and nothing is claimed. Reporting a
+failure there would be the worst answer available, telling you a submission failed when it
+did not, and it was reachable by every tool whose wording is not in `submit.verdicts`. Only
+a non-zero exit, the tool's own word for "this did not work", is reported.
+
+The terminal path (`submit.watch = false`) remains the right choice for a tool that **asks
+you something** — kattis-cli without `-f` prompts to confirm — because watch mode gives the
+child no stdin, so a prompt there gets EOF.
+
 **Why:** submitting is the last manual step in the loop; folding it into the plugin
 (configurably, not hardcoded to one tool) removes the last reason to drop back to a
 shell, and the provider seam keeps it open to new judges.
@@ -993,15 +1007,44 @@ for C++ and Python, and both the base filenames and the templates — per kind a
 
 ## The `:Tuna` dashboard (`dashboard.lua`)
 
-✅ **Done (evolving, W8).** Bare `:Tuna` (or `:Tuna dashboard`) opens a native chooser
-that switches the buffer's **run mode**
-(normal / run-all / stress / interactive), toggles the checker, cycles the compare
-method, shows the results UI, scaffolds a helper, or cleans unused files — so the
-Phase 3 features are discoverable without memorising subcommands, and picking a mode
-here is what a later bare `:Tuna run` repeats. In competitest a bare `:CompetiTest`
-was an error. This started as an inline "mode-switcher menu" and has been promoted to
-its own `dashboard.lua` — the seed of the fuller contest hub (problem navigation,
-at-a-glance status) it will grow into.
+✅ **Done (W8).** In competitest a bare `:CompetiTest` is an error. In tuna it opens the
+dashboard: a slanted block `tuna` wordmark across the top, and under it two columns side
+by side in one float, each a list you walk with `j`/`k` and act on with `<CR>`, with
+`switch_window_keys` (or Tab) moving between them exactly as they move between the
+results UI's panes.
+
+The banner is an ornament and is treated as one — it is drawn only when the lists still
+fit under it, so a small terminal loses the title rather than the dashboard, and
+`dashboard.header` replaces it with lines of your own or turns it off.
+
+**Recent**, on the left, is *where you were*: the contest and the problem
+`:Tuna last …` would return to, each with how it went, and `<CR>` goes there. The status
+is resolved in the order a competitor cares about — the judge's verdict if there is one,
+else how the local testcases went, else nothing — because a judge has the last word and
+local results are the best available guess until it arrives. The verdict is read from the
+problem's sidecar by *path*, so a problem need not be open to say `Accepted`, and it is
+dropped once the file has been edited since, on the same rule that governs the lualine
+indicator: a verdict describes the source it was submitted from.
+
+Local results are deliberately **not** persisted. They describe a build that may no
+longer exist, which is exactly why a submit verdict carries an mtime and a run does not —
+so they are available for the problem you are on and never for one you have not opened,
+which is the right side of that to be wrong on.
+
+**Commands**, on the right, is *what to do*, and only what can be done from the file you
+are on: the solution-only half is dropped for a buffer tuna cannot run, since offering
+`Add testcase` on a scratch buffer is offering an error message.
+
+The board is a widget of its own (`widgets.panels`) rather than a mode of the existing
+chooser form, because the two differ in what `<CR>` *means*. A form asks one question
+with several parts, so submitting takes every list's selection together; a board puts
+unrelated lists side by side, so submitting takes the selection of the list you are
+standing in and leaves the others alone.
+
+**Why:** the two questions a competitor asks between problems are "where was I" and
+"what now", and they are different kinds of question — one is a place, the other an
+action. Putting them side by side answers both at a glance, where a single menu makes
+you read past one to find the other.
 
 ## Clean unused files (`clean.lua`, `:Tuna clean`)
 

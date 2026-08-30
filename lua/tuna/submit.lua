@@ -637,6 +637,21 @@ local token_seq = 0
 
 local FINAL = { accepted = true, rejected = true, partial = true }
 
+---What a watched submit that reached **no final verdict** amounts to, once its tool has
+---exited. The whole question is what silence means, and the answer is the exit code: a
+---tool that exits 0 has said the submission went through, and tuna not recognising the
+---words it used to say so is tuna's ignorance, not a failure. Reporting one would be the
+---worst kind of wrong — telling you a submission failed when it did not — and it is
+---reachable by any submit tool whose verdict wording is not in `submit.verdicts`, which
+---is every tool nobody has configured patterns for yet.
+---
+---A non-zero exit is the tool's own word for "this did not work", and is reported.
+---@param code integer the tool's exit status
+---@return "clear"|"error"
+local function watch_outcome(code)
+    return code == 0 and "clear" or "error"
+end
+
 ---Absolute file-path key for a buffer.
 ---@param bufnr integer?
 ---@return string
@@ -771,6 +786,32 @@ end
 ---verdict, or if the file's mtime no longer matches the one recorded at submit time
 ---(the solution was edited since). Called from the `BufReadPost` autocmd.
 ---@param bufnr integer
+---The last submit verdict recorded for `path`, whoever recorded it and whether or not
+---the file is open. Read straight from the sidecar rather than from `M.state`, so the
+---dashboard can say how a problem went without opening it — and guarded by the same
+---mtime rule `M.restore` applies, since a verdict describes the source it was submitted
+---from and says nothing about one edited since.
+---@param path string absolute solution path
+---@return { state: string, text: string }? verdict, nil when there is none or it is stale
+function M.verdict_for(path)
+    if type(path) ~= "string" or path == "" then
+        return nil
+    end
+    local live = M.state[path]
+    if live and FINAL[live.state] then
+        return { state = live.state, text = live.text }
+    end
+    local store = M.read_task_store(vim.fn.fnamemodify(path, ":h"), config.current_setup)
+    local entry = store and type(store.submit) == "table" and store.submit[vim.fn.fnamemodify(path, ":t")]
+    if type(entry) ~= "table" or not FINAL[entry.state] then
+        return nil
+    end
+    if entry.mtime ~= file_mtime(path) then
+        return nil -- edited since the verdict was recorded
+    end
+    return { state = entry.state, text = entry.text }
+end
+
 function M.restore(bufnr)
     local path = buf_path(bufnr)
     if path == "" or M.state[path] then
@@ -1169,10 +1210,11 @@ local function run_watch(ctx, cmd)
             if not (st and st.token == my_token) then
                 return
             end
-            -- Fire-and-forget tool (no verdict stream): a clean exit is a successful
-            -- submit — the tool's own output / opened browser is the feedback — so
-            -- just clear the "submitting …" flash. Only a non-zero exit is an error.
-            if scfg.expects_verdict == false and res.code == 0 then
+            -- No verdict was recognised. A clean exit means the tool believes it
+            -- submitted — whether it never prints verdicts at all, or prints them in
+            -- words `submit.verdicts` does not know — so the "submitting …" flash is
+            -- cleared and nothing is claimed. Only a non-zero exit is a failure.
+            if watch_outcome(res.code) == "clear" then
                 M.state[path] = nil
                 refresh_status()
                 return
@@ -1367,6 +1409,7 @@ M._test = {
     scan_verdict = scan_verdict,
     is_valid_url = is_valid_url,
     judge_of = judge_of,
+    watch_outcome = watch_outcome,
 }
 
 return M

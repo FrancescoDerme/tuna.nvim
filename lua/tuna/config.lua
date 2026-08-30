@@ -264,6 +264,14 @@ M.defaults = {
     -- Three ways in: `:Tuna lib` (file, then snippet), `:Tuna lib snippet` (straight
     -- from every snippet) and `:Tuna lib search` (the same catalogue in telescope,
     -- matching names first and code second — needs telescope, the others do not).
+    -- dashboard (bare `:Tuna`)
+    dashboard = {
+        -- The banner across the top: a list of lines to draw instead of the shipped
+        -- wordmark, or `false` for none. It is an ornament and is dropped automatically
+        -- when the editor is too small to hold it and the lists both.
+        header = nil,
+    },
+
     library = {
         path = false, -- false | "~/cp/snippets" | { dir, dir, … }
         marker = "TUNALIB",
@@ -352,17 +360,25 @@ M.defaults = {
         -- Watch mode: run the submit command as a tracked async job (no terminal),
         -- parse its stdout for the judge verdict, and show it in the lualine
         -- component — persistently, per solution buffer, until the next submit.
-        -- Requires a submit tool that polls and prints a verdict (e.g. the Rust
-        -- `submitter`). Leave false to keep the fire-and-forget terminal behaviour.
-        watch = false,
+        -- On by default: the tools people configure here (cf-tool, the Rust
+        -- `submitter`, kattis-cli with -f) poll the judge and print the verdict, and
+        -- reading it is the whole reason to submit from the editor. A tool that prints
+        -- nothing tuna recognises is not a failure — a clean exit clears the indicator
+        -- and says nothing — so the cost of this being wrong for your tool is a missing
+        -- verdict, not a wrong one.
+        --
+        -- Set false for the fire-and-forget terminal instead. That is the one to use for
+        -- a tool that **asks you something** (kattis-cli without -f prompts to confirm):
+        -- watch mode gives the child no stdin, so a prompt there gets EOF.
+        watch = true,
         -- How long (ms) the terminal-path "submitting …" flash stays up (watch mode
         -- ignores this — its state persists until the next submit). 0 disables it.
         status_time = 6000,
-        -- Whether the submit tool streams a parseable judge verdict (true, e.g. the
-        -- Rust submitter on Codeforces). Set false for a fire-and-forget tool that
-        -- just submits and prints no verdict: watch mode then runs it in the
-        -- background (no terminal, lualine shows "submitting …"), treats a clean exit
-        -- as success (clears the indicator), and only a non-zero exit as an error.
+        -- Whether to read the submit tool's output for a verdict at all. false skips
+        -- the parsing for a tool that just submits and prints nothing useful, so a
+        -- stray "accepted" in its chatter can't be misread as the judge's word. It no
+        -- longer changes what a *silent* run means: either way, a clean exit with no
+        -- verdict clears the indicator rather than reporting a failure.
         expects_verdict = true,
         -- Watch-mode safety net (ms): if a submit job never reports a final verdict
         -- within this long (a hung/abandoned poll), stop watching and clear the

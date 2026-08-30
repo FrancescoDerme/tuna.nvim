@@ -1339,6 +1339,287 @@ end
 --------------------------------------------------------------------------------
 
 ---Rebuild whichever widgets are currently visible. Called from the `VimResized`
+--------------------------------------------------------------------------------
+-- Panels: side-by-side lists, one focused, <CR> acting on the focused one
+--------------------------------------------------------------------------------
+--
+-- The `form` above is the vertical relative of this: several lists on screen at once,
+-- switched between with the same keys. The two differ in what `<CR>` *means*, which is
+-- why they are separate rather than one widget with a flag. A form asks one question
+-- with several parts, so submitting takes every list's selection together; a panel board
+-- puts unrelated lists side by side, so submitting takes the selection of the list you
+-- are standing in and leaves the others alone. Folding that into `form` would mean a
+-- flag that changes both the layout and the meaning of the only key that acts.
+
+---@class tuna.PanelSection
+---@field title string border title
+---@field items string[] rows, pre-formatted by the caller
+
+---@class tuna.PanelsWidget
+---@field ui_visible boolean
+---@field sections { title: string, items: string[], sel: integer }[]
+---@field wins integer[]
+---@field bufs integer[]
+---@field header string[]? banner rows drawn above the lists
+---@field header_win integer?
+---@field header_buf integer?
+---@field focused integer
+---@field title string?
+---@field on_choice fun(section: integer, item: integer)?
+---@field on_close fun()?
+---@field restore_winid integer?
+---@field skip_close boolean swallow WinClosed events during a resize/teardown
+local panels = { ui_visible = false, sections = {}, wins = {}, bufs = {}, focused = 1 }
+
+---A row of single-choice lists, all visible, one focused. `<CR>` chooses from the
+---focused list only. Call with `sections == nil` to rebuild on `VimResized`, keeping
+---each list's selection and which one had focus.
+---@param sections tuna.PanelSection[]? nil to resize
+---@param title string? unused today, kept for symmetry with the other widgets
+---@param on_choice fun(section: integer, item: integer)?
+---@param restore_winid integer?
+---@param on_close fun()?
+---@param header string[]? a banner above the lists, drawn only when there is room for it
+function M.panels(sections, title, on_choice, restore_winid, on_close, header)
+    if sections == nil then -- resize: keep each list's selection and the focused one
+        if not panels.ui_visible then
+            return
+        end
+        for i, w in ipairs(panels.wins) do
+            if api.nvim_win_is_valid(w) then
+                panels.sections[i].sel = api.nvim_win_get_cursor(w)[1]
+            end
+        end
+        panels.skip_close = true
+        close_win(panels.header_win)
+        for _, w in ipairs(panels.wins) do
+            close_win(w)
+        end
+    else
+        if #sections == 0 then
+            return
+        end
+        panels.sections = {}
+        for _, sec in ipairs(sections) do
+            panels.sections[#panels.sections + 1] = {
+                title = sec.title,
+                items = #sec.items > 0 and sec.items or { "" },
+                sel = 1,
+            }
+        end
+        panels.title = title
+        panels.on_choice = on_choice
+        panels.on_close = on_close
+        panels.restore_winid = restore_winid
+        panels.header = header
+        panels.focused = 1
+    end
+
+    local cfg = config.get_buffer_config(api.nvim_get_current_buf())
+    local vim_width = utils.get_ui_size()
+    local n = #panels.sections
+
+    -- Each list is as wide as its own content wants; the board is then scaled down as a
+    -- whole if the editor cannot hold it, so a long command name never squeezes the
+    -- column beside it out of existence.
+    local widths, total = {}, 0
+    for i, sec in ipairs(panels.sections) do
+        local w = #sec.title + 4
+        for _, it in ipairs(sec.items) do
+            w = math.max(w, api.nvim_strwidth(it))
+        end
+        widths[i] = w + 2
+        total = total + widths[i] + PANE_STEP
+    end
+    local room = vim_width - 2
+    if total > room then
+        local scale = room / total
+        total = 0
+        for i = 1, n do
+            widths[i] = math.max(6, math.floor(widths[i] * scale))
+            total = total + widths[i] + PANE_STEP
+        end
+    end
+
+    -- Each list is as tall as its own content, bounded by the band, and they are aligned
+    -- at the top. A shared height would be the tidier-sounding choice and is the wrong
+    -- one: these lists are unrelated, so a two-row column beside a twenty-row one would
+    -- be drawn twenty rows tall around two lines of text.
+    local band_row, band_h = utils.float_band()
+
+    -- The banner is an ornament, so it is the first thing given up: it is drawn only if
+    -- the lists still fit under it, and never at their expense. A dashboard that will
+    -- not open on a small terminal would be a worse trade than one without a title.
+    local head = panels.header
+    local head_w, head_h = 0, 0
+    if head and #head > 0 then
+        for _, l in ipairs(head) do
+            head_w = math.max(head_w, api.nvim_strwidth(l))
+        end
+        head_h = #head
+        -- Room for the banner *and* at least a few rows of every list under it.
+        if head_w + 2 > vim_width or band_h < head_h + PANE_STEP * 2 + 3 then
+            head, head_w, head_h = nil, 0, 0
+        end
+    else
+        head = nil
+    end
+
+    local cap = math.max(1, band_h - PANE_STEP - (head and head_h + PANE_STEP or 0))
+    local heights, tallest = {}, 1
+    for i, sec in ipairs(panels.sections) do
+        heights[i] = math.max(1, math.min(#sec.items, cap))
+        tallest = math.max(tallest, heights[i])
+    end
+    local board_h = tallest + PANE_STEP + (head and head_h + PANE_STEP or 0)
+    local row = band_row + math.max(0, math.floor((band_h - board_h) / 2))
+    -- The banner spans the wider of itself and the lists, everything centred on one
+    -- axis, so the board reads as a single object however the two compare.
+    local board_w = math.max(total, head and head_w + PANE_STEP or 0)
+    local col = math.max(0, math.floor((vim_width - board_w) / 2))
+
+    panels.header_win, panels.header_buf = nil, nil
+    if head then
+        local hb = api.nvim_create_buf(false, true)
+        -- Centred by padding the lines, not by narrowing the float: the banner spans the
+        -- board so its frame lines up with the lists under it, and a block of art sitting
+        -- against the left edge of a wide frame reads as a mistake.
+        local inner = board_w - PANE_STEP
+        local pad = string.rep(" ", math.max(0, math.floor((inner - head_w) / 2)))
+        local centred = {}
+        for i, l in ipairs(head) do
+            centred[i] = pad .. l
+        end
+        api.nvim_buf_set_lines(hb, 0, -1, false, centred)
+        vim.bo[hb].modifiable = false
+        panels.header_buf = hb
+        panels.header_win = open_float(hb, false, {
+            width = board_w - PANE_STEP,
+            height = head_h,
+            row = row,
+            col = col,
+            border = cfg.floating_border,
+            border_highlight = cfg.floating_border_highlight,
+        })
+        row = row + head_h + PANE_STEP
+    end
+    -- The lists are centred under the banner rather than left-aligned with it.
+    col = math.max(0, math.floor((vim_width - total) / 2))
+
+    panels.skip_close = false -- fresh windows: a real close should count again
+    panels.wins, panels.bufs = {}, {}
+    for i, sec in ipairs(panels.sections) do
+        local b = api.nvim_create_buf(false, true)
+        api.nvim_buf_set_lines(b, 0, -1, false, sec.items)
+        vim.bo[b].modifiable = false
+        local w = open_float(b, i == panels.focused, {
+            width = widths[i],
+            height = heights[i],
+            row = row,
+            col = col,
+            border = cfg.floating_border,
+            border_highlight = cfg.floating_border_highlight,
+            title = " " .. sec.title .. " ",
+            -- A list that has to scroll is read like a buffer, so the user's own
+            -- scrolloff applies; one that fits keeps the pin so its edge rows stay
+            -- reachable (the same rule the menu follows).
+            keep_scrolloff = heights[i] < #sec.items,
+        })
+        -- setlocal, so focusing a list does not leak cursorline's global default into
+        -- the user's editor (see the menu note).
+        api.nvim_set_option_value("cursorline", true, { scope = "local", win = w })
+        pcall(api.nvim_win_set_cursor, w, { math.min(sec.sel, #sec.items), 0 })
+        panels.wins[i] = w
+        panels.bufs[i] = b
+        col = col + widths[i] + PANE_STEP -- the next list's border starts where this one ends
+    end
+    panels.ui_visible = true
+
+    local function teardown()
+        panels.ui_visible = false
+        panels.skip_close = true
+        close_win(panels.header_win)
+        for _, w in ipairs(panels.wins) do
+            close_win(w)
+        end
+        panels.skip_close = false
+        if panels.restore_winid and api.nvim_win_is_valid(panels.restore_winid) then
+            api.nvim_set_current_win(panels.restore_winid)
+        end
+    end
+
+    local function choose(i)
+        if not panels.ui_visible then
+            return
+        end
+        local w = panels.wins[i]
+        local idx = api.nvim_win_is_valid(w) and api.nvim_win_get_cursor(w)[1] or panels.sections[i].sel
+        teardown()
+        if panels.on_choice then
+            panels.on_choice(i, idx)
+        end
+    end
+
+    local function cancel()
+        if not panels.ui_visible then
+            return
+        end
+        teardown()
+        if panels.on_close then
+            panels.on_close()
+        end
+    end
+
+    ---Move focus by `delta`, wrapping. Focus is the active window (cursor + cursorline),
+    ---as everywhere else in the plugin, so this only moves the cursor.
+    local function refocus(delta)
+        panels.focused = (panels.focused - 1 + delta) % n + 1
+        if api.nvim_win_is_valid(panels.wins[panels.focused]) then
+            api.nvim_set_current_win(panels.wins[panels.focused])
+        end
+    end
+
+    -- The plugin-wide pane keys, taken as { left, down, up, right }: right/down move to
+    -- the next list, left/up to the previous. Tab/S-Tab are the portable fallback.
+    local sw = cfg.switch_window_keys or {}
+    local next_keys, prev_keys = { "<Tab>" }, { "<S-Tab>" }
+    for _, k in ipairs({ sw[4], sw[2] }) do
+        next_keys[#next_keys + 1] = k
+    end
+    for _, k in ipairs({ sw[1], sw[3] }) do
+        prev_keys[#prev_keys + 1] = k
+    end
+
+    for i, b in ipairs(panels.bufs) do
+        local sec = panels.sections[i]
+        map_keys({ "j", "<down>" }, "n", b, function()
+            move_cursor(panels.wins[i], #sec.items, 1)
+        end)
+        map_keys({ "k", "<up>" }, "n", b, function()
+            move_cursor(panels.wins[i], #sec.items, -1)
+        end)
+        map_keys(next_keys, "n", b, function()
+            refocus(1)
+        end)
+        map_keys(prev_keys, "n", b, function()
+            refocus(-1)
+        end)
+        map_keys(cfg.picker_ui.mappings.submit, "n", b, function()
+            choose(i)
+        end)
+        map_cancel(b, cancel, { normal = cfg.picker_ui.mappings.close })
+        api.nvim_create_autocmd("WinClosed", {
+            buffer = b,
+            callback = function()
+                if panels.skip_close then
+                    return
+                end
+                cancel()
+            end,
+        })
+    end
+end
+
 ---autocmd so floats stay centred and proportional after the UI changes size.
 function M.resize_widgets()
     M.editor(nil)
@@ -1346,6 +1627,7 @@ function M.resize_widgets()
     M.input(nil)
     M.menu(nil)
     M.form(nil)
+    M.panels(nil)
 end
 
 return M

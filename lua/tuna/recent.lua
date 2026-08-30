@@ -74,6 +74,16 @@ local function load()
     end
 end
 
+---What `:Tuna last problem` / `last contest` would return to, hydrated from disk if this
+---session has not read it yet. Exported so the dashboard can *show* what those commands
+---would do without doing it — the state itself is `M.state`, but reading that directly
+---would see an empty table until something else happened to load it.
+---@return { problem: table?, contest: table? }
+function M.snapshot()
+    load()
+    return M.state
+end
+
 ---Write the state file now.
 function M.flush()
     if timer then
