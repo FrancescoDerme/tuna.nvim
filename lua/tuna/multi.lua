@@ -86,9 +86,11 @@ local function load_dir_testcases(source_dir, anchor, cfg)
     local primary = loaders[cfg.testcases_storage]
     local tctbl = primary and primary() or {}
     if next(tctbl) == nil and cfg.testcases_auto_detect then
-        for name, load in pairs(loaders) do
+        -- The same fixed fallback order the buffer path uses, for the same reason:
+        -- which backend answers must not depend on table hash order.
+        for _, name in ipairs(testcases.BACKEND_ORDER) do
             if name ~= cfg.testcases_storage then
-                tctbl = load()
+                tctbl = loaders[name]()
                 if next(tctbl) ~= nil then
                     break
                 end
@@ -155,8 +157,9 @@ function MultiRunner:solution_summary(hrow)
     return table.concat(lines, "\n")
 end
 
----Detail-pane content: testcase rows use their run's streams; solution rows show a
----per-testcase summary (Output) and any compile output (Errors).
+---Detail-pane content: solution rows show a per-testcase summary (Output) and any
+---compile output (Errors); testcase rows are the base class's — including the Errors
+---pane carrying a checker's message.
 function MultiRunner:pane_content(tc, name)
     if tc.kind == "solution" then
         if name == "so" then
@@ -166,16 +169,7 @@ function MultiRunner:pane_content(tc, name)
         end
         return ""
     end
-    if name == "so" then
-        return tc.stdout
-    elseif name == "eo" then
-        return tc.expected
-    elseif name == "si" then
-        return tc.stdin
-    elseif name == "se" then
-        return tc.stderr
-    end
-    return ""
+    return core.RunnerCore.pane_content(self, tc, name)
 end
 
 ---Build the matrix rows: for each solution, a header row then one row per testcase.
@@ -355,18 +349,32 @@ function MultiRunner:compile_solution(sol, cb)
     hrow.status, hrow.hlgroup = "compiling", "TunaRunning"
     self:update_ui(true)
     utils.ensure_directory(self.compdir)
-    vim.system(vim.list_extend({ sol.cc.exec }, vim.deepcopy(sol.cc.args)), { cwd = self.compdir }, function(res)
-        vim.schedule(function()
-            hrow.compile_output = (res.stdout or "") .. (res.stderr or "")
-            if res.code ~= 0 then
-                hrow.status, hrow.hlgroup = "CE", "TunaWarning"
-                self:set_cases(sol, "—", "TunaDone")
-                self:update_ui(true)
-                return cb(false)
-            end
-            cb(true)
-        end)
-    end)
+    -- pcall'd: a compiler that is not installed makes `vim.system` itself throw, and
+    -- that is this solution's CE, not an editor error.
+    local ok, err = pcall(
+        vim.system,
+        vim.list_extend({ sol.cc.exec }, vim.deepcopy(sol.cc.args)),
+        { cwd = self.compdir },
+        function(res)
+            vim.schedule(function()
+                hrow.compile_output = (res.stdout or "") .. (res.stderr or "")
+                if res.code ~= 0 then
+                    hrow.status, hrow.hlgroup = "CE", "TunaWarning"
+                    self:set_cases(sol, "—", "TunaDone")
+                    self:update_ui(true)
+                    return cb(false)
+                end
+                cb(true)
+            end)
+        end
+    )
+    if not ok then
+        hrow.compile_output = tostring(err)
+        hrow.status, hrow.hlgroup = "CE", "TunaWarning"
+        self:set_cases(sol, "—", "TunaDone")
+        self:update_ui(true)
+        cb(false)
+    end
 end
 
 ---Run every solution version: compile them all first (in parallel), then run every
@@ -486,8 +494,12 @@ end
 ---@param sol table
 function MultiRunner:rerun_solution(sol)
     sol.skip = false
+    -- A re-run is a run: `idle()` must say so while it is in flight, so the
+    -- structural edits that wait on it do (see `settle_single`).
+    self.completed = false
     self:compile_solution(sol, function(ok)
         if not ok then
+            self:settle_single()
             return
         end
         local ci = 0
@@ -495,6 +507,7 @@ function MultiRunner:rerun_solution(sol)
             ci = ci + 1
             if ci > #sol.case_idxs then
                 self:recompute_header(sol)
+                self:settle_single()
                 self:update_ui(true)
                 return
             end
@@ -510,6 +523,15 @@ function MultiRunner:rerun_solution(sol)
     end)
 end
 
+---@private
+---Mark a single/solution re-run finished — unless the shared pool is still draining,
+---in which case its own completion check owns the flag.
+function MultiRunner:settle_single()
+    if (self.running_cases or 0) == 0 and (self.qpos or 0) >= #(self.queue or {}) then
+        self.completed = true
+    end
+end
+
 ---Re-run one row: a testcase row re-runs just that case (reusing the existing
 ---binary); a solution header row recompiles and re-runs that whole solution.
 ---@param idx integer
@@ -522,9 +544,11 @@ function MultiRunner:run_single(idx)
         self:rerun_solution(tc.sol)
         return
     end
+    self.completed = false
     self:reset_row(tc)
     self:execute_process(idx, tc.sol.rc, self.rundir, { timelimit = self.timeout }, function()
         self:recompute_header(tc.sol)
+        self:settle_single()
         self:update_ui(true)
     end)
 end

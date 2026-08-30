@@ -217,6 +217,17 @@ function M.run_testcases(bufnr, list, compile, only_show)
     config.load_buffer_config(bufnr)
     local tctbl = testcases.buf_get_testcases(bufnr)
 
+    -- The cached runner keeps the commands/dirs/checker resolved when it was built,
+    -- while the line above re-reads the config — so an edited `.tuna.lua` used to
+    -- change which testcases were found immediately but not how they were run, until
+    -- something happened to drop the runner. If the config changed, drop it now: the
+    -- results it holds describe runs under settings that no longer apply.
+    local cached = M.runners[bufnr]
+    if cached and not vim.deep_equal(cached.config, config.get_buffer_config(bufnr)) then
+        cached:delete_ui()
+        M.runners[bufnr] = nil
+    end
+
     if list then
         local subset = {}
         for _, s in ipairs(list) do
@@ -374,6 +385,12 @@ end
 -- Order the menu's "Compare" entry cycles through (default = clear the override).
 local COMPARE_CYCLE = { "default", "exact", "squish", "float" }
 
+-- The float tolerance each buffer last asked for (`:Tuna compare float 1e-9`), so
+-- cycling away from float and back does not silently reset it to 1e-6. Session-local
+-- on purpose: the sidecar already persists the tolerance while float is *active*.
+---@type table<string, number>
+local last_float_tol = {}
+
 ---The cycle token naming the buffer's current compare override (or "default").
 ---@param path string
 ---@return string
@@ -391,7 +408,8 @@ end
 ---the dashboard, where a click cycles rather than takes an argument).
 ---@param bufnr integer
 function M.cycle_compare(bufnr)
-    local token = compare_token(api.nvim_buf_get_name(bufnr))
+    local path = api.nvim_buf_get_name(bufnr)
+    local token = compare_token(path)
     local i = 1
     for k, t in ipairs(COMPARE_CYCLE) do
         if t == token then
@@ -400,7 +418,11 @@ function M.cycle_compare(bufnr)
         end
     end
     local next_token = COMPARE_CYCLE[i % #COMPARE_CYCLE + 1]
-    M.set_compare(bufnr, { next_token })
+    local args = { next_token }
+    if next_token == "float" and last_float_tol[path] then
+        args[2] = tostring(last_float_tol[path]) -- come back to the tolerance last set
+    end
+    M.set_compare(bufnr, args)
 end
 
 ---Set (or clear) the per-buffer output-compare override. Drops the cached runner so
@@ -412,7 +434,11 @@ function M.set_compare(bufnr, args)
     if not ok then
         return
     end
-    tools.set_compare(api.nvim_buf_get_name(bufnr), method)
+    local path = api.nvim_buf_get_name(bufnr)
+    if type(method) == "table" and method[1] == "float" then
+        last_float_tol[path] = method.tol
+    end
+    tools.set_compare(path, method)
     M.runners[bufnr] = nil
     if cleared then
         utils.notify("compare method reset to config default for this buffer.", "INFO")

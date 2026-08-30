@@ -71,13 +71,21 @@ M.builtin = {
     end,
 
     atcoder = function(ctx)
+        -- Each contest kind by its own word: matching everything that says "contest N"
+        -- as a regular round filed AGC and AHC under "reg round", which misnames the
+        -- folder and collides with the ARC of the same number.
         local c = ctx.contest
-        local beg = c:match("beginner.-contest%s*(%d+)")
-        local round = c:match("contest%s*(%d+)")
-        if beg then
-            return { contest = "beg round " .. beg }
-        elseif round then
-            return { contest = "reg round " .. round }
+        local kinds = {
+            { "beginner", "beg round " },
+            { "regular", "reg round " },
+            { "grand", "grand round " },
+            { "heuristic", "heur round " },
+        }
+        for _, kind in ipairs(kinds) do
+            local n = c:match(kind[1] .. ".-contest%s*(%d+)")
+            if n then
+                return { contest = kind[2] .. n }
+            end
         end
     end,
 }

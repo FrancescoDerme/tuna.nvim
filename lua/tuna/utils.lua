@@ -109,6 +109,13 @@ function M.format_modifiers(str, modifiers, argument)
         -- when inside a modifier and c ~= ")", the character is part of the name
     end
 
+    -- A `$` or `$(` the string ended inside: the tail was never a modifier, and
+    -- returning what was collected so far would silently drop it.
+    if mod_start ~= 0 then
+        M.notify("format_modifiers: unterminated modifier in:\n" .. str)
+        return nil
+    end
+
     return table.concat(out)
 end
 
@@ -333,14 +340,21 @@ end
 ---while `~` is shell syntax that never reaches a shell — so left alone it survives into
 ---the path and becomes a directory literally *named* `~`, beside whatever the path was
 ---resolved against. Only the leading one, since `~` is an ordinary character anywhere
----else in a filename.
+---else in a filename. Only a bare `~` or a `~/` prefix: `~backup/file` names a
+---directory (or another user's home), not this user's, so it is left alone. Plain
+---concatenation rather than `gsub`, whose replacement string would misread a `%` in
+---the home path as a capture reference.
 ---@param path string
 ---@return string
 function M.expand_home(path)
-    if type(path) ~= "string" then
+    if type(path) ~= "string" or (path ~= "~" and path:sub(1, 2) ~= "~/") then
         return path
     end
-    return (path:gsub("^~", vim.uv.os_homedir() or vim.env.HOME or "~"))
+    local home = vim.uv.os_homedir() or vim.env.HOME
+    if not home then
+        return path
+    end
+    return home .. path:sub(2)
 end
 
 ---Resolve `path` to an absolute path. Relative paths are taken against

@@ -514,7 +514,15 @@ local function run_native(cmd, scfg)
 
     if not scfg.reuse_terminal then
         if background then
+            -- A fresh hidden shell per submit cannot be reused by construction, but it
+            -- must not accumulate either: drop the previous one (unless the user has a
+            -- window on it) so at most one stray terminal outlives its submission.
+            local prev = cached.oneshot
+            if prev and vim.api.nvim_buf_is_valid(prev.buf) and vim.fn.bufwinid(prev.buf) == -1 then
+                pcall(vim.api.nvim_buf_delete, prev.buf, { force = true })
+            end
             local n = spawn_native_background()
+            cached.oneshot = n
             vim.defer_fn(function()
                 pcall(vim.fn.chansend, n.chan, cmd .. "\n")
             end, 120)
@@ -1335,6 +1343,9 @@ M.providers.command = function(ctx)
         return
     end
     local cmd = utils.format_modifiers(template, ctx.modifiers, ctx.filepath)
+    if not cmd then
+        return -- a malformed modifier; format_modifiers already said which
+    end
     local name = display_name(ctx) -- header/sidecar problem name if known, else the basename
 
     if scfg.watch then

@@ -207,10 +207,27 @@ local function warn_unknown(mapping_tbl, scope)
     end
 end
 
----Install the opt-in keymaps: set the always-available `global` maps once, and
----register a `FileType` autocmd that applies the buffer-local `mappings` on the
----solution filetypes (also covering already-open buffers, for a lazy-loaded setup).
+---The global maps the last `setup()` applied, so a re-run can take them down before
+---applying the new set: a keymap.set can add or replace a map but never notices one
+---the user removed from their config. (Buffer-local maps have no such list — the
+---`FileType` autocmd is replaced wholesale, and a map already set on an open buffer
+---lingers until that buffer is reloaded.)
+---@type string[]
+local applied_global = {}
+
+---Install the opt-in keymaps: set the always-available `global` maps, and register a
+---`FileType` autocmd that applies the buffer-local `mappings` on the solution
+---filetypes (also covering already-open buffers, for a lazy-loaded setup). Re-runnable:
+---`init.setup()` calls it on every `setup()`, so a re-sourced config applies.
 function M.setup()
+    for _, lhs in ipairs(applied_global) do
+        pcall(vim.keymap.del, "n", lhs)
+    end
+    applied_global = {}
+    -- Cleared even when nothing will be re-registered: a config that dropped its
+    -- `mappings` should stop mapping new solution buffers.
+    local ft_group = vim.api.nvim_create_augroup("TunaKeymaps", { clear = true })
+
     local km = require("tuna.config").current_setup.keymaps
     if type(km) ~= "table" then
         return
@@ -230,10 +247,17 @@ function M.setup()
         return
     end
 
-    -- Always-available maps: set immediately, once.
+    -- Always-available maps: set immediately.
     if not vim.tbl_isempty(global) then
         warn_unknown(global, "global")
         set_maps(global, {}, glabels)
+        for action, lhs in pairs(global) do
+            if M.actions[action] and lhs then
+                for _, key in ipairs(type(lhs) == "table" and lhs or { lhs }) do
+                    applied_global[#applied_global + 1] = key
+                end
+            end
+        end
     end
 
     -- Buffer-local maps: applied per solution buffer via FileType.
@@ -241,7 +265,7 @@ function M.setup()
         warn_unknown(mappings, "mappings")
         local fts = filetypes(km)
         vim.api.nvim_create_autocmd("FileType", {
-            group = vim.api.nvim_create_augroup("TunaKeymaps", { clear = true }),
+            group = ft_group,
             pattern = fts,
             callback = function(ev)
                 set_maps(mappings, { buffer = ev.buf }, mlabels)

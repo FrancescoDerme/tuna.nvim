@@ -246,8 +246,16 @@ end
 function M.checker_spec(path, cfg)
     local spec, err = M.program(path, cfg)
     if not spec then
-        -- Not a known source language: assume a prebuilt, directly-runnable binary.
-        local _ = err
+        -- No run command for the filetype: an unknown language is the normal shape of
+        -- a prebuilt, directly-runnable binary, so nothing is wrong. Any *other*
+        -- failure means a language tuna knows whose command is malformed — falling
+        -- back to executing the source file will not work, so say why first.
+        if err and not err:match("^no run command") then
+            utils.notify(
+                "checker: " .. err .. ", treating '" .. vim.fn.fnamemodify(path, ":t") .. "' as a prebuilt binary.",
+                "WARN"
+            )
+        end
         return { exec = path, cwd = vim.fn.fnamemodify(path, ":p:h") }
     end
     spec.args = vim.list_extend(spec.args, vim.deepcopy(CHECKER_ARGS))
@@ -365,24 +373,33 @@ function M.prepare(spec, cb)
 
     utils.ensure_directory(spec.compile_dir)
     local argv = vim.list_extend({ spec.compile.exec }, vim.deepcopy(spec.compile.args or {}))
-    vim.system(argv, { cwd = spec.compile_dir }, function(res)
+    local function settle(compiled, error_msg)
+        entry.compiling = false
+        -- Re-read the mtime: capture what we actually compiled (the file may
+        -- have changed again while g++ was running).
+        entry.mtime = source_mtime(spec.source)
+        entry.compiled, entry.error = compiled, error_msg
+        local waiters = entry.waiters
+        entry.waiters = nil
+        for _, w in ipairs(waiters or {}) do
+            w(compiled, error_msg)
+        end
+    end
+    -- pcall'd: a compiler that is not installed makes `vim.system` itself throw, and
+    -- every queued caller still has to hear the answer — an exception here left
+    -- `compiling` set and the queue waiting forever.
+    local ok, spawn_err = pcall(vim.system, argv, { cwd = spec.compile_dir }, function(res)
         vim.schedule(function()
-            entry.compiling = false
-            -- Re-read the mtime: capture what we actually compiled (the file may
-            -- have changed again while g++ was running).
-            entry.mtime = source_mtime(spec.source)
             if res.code == 0 then
-                entry.compiled, entry.error = true, nil
+                settle(true, nil)
             else
-                entry.compiled, entry.error = false, "compilation failed:\n" .. (res.stderr or "")
-            end
-            local waiters = entry.waiters
-            entry.waiters = nil
-            for _, w in ipairs(waiters or {}) do
-                w(entry.compiled == true, entry.error)
+                settle(false, "compilation failed:\n" .. (res.stderr or ""))
             end
         end)
     end)
+    if not ok then
+        settle(false, "could not start '" .. tostring(spec.compile.exec) .. "': " .. tostring(spawn_err))
+    end
 end
 
 ---Save the buffers a run depends on, honouring `save_current_file` /

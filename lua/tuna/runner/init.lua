@@ -328,6 +328,10 @@ function TCRunner:run_single(tcindex)
     if not tc then
         return
     end
+    -- A single re-run is a run: while it is in flight the runner must not read as
+    -- idle, or the structural edits (`n`/`x`/`c`/`u`) that wait on `idle()` would be
+    -- let through mid-flight. `check_complete` flips it back once the row settles.
+    self.completed = false
     -- These rows were only ever *listed* (`:Tuna show_ui` before any run), so nothing has
     -- been built: running one on its own would spawn a binary that does not exist yet and
     -- report `ENOENT` as the testcase's verdict. Compile first, then run the row — the

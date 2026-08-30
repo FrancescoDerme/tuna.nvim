@@ -85,6 +85,12 @@ end
 function M.setup(user_opts)
     config.setup(user_opts)
 
+    -- Re-applied on every setup(), to match config's own contract: re-sourcing a
+    -- config that changed `keymaps` takes effect like every other option, instead of
+    -- silently waiting for a restart. Everything below the guard is config-independent
+    -- and installed once.
+    require("tuna.keymaps").setup()
+
     if loaded then
         return
     end
@@ -125,7 +131,6 @@ function M.setup(user_opts)
         desc = "Resize Tuna's UI when the window geometry changes",
     })
 
-    require("tuna.keymaps").setup()
     -- Track the problem/contest to come back to with `:Tuna last …`.
     require("tuna.recent").setup()
 

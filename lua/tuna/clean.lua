@@ -1205,15 +1205,15 @@ local function scan_and_confirm(dir, cfg, restore, depth, threshold, bufnr)
     end
 end
 
----Entry point for `:Tuna clean`. Choose a directory, recursion depth, and match
----threshold together (one form, all three lists visible), then confirm each unused
----file before deleting it.
----@param bufnr integer? defaults to the current buffer
--- The two pure deciders, exposed for the local test suite: reaching them through
+-- The pure deciders, exposed for the local test suite: reaching them through
 -- `M.clean` would mean driving a chooser form and a confirmation per file. Not part of
 -- the plugin's interface.
 M._test = { classify = classify, solution_templates = solution_templates, similarity = similarity, is_artifact = is_artifact }
 
+---Entry point for `:Tuna clean`. Choose a directory, recursion depth, and match
+---threshold together (one form, all three lists visible), then confirm each unused
+---file before deleting it.
+---@param bufnr integer? defaults to the current buffer
 function M.clean(bufnr)
     bufnr = bufnr or api.nvim_get_current_buf()
     config.load_buffer_config(bufnr)

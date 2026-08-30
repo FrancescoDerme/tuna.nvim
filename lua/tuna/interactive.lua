@@ -75,21 +75,16 @@ function InteractiveRunner:status_tail()
 end
 
 ---In `live` mode the Input pane is editable (you type responses into it), so the UI
----must not overwrite it on redraw.
+---must not overwrite it on redraw. Every other pane is the base class's — including
+---the Errors pane carrying a checker's message in feed mode.
 function InteractiveRunner:pane_content(tc, name)
-    if name == "so" then
-        return tc.stdout
-    elseif name == "eo" then
-        return tc.expected
-    elseif name == "si" then
+    if name == "si" then
         if self.source == "live" then
             return core.SKIP
         end
         return tc.stdin
-    elseif name == "se" then
-        return tc.stderr
     end
-    return ""
+    return core.RunnerCore.pane_content(self, tc, name)
 end
 
 ---A single session runs at a time; killing it ends that session.
@@ -326,9 +321,10 @@ function InteractiveRunner:run_feed(idx, on_done)
         on_stdout = function(data)
             tc.stdout = tc.stdout .. data
             self:update_ui(false)
-            -- One line per turn: when the solution completes a line of output,
-            -- send it the next input line.
-            if data:find("\n") then
+            -- One input line per *line* of output: a chunk carrying several newlines
+            -- is several completed turns, and answering it with a single line
+            -- deadlocked any protocol that prints more than one line per query.
+            for _ in data:gmatch("\n") do
                 send_next()
             end
         end,
@@ -411,7 +407,7 @@ function InteractiveRunner:run_interactor(idx, on_done)
     local sol_in, sol_out = uv.new_pipe(false), uv.new_pipe(false)
     local int_in, int_out, int_err = uv.new_pipe(false), uv.new_pipe(false), uv.new_pipe(false)
     local sol_handle, int_handle, timer
-    local done, verdict, int_exited = false, nil, false
+    local done, verdict, int_exited, failed = false, nil, false, false
 
     local function safe_close(h)
         if h and not h:is_closing() then
@@ -444,7 +440,11 @@ function InteractiveRunner:run_interactor(idx, on_done)
         utils.delete_file(answer_file)
         self.sol_handle, self.int_handle = nil, nil
         vim.schedule(function()
-            if verdict == true then
+            if failed then
+                -- The session never happened (the interactor would not start): that is
+                -- not a DONE, which reads as a session that ran and was not judged.
+                tc.status, tc.hlgroup = "FAILED", "TunaWarning"
+            elseif verdict == true then
                 tc.status, tc.hlgroup = "CORRECT", "TunaCorrect"
             elseif verdict == false then
                 tc.status, tc.hlgroup = "WRONG", "TunaWrong"
@@ -492,6 +492,7 @@ function InteractiveRunner:run_interactor(idx, on_done)
     end)
     if not int_handle then
         tc.stderr = "could not start interactor '" .. tostring(self.interactor.exec) .. "'"
+        failed = true
         finish()
         return
     end
@@ -790,20 +791,31 @@ function M.run(bufnr, args)
         ce.status, ce.hlgroup, ce.start_time = "RUNNING", "TunaRunning", vim.uv.now()
         ir:update_ui(true)
         utils.ensure_directory(r.compile_directory)
-        vim.system(vim.list_extend({ r.cc.exec }, vim.deepcopy(r.cc.args)), { cwd = r.compile_directory }, function(res)
-            vim.schedule(function()
-                ce.time = vim.uv.now() - ce.start_time
-                ce.stdout, ce.stderr, ce.exit_code = res.stdout or "", res.stderr or "", res.code
-                if res.code ~= 0 then
-                    ce.status, ce.hlgroup = "RET " .. tostring(res.code), "TunaWarning"
+        -- pcall'd: a compiler that is not installed makes `vim.system` itself throw,
+        -- and that failure belongs on the Compile row like any other.
+        local ok, err = pcall(
+            vim.system,
+            vim.list_extend({ r.cc.exec }, vim.deepcopy(r.cc.args)),
+            { cwd = r.compile_directory },
+            function(res)
+                vim.schedule(function()
+                    ce.time = vim.uv.now() - ce.start_time
+                    ce.stdout, ce.stderr, ce.exit_code = res.stdout or "", res.stderr or "", res.code
+                    if res.code ~= 0 then
+                        ce.status, ce.hlgroup = "RET " .. tostring(res.code), "TunaWarning"
+                        ir:update_ui(true)
+                        return
+                    end
+                    ce.status, ce.hlgroup = "DONE", "TunaDone"
                     ir:update_ui(true)
-                    return
-                end
-                ce.status, ce.hlgroup = "DONE", "TunaDone"
-                ir:update_ui(true)
-                prepare_and_start()
-            end)
-        end)
+                    prepare_and_start()
+                end)
+            end
+        )
+        if not ok then
+            ce.status, ce.hlgroup, ce.stderr = "FAILED", "TunaWarning", tostring(err)
+            ir:update_ui(true)
+        end
     else
         prepare_and_start()
     end

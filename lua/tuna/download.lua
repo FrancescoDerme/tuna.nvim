@@ -363,8 +363,10 @@ local function eval_download_modifiers(str, task, file_extension, remove_illegal
         JUDGE = judge,
         CONTEST = contest,
         URL = task.url,
-        MEMLIM = tostring(task.memoryLimit),
-        TIMELIM = tostring(task.timeLimit),
+        -- Empty when the task carries no limit (a hand-reconstructed task from a
+        -- sidecar has none), never the literal string "nil" a bare tostring produced.
+        MEMLIM = task.memoryLimit ~= nil and tostring(task.memoryLimit) or "",
+        TIMELIM = task.timeLimit ~= nil and tostring(task.timeLimit) or "",
         JAVA_MAIN_CLASS = java.mainClass or "Main",
         JAVA_TASK_CLASS = java.taskClass or "",
         DATE = tostring(os.date(date_format)),
@@ -512,46 +514,57 @@ end
 ---@param finished fun()?
 local function store_testcases_into_buffer(bufnr, tclist, replace, finished)
     local tctbl = testcases.buf_get_testcases(bufnr)
-    if next(tctbl) ~= nil then
-        local choice = 2 -- default to Replace when `replace` is set
-        if not replace then
-            choice = vim.fn.confirm(
-                "Testcases already exist. Keep them alongside the new ones?",
-                "&Keep\n&Replace\n&Cancel",
-                1
-            )
-        end
-        if choice == 2 then
-            testcases.buf_clear(bufnr) -- delete stale files before rewriting
-            tctbl = {}
-        elseif choice == 0 or choice == 3 then
-            if finished then
-                finished()
-            end
-            return
-        end
-    end
 
-    -- Append the new testcases at the lowest free indices.
-    local idx = 0
-    for _, tc in ipairs(tclist) do
-        while tctbl[idx] do
+    ---Append the new testcases to `existing` at the lowest free indices and write.
+    ---@param existing table<integer, table>
+    local function write(existing)
+        local idx = 0
+        for _, tc in ipairs(tclist) do
+            while existing[idx] do
+                idx = idx + 1
+            end
+            existing[idx] = tc
             idx = idx + 1
         end
-        tctbl[idx] = tc
-        idx = idx + 1
+        testcases.buf_write_testcases(bufnr, existing)
+        -- The buffer is a problem now (it has testcases), which is what makes it worth
+        -- remembering — record it here rather than waiting for the next `BufEnter`.
+        local path = vim.api.nvim_buf_get_name(bufnr)
+        if path ~= "" then
+            require("tuna.recent").record_problem(path)
+        end
+        if finished then
+            finished()
+        end
     end
 
-    testcases.buf_write_testcases(bufnr, tctbl)
-    -- The buffer is a problem now (it has testcases), which is what makes it worth
-    -- remembering — record it here rather than waiting for the next `BufEnter`.
-    local path = vim.api.nvim_buf_get_name(bufnr)
-    if path ~= "" then
-        require("tuna.recent").record_problem(path)
+    if next(tctbl) == nil then
+        write(tctbl)
+        return
     end
-    if finished then
-        finished()
+    if replace then
+        testcases.buf_clear(bufnr) -- delete stale files before rewriting
+        write({})
+        return
     end
+    -- Keep-or-replace is decided in the floating UI like every other tuna question;
+    -- dismissing (Esc) stores nothing. Every answer releases the batch processor.
+    require("tuna.widgets").menu(
+        { "Keep them alongside the new ones", "Replace them", "Stop" },
+        "testcases already exist",
+        function(idx)
+            if idx == 1 then
+                write(tctbl)
+            elseif idx == 2 then
+                testcases.buf_clear(bufnr)
+                write({})
+            elseif finished then
+                finished()
+            end
+        end,
+        vim.api.nvim_get_current_win(),
+        finished
+    )
 end
 
 ---Store one downloaded problem, prompting for its path unless configured not to.
@@ -864,23 +877,30 @@ local function make_handler(mode, notify_on_download, bufnr, cfg)
             if #tasks > 1 then
                 store_contest(tasks, cfg, finished)
             else
-                local choice = vim.fn.confirm(
-                    "Downloaded '" .. tasks[1].name .. "'.\nStore testcases only, or the full problem?",
-                    "&Testcases\n&Problem\n&Cancel",
-                    1
+                -- Persistent mode's per-batch question, in a float like every other
+                -- tuna question — never a command-line `confirm` in the middle of a
+                -- flow whose other prompts are floating. Dismissing stores nothing;
+                -- every answer releases the batch processor.
+                require("tuna.widgets").menu(
+                    { "Store the testcases only", "Store the full problem", "Stop" },
+                    "downloaded '" .. tasks[1].name .. "'",
+                    function(choice)
+                        if choice == 1 then
+                            store_testcases_into_buffer(
+                                vim.api.nvim_get_current_buf(),
+                                tasks[1].tests,
+                                cfg.replace_downloaded_testcases,
+                                finished
+                            )
+                        elseif choice == 2 then
+                            store_single_problem(tasks[1], cfg, finished)
+                        else
+                            finished()
+                        end
+                    end,
+                    vim.api.nvim_get_current_win(),
+                    finished
                 )
-                if choice == 1 then
-                    store_testcases_into_buffer(
-                        vim.api.nvim_get_current_buf(),
-                        tasks[1].tests,
-                        cfg.replace_downloaded_testcases,
-                        finished
-                    )
-                elseif choice == 2 then
-                    store_single_problem(tasks[1], cfg, finished)
-                else
-                    finished()
-                end
             end
         end
     end

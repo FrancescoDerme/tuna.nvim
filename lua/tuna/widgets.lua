@@ -77,6 +77,12 @@ local function open_float(bufnr, enter, opts)
     -- clear it, so `:Tuna clean` could leave `tuna://widget/N/tuna` behind as an unsaved
     -- *file* and a later `:qa` answered `E37`/`E162` about it.
     surface.adopt(bufnr, opts.kind or "widget", { keep_clean = true })
+    -- Wiped when its window closes: every widget creates fresh buffers on every open
+    -- and closes only its windows, so without this each prompt of a long session left
+    -- a hidden `tuna://widget` buffer (and its buffer-local autocmds) behind for good
+    -- — a `:Tuna clean` pass over thirty files leaked sixty of them. Nothing reads a
+    -- widget buffer after its window is gone, so there is nothing to keep.
+    vim.bo[bufnr].bufhidden = "wipe"
     -- A list is read by moving through it, never edited, so the keys that would try are
     -- made inert here rather than left to raise `E21` a keystroke later. Run before the
     -- widget binds its own keys, which simply take precedence.
@@ -275,6 +281,14 @@ function M.input(title, default_text, border, border_highlight, callback_only, o
             on_submit(default_text)
             return
         end
+        if input.ui_visible then
+            -- Opened over an open prompt: repointing the singleton would orphan the
+            -- old window (see the menu).
+            input.ui_visible = false
+            input.skip_on_close = true
+            close_win(input.winid)
+            input.skip_on_close = false
+        end
         input.title = title
         input.default_text = default_text
         input.border = border
@@ -387,6 +401,13 @@ function M.editor(bufnr, tcnum, input_content, output_content, callback, restore
         close_win(editor.input_win)
         close_win(editor.output_win)
     else
+        if editor.ui_visible then
+            -- Opened over an open editor: repointing the singleton would orphan the
+            -- old windows (see the menu).
+            editor.ui_visible = false
+            close_win(editor.input_win)
+            close_win(editor.output_win)
+        end
         editor.bufnr = bufnr
         editor.tcnum = tcnum and (tostring(tcnum) .. " ") or ""
         editor.callback = callback
@@ -538,6 +559,12 @@ function M.picker(bufnr, tctbl, title, callback, restore_winid)
             utils.notify("there's no testcase to pick from.", "WARN")
             return
         end
+        if picker.ui_visible then
+            -- Opened over an open picker: repointing the singleton would orphan the
+            -- old window (see the menu).
+            picker.ui_visible = false
+            close_win(picker.winid)
+        end
         picker.bufnr = bufnr
         picker.tcnums = vim.tbl_keys(tctbl)
         table.sort(picker.tcnums)
@@ -663,6 +690,16 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
         if #items == 0 then
             return
         end
+        if menu.ui_visible then
+            -- A menu opened over a menu: the singleton state is about to be
+            -- repointed, and the windows it points at now would be left open with
+            -- nothing left knowing about them.
+            menu.skip_close = true
+            close_win(menu.winid)
+            close_win(menu.preview_win)
+            close_win(menu.notice_win)
+            menu.skip_close = false
+        end
         menu.items = items
         menu.title = title and (" " .. title .. " ") or " Tuna "
         menu.on_choice = on_choice
@@ -699,14 +736,17 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
         -- and a float that resized on every step would be distracting.
         width = math.min(math.max(pv.width, 24), vim_width - 4)
     else
-        width = #menu.title
+        -- Display width, not byte length: a multibyte title (a problem name in a
+        -- `already exists` prompt) is fewer cells than bytes, and sizing by bytes
+        -- made such floats visibly too wide.
+        width = api.nvim_strwidth(menu.title)
         for _, l in ipairs(menu.items) do
-            width = math.max(width, #l)
+            width = math.max(width, api.nvim_strwidth(l))
         end
         if pv then
-            width = math.max(width, #(shown.title or "") + 4)
+            width = math.max(width, api.nvim_strwidth(shown.title or "") + 4)
             for _, l in ipairs(shown.lines) do
-                width = math.max(width, #l)
+                width = math.max(width, api.nvim_strwidth(l))
             end
         end
         width = math.min(math.max(width + 4, 24), vim_width - 4)
@@ -729,7 +769,7 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
         -- The notice wraps, so its height is counted in *screen* rows, not lines.
         nt_h = 0
         for _, l in ipairs(nt.lines) do
-            nt_h = nt_h + math.max(1, math.ceil(#l / math.max(1, width)))
+            nt_h = nt_h + math.max(1, math.ceil(api.nvim_strwidth(l) / math.max(1, width)))
         end
         nt_h = math.max(1, math.min(nt_h, 6, budget - 6)) -- never at the cost of the list
         budget = budget - (nt_h + PANE_STEP)
@@ -1085,6 +1125,14 @@ function M.form(sections, title, on_submit, restore_winid, on_close)
         if #sections == 0 then
             return
         end
+        if form.ui_visible then
+            -- Opened over an open form: repointing the singleton would orphan the
+            -- old windows (see the menu).
+            form.skip_close = true
+            for _, w in ipairs(form.wins or {}) do
+                close_win(w)
+            end
+        end
         form.sections = {}
         for _, s in ipairs(sections) do
             form.sections[#form.sections + 1] = {
@@ -1109,12 +1157,12 @@ function M.form(sections, title, on_submit, restore_winid, on_close)
     -- also has to fit its inline label plus the text typed into it.
     local width = 0
     for _, s in ipairs(form.sections) do
-        width = math.max(width, #s.title + 4)
+        width = math.max(width, api.nvim_strwidth(s.title) + 4)
         for _, it in ipairs(s.items) do
-            width = math.max(width, #it)
+            width = math.max(width, api.nvim_strwidth(it))
         end
         if s.custom then
-            width = math.max(width, #s.custom.label + #(s.text or s.custom.default) + 8)
+            width = math.max(width, api.nvim_strwidth(s.custom.label .. (s.text or s.custom.default)) + 8)
         end
     end
     width = math.min(math.max(width + 2, 20), vim_width - 4)
@@ -1337,9 +1385,6 @@ function M.form(sections, title, on_submit, restore_winid, on_close)
 end
 
 --------------------------------------------------------------------------------
-
----Rebuild whichever widgets are currently visible. Called from the `VimResized`
---------------------------------------------------------------------------------
 -- Panels: side-by-side lists, one focused, <CR> acting on the focused one
 --------------------------------------------------------------------------------
 --
@@ -1398,6 +1443,15 @@ function M.panels(sections, title, on_choice, restore_winid, on_close, header)
     else
         if #sections == 0 then
             return
+        end
+        if panels.ui_visible then
+            -- Opened over an open board: repointing the singleton would orphan the
+            -- old windows (see the menu).
+            panels.skip_close = true
+            close_win(panels.header_win)
+            for _, w in ipairs(panels.wins or {}) do
+                close_win(w)
+            end
         end
         panels.sections = {}
         for _, sec in ipairs(sections) do
@@ -1620,6 +1674,7 @@ function M.panels(sections, title, on_choice, restore_winid, on_close, header)
     end
 end
 
+---Rebuild whichever widgets are currently visible. Called from the `VimResized`
 ---autocmd so floats stay centred and proportional after the UI changes size.
 function M.resize_widgets()
     M.editor(nil)

@@ -650,31 +650,12 @@ function M.update_config_table(cfg_tbl, opts)
         return vim.deepcopy(cfg_tbl or M.defaults)
     end
 
-    local new_config = vim.tbl_deep_extend("force", cfg_tbl or M.defaults, opts)
-
-    -- `vim.tbl_deep_extend` merges list-like tables by index, which is wrong for
-    -- command argument lists: a user-supplied `args` must replace the default
-    -- entirely, not be spliced over it index-by-index.
-    for lang, cmd in pairs(opts.compile_command or {}) do
-        if cmd.args then
-            new_config.compile_command[lang].args = cmd.args
-        end
-    end
-    for lang, cmd in pairs(opts.run_command or {}) do
-        if cmd.args then
-            new_config.run_command[lang].args = cmd.args
-        end
-    end
-
-    -- Same index-merge hazard for the file-format lists: a user-supplied list must
-    -- replace the default list wholesale (a plain string override is fine as-is).
-    for _, key in ipairs({ "testcases_input_file_format", "testcases_output_file_format" }) do
-        if type(opts[key]) == "table" then
-            new_config[key] = opts[key]
-        end
-    end
-
-    return new_config
+    -- `vim.tbl_deep_extend` already replaces a non-empty *list* wholesale (its
+    -- `can_merge` refuses lists), so a user-supplied `args` or file-format list needs
+    -- no special-casing: only map-like tables merge key by key. The one shape it
+    -- treats differently is an empty list, which merges — and "override with an empty
+    -- list" has no meaning for any option here.
+    return vim.tbl_deep_extend("force", cfg_tbl or M.defaults, opts)
 end
 
 ---Initialise configuration from user options.
@@ -688,9 +669,10 @@ function M.setup(opts)
     -- exactly the trap when trying settings out in a running editor. Costs one
     -- `deepcopy` of the defaults (~0.16 ms, measured) on a call that happens once.
     --
-    -- The copy is not optional: `update_config_table` writes into its base table (the
-    -- per-language `args` replacement), so handing it `M.defaults` directly would
-    -- quietly poison the defaults for the rest of the session.
+    -- The copy is not optional: `vim.tbl_deep_extend` copies a sub-table only where
+    -- both sides have one, so everything the user did not mention lands in
+    -- `current_setup` **by reference** — a later write through it would quietly
+    -- poison `M.defaults` for the rest of the session.
     M.current_setup = M.update_config_table(vim.deepcopy(M.defaults), opts)
     M.buffer_configs = {} -- invalidate caches so buffers re-resolve against new setup
 end

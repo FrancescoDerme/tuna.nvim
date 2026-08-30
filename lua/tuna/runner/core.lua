@@ -127,6 +127,18 @@ function RunnerCore:pane_content(tc, name)
     elseif name == "si" then
         return tc.stdin
     elseif name == "se" then
+        -- The checker's own words belong with the errors: for an external checker its
+        -- stderr *is* the explanation of the verdict ("wrong answer: expected 5, got
+        -- 3"), and a WRONG with the reason collected but never shown is a checker the
+        -- user cannot hear.
+        local msg = tc.checker_message
+        if msg and msg ~= "" then
+            local err = tc.stderr or ""
+            if err ~= "" and not err:match("\n$") then
+                err = err .. "\n"
+            end
+            return err .. "checker: " .. msg
+        end
         return tc.stderr
     end
     return ""
@@ -136,13 +148,18 @@ end
 -- Shared execution: spawn one process, judge it
 --------------------------------------------------------------------------------
 
----Reset a row's per-run state so a re-run starts clean.
+---Reset a row's per-run state so a re-run starts clean. Bumping `run_id` here as
+---well as at spawn means a reset alone orphans any callback still in flight for the
+---row — the result of a process that was killed to make way for this reset must not
+---land on the fresh row (see `execute_process`).
 ---@param tc table
 function RunnerCore:reset_row(tc)
+    tc.run_id = (tc.run_id or 0) + 1
     tc.status = ""
     tc.hlgroup = "TunaRunning"
     tc.stdout = nil
     tc.stderr = nil
+    tc.checker_message = nil
     tc.time = nil
     tc.time_label = nil
     tc.running = false
@@ -168,11 +185,26 @@ function RunnerCore:execute_process(tcindex, cmd, dir, opts, on_done)
     local tc = self.tcdata[tcindex]
     utils.ensure_directory(dir)
 
+    -- One token per spawn, checked again when the result lands. A process's exit
+    -- callback arrives on a *scheduled* tick, so a re-run that killed this child and
+    -- spawned a replacement — or rebuilt the rows entirely — has already happened by
+    -- the time the dead child reports in. Without the token that stale report wrote
+    -- into whatever row now sits at this index: it cleared `running` (declaring a run
+    -- complete early), nilled the fresh handle (making the new process unkillable),
+    -- stamped `SIG 9` over a row mid-run, and its `on_done` pulled another lane out
+    -- of the *new* run's queue, double-running rows.
+    tc.run_id = (tc.run_id or 0) + 1
+    local run_id = tc.run_id
+
     local timelimit = opts.timelimit or tc.timelimit
+    -- The timer is a local, not a row field: a superseded callback must still close
+    -- the timer *it* started, which a shared `tc.timer` slot cannot tell apart from
+    -- the replacement run's.
+    local timer
     if timelimit then
-        tc.timer = vim.uv.new_timer()
-        tc.timer:start(timelimit, 0, function()
-            if tc.running then
+        timer = vim.uv.new_timer()
+        timer:start(timelimit, 0, function()
+            if tc.run_id == run_id and tc.running and tc.handle then
                 tc.timed_out = true
                 tc.handle:kill("sigkill")
             end
@@ -188,16 +220,15 @@ function RunnerCore:execute_process(tcindex, cmd, dir, opts, on_done)
     local ok, handle = pcall(vim.system, argv, { cwd = dir, stdin = stdin }, function(res)
         -- on_exit is a fast context; defer API/UI work to the main loop.
         vim.schedule(function()
-            self:finish_process(tcindex, res, opts, on_done)
+            self:finish_process(tc, run_id, timer, res, opts, on_done)
         end)
     end)
 
     if not ok then
-        if tc.timer and not tc.timer:is_closing() then
-            tc.timer:stop()
-            tc.timer:close()
+        if timer and not timer:is_closing() then
+            timer:stop()
+            timer:close()
         end
-        tc.timer = nil
         tc.status, tc.hlgroup = "FAILED", "TunaWarning"
         tc.stderr = tostring(handle) -- the pcall error message
         tc.time = -1
@@ -216,13 +247,43 @@ function RunnerCore:execute_process(tcindex, cmd, dir, opts, on_done)
 end
 
 ---@private
+---Whether `tc` is still one of this runner's rows. Row tables are replaced wholesale
+---by a rebuild (`build_rows`, run-all's `rebuild_rows`), so a callback holding an old
+---row must not act on the runner at all — its `on_done` would feed a lane into a run
+---it was never part of.
+---@param tc table
+---@return boolean
+function RunnerCore:owns_row(tc)
+    for _, row in ipairs(self.tcdata) do
+        if row == tc then
+            return true
+        end
+    end
+    return false
+end
+
+---@private
 ---Record a finished process's result and decide its status (may judge async).
----@param tcindex integer
+---Takes the row *object* it was spawned for, never an index: prompts answered while
+---the child ran can renumber or remove rows, and the result belongs to the row it
+---came from wherever that row now sits.
+---@param tc table
+---@param run_id integer the spawn token captured by `execute_process`
+---@param timer uv_timer_t? that spawn's timeout timer
 ---@param res vim.SystemCompleted
 ---@param opts table
 ---@param on_done fun()?
-function RunnerCore:finish_process(tcindex, res, opts, on_done)
-    local tc = self.tcdata[tcindex]
+function RunnerCore:finish_process(tc, run_id, timer, res, opts, on_done)
+    if timer and not timer:is_closing() then
+        timer:stop()
+        timer:close()
+    end
+    -- Superseded (the row was reset or re-spawned) or orphaned (the rows were
+    -- rebuilt): this result describes a process the runner has already disowned, so
+    -- nothing of it may land — not the row state, not `on_done`.
+    if tc.run_id ~= run_id or not self:owns_row(tc) then
+        return
+    end
     tc.running = false
     tc.time = vim.uv.now() - tc.start_time
     tc.exit_code = res.code
@@ -230,11 +291,6 @@ function RunnerCore:finish_process(tcindex, res, opts, on_done)
     tc.stdout = res.stdout or ""
     tc.stderr = res.stderr or ""
     tc.handle = nil
-    if tc.timer and not tc.timer:is_closing() then
-        tc.timer:stop()
-        tc.timer:close()
-    end
-    tc.timer = nil
 
     local function finalize()
         self:update_ui(true)
@@ -266,6 +322,11 @@ function RunnerCore:finish_process(tcindex, res, opts, on_done)
         tc.judging = true
         local chk = opts.checker or self.checker
         checker.judge(tc, chk, self:effective_compare(), function(correct, message)
+            -- An external checker takes real time, and the row can be reset or
+            -- re-spawned while it judges — the same window the token guards above.
+            if tc.run_id ~= run_id then
+                return
+            end
             tc.judging = false
             tc.checker_message = message
             if correct == true then

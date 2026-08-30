@@ -419,10 +419,27 @@ local warned_shared = {}
 ---other's testcases there. Say so once, with the fix, rather than letting the data
 ---go. A value coming from a directory's own `.tuna.lua` already scopes itself to that
 ---tree, so only a globally configured one is worth flagging.
+---@private
+---Whether the configured value carries a modifier that varies per problem. `$(HOME)`
+---and the `$()` escape do not — `"$(HOME)/cp/testcases"` is the same directory for
+---every problem exactly as `"~/cp/testcases"` is, and the two spellings must be
+---judged alike. `$(CWD)` counts as scoping: tuna moves the cwd into each downloaded
+---problem, so a `$(CWD)`-based path follows the problem for the workflow it serves.
+---@param raw string
+---@return boolean
+local function has_scoping_modifier(raw)
+    for name in raw:gmatch("%$%(([^)]*)%)") do
+        if name ~= "" and name ~= "HOME" then
+            return true
+        end
+    end
+    return false
+end
+
 ---@param raw string the configured value
 ---@param expanded string the same value after modifier/`~` expansion
 local function warn_if_shared(raw, expanded)
-    if warned_shared[raw] or raw:find("$(", 1, true) or not utils.is_absolute(expanded) then
+    if warned_shared[raw] or has_scoping_modifier(raw) or not utils.is_absolute(expanded) then
         return
     end
     if raw ~= (config.current_setup or config.defaults).testcases_directory then
@@ -591,6 +608,11 @@ M.backends = {
     directory = M.directory,
 }
 
+-- The order auto-detection tries the backends in. A fixed list, not `pairs` over
+-- `M.backends`: if two backends both hold data, which one answers must not depend on
+-- table hash order.
+M.BACKEND_ORDER = { "files", "single_file", "directory" }
+
 ---Return the backend for a storage mode, defaulting to `files`.
 ---@param storage string?
 ---@return table
@@ -608,7 +630,8 @@ function M.buf_get_testcases(bufnr)
     local tctbl = primary.buf_load(bufnr)
 
     if next(tctbl) == nil and cfg.testcases_auto_detect then
-        for _, backend in pairs(M.backends) do
+        for _, name in ipairs(M.BACKEND_ORDER) do
+            local backend = M.backends[name]
             if backend ~= primary then
                 tctbl = backend.buf_load(bufnr)
                 if next(tctbl) ~= nil then

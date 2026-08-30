@@ -142,7 +142,10 @@ function StressRunner:record_counterexample(seed, input, expected, sol_out, sol_
     table.insert(self.tcdata, {
         tcnum = n,
         stdin = input,
-        expected = expected,
+        -- Through `core.answer`, as every in-memory expected output goes: a reference
+        -- that printed nothing was just stored as *no* answer on disk, and a row
+        -- holding `""` instead would be judged against an empty answer on re-run.
+        expected = core.answer(expected),
         stdout = sol_out,
         stderr = sol_err,
         status = status,
@@ -159,7 +162,7 @@ end
 ---A generator/reference process failed at *runtime* (nonzero exit). Show its output
 ---in the UI (like a compile failure) rather than dumping a traceback into a
 ---notification, and stop the search quietly.
----@param label string "generator" | "reference"
+---@param label string "generator" | "reference" | "solution"
 ---@param seed integer
 ---@param output string? the failing process's stderr/stdout
 function StressRunner:helper_failed(label, seed, output)
@@ -196,7 +199,9 @@ function StressRunner:generation(i)
         self:finish()
         return
     end
-    if #self.tcdata >= self.max_saved then
+    -- Testcase rows only: the Compile row is not a testcase, and counting it tripped
+    -- the cap one counterexample early for every compiled solution.
+    if #self.tcdata - (self.compile_entry and 1 or 0) >= self.max_saved then
         self:finish("reached the max of " .. self.max_saved .. " testcases")
         return
     end
@@ -211,7 +216,10 @@ function StressRunner:generation(i)
     if self.seed_arg then
         table.insert(gen_argv, tostring(i))
     end
-    vim.system(gen_argv, { cwd = self.rundir, timeout = self.timeout }, function(gres)
+    -- Every spawn in this loop is pcall'd: a binary that is not there (a helper whose
+    -- compile failed, then a restart) makes `vim.system` itself throw, and from a
+    -- scheduled callback that is a raw traceback rather than a stress message.
+    local gen_ok, gen_err = pcall(vim.system, gen_argv, { cwd = self.rundir, timeout = self.timeout }, function(gres)
         vim.schedule(function()
             if self:aborted() then
                 return
@@ -223,7 +231,8 @@ function StressRunner:generation(i)
             local input = gres.stdout or ""
 
             -- Solution on the generated input.
-            vim.system(
+            local sol_ok, sol_err = pcall(
+                vim.system,
                 vim.list_extend({ self.r.rc.exec }, vim.deepcopy(self.r.rc.args)),
                 { cwd = self.rundir, stdin = input, timeout = self.timeout },
                 function(sres)
@@ -232,7 +241,8 @@ function StressRunner:generation(i)
                             return
                         end
                         -- Reference on the same input (for the expected output).
-                        vim.system(
+                        local ref_ok, ref_err = pcall(
+                            vim.system,
                             vim.list_extend({ self.ref.exec }, vim.deepcopy(self.ref.args)),
                             { cwd = self.rundir, stdin = input, timeout = self.timeout },
                             function(rres)
@@ -296,11 +306,20 @@ function StressRunner:generation(i)
                                 end)
                             end
                         )
+                        if not ref_ok then
+                            self:helper_failed("reference", i, tostring(ref_err))
+                        end
                     end)
                 end
             )
+            if not sol_ok then
+                self:helper_failed("solution", i, tostring(sol_err))
+            end
         end)
     end)
+    if not gen_ok then
+        self:helper_failed("generator", i, tostring(gen_err))
+    end
 end
 
 ---Run the pre-existing testcases (in order) through the solution, then call `cb`.
@@ -365,8 +384,10 @@ function StressRunner:run_single(idx)
     self:execute_entry(idx)
 end
 
----Restart the whole search from scratch (the UI's "run all again"). The helpers
----are already compiled (cached), so re-run the existing testcases, then generate.
+---Restart the whole search from scratch (the UI's "run all again"). The helpers go
+---back through `prepare_helpers`: the compile cache makes an unchanged one free, an
+---edited one rebuilds, and one whose first compile failed is retried instead of the
+---search spawning a binary that was never produced.
 function StressRunner:run_testcases()
     self.stopped = false
     self.finished = false
@@ -374,11 +395,25 @@ function StressRunner:run_testcases()
     self.saved_this_run = 0
     self:load_testcases()
     self:update_ui(true)
-    self:run_existing(function()
-        if not self:aborted() then
+    local existing_done, helpers_ready = false, false
+    local function maybe_generate()
+        if existing_done and helpers_ready and not self:aborted() then
             self:generation(1)
         end
+    end
+    self:run_existing(function()
+        existing_done = true
+        maybe_generate()
     end)
+    if self.prepare_helpers then
+        self.prepare_helpers(function()
+            helpers_ready = true
+            maybe_generate()
+        end)
+    else
+        helpers_ready = true
+        maybe_generate()
+    end
 end
 
 --------------------------------------------------------------------------------
@@ -540,7 +575,8 @@ function M.run(bufnr, count_override)
         end
     end
 
-    -- Compile the generator and reference; `cb()` once both are ready.
+    -- Compile the generator and reference; `cb()` once both are ready. Kept on the
+    -- runner so a restart (`run_testcases`) can re-prepare them too.
     local function prepare_helpers(cb)
         tools.prepare(gen, function(gok, gerr)
             if not gok then
@@ -556,6 +592,7 @@ function M.run(bufnr, count_override)
             end)
         end)
     end
+    sr.prepare_helpers = prepare_helpers
 
     -- With the solution built, run the existing testcases *immediately* while the
     -- generator/reference compile in parallel; generation waits for both the
@@ -585,22 +622,33 @@ function M.run(bufnr, count_override)
         ce.status, ce.hlgroup, ce.start_time = "RUNNING", "TunaRunning", vim.uv.now()
         sr:update_ui(true)
         utils.ensure_directory(r.compile_directory)
-        vim.system(vim.list_extend({ r.cc.exec }, vim.deepcopy(r.cc.args)), { cwd = r.compile_directory }, function(res)
-            vim.schedule(function()
-                ce.time = vim.uv.now() - ce.start_time
-                ce.stdout, ce.stderr, ce.exit_code = res.stdout or "", res.stderr or "", res.code
-                if res.code ~= 0 then
-                    -- Failure stays in the UI (compile row + auto-viewer), no notify.
-                    ce.status, ce.hlgroup = "RET " .. tostring(res.code), "TunaWarning"
+        -- pcall'd: a compiler that is not installed makes `vim.system` itself throw,
+        -- and that failure belongs on the Compile row like any other.
+        local ok, err = pcall(
+            vim.system,
+            vim.list_extend({ r.cc.exec }, vim.deepcopy(r.cc.args)),
+            { cwd = r.compile_directory },
+            function(res)
+                vim.schedule(function()
+                    ce.time = vim.uv.now() - ce.start_time
+                    ce.stdout, ce.stderr, ce.exit_code = res.stdout or "", res.stderr or "", res.code
+                    if res.code ~= 0 then
+                        -- Failure stays in the UI (compile row + auto-viewer), no notify.
+                        ce.status, ce.hlgroup = "RET " .. tostring(res.code), "TunaWarning"
+                        sr:update_ui(true)
+                        return
+                    end
+                    -- Success (warnings, if any, are viewable by selecting this row).
+                    ce.status, ce.hlgroup = "DONE", "TunaDone"
                     sr:update_ui(true)
-                    return
-                end
-                -- Success (warnings, if any, are viewable by selecting this row).
-                ce.status, ce.hlgroup = "DONE", "TunaDone"
-                sr:update_ui(true)
-                start()
-            end)
-        end)
+                    start()
+                end)
+            end
+        )
+        if not ok then
+            ce.status, ce.hlgroup, ce.stderr = "FAILED", "TunaWarning", tostring(err)
+            sr:update_ui(true)
+        end
     else
         start()
     end

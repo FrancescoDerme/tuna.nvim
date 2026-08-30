@@ -262,7 +262,8 @@ starter file in your language.
 which one is right — including when they are in _different languages_, since each is
 compiled and run with its own filetype's commands. **Stress testing** is for the shape
 where you know one is right and slow. **Checkers** are for problems with more than one
-correct answer.
+correct answer; whatever the checker prints about a verdict (`wrong answer: expected 5,
+got 3`) shows in the Errors pane of that testcase's row.
 
 ### Downloading problems and contests
 

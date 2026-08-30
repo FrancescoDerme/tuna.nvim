@@ -91,9 +91,14 @@ function M.new(runner)
 end
 
 ---@private
----Normalise a mapping spec (string or list) to a list of keys.
+---Normalise a mapping spec (string or list) to a list of keys. Anything else —
+---including the `false` a user writes to disable a mapping — is no keys, not an
+---error when the UI opens.
 local function as_list(maps)
-    return type(maps) == "string" and { maps } or maps
+    if type(maps) == "string" then
+        return { maps }
+    end
+    return type(maps) == "table" and maps or {}
 end
 
 -- Every abbreviation of the commands that would close a pane (or the editor) out from
@@ -288,91 +293,6 @@ function RunnerUI:legend_sections()
         { "this legend", keys("help") },
     })
     return align(editable), readonly
-end
-
----@private
----How a set of testcase numbers is named in a prompt's title.
----@param nums integer[]
----@return string
-local function testcase_label(nums)
-    return #nums == 1 and ("testcase " .. nums[1]) or ("testcases " .. table.concat(nums, ", "))
-end
-
----@private
----The three answers to "this would throw away an unsaved edit", for whichever action
----would. One list, so closing and re-running cannot drift apart: each answer names the
----outcome it produces, and the third is `Keep editing` rather than `Cancel` — what you
----get, rather than what did not happen, and the same words the empty-save prompt uses
----for the same answer. It is also what a dismissal gives.
----@param what string the action, e.g. "close" or "re-run all"
----@return string[]
-local function unsaved_items(what)
-    return { "Save and " .. what, "Discard and " .. what, "Keep editing" }
-end
-
----@private
----Close the UI, asking first when testcase edits would be thrown away. The prompt is
----a float like every other tuna dialog, and it is the only one in this flow: routine
----editing never asks anything.
----@param torn boolean? the windows are already gone (a `:q` on one pane)
----@param on_closed fun()? run once the UI is actually closed — how a `:qa` that was
----cancelled to ask about an edit gets to finish afterwards. Not run on "Keep editing":
----the answer there is that the command should not happen.
-function RunnerUI:request_close(torn, on_closed)
-    if not self:has_pending() then
-        self:delete()
-        if on_closed then
-            on_closed()
-        end
-        return
-    end
-    local nums = self:unsaved_testcases()
-    -- A `:q` on one pane has already left a hole in the grid — Neovim closes the window
-    -- before `WinClosed` fires, so there is no asking first. Put the grid back *now*,
-    -- before the prompt, so the question is posed over an intact UI instead of over a
-    -- gap where the pane being edited used to be. `pending` lives on this object, so
-    -- the edit comes back with it, and every answer works the same from here.
-    local was_in = api.nvim_get_current_win()
-    if torn then
-        self:delete()
-        self:show_ui()
-        was_in = nil
-    end
-    -- Where "Keep editing" puts you back. Not `restore_winid` — that is the *code*
-    -- buffer the runner was launched from, i.e. behind the UI, which is the one place
-    -- you were certainly not: keeping the edit means going back to the pane holding
-    -- it, or failing that the selector.
-    local back_to = was_in
-    if not (back_to and api.nvim_win_is_valid(back_to) and back_to ~= self.viewer_winid) then
-        for _, name in ipairs({ "si", "eo", "tc" }) do
-            local w = self.windows[name]
-            if w and w.winid and api.nvim_win_is_valid(w.winid) then
-                back_to = w.winid
-                break
-            end
-        end
-    end
-
-    -- Dismissing the prompt keeps the UI (and the edit) as it is, exactly like
-    -- choosing "Keep editing" — the safe answer is the one a stray Esc gives.
-    require("tuna.widgets").menu(
-        unsaved_items("close"),
-        "unsaved " .. testcase_label(nums),
-        function(idx)
-            if idx == 1 then
-                self:save_all_pending()
-                self:delete()
-            elseif idx == 2 then
-                self:discard_pending()
-                self:delete()
-            end
-            if on_closed and idx ~= 3 then
-                on_closed()
-            end
-        end,
-        back_to,
-        function() end
-    )
 end
 
 ---@private
@@ -1155,6 +1075,10 @@ function RunnerUI:delete_testcase(tcnum)
         tcnum = n,
         input = snapshot.stdin or "",
         expected = snapshot.expected or "",
+        -- An answer stored present-and-empty means "expect no output", and `undo`
+        -- restores through a save whose empty answer otherwise means "no answer" —
+        -- so which of the two it was has to survive the round trip.
+        expect_empty = stored ~= nil and stored.output == "",
     })
     self.pending[n] = nil
     self.runner:remove_testcase_rows(n)
@@ -1186,7 +1110,7 @@ function RunnerUI:undo_delete()
     local last = table.remove(stack)
     self:capture_pending()
     self.runner:add_testcase_row(last.tcnum)
-    self.runner:save_testcase(last.tcnum, last.input, last.expected)
+    self.runner:save_testcase(last.tcnum, last.input, last.expected, last.expect_empty)
     self.update_windows = true
     self:update_ui()
     utils.notify("testcase " .. last.tcnum .. " restored.", "INFO")
@@ -1503,7 +1427,13 @@ function RunnerUI:show_ui()
                 if not idx then
                     return
                 end
-                self.runner:kill_process(idx)
+                -- Kill only a row that is actually running: on an idle row the base
+                -- kill is a no-op anyway, and stress overrides `kill_process` to mean
+                -- "stop the whole search" — re-running an already-settled row must
+                -- not do that (nor flash its "stopped" message) as a side effect.
+                if tc.running then
+                    self.runner:kill_process(idx)
+                end
                 vim.schedule(function()
                     self.runner:run_single(idx)
                 end)
@@ -2392,8 +2322,12 @@ function RunnerUI:render_selector()
         if unsaved[tc.tcnum] then
             status, hlgroup = "EDITED", "TunaDone"
         end
-        table.insert(lines, fit(10, header) .. fit(10, status) .. timestr)
-        table.insert(regions, { line = i - 1, hlgroup = hlgroup, len = #status })
+        -- The highlight is byte-addressed while `fit` pads by *display* width, so the
+        -- status column's byte offset has to be measured off the padded header — a
+        -- multibyte or truncated header (run-all's solution names) shifts it past 10.
+        local head, st = fit(10, header), fit(10, status)
+        table.insert(lines, head .. st .. timestr)
+        table.insert(regions, { line = i - 1, hlgroup = hlgroup, col = #head, len = #(st:gsub("%s+$", "")) })
 
         -- Auto-pop the viewer onto a fresh compilation failure's stderr.
         if
@@ -2416,8 +2350,8 @@ function RunnerUI:render_selector()
     api.nvim_buf_clear_namespace(buf, ns, 0, -1)
     for _, r in ipairs(regions) do
         if r.len > 0 then
-            api.nvim_buf_set_extmark(buf, ns, r.line, 10, {
-                end_col = 10 + r.len,
+            api.nvim_buf_set_extmark(buf, ns, r.line, r.col, {
+                end_col = r.col + r.len,
                 hl_group = r.hlgroup,
             })
         end
