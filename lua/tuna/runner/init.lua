@@ -124,8 +124,12 @@ function M.new(bufnr)
         rc = run_command,
         checker = resolved_checker,
         compare_method = tools.get_compare(path), -- per-buffer `:Tuna compare` override (nil = use config)
-        compile_directory = vim.fs.normalize(filedir .. "/" .. cfg.compile_directory) .. "/",
-        running_directory = vim.fs.normalize(filedir .. "/" .. cfg.running_directory) .. "/",
+        -- Resolved against the source's directory only when relative. Joined
+        -- unconditionally, an absolute `/tmp/build` became `<source dir>/tmp/build`
+        -- and a `~/build` a directory literally named `~` — the second visibly wrong,
+        -- the first worse for looking as though it had worked.
+        compile_directory = utils.normalize_path(cfg.compile_directory, filedir) .. "/",
+        running_directory = utils.normalize_path(cfg.running_directory, filedir) .. "/",
         tcdata = {},
         tc_size = 0,
         compile = compile_command ~= nil,
@@ -163,6 +167,23 @@ function TCRunner:build_rows(tctbl, do_compile)
             expected = tc.output,
             timelimit = timelimit,
         })
+    end
+    -- Nothing to test, but the program is still worth running: hitting run on a file
+    -- with no testcases means "execute this", which is how a scratch solution gets
+    -- built and run without first inventing a dummy empty testcase. So it runs once on
+    -- empty stdin, with no expected output — it reads DONE and can never claim a pass
+    -- on a problem whose testcases simply failed to arrive. It is also what makes the
+    -- two languages agree: without it a compiled file built and showed a lone `Compile`
+    -- row while an interpreted one only warned, and neither ran anything.
+    --
+    -- It is testcase 0 (nothing is on disk, so that number is free) and editable like
+    -- any other row, which is what turns "just run it" into the start of a testcase:
+    -- read the output, type the input and the answer you wanted into the panes, `:w`,
+    -- and the row is a stored testcase from then on. `bare` only says it has no file
+    -- behind it *yet* — the selector labels it `No input` rather than `TC 0` until it
+    -- does, and `save_testcase` clears the flag.
+    if next(tctbl) == nil then
+        table.insert(self.tcdata, { tcnum = 0, bare = true, stdin = "", expected = nil, timelimit = timelimit })
     end
     self.tc_size = #self.tcdata
 end
@@ -349,7 +370,7 @@ end
 function TCRunner:display_results()
     local lines = {}
     for _, tc in ipairs(self.tcdata) do
-        local label = tc.tcnum == "Compile" and "Compile" or ("Testcase " .. tc.tcnum)
+        local label = type(tc.tcnum) == "number" and ("Testcase " .. tc.tcnum) or tostring(tc.tcnum)
         local timestr = (tc.time and tc.time >= 0) and (" (" .. tc.time .. "ms)") or ""
         table.insert(lines, ("%-12s %s%s"):format(label, tc.status, timestr))
         if tc.stderr and tc.stderr ~= "" then

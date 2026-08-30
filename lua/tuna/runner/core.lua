@@ -410,19 +410,28 @@ end
 ---@param tcnum integer
 ---@param input string
 ---@param expected string
+---@param expect_empty_output boolean? an empty answer means the solution must print
+---nothing, rather than that the testcase has no answer — the one thing a save cannot
+---read off the panes, so it is the one thing asked
 ---@return boolean # whether the write succeeded
-function RunnerCore:save_testcase(tcnum, input, expected)
+function RunnerCore:save_testcase(tcnum, input, expected, expect_empty_output)
     local ok, err = pcall(function()
-        require("tuna.testcases").buf_save_testcase(self:edit_bufnr(), tcnum, input, expected)
+        require("tuna.testcases").buf_save_testcase(self:edit_bufnr(), tcnum, input, expected, expect_empty_output)
     end)
     if not ok then
         utils.notify("could not save testcase " .. tcnum .. ": " .. tostring(err))
         return false
     end
     local rows = self:rows_for(tcnum)
+    -- What was stored for the answer: `""` when an empty one means "print nothing",
+    -- `nil` when it means the testcase has no answer.
+    local stored_answer = expect_empty_output and "" or M.answer(expected)
     for _, i in ipairs(rows) do
         self.tcdata[i].stdin = input
-        self.tcdata[i].expected = M.answer(expected)
+        self.tcdata[i].expected = stored_answer
+        -- A save always leaves the testcase on disk, so the row always has a file behind
+        -- it — which is what `bare` says it has not.
+        self.tcdata[i].bare = nil
     end
     if self.preloaded or not self:idle() then
         self:update_ui(true)
@@ -485,15 +494,19 @@ end
 ---@private
 ---Point the rows for `numbers` at what is now on disk.
 ---@param numbers integer[]
+---@param tctbl table<integer, table>? testcases already read, to save a second scan
 ---@return integer[] rows the row indices that stand for them
-function RunnerCore:sync_rows(numbers)
-    local tctbl = require("tuna.testcases").buf_get_testcases(self:edit_bufnr())
+function RunnerCore:sync_rows(numbers, tctbl)
+    tctbl = tctbl or require("tuna.testcases").buf_get_testcases(self:edit_bufnr())
     local rows = {}
     for _, n in ipairs(numbers) do
         local case = tctbl[n] or {}
         for _, i in ipairs(self:rows_for(n)) do
             self.tcdata[i].stdin = case.input or ""
-            self.tcdata[i].expected = M.answer(case.output)
+            -- Straight from disk, not through `answer`: that normalizes *typed* text,
+            -- and an answer stored as empty means "expect no output", which squashing
+            -- it to nil would turn back into "no answer".
+            self.tcdata[i].expected = case.output
             rows[#rows + 1] = i
         end
     end

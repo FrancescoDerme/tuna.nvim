@@ -43,7 +43,7 @@ local function template_path(ext, cfg)
             -- against; a fictitious one in the cwd is enough to fill `$(FEXT)`.
             local path = utils.eval_string(vim.fn.getcwd() .. "/temp." .. ext, candidate)
             if path then
-                path = path:gsub("^~", vim.uv.os_homedir())
+                path = utils.expand_home(path)
                 if utils.file_exists(path) then
                     return path, true
                 end
@@ -81,7 +81,7 @@ end
 ---@return string
 local function scratch_path(ext, cfg)
     local spec = (cfg.temp or {}).file or (vim.fn.stdpath("cache") .. "/tuna_temp.$(FEXT)")
-    return (spec:gsub("%$%(FEXT%)", ext):gsub("^~", vim.uv.os_homedir()))
+    return utils.expand_home((spec:gsub("%$%(FEXT%)", ext)))
 end
 
 ---The language the scratch should be written in: the current buffer's, when it is a

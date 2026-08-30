@@ -328,6 +328,21 @@ function M.is_absolute(path)
     return path:sub(1, 1) == "/" or path:match("^%a:/") ~= nil or path:sub(1, 2) == "//"
 end
 
+---Expand a leading `~` to the user's home directory. The one thing a configured path
+---needs that the modifier engine does not do: `$(HOME)` is a modifier tuna expands,
+---while `~` is shell syntax that never reaches a shell — so left alone it survives into
+---the path and becomes a directory literally *named* `~`, beside whatever the path was
+---resolved against. Only the leading one, since `~` is an ordinary character anywhere
+---else in a filename.
+---@param path string
+---@return string
+function M.expand_home(path)
+    if type(path) ~= "string" then
+        return path
+    end
+    return (path:gsub("^~", vim.uv.os_homedir() or vim.env.HOME or "~"))
+end
+
 ---Resolve `path` to an absolute path. Relative paths are taken against
 ---`base_dir` (defaulting to the cwd). Absolute paths are returned unchanged.
 ---@param path string

@@ -206,6 +206,18 @@ from a directory's own `.tuna.lua`, which is scoped to that tree by construction
 - **Single-file storage read as raw bytes.** competitest reads its msgpack
   single-file through a helper that rewrites CRLF→LF, which can corrupt the
   binary payload; tuna reads it verbatim (`utils.read_file(path, true)`).
+- **`~` works in every configured path.** `$(HOME)` is a modifier the plugin
+  expands; `~` is shell syntax that never reaches a shell, so left alone it
+  survives into the path and becomes a directory literally *named* `~`. tuna
+  expands the leading one (`utils.expand_home`) wherever a config option becomes
+  a real path — `testcases_directory`, `compile_directory`, `running_directory`,
+  the `downloaded_*` paths, `template_file`, `library.path`, `temp.file`, the
+  scaffold templates, `clean.protected_dirs`, `submit.log_file` — and only the
+  leading one, since `~` is an ordinary character elsewhere in a filename.
+  Relatedly, `compile_directory` and `running_directory` are resolved against the
+  source's directory only when they are **relative**: joined unconditionally, an
+  absolute `/tmp/build` becomes `<source dir>/tmp/build`, which is worse than the
+  `~` case for looking as though it had worked.
 
 ---
 
@@ -413,6 +425,104 @@ Design notes:
 **Why:** submitting is the last manual step in the loop; folding it into the plugin
 (configurably, not hardcoded to one tool) removes the last reason to drop back to a
 shell, and the provider seam keeps it open to new judges.
+
+---
+
+## A run with no testcases runs the program
+
+✅ **Decision:** `:Tuna run` on a file with **no testcases at all** runs the solution
+once on empty stdin, rather than refusing — as an editable row that becomes the
+problem's first testcase as soon as you type into it.
+
+competitest answers "no testcases found" and stops, so using it to simply build and
+execute the file you are looking at means first creating a dummy empty testcase by
+hand. tuna's runner already models a testcase with no input — an answer-only testcase
+runs against empty stdin — so the run with nothing at all is the same shape, and it
+costs one process that can go nowhere: the row has **no expected output**, so its
+verdict is `DONE` and can never read `CORRECT`. A problem whose testcases failed to
+arrive therefore can't be mistaken for one that passed, and the row label says what
+happened, so nothing needs notifying.
+
+The row is **testcase 0** — nothing is on disk, so the number is free — and editable
+like any other, which is the second half of the idea: the fastest way to write the
+first testcase for a problem is to run the thing, read what it printed, and type the
+input and the answer you wanted into the panes. `:w` stores it and re-runs, and from
+then on it is an ordinary testcase. Until it has something behind it the selector calls
+it `No input` rather than `TC 0`, so the label explains why the row is there instead of
+claiming a file that doesn't exist; it becomes `TC 0` the moment there is an unwritten
+edit or a saved file. Pressing `n` on an untouched bare row reuses it rather than
+adding a second empty testcase beside it, which would take number 1 and leave a gap.
+
+It also settles an inconsistency that had nothing to do with the feature: with no
+testcases a **compiled** file was built and shown a lone `Compile` row with nothing
+saying why the results were empty, while an **interpreted** one only warned — two
+different non-answers to the same question, neither of which ran anything.
+
+Making rows editable means the UI can now disagree with the disk, in two directions,
+and neither is allowed to happen quietly.
+
+**A save that clears a half.** A `:w` stores what the panes show, and it stores the
+testcase **even when both halves are empty** — an empty testcase is a testcase, and
+removing one is `x`, which is one key and undoable. So there is nothing to ask about an
+empty *input*: for an input, empty and absent are the same thing, since the solution is
+fed `""` either way.
+
+The **answer** is the sole exception, and this is where competitest has no answer at
+all. An absent answer means the testcase is not judged (the verdict is `DONE`); an
+answer that is present and empty means the solution must **print nothing**, and one that
+prints something is `WRONG`. Neither is expressible without the other, and only file
+presence can tell them apart — which is why the load path keeps an empty answer as it
+finds it while normalizing an empty input away.
+
+The panes look identical either way, so a save that would turn a **real** answer into an
+empty one asks which was meant: `Don't specify output` / `Expect empty output` / `Keep
+editing`. It asks only then. An answer that is already absent, or already empty, is not
+changing, so it goes on meaning what it meant — which is what keeps a first save silent
+and keeps re-saving a testcase from raising the same question over and over.
+
+That is the whole of it: one question, one shape, one trigger. An earlier version had
+three prompt shapes whose choice depended on what happened to be stored, so the same two
+empty panes could produce two different dialogs — which is exactly the kind of rule a
+user has to reverse-engineer instead of read off the screen.
+
+**A testcase file that changes under an open UI.** The results UI keeps its rows across
+a re-run — that is what makes it a results view rather than a fresh load — so anything
+touching the testcase files behind its back (another Neovim, `:Tuna clean`, a checkout,
+a plain `rm`) leaves rows describing a state that is no longer there. A fresh
+`:Tuna run` reloads from disk and the question never arises. Two shapes, and they get
+deliberately different answers.
+
+**Changed** is not a question. The file is the truth and the row is a cache of it, so
+the row is reloaded before the run — which is exactly what a fresh `:Tuna run` would
+have done, while running the stale text would report a verdict for input the user has
+already replaced. Either half counts: an answer edited on disk with the input left alone
+is the half that decides the verdict. It is said once rather than shown, being an event
+rather than a state.
+
+**Missing** is. The testcase is gone and the row is the last place its text exists, so
+dropping it is not undoable and the choice is the user's: `Restore and re-run` /
+`Discard` / `Stop`. `Discard` only discards — the row being re-run may be the one going
+away, so a label promising a re-run could not keep it, and the re-run is one keypress
+away once the UI says the truth. Restoring writes each row back to its own number **when
+that is still free, and to the lowest free one otherwise**, renumbering the row to match
+and saying so — an older row the UI happened to still be holding must never overwrite a
+newer testcase that took its number in the meantime. The restore is a rescue, not a
+rollback.
+
+Rows that legitimately have no file are neither — the bare row, a row added with `n` and
+never saved, one whose edit is still unwritten. Those are testcases being *written*, not
+testcases that drifted, and the last of them is excluded for a second reason: reloading
+it would throw the edit away.
+
+Not a configuration option. The behaviour it replaces is a refusal, the replacement
+can't produce a wrong verdict, and `:Tuna run 5` naming a testcase that doesn't exist
+is kept separate: an explicit list that resolves to nothing reports each missing number
+and stops, since "run this file" and "run testcase 5" are different questions.
+
+**Why:** a solution file is a program, and running it is worth a keystroke even before
+it has testcases — the minutes before a contest opens, a scratch file, a helper being
+eyeballed. Requiring a dummy testcase to get there is ceremony for its own sake, and
+once the run is on screen the dummy testcase is the row you are already looking at.
 
 ---
 
@@ -919,6 +1029,22 @@ deletion. Form/list navigation uses the plugin-wide pane keys (`switch_window_ke
 default `<C-hjkl>`). Clean may delete the file it was launched from and stays robust:
 the file's buffer is wiped afterwards (kept, if it has unsaved edits). competitest had
 no cleanup facility at all.
+
+Build artifacts are handled here rather than after every run. Deleting the compiled
+binary once the testcases finish is the obvious way to stop a problem directory filling
+up with them, and it is wrong for tuna: `:Tuna run_no_compile` exists precisely to reuse
+the build, and `r`/`R` in the results UI re-run the existing binary without recompiling
+— remove it and they answer `FAILED` (measured). So the binary stays, and `:Tuna clean`
+disposes of it along with the problem, treating the build output of a solution it has
+*just removed* as disposable in the same way testcases and the sidecar are. Without that
+the binary kept the directory alive and left the testcases stranded in it, so the litter
+survived the very command meant to remove it.
+
+Keeping binaries out of the problem directory in the first place needs no option either:
+point `compile_directory` and `running_directory` at a build directory and name the
+output after the problem, which works now that an absolute or `~`-prefixed value is
+honoured.
+
 
 ## Health check (`health.lua`, `:checkhealth tuna`)
 

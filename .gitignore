@@ -1,10 +1,2 @@
-# Local-only, never published: things that exist for working *on* the plugin rather
-# than for running it. Kept out of the repository entirely rather than merely out of
-# release archives — the test suite covers a fraction of the plugin, and a partial
-# suite in a public repo reads as a coverage claim it cannot back.
-
-# Manual-test instructions
-test.md
-
-# The local test suite (tests/run.sh)
+# local test suite
 tests/

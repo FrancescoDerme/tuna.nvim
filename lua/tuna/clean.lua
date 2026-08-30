@@ -228,7 +228,7 @@ local function solution_templates(full, ext, cfg, cache)
             end
         end
         if path then
-            path = path:gsub("^~", vim.uv.os_homedir())
+            path = utils.expand_home(path)
             -- `full` may *be* the template file itself (e.g. cleaning the folder that
             -- holds `template.cpp`); it would trivially match itself 100%. Don't offer
             -- to delete it.
@@ -508,6 +508,35 @@ local function is_disposable(name, pats)
     return false
 end
 
+-- What a compiler leaves beside a source file. A bare stem (`main`, from `main.cpp`) is
+-- what every default `compile_command` here produces with `-o $(FNOEXT)`; the rest are
+-- the toolchain leftovers that keep it company, `.dSYM` being a *directory* on macOS.
+local ARTIFACT_EXTS = { exe = true, out = true, o = true, obj = true, class = true, pdb = true, ilk = true, dSYM = true }
+
+---Whether `name` is the build output of a source file **this run deleted** from `dir`.
+---
+---Deliberately not "does this look like a binary": it only ever matches the leftovers of
+---a solution clean itself has just removed, so nothing in an untouched directory can be
+---caught by it. That is enough for the case it exists for — the run removes `main.cpp`,
+---the `main` beside it keeps the directory alive, and the testcases and sidecar are then
+---stranded there with it while the directory pass declines to offer a directory that is
+---not empty.
+---@param dir string
+---@param name string basename
+---@param ctx table scan context, whose `artifacts` maps a directory to the stems removed from it
+---@return boolean
+local function is_artifact(dir, name, ctx)
+    local stems = ctx.artifacts and ctx.artifacts[vim.fs.normalize(dir)]
+    if not stems then
+        return false
+    end
+    local stem, ext = name:match("^(.*)%.([^.]+)$")
+    if not stem then
+        return stems[name] == true
+    end
+    return stems[stem] == true and ARTIFACT_EXTS[ext] == true
+end
+
 -- Filesystem roots that belong to the system, not to any problem set. An empty one is
 -- still not tuna's to remove, and a scan started high enough up will walk into them.
 local SYSTEM_DIRS = {
@@ -655,14 +684,18 @@ local function collect_prunable(dir, ctx, out, depth)
         -- Dot-directories are pruned here exactly as in the file scan: they are never
         -- tuna's to remove, and walking them is what made a scan of a home directory
         -- burn its whole allowance before reaching anything relevant.
-        if typ == "directory" and not ctx.skips[name] and name:sub(1, 1) ~= "." then
+        if typ == "directory" and is_artifact(dir, name, ctx) then
+            -- A build output that happens to be a directory (macOS's `main.dSYM`) goes
+            -- with the rest of them rather than being walked into.
+            files = files + 1
+        elseif typ == "directory" and not ctx.skips[name] and name:sub(1, 1) ~= "." then
             local ok, n = collect_prunable(full, ctx, out, depth - 1)
             if ok then
                 files = files + n -- its count already covers everything below it
             else
                 removable = false
             end
-        elseif typ == "directory" or not is_disposable(name, ctx.pats) then
+        elseif typ == "directory" or not (is_disposable(name, ctx.pats) or is_artifact(dir, name, ctx)) then
             removable = false -- a pruned directory, or something worth keeping
         else
             files = files + 1
@@ -838,7 +871,12 @@ local function confirm_each(files, i, restore, stats, ui, done)
                 -- Remember what this emptied: the directory pass starts from here, so
                 -- what the run itself hollowed out is offered even when the general
                 -- sweep is too big to finish.
-                stats.emptied[vim.fs.normalize(vim.fs.dirname(f.path))] = true
+                local into = vim.fs.normalize(vim.fs.dirname(f.path))
+                stats.emptied[into] = true
+                -- ...and what it was called, so the build output left beside it is not
+                -- mistaken for something worth keeping the directory for.
+                stats.artifacts[into] = stats.artifacts[into] or {}
+                stats.artifacts[into][(vim.fs.basename(f.path):gsub("%.[^.]*$", ""))] = true
                 drop_buffer(f.path)
             else
                 utils.notify("clean: could not delete " .. f.rel .. ".", "WARN")
@@ -981,6 +1019,7 @@ local function prune_dirs(root, cfg, bufnr, restore, stats, depth, done)
         protected = protected_dirs(root, cfg, bufnr),
         skips = skip_set(cfg),
         budget = entry_budget(cfg),
+        artifacts = stats.artifacts or {},
         decided = {},
     }
     -- What the run emptied first, the general sweep for already-empty directories
@@ -1102,7 +1141,7 @@ local function scan_and_confirm(dir, cfg, restore, depth, threshold, bufnr)
         utils.notify("clean: '" .. dir .. "' is not a directory.")
         return
     end
-    local stats = { deleted = 0, dirs = 0, emptied = {} }
+    local stats = { deleted = 0, dirs = 0, emptied = {}, artifacts = {} }
 
     local function report()
         if stats.deleted == 0 and stats.dirs == 0 then
@@ -1173,7 +1212,7 @@ end
 -- The two pure deciders, exposed for the local test suite: reaching them through
 -- `M.clean` would mean driving a chooser form and a confirmation per file. Not part of
 -- the plugin's interface.
-M._test = { classify = classify, solution_templates = solution_templates, similarity = similarity }
+M._test = { classify = classify, solution_templates = solution_templates, similarity = similarity, is_artifact = is_artifact }
 
 function M.clean(bufnr)
     bufnr = bufnr or api.nvim_get_current_buf()

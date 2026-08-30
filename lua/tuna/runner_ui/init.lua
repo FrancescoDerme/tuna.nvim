@@ -291,6 +291,26 @@ function RunnerUI:legend_sections()
 end
 
 ---@private
+---How a set of testcase numbers is named in a prompt's title.
+---@param nums integer[]
+---@return string
+local function testcase_label(nums)
+    return #nums == 1 and ("testcase " .. nums[1]) or ("testcases " .. table.concat(nums, ", "))
+end
+
+---@private
+---The three answers to "this would throw away an unsaved edit", for whichever action
+---would. One list, so closing and re-running cannot drift apart: each answer names the
+---outcome it produces, and the third is `Keep editing` rather than `Cancel` — what you
+---get, rather than what did not happen, and the same words the empty-save prompt uses
+---for the same answer. It is also what a dismissal gives.
+---@param what string the action, e.g. "close" or "re-run all"
+---@return string[]
+local function unsaved_items(what)
+    return { "Save and " .. what, "Discard and " .. what, "Keep editing" }
+end
+
+---@private
 ---Close the UI, asking first when testcase edits would be thrown away. The prompt is
 ---a float like every other tuna dialog, and it is the only one in this flow: routine
 ---editing never asks anything.
@@ -307,7 +327,6 @@ function RunnerUI:request_close(torn, on_closed)
         return
     end
     local nums = self:unsaved_testcases()
-    local label = #nums == 1 and ("testcase " .. nums[1]) or ("testcases " .. table.concat(nums, ", "))
     -- A `:q` on one pane has already left a hole in the grid — Neovim closes the window
     -- before `WinClosed` fires, so there is no asking first. Put the grid back *now*,
     -- before the prompt, so the question is posed over an intact UI instead of over a
@@ -337,8 +356,8 @@ function RunnerUI:request_close(torn, on_closed)
     -- Dismissing the prompt keeps the UI (and the edit) as it is, exactly like
     -- choosing "Keep editing" — the safe answer is the one a stray Esc gives.
     require("tuna.widgets").menu(
-        { "Save and close", "Discard changes", "Keep editing" },
-        "unsaved " .. label,
+        unsaved_items("close"),
+        "unsaved " .. testcase_label(nums),
         function(idx)
             if idx == 1 then
                 self:save_all_pending()
@@ -356,12 +375,331 @@ function RunnerUI:request_close(torn, on_closed)
     )
 end
 
+---@private
+---Settle the one thing a save cannot read off the panes, then do it.
+---
+---Everything else a `:w` needs to know is on screen: it stores what the panes show, and
+---it stores the testcase even when both are empty — an empty testcase is a testcase,
+---and removing one is `x`, which is one key and undoable. So there is nothing to ask
+---about an empty *input*: for an input, empty and absent are the same thing.
+---
+---An empty **answer** is the exception, and the only one. Absent means the testcase is
+---not judged (the verdict is `DONE`); present and empty means the solution must print
+---nothing, and one that prints something is `WRONG`. The panes look identical either
+---way, so a save that would turn a real answer into an empty one asks which was meant.
+---
+---It asks **only then**. An answer that is already absent, or already empty, is not
+---changing, so it goes on meaning what it meant — which is what keeps a first save
+---silent and keeps re-saving a testcase from asking the same question again.
+---@param tcnum integer
+---@param proceed fun(expect_empty_output: boolean?)
+function RunnerUI:with_answer_settled(tcnum, proceed)
+    local _, expected = self:edited_text(tcnum)
+    if expected ~= "" then
+        proceed(false)
+        return
+    end
+    local rows = self.runner:rows_for(tcnum)
+    local tc = rows[1] and self.runner.tcdata[rows[1]]
+    local stored = tc and tc.expected
+    if stored == nil or stored == "" then
+        proceed(stored == "") -- unchanged: it goes on meaning what it already meant
+        return
+    end
+
+    -- Captured before the schedule below, and used as the window "Keep editing" returns
+    -- to: the pane the `:w` was typed in.
+    local back_to = api.nvim_get_current_win()
+    -- Opened *out* of the write command rather than inside it. A float entered from a
+    -- `BufWriteCmd` does not keep the focus: Vim restores the window the command ran in
+    -- as it finishes the `:w`, which left the menu on screen with the cursor still in
+    -- the pane behind it and no way to answer without reaching for the mouse (verified,
+    -- then fixed).
+    vim.schedule(function()
+        require("tuna.widgets").menu(
+            { "Don't specify output", "Expect empty output", "Keep editing" },
+            "the answer to testcase " .. tcnum .. " is empty",
+            function(idx)
+                if idx == 1 or idx == 2 then
+                    proceed(idx == 2)
+                end
+            end,
+            back_to,
+            function() end
+        )
+    end)
+end
+
+---@private
+---How a set of testcase numbers is named in a prompt's title.
+---@param nums integer[]
+---@return string
+local function testcase_label(nums)
+    return #nums == 1 and ("testcase " .. nums[1]) or ("testcases " .. table.concat(nums, ", "))
+end
+
+---@private
+---The three answers to "this would throw away an unsaved edit", for whichever action
+---would. One list, so closing and re-running cannot drift apart: each answer names the
+---outcome it produces, and the third is `Keep editing` rather than `Cancel` — what you
+---get, rather than what did not happen, and the same words the empty-save prompt uses
+---for the same answer. It is also what a dismissal gives.
+---@param what string the action, e.g. "close" or "re-run all"
+---@return string[]
+local function unsaved_items(what)
+    return { "Save and " .. what, "Discard and " .. what, "Keep editing" }
+end
+
+---@private
+---Close the UI, asking first when testcase edits would be thrown away. The prompt is
+---a float like every other tuna dialog, and it is the only one in this flow: routine
+---editing never asks anything.
+---@param torn boolean? the windows are already gone (a `:q` on one pane)
+---@param on_closed fun()? run once the UI is actually closed — how a `:qa` that was
+---cancelled to ask about an edit gets to finish afterwards. Not run on "Keep editing":
+---the answer there is that the command should not happen.
+function RunnerUI:request_close(torn, on_closed)
+    if not self:has_pending() then
+        self:delete()
+        if on_closed then
+            on_closed()
+        end
+        return
+    end
+    local nums = self:unsaved_testcases()
+    -- A `:q` on one pane has already left a hole in the grid — Neovim closes the window
+    -- before `WinClosed` fires, so there is no asking first. Put the grid back *now*,
+    -- before the prompt, so the question is posed over an intact UI instead of over a
+    -- gap where the pane being edited used to be. `pending` lives on this object, so
+    -- the edit comes back with it, and every answer works the same from here.
+    local was_in = api.nvim_get_current_win()
+    if torn then
+        self:delete()
+        self:show_ui()
+        was_in = nil
+    end
+    -- Where "Keep editing" puts you back. Not `restore_winid` — that is the *code*
+    -- buffer the runner was launched from, i.e. behind the UI, which is the one place
+    -- you were certainly not: keeping the edit means going back to the pane holding
+    -- it, or failing that the selector.
+    local back_to = was_in
+    if not (back_to and api.nvim_win_is_valid(back_to) and back_to ~= self.viewer_winid) then
+        for _, name in ipairs({ "si", "eo", "tc" }) do
+            local w = self.windows[name]
+            if w and w.winid and api.nvim_win_is_valid(w.winid) then
+                back_to = w.winid
+                break
+            end
+        end
+    end
+
+    -- Dismissing the prompt keeps the UI (and the edit) as it is, exactly like
+    -- choosing "Keep editing" — the safe answer is the one a stray Esc gives.
+    require("tuna.widgets").menu(
+        unsaved_items("close"),
+        "unsaved " .. testcase_label(nums),
+        function(idx)
+            if idx == 1 then
+                self:save_all_pending()
+                self:delete()
+            elseif idx == 2 then
+                self:discard_pending()
+                self:delete()
+            end
+            if on_closed and idx ~= 3 then
+                on_closed()
+            end
+        end,
+        back_to,
+        function() end
+    )
+end
+
+---@private
+---Where the rows and the disk disagree, from a single read. The results UI keeps its
+---rows across a re-run — that is what makes it a results view rather than a fresh
+---load — so anything that touches the testcase files behind its back (another Neovim,
+---`:Tuna clean`, a checkout, a plain `rm`) leaves rows describing a state that is no
+---longer there. A fresh `:Tuna run` reloads from disk and the question never arises.
+---
+---Two kinds of disagreement, and they have different answers. **Missing**: the
+---testcase is gone, and the row holds the only copy of its text, so the user decides.
+---**Changed**: the file is still there and says something else, and the file is the
+---truth while the row is a cache of it, so it is simply reloaded.
+---
+---Three kinds of row legitimately have no file and are neither: the `bare` row of a
+---run with nothing to test, a row added with `n` and never written, and one whose
+---unwritten edit is still pending — all of them are testcases being *written*, not
+---testcases that drifted. A pending row is excluded from `changed` for the stronger
+---reason too: reloading it would throw the edit away.
+---@param tcnum integer? only this testcase
+---@return integer[] missing ascending
+---@return integer[] changed ascending
+---@return table<integer, table> disk what was read, so a caller need not read it again
+function RunnerUI:disk_drift(tcnum)
+    if not self.runner.editable_testcases or self.runner.preloaded then
+        return {}, {}, {}
+    end
+    local ok, disk = pcall(require("tuna.testcases").buf_get_testcases, self.runner:edit_bufnr())
+    if not ok then
+        return {}, {}, {}
+    end
+    local seen, missing, changed = {}, {}, {}
+    for _, tc in ipairs(self.runner.tcdata) do
+        local n = tc.tcnum
+        local considered = self.runner:row_editable(tc)
+            and not tc.bare
+            and not self.pending[n]
+            and not seen[n]
+            and (tcnum == nil or n == tcnum)
+        if considered then
+            seen[n] = true
+            local d = disk[n]
+            if d == nil then
+                missing[#missing + 1] = n
+            elseif (d.input or "") ~= tc.stdin or d.output ~= tc.expected then
+                changed[#changed + 1] = n
+            end
+        end
+    end
+    table.sort(missing)
+    table.sort(changed)
+    return missing, changed, disk
+end
+
+---@private
+---Write each missing row back to disk. To its own number if that is still free, else
+---to the lowest free one: a testcase created since the row went missing would
+---otherwise be overwritten by an older one the UI happened to still be holding. The
+---row is renumbered with it, so what is on screen keeps naming what is on disk.
+---
+---Deliberately not `runner:save_testcase`, which re-runs what it saves: the caller is
+---about to run anyway, and running each row twice is both slower and confusing to
+---watch.
+---@param nums integer[]
+function RunnerUI:restore_missing(nums)
+    local testcases = require("tuna.testcases")
+    local bufnr = self.runner:edit_bufnr()
+    local ok, disk = pcall(testcases.buf_get_testcases, bufnr)
+    disk = ok and disk or {}
+    -- Every number already spoken for: what is on disk now, plus the rows that are not
+    -- themselves being restored.
+    local restoring, used = {}, {}
+    for _, n in ipairs(nums) do
+        restoring[n] = true
+    end
+    for n in pairs(disk) do
+        used[n] = true
+    end
+    for _, tc in ipairs(self.runner.tcdata) do
+        if type(tc.tcnum) == "number" and not restoring[tc.tcnum] then
+            used[tc.tcnum] = true
+        end
+    end
+
+    local moved = {}
+    for _, n in ipairs(nums) do
+        local rows = self.runner:rows_for(n)
+        local tc = rows[1] and self.runner.tcdata[rows[1]]
+        if tc then
+            local target = n
+            if used[target] then
+                target = 0
+                while used[target] do
+                    target = target + 1
+                end
+                moved[#moved + 1] = n .. " as " .. target
+            end
+            used[target] = true
+            local written =
+                pcall(testcases.buf_save_testcase, bufnr, target, tc.stdin or "", tc.expected or "", tc.expected == "")
+            if written then
+                for _, i in ipairs(rows) do
+                    self.runner.tcdata[i].tcnum = target
+                end
+            else
+                utils.notify("could not restore testcase " .. n .. ".", "WARN")
+            end
+        end
+    end
+    if #moved > 0 then
+        utils.notify("restored testcase " .. table.concat(moved, ", ") .. ", the original number was taken.", "WARN")
+    end
+    self.update_windows = true
+end
+
+---@private
+---Run `proceed`, but reconcile the rows with the disk first, so nothing is run against
+---a testcase that is not what the file says any more.
+---
+---A **changed** testcase is reloaded outright: the file is the truth and the row is a
+---cache of it, so there is nothing to decide — this is what a fresh `:Tuna run` would
+---have done, and running the stale text instead would report a verdict for input the
+---user has already replaced. It is said once rather than shown, since it is an event
+---and not a state: the rows it happened to are on screen from then on.
+---
+---A **missing** testcase is the one the user has to answer, because the row is the
+---last place its text exists and dropping it is not undoable. `Discard` only discards:
+---the row being re-run may be the one going away, so a label promising a re-run could
+---not keep it.
+---@param tcnum integer? only care about this testcase (nil: any drifted row)
+---@param what string the action, for the prompt's options
+---@param proceed fun()
+function RunnerUI:with_disk_settled(tcnum, what, proceed)
+    local nums, changed, disk = self:disk_drift(tcnum)
+    if #changed > 0 then
+        self.runner:sync_rows(changed, disk)
+        self.update_windows = true
+        utils.notify(
+            "reloaded testcase" .. (#changed > 1 and "s " or " ") .. table.concat(changed, ", ")
+                .. " from disk, changed since the last run.",
+            "INFO"
+        )
+    end
+    if #nums == 0 then
+        if #changed > 0 then
+            self:update_ui()
+        end
+        proceed()
+        return
+    end
+    local label = testcase_label(nums)
+    -- `Discard` is not "discard and re-run": the row being re-run may be the one going
+    -- away, and then there is nothing left to run — a promise the label cannot keep. So
+    -- it does exactly what it says, drops the rows and stops, and the re-run is one
+    -- keypress away once the UI says the truth. Dismissing is `Stop`, which changes
+    -- nothing at all.
+    require("tuna.widgets").menu(
+        { "Restore and " .. what, "Discard", "Stop" },
+        label .. " no longer on disk",
+        function(idx)
+            if idx == 1 then
+                self:restore_missing(nums)
+                -- Rendered here rather than left to `proceed`, which renumbering rows
+                -- does not oblige to happen.
+                self:update_ui()
+                proceed()
+            elseif idx == 2 then
+                for _, n in ipairs(nums) do
+                    self.pending[n] = nil
+                    self.runner:remove_testcase_rows(n)
+                end
+                self.update_testcase = nil
+                self.update_windows = true
+                self:update_ui()
+            end
+        end,
+        api.nvim_get_current_win(),
+        function() end
+    )
+end
+
 ---Run `proceed`, but settle any unsaved edit it would silently throw away first.
 ---Re-running a testcase you have edited but not written would feed the *old* input to
 ---the solution and then report a verdict for text that is no longer the text on
 ---screen — so ask, with the same three answers as closing does.
 ---@param tcnum integer? only care about this testcase (nil: any unsaved edit at all)
----@param what string the action, for the prompt's title
+---@param what string the action each answer names, e.g. "re-run all"
 ---@param proceed fun()
 function RunnerUI:with_pending_settled(tcnum, what, proceed)
     self:capture_pending()
@@ -376,10 +714,9 @@ function RunnerUI:with_pending_settled(tcnum, what, proceed)
         return
     end
 
-    local label = #nums == 1 and ("testcase " .. nums[1]) or ("testcases " .. table.concat(nums, ", "))
     require("tuna.widgets").menu(
-        { "Save and " .. what, "Discard and " .. what, "Cancel" },
-        "unsaved " .. label,
+        unsaved_items(what),
+        "unsaved " .. testcase_label(nums),
         function(idx)
             if idx == 1 then
                 -- Saving re-runs what it saved, so the run is already under way.
@@ -628,20 +965,42 @@ function RunnerUI:discard_pending()
     end
 end
 
+---@private
+---Where a row table currently sits in `tcdata`, or nil if it is gone. Rows are found
+---by identity wherever an answer to a prompt could have moved or removed them, since
+---the index the action started from is only good until then.
+---@param tc table?
+---@return integer?
+function RunnerUI:row_index(tc)
+    for i, row in ipairs(self.runner.tcdata) do
+        if row == tc then
+            return i
+        end
+    end
+    return nil
+end
+
+---@private
+---The text a save of `tcnum` would write. The panes hold this testcase's text only
+---while they are showing it; for any other one, what was captured when they stopped
+---showing it is the truth.
+---@param tcnum integer
+---@return string input, string expected
+function RunnerUI:edited_text(tcnum)
+    local p = self.pending[tcnum]
+    if p and tcnum ~= self.pane_tcnum then
+        return p.stdin, p.expected
+    end
+    return self:pane_text("si"), self:pane_text("eo")
+end
+
 ---Write the edits shown in the panes (or held for `tcnum`) to disk and re-run.
 ---@param tcnum integer
+---@param expect_empty_output boolean? an empty answer means "print nothing"
 ---@return boolean
-function RunnerUI:save_testcase(tcnum)
-    local p = self.pending[tcnum]
-    local input, expected
-    -- The panes hold this testcase's text only while they are showing it; for any
-    -- other one, what was captured when they stopped showing it is the truth.
-    if p and tcnum ~= self.pane_tcnum then
-        input, expected = p.stdin, p.expected
-    else
-        input, expected = self:pane_text("si"), self:pane_text("eo")
-    end
-    if not self.runner:save_testcase(tcnum, input, expected) then
+function RunnerUI:save_testcase(tcnum, expect_empty_output)
+    local input, expected = self:edited_text(tcnum)
+    if not self.runner:save_testcase(tcnum, input, expected, expect_empty_output) then
         return false
     end
     self.pending[tcnum] = nil
@@ -667,6 +1026,21 @@ function RunnerUI:save_all_pending()
 end
 
 ---@private
+---The testcase number of an untouched bare row, if there is one: the row a run with
+---nothing to test leaves behind, before anything has been typed into it. Nil once it
+---carries an edit, since it is then a testcase being written rather than an empty one
+---going spare.
+---@return integer?
+function RunnerUI:bare_row_tcnum()
+    for _, tc in ipairs(self.runner.tcdata) do
+        if tc.bare and not self.pending[tc.tcnum] then
+            return tc.tcnum
+        end
+    end
+    return nil
+end
+
+---@private
 ---Add a testcase: a new row, selected, with both panes empty and waiting. Like any
 ---other edit it is only written by `:w`, so an abandoned one costs nothing.
 function RunnerUI:add_testcase()
@@ -678,11 +1052,18 @@ function RunnerUI:add_testcase()
         return
     end
     self:capture_pending()
-    local n = self.runner:next_tcnum()
-    self.runner:add_testcase_row(n)
-    -- `fresh`: unsaved by existing, not by differing — a row added here has no file
-    -- behind it, so it stays pending even while its (empty) panes match their render.
-    self.pending[n] = { stdin = "", expected = "", fresh = true }
+    -- A run with no testcases already left an empty, unsaved testcase 0 on screen (the
+    -- `No input` row), which is exactly what this key would otherwise create. Adding a
+    -- second one beside it would number it 1 and leave a gap on disk, so `n` there
+    -- means "go and type in the empty one".
+    local n = self:bare_row_tcnum()
+    if n == nil then
+        n = self.runner:next_tcnum()
+        self.runner:add_testcase_row(n)
+        -- `fresh`: unsaved by existing, not by differing — a row added here has no file
+        -- behind it, so it stays pending even while its (empty) panes match their render.
+        self.pending[n] = { stdin = "", expected = "", fresh = true }
+    end
     self.update_windows = true
     self:update_ui()
     -- The row only exists on screen after the scheduled render.
@@ -741,11 +1122,13 @@ function RunnerUI:split_testcase()
     self:update_ui(true)
 end
 
----Delete the testcase under the cursor. No confirmation: it goes on an undo stack
----the runner keeps, and `u` puts it back — cheaper to press than a dialog, and
----recoverable, which a dialog does not make it.
-function RunnerUI:delete_testcase()
-    local tc = self.runner.tcdata[self:cursor_tc()]
+---Delete a testcase, the one under the cursor unless `tcnum` names another. No
+---confirmation: it goes on an undo stack the runner keeps, and `u` puts it back —
+---cheaper to press than a dialog, and recoverable, which a dialog does not make it.
+---@param tcnum integer? the testcase to delete (default: the row under the cursor)
+function RunnerUI:delete_testcase(tcnum)
+    local rows = tcnum ~= nil and self.runner:rows_for(tcnum) or nil
+    local tc = self.runner.tcdata[rows and rows[1] or self:cursor_tc()]
     if not self.runner:row_editable(tc) then
         return
     end
@@ -1046,7 +1429,11 @@ function RunnerUI:show_ui()
                     elseif tcnum == nil then
                         utils.notify("this row is not a testcase, so there is nothing to save.", "WARN")
                     elseif self:panes_changed() or self.pending[tcnum] then
-                        self:save_testcase(tcnum)
+                        -- The one save that asks: an explicit `:w` of a testcase with
+                        -- nothing in it stores nothing and removes what was there.
+                        self:with_answer_settled(tcnum, function(expect_empty_output)
+                            self:save_testcase(tcnum, expect_empty_output)
+                        end)
                     end
                     -- Nothing changed since the last write: saving would only re-run the
                     -- testcase, which is what `R` is for. Also what keeps a `:wqa`
@@ -1102,22 +1489,34 @@ function RunnerUI:show_ui()
         self.runner:kill_all_processes()
     end)
     map_tc("run_again", function()
-        local idx = self:cursor_tc()
-        local tc = self.runner.tcdata[idx]
+        local tc = self.runner.tcdata[self:cursor_tc()]
         -- Re-running a row you have edited but not saved would run the *old* input and
         -- report a verdict for text that is no longer what you are looking at. Ask.
+        -- Then ask again if the row's testcase has gone missing from disk, for the same
+        -- reason from the other side: the verdict would be about something not there.
         self:with_pending_settled(tc and tc.tcnum, "re-run", function()
-            self.runner:kill_process(idx)
-            vim.schedule(function()
-                self.runner:run_single(idx)
+            self:with_disk_settled(tc and tc.tcnum, "re-run", function()
+                -- Found again by identity, not by the index we started from: settling
+                -- the two questions can renumber this row, and can remove others above
+                -- it. A row discarded along the way is simply not run.
+                local idx = self:row_index(tc)
+                if not idx then
+                    return
+                end
+                self.runner:kill_process(idx)
+                vim.schedule(function()
+                    self.runner:run_single(idx)
+                end)
             end)
         end)
     end)
     map_tc("run_all_again", function()
         self:with_pending_settled(nil, "re-run all", function()
-            self.runner:kill_all_processes()
-            vim.schedule(function()
-                self.runner:run_testcases()
+            self:with_disk_settled(nil, "re-run all", function()
+                self.runner:kill_all_processes()
+                vim.schedule(function()
+                    self.runner:run_testcases()
+                end)
             end)
         end)
     end)
@@ -1221,14 +1620,29 @@ function RunnerUI:show_ui()
             end
             local pane = self.escaped_from
             self.escaped_from, self.escaped_to = nil, nil
+            -- The windows that exist *now*, before the close settles. Focus landing on
+            -- one of these afterwards is Neovim falling back, which is what this exists
+            -- to rescue. Focus landing anywhere else means a window opened *during* the
+            -- close and took it on purpose — a dialog raised from the answer to another
+            -- dialog, which is how the results UI asks two questions in a row (an
+            -- unsaved edit, then a testcase that has gone missing) — and pulling the
+            -- cursor back into the pane there leaves the second question on screen with
+            -- no way to answer it, looking for all the world as though the first prompt
+            -- had swallowed it (verified, then fixed).
+            local existing = {}
+            for _, w in ipairs(api.nvim_list_wins()) do
+                existing[w] = true
+            end
             -- Scheduled: this fires *during* the close, and the window Neovim lands on
             -- is not settled until it is over.
             vim.schedule(function()
+                local cur = api.nvim_get_current_win()
                 if
                     self.ui_visible
                     and pane
                     and api.nvim_win_is_valid(pane)
-                    and not self:owns_win(api.nvim_get_current_win())
+                    and existing[cur]
+                    and not self:owns_win(cur)
                 then
                     api.nvim_set_current_win(pane)
                 end
@@ -1950,11 +2364,18 @@ function RunnerUI:render_selector()
     for i, tc in ipairs(self.runner.tcdata) do
         -- The left column: a mode may relabel rows (run-all groups solution
         -- header rows above indented per-testcase rows).
+        -- A row standing for no stored testcase names itself (`Compile`); a numbered
+        -- one is a testcase. The bare row of a run with nothing to test is the case
+        -- between the two: it is testcase 0 and editable, but nothing is on disk yet,
+        -- so it says why it is there — until it has something behind it, which is
+        -- either an unwritten edit or, once `bare` is cleared, a saved file.
         local header
         if self.runner.row_label then
             header = self.runner:row_label(tc)
+        elseif tc.bare and not unsaved[tc.tcnum] then
+            header = "No input"
         else
-            header = tc.tcnum == "Compile" and "Compile" or ("TC " .. tc.tcnum)
+            header = type(tc.tcnum) == "number" and ("TC " .. tc.tcnum) or tostring(tc.tcnum)
         end
         -- No runtime for a just-saved counterexample: show its label
         -- (e.g. "saved") in the time column instead.

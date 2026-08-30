@@ -117,11 +117,20 @@ local function make_matcher(parts)
 end
 
 ---Write `content` to `path`, or delete `path` when `content` is empty/nil.
+---
+---`keep_empty` is the deliberate exception, and the only way to put an empty file on
+---disk. An empty file is not the same thing as an absent one: an empty *input* file is
+---what makes a testcase exist with nothing to feed it, and an empty *answer* file is
+---the instruction to expect no output, as against no answer at all. Nothing sets it by
+---accident; it comes from a question the user answered.
 ---@param path string
 ---@param content string?
-local function write_or_delete(path, content)
+---@param keep_empty boolean? write an empty file rather than removing it
+local function write_or_delete(path, content, keep_empty)
     if not content or content == "" then
-        if utils.file_exists(path) then
+        if keep_empty then
+            utils.write_file(path, "")
+        elseif utils.file_exists(path) then
             utils.delete_file(path)
         end
     else
@@ -129,24 +138,24 @@ local function write_or_delete(path, content)
     end
 end
 
----The mirror of `write_or_delete`, applied to everything a backend loads: an empty
----input or answer is stored as `nil`, because storage has no way to say "empty" —
----`write_or_delete` removes the file rather than writing one, so an empty answer and
----no answer are the same bytes on disk and must be the same thing in memory.
+---The mirror of `write_or_delete`, applied to everything a backend loads. It normalizes
+---the **input** only, and the asymmetry is the point: for an input, empty and absent
+---really are the same thing — the process is fed `""` either way — so nothing is lost
+---by saying so once, and a load that reported `""` while a save reported `nil` was a
+---discrepancy with no meaning behind it.
 ---
----Without this a hand-made (or externally emptied) `out.txt` loaded as `""`, which
----`compare_output` judges against instead of returning `nil`: a testcase with nothing
----to be wrong about read WRONG, and went back to DONE the moment the same text was
----saved through the UI, where `core.answer` already normalized it.
+---For an **answer** they are two different things, so nothing may be normalized away:
+---an absent answer means the testcase is not judged (`compare_output` returns nil, the
+---verdict is DONE), while an answer that is present and empty means the solution must
+---print nothing. Only file *presence* can carry that, which is why an empty answer is
+---never written by accident — `write_or_delete` removes it unless `keep_empty` says the
+---user asked for one — and why what is there must be loaded as it is.
 ---@param tctbl table<integer, { input: string?, output: string? }>
 ---@return table<integer, { input: string?, output: string? }>
 local function as_stored(tctbl)
     for _, tc in pairs(tctbl) do
         if tc.input == "" then
             tc.input = nil
-        end
-        if tc.output == "" then
-            tc.output = nil
         end
     end
     return tctbl
@@ -253,8 +262,9 @@ function M.files.write(directory, tctbl, filepath, input_format, output_format)
         return
     end
     for tcnum, tc in pairs(tctbl) do
-        write_or_delete(directory .. format_name(in_parts, tcnum), tc.input)
-        write_or_delete(directory .. format_name(out_parts, tcnum), tc.output)
+        local keep = tc.keep_empty or {}
+        write_or_delete(directory .. format_name(in_parts, tcnum), tc.input, keep.input)
+        write_or_delete(directory .. format_name(out_parts, tcnum), tc.output, keep.output)
     end
 end
 
@@ -280,15 +290,22 @@ end
 function M.single_file.write(path, tctbl)
     -- drop empty inputs/outputs, then drop testcases that became empty
     for tcnum, tc in pairs(tctbl) do
+        local keep = tc.keep_empty or {}
         if tc.input == "" then
             tc.input = nil
         end
-        if tc.output == "" then
+        -- An empty answer the user asked to keep is the instruction to expect no
+        -- output, and this backend has no file of its own to leave behind, so it says
+        -- it by keeping the empty string in the entry.
+        if tc.output == "" and not keep.output then
             tc.output = nil
         end
-        if not tc.input and not tc.output then
+        -- An entry with both halves gone is no testcase at all, so it is dropped —
+        -- unless the user asked to keep it, which is recorded the same way.
+        if not tc.input and not tc.output and not keep.input then
             tctbl[tcnum] = nil
         end
+        tc.keep_empty = nil
     end
 
     if next(tctbl) == nil then
@@ -371,8 +388,9 @@ function M.directory.write(base_dir, tctbl, filepath, dir_format, input_name, ou
     end
     for tcnum, tc in pairs(tctbl) do
         local tcdir = vim.fs.normalize(base_dir .. format_name(parts, tcnum)) .. "/"
+        local keep = tc.keep_empty or {}
         local empty = (not tc.input or tc.input == "") and (not tc.output or tc.output == "")
-        if empty then
+        if empty and not (keep.input or keep.output) then
             -- remove the testcase's files, and the directory itself if now empty
             write_or_delete(tcdir .. input_name, nil)
             write_or_delete(tcdir .. output_name, nil)
@@ -381,8 +399,8 @@ function M.directory.write(base_dir, tctbl, filepath, dir_format, input_name, ou
             end
         else
             utils.ensure_directory(tcdir)
-            write_or_delete(tcdir .. input_name, tc.input)
-            write_or_delete(tcdir .. output_name, tc.output)
+            write_or_delete(tcdir .. input_name, tc.input, keep.input)
+            write_or_delete(tcdir .. output_name, tc.output, keep.output)
         end
     end
 end
@@ -618,20 +636,36 @@ function M.buf_clear(bufnr)
     M.backend(cfg.testcases_storage).buf_clear(bufnr)
 end
 
----Create or replace a single testcase for a buffer.
+---Create or replace a single testcase for a buffer. Saving a testcase **stores** it,
+---even with nothing in it: an empty input is written as an empty file rather than as
+---the removal an empty write means in bulk, so a testcase never disappears because it
+---was saved. Removing one is `buf_delete_testcase`, which is what the results UI's
+---delete key and `:Tuna testcase delete` call — one way in, and an undoable one.
+---
+---The **answer** is the exception, because an empty one is ambiguous where an empty
+---input is not: absent means the testcase is not judged, present-and-empty means the
+---solution must print nothing. `expect_empty_output` picks the second; without it an
+---empty answer is stored as absent.
 ---@param bufnr integer
 ---@param tcnum integer
 ---@param input string?
 ---@param output string?
-function M.buf_save_testcase(bufnr, tcnum, input, output)
+---@param expect_empty_output boolean? store an empty answer as an empty *file*, so the
+---testcase is judged and the solution must print nothing
+function M.buf_save_testcase(bufnr, tcnum, input, output, expect_empty_output)
     local cfg = config.get_buffer_config(bufnr)
+    local entry = {
+        input = input,
+        output = output,
+        keep_empty = { input = true, output = expect_empty_output or nil },
+    }
     if cfg.testcases_storage == "single_file" then
         -- single file holds everything, so edit the whole table and rewrite
         local tctbl = M.single_file.buf_load(bufnr)
-        tctbl[tcnum] = { input = input, output = output }
+        tctbl[tcnum] = entry
         M.single_file.buf_write(bufnr, tctbl)
     else
-        M.backend(cfg.testcases_storage).buf_write(bufnr, { [tcnum] = { input = input, output = output } })
+        M.backend(cfg.testcases_storage).buf_write(bufnr, { [tcnum] = entry })
     end
 end
 

@@ -227,6 +227,13 @@ function M.run_testcases(bufnr, list, compile, only_show)
                 subset[n] = tctbl[n]
             end
         end
+        -- Named testcases, none of which exist: each was reported above, and there is
+        -- nothing left to run. Returning here keeps it out of the bare-run path below,
+        -- which runs the program on empty stdin — right for "run this file", wrong as
+        -- the answer to "run testcase 5" when testcase 5 is missing.
+        if next(subset) == nil then
+            return
+        end
         tctbl = subset
     end
 
@@ -252,10 +259,11 @@ function M.run_testcases(bufnr, list, compile, only_show)
         -- window. Only when there is nothing to show yet — a runner that has already
         -- run keeps its results.
         if #r.tcdata == 0 or r.preloaded then
-            if next(tctbl) == nil then
-                utils.notify("no testcases to show.", "WARN")
-                return
-            end
+            -- No testcases is not nothing to show: `build_rows` lists the same `No input`
+            -- row a run with nothing to test would build, so the UI opens on an editable
+            -- testcase 0 waiting to be typed into rather than on a warning. That is the
+            -- way in to writing a problem's first testcase from the results UI, which
+            -- refusing to open made unreachable exactly when it was wanted.
             r:load_testcases(tctbl)
         end
     else

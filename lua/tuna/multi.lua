@@ -301,9 +301,11 @@ end
 ---@param input string
 ---@param expected string
 ---@return boolean
-function MultiRunner:save_testcase(tcnum, input, expected)
-    self.tctbl[tcnum] = { input = input, output = core.answer(expected) }
-    return core.RunnerCore.save_testcase(self, tcnum, input, expected)
+function MultiRunner:save_testcase(tcnum, input, expected, expect_empty_output)
+    -- The same answer the base class stores.
+    local stored = expect_empty_output and "" or core.answer(expected)
+    self.tctbl[tcnum] = { input = input, output = stored }
+    return core.RunnerCore.save_testcase(self, tcnum, input, expected, expect_empty_output)
 end
 
 ---Recompute a solution header row's `correct/total` from its testcase rows.
@@ -661,8 +663,8 @@ function M.run(bufnr)
         -- Testcase edits from the UI are resolved against a real solution: the
         -- invoking buffer may be a scratch one that owns no testcases of its own.
         edit_anchor = not curpath and paths[1].path or nil,
-        rundir = vim.fs.normalize(dir .. "/" .. cfg.running_directory) .. "/",
-        compdir = vim.fs.normalize(dir .. "/" .. cfg.compile_directory) .. "/",
+        rundir = utils.normalize_path(cfg.running_directory, dir) .. "/",
+        compdir = utils.normalize_path(cfg.compile_directory, dir) .. "/",
         timeout = timeout,
         tcdata = {},
         completed = false,

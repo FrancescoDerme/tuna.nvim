@@ -399,9 +399,14 @@ end
 ---@return string?
 local function eval_path(path, task, file_extension, cfg)
     if type(path) == "function" then
-        return path(task, file_extension)
+        return utils.expand_home(path(task, file_extension))
     end
-    return eval_download_modifiers(path, task, file_extension, true, cfg)
+    -- `~` last, on the evaluated result: `$(HOME)` is a modifier the engine expands,
+    -- while `~` is shell syntax no shell ever sees here, so without this a
+    -- `downloaded_problems_path = "~/cp/…"` writes into a directory literally named `~`.
+    -- Not folded into `eval_download_modifiers`, which also evaluates template *content*,
+    -- where a leading `~` is text rather than a path.
+    return utils.expand_home(eval_download_modifiers(path, task, file_extension, true, cfg))
 end
 
 ---Convert a task's `tests` list into a 0-indexed testcase table.
@@ -465,7 +470,7 @@ local function store_downloaded_task(filepath, task, cfg)
     for _, candidate in ipairs(candidates) do
         local path = eval_download_modifiers(candidate, task, file_extension, false, cfg, filepath)
         if path then
-            path = string.gsub(path, "^~", vim.uv.os_homedir()) -- expand leading ~
+            path = utils.expand_home(path) -- expand leading ~
             tried[#tried + 1] = path
             if utils.file_exists(path) then
                 template_file = path
@@ -936,6 +941,7 @@ M._test = {
     validate_task = validate_task,
     canonicalize_task = canonicalize_task,
     eval_download_modifiers = eval_download_modifiers,
+    eval_path = eval_path,
 }
 
 return M

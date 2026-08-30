@@ -230,7 +230,7 @@ function M.program(path, cfg)
             return nil, "compile command for '" .. ft .. "' is malformed"
         end
         spec.compile = compile
-        spec.compile_dir = vim.fs.normalize(dir .. "/" .. (cfg.compile_directory or ".")) .. "/"
+        spec.compile_dir = utils.normalize_path(cfg.compile_directory or ".", dir) .. "/"
     end
     return spec
 end

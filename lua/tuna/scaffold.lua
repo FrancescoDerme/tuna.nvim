@@ -177,7 +177,7 @@ local function resolve_template(override, ext, builtins, quiet)
         override = override[ext]
     end
     if type(override) == "string" then
-        override = override:gsub("^~", vim.uv.os_homedir())
+        override = utils.expand_home(override)
         local c = utils.read_file(override)
         if c then
             return c
