@@ -20,8 +20,8 @@ local M = {}
 -- Per-problem sidecar (written by download, read as a URL fallback here)
 --------------------------------------------------------------------------------
 
--- The sidecar itself lives in `sidecar.lua`: it is no longer a submit detail now that
--- it also carries the per-problem run state (`tools.lua`).
+-- The sidecar itself lives in `sidecar.lua`, since it also carries the per-problem run
+-- state (`tools.lua`).
 local sidecar = require("tuna.sidecar")
 local read_store, write_store = sidecar.read, sidecar.write
 
@@ -278,8 +278,7 @@ end
 ---during a live round. They serve the same contests as the main site, but not the same
 ---submit pages: the main site's per-problem `…/contest/<id>/submit/<index>` **404s on a
 ---mirror**, which only has the contest-wide `…/contest/<id>/submit` (you pick the
----problem from a dropdown there — the mirror has no way to preselect it, verified
----during a live round).
+---problem from a dropdown there, since the mirror has no way to preselect it).
 ---
 ---That matters here because the CLI submitters this feeds derive their target from the
 ---problem URL by swapping `/problem/<index>` for `/submit/<index>` — which is exactly
@@ -302,11 +301,10 @@ local MIRROR_TTL = 24 * 60 * 60 -- a round is hours; its mirror lasts a day or t
 ---
 ---This is a clock, not a check, because **there is nothing to check**: Codeforces
 ---answers every non-browser request with a JavaScript challenge page, and the reply for
----a contest the mirror still carries and one it has dropped is byte-for-byte identical
----(measured: both 10178 bytes of "Please wait. Your browser is being checked…"). A probe
----cannot see the difference, so guessing from the age of the download is the honest
----option — and being wrong is cheap in the safe direction: the fallback is the main
----site, which always works.
+---a contest the mirror still carries and one it has dropped is byte-for-byte identical.
+---A probe cannot see the difference, so guessing from the age of the download is the
+---honest option — and being wrong is cheap in the safe direction: the fallback is the
+---main site, which always works.
 ---
 ---`submit.mirror_ttl` is the window in seconds (`false` never to expire, `0` never to
 ---use a mirror). A `mirror` with no `mirror_at` beside it counts as expired: the pair is
@@ -647,8 +645,8 @@ local FINAL = { accepted = true, rejected = true, partial = true }
 
 ---What a watched submit that reached **no final verdict** amounts to, once its tool has
 ---exited. The whole question is what silence means, and the answer is the exit code: a
----tool that exits 0 has said the submission went through, and tuna not recognising the
----words it used to say so is tuna's ignorance, not a failure. Reporting one would be the
+---tool that exits 0 has said the submission went through, and tuna not recognising how
+---it worded that is tuna's ignorance, not a failure. Reporting one would be the
 ---worst kind of wrong — telling you a submission failed when it did not — and it is
 ---reachable by any submit tool whose verdict wording is not in `submit.verdicts`, which
 ---is every tool nobody has configured patterns for yet.

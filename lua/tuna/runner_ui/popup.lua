@@ -93,12 +93,22 @@ end
 ---@param config table
 ---@param _init_winid integer? unused (popup anchors to the editor)
 ---@param status_rows integer? content rows of the "Run" pane (default 2)
-function M.init_ui(windows, config, _init_winid, status_rows)
+---@param opts { layout: table?, titles: table<string, string>? }? what the run mode
+---changes about the grid: a layout of its own, and titles it gives panes
+function M.init_ui(windows, config, _init_winid, status_rows, opts)
+    opts = opts or {}
     local defaults = require("tuna.config").defaults.popup_ui.layout
-    local layout = layout_util.resolve(config.popup_ui.layout, "popup_ui.layout", defaults)
+    -- A run mode that lays the grid out its own way (interactive's conversation columns)
+    -- replaces the configured layout, and is validated the same way.
+    local layout = layout_util.resolve(
+        opts.layout or config.popup_ui.layout,
+        opts.layout and "run mode layout" or "popup_ui.layout",
+        defaults
+    )
     local sizes, positions = compute_layout(config, status_rows or 2, layout)
 
     for name in pairs(titles) do
+        local title = (opts.titles and opts.titles[name]) or titles[name]
         local buf = api.nvim_create_buf(false, true)
         -- Named, tagged, and answering `:w` instead of erroring — the shared surface
         -- contract, so a pane cannot be born missing a piece of it. What a write *does*
@@ -124,7 +134,7 @@ function M.init_ui(windows, config, _init_winid, status_rows)
                 row = p.row,
                 border = config.floating_border,
                 border_highlight = config.floating_border_highlight,
-                title = titles[name],
+                title = title,
             })
             local selector = name == "tc"
             vim.wo[win].number = selector and config.runner_ui.selector_show_nu or config.runner_ui.show_nu
@@ -133,7 +143,7 @@ function M.init_ui(windows, config, _init_winid, status_rows)
             vim.wo[win].spell = false
             vim.wo[win].cursorline = selector
         end
-        windows[name] = { bufnr = buf, winid = win, title = titles[name] }
+        windows[name] = { bufnr = buf, winid = win, title = title }
     end
 end
 

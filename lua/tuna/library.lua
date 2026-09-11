@@ -501,10 +501,9 @@ function M.search(bufnr)
         .new({}, {
             prompt_title = "Tuna library (." .. ext .. ")",
             -- Two tiers, rebuilt on every keystroke. Fuzzy matching runs over
-            -- `name + file` only: feeding whole file bodies to the matcher does not
-            -- work — every entry then carries thousands of characters, the length
-            -- penalty swamps the signal, and typing a snippet's own name lands on
-            -- something else (measured: "bexp" selected a Fenwick tree). An entry whose
+            -- `name + file` only: with whole file bodies every entry carries thousands of
+            -- characters, the length penalty swamps the signal, and typing a snippet's
+            -- own name lands on something else. An entry whose
             -- *code* contains what was typed has the prompt appended to its ordinal
             -- instead, which keeps it in the list while its greater length ranks it
             -- below the name matches. So: type a name to get that snippet, type an

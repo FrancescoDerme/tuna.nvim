@@ -28,8 +28,6 @@ end
 ---panel whose corners the rounded glyphs sit on. (A terminal cell can't be split,
 ---so the fill can't literally be rounded; matching the fill is the closest look.)
 ---The derived group is (re)computed each call so it tracks colourscheme changes.
----Setting `winhighlight` is the API equivalent of competitest's nui
----`border.highlight` option.
 ---@param winid integer
 ---@param hl string? highlight group whose foreground is used for the border
 function M.set_border_highlight(winid, hl, group)

@@ -8,7 +8,7 @@
 --
 --   * `keymaps.mappings` — buffer-local maps set on the configured solution
 --     filetypes via a `FileType` autocmd, so they follow the user from one problem
---     to the next (what an ftplugin used to give).
+--     to the next, as an ftplugin would.
 --   * `keymaps.global`   — always-available maps set once at setup, regardless of
 --     the current buffer (handy for buffer-agnostic actions like `dashboard`/`download_*`).
 --

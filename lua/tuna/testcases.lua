@@ -141,8 +141,7 @@ end
 ---The mirror of `write_or_delete`, applied to everything a backend loads. It normalizes
 ---the **input** only, and the asymmetry is the point: for an input, empty and absent
 ---really are the same thing — the process is fed `""` either way — so nothing is lost
----by saying so once, and a load that reported `""` while a save reported `nil` was a
----discrepancy with no meaning behind it.
+---by saying so once, and a load and a save never disagree about it.
 ---
 ---For an **answer** they are two different things, so nothing may be normalized away:
 ---an absent answer means the testcase is not judged (`compare_output` returns nil, the
@@ -461,10 +460,7 @@ end
 ---
 ---`testcases_directory` is evaluated for file modifiers — so `$(DIRNAME)`, `$(HOME)`,
 ---`$(CWD)`, `$(FNOEXT)`… can build a per-problem path — and the result is used as-is
----when it is absolute, joined onto the source's directory when it is not. competitest
----joined unconditionally, which made an absolute path unreachable and turned
----`~/cp/testcases` into a directory literally named `~` beside the source
----(the competitest behaviour).
+---when it is absolute, joined onto the source's directory when it is not.
 ---@param source_dir string directory holding the source file
 ---@param filepath string source file path, which the modifiers are computed from
 ---@param cfg table resolved configuration

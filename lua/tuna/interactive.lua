@@ -3,9 +3,10 @@
 -- Interactive problems: the solution talks to something over stdio, turn by turn.
 -- Tuna offers three *sources* for the other side of that conversation:
 --
---   * live       — YOU are the other side. The solution's stdout streams into the
---                  Output pane; you type into the (editable) Input pane and each
---                  <CR> line is sent to the solution's stdin. No auto-verdict.
+--   * live       — YOU are the other side. The conversation is laid out in three
+--                  columns, Errors, Output and Live, each writing on rows the other
+--                  two leave blank; you type into Live and <CR> sends the line to the
+--                  solution's stdin. No auto-verdict.
 --   * feed       — a pre-written input plays the other side, one line per turn: each
 --                  time the solution emits a line, the next input line is sent. If
 --                  the testcase has an expected output, the solution's stdout is
@@ -51,16 +52,142 @@ local function temp_with(content)
 end
 
 --------------------------------------------------------------------------------
+-- The conversation (live and interactor)
+--------------------------------------------------------------------------------
+
+-- The columns a conversation is laid out in, left to right beside the selector.
+local CONVERSATION_PANES = { "se", "so", "si" }
+
+---Append what one side said to a session's conversation. Each entry of `tc.log` is one
+---row, owned by the column that wrote it; the other columns are blank on that row, which
+---is what puts a reply on a line of its own instead of beside the message it answers, and
+---why nothing is ever copied from one column into another. A side that keeps writing
+---without a newline (a prompt, or output arriving in pieces) carries on along its own row,
+---but only while nobody else has spoken: once another column has taken a row, whatever
+---comes next starts a fresh one.
+---@param tc table the session's row
+---@param col "so"|"se"|"si"
+---@param data string?
+local function log_append(tc, col, data)
+    tc.log = tc.log or {}
+    if data == nil or data == "" then
+        return
+    end
+    local pieces = vim.split(data, "\n", { plain = true })
+    local ends_line = pieces[#pieces] == ""
+    if ends_line then
+        table.remove(pieces)
+    end
+    for i, piece in ipairs(pieces) do
+        local last = tc.log[#tc.log]
+        local entry
+        if i == 1 and last and last.col == col and last.open then
+            last.text = last.text .. piece
+            entry = last
+        else
+            entry = { col = col, text = piece }
+            tc.log[#tc.log + 1] = entry
+        end
+        entry.open = i == #pieces and not ends_line
+    end
+end
+
+---Put a line of tuna's own (a session ending, a timeout) into the Errors column, on a row
+---of its own: whatever row was left open is closed first, so the note can't run into it.
+---@param tc table
+---@param text string
+local function log_note(tc, text)
+    tc.log = tc.log or {}
+    local last = tc.log[#tc.log]
+    if last then
+        last.open = false
+    end
+    log_append(tc, "se", text .. "\n")
+end
+
+---Lay a conversation out as the lines of its three columns: one row per entry, blank in
+---every column but the one that wrote it. The three come back the same length, so the
+---columns stay line for line.
+---@param log table[]?
+---@return table<string, string[]>
+local function conversation(log)
+    local out = { so = {}, se = {}, si = {} }
+    for _, entry in ipairs(log or {}) do
+        for _, col in ipairs(CONVERSATION_PANES) do
+            out[col][#out[col] + 1] = col == entry.col and entry.text or ""
+        end
+    end
+    return out
+end
+
+---Write a column's lines without touching the undo history or leaving the buffer
+---`modified`, and without writing at all when it already says the same thing, so a
+---redraw leaves a column being read alone. With `keep_last`, the buffer's own last line is
+---left in place and everything above it replaced: that line is being typed into.
+---@param bufnr integer
+---@param lines string[]
+---@param keep_last boolean
+---@param modifiable boolean
+local function set_column(bufnr, lines, keep_last, modifiable)
+    if not keep_last and #lines == 0 then
+        lines = { "" }
+    end
+    local stop = keep_last and api.nvim_buf_line_count(bufnr) - 1 or -1
+    if not vim.deep_equal(api.nvim_buf_get_lines(bufnr, 0, stop, false), lines) then
+        vim.bo[bufnr].modifiable = true
+        local undolevels = vim.bo[bufnr].undolevels
+        vim.bo[bufnr].undolevels = -1
+        api.nvim_buf_set_lines(bufnr, 0, stop, false, lines)
+        vim.bo[bufnr].undolevels = undolevels
+    end
+    vim.bo[bufnr].modifiable = modifiable
+    vim.bo[bufnr].modified = false
+end
+
+--------------------------------------------------------------------------------
 -- InteractiveRunner (a RunnerCore subclass the runner UI drives)
 --------------------------------------------------------------------------------
 
 local InteractiveRunner = core.extend()
 
--- The Input pane here is the thing you talk to the solution through, not a stored
--- testcase's input, so the results UI must not make it an editor.
+-- Testcases are not edited from this UI by default: in `live` and `interactor` the `si`
+-- pane is the other side of a conversation, not a stored input. `feed` is the exception
+-- and turns it on per runner (see `M.run`), since what it replays *is* a stored testcase.
 InteractiveRunner.editable_testcases = false
 
----In live mode the Input pane is typed into, so the UI must leave its letters alone
+---Whether this runner's source is a conversation, laid out in aligned columns. `feed` is
+---not one: it replays a stored testcase, whose input and output are read as texts.
+---@return boolean
+function InteractiveRunner:conversational()
+    return self.source ~= "feed"
+end
+
+---The grid follows the source. `feed` keeps whatever layout is configured, with the
+---canonical Input and Expected Output panes, editable as in a normal run: what it replays is
+---a stored testcase, its input the script and its expected output the verdict. `live` and
+---`interactor` are a conversation and are laid out as one — the selector, then a column
+---each for Errors, Output and Live, every one full height, so a row of one faces the same
+---row of the others. Expected output has no place in it, a sample exchange being one
+---example of a conversation rather than the only correct one.
+---@return table?
+function InteractiveRunner:layout()
+    if not self:conversational() then
+        return nil
+    end
+    return { { 3, "tc" }, { 3, "se" }, { 4, "so" }, { 4, "si" } }
+end
+
+---`si` is named for what it is in a conversation: the other side of it, not a stored
+---testcase's input.
+---@return table<string, string>?
+function InteractiveRunner:pane_titles()
+    if not self:conversational() then
+        return nil
+    end
+    return { si = " Live " }
+end
+
+---In live mode the Live pane is typed into, so the UI must leave its letters alone
 ---(no `q`-to-close on it) even though testcases aren't editable in this mode.
 ---@param name string
 ---@return boolean
@@ -74,15 +201,14 @@ function InteractiveRunner:status_tail()
     return { { "source", self.source } }
 end
 
----In `live` mode the Input pane is editable (you type responses into it), so the UI
----must not overwrite it on redraw. Every other pane is the base class's — including
----the Errors pane carrying a checker's message in feed mode.
+---In a conversation the three columns are drawn by `on_details_rendered`, since their rows
+---have to be laid out together and the Live column is typed into, where the base render
+---would replace each pane on its own and overwrite the line being typed. There is no
+---expected output to show or diff against. In `feed` every pane is the base class's: `si`
+---shows the input being fed, and Errors carries a checker's message.
 function InteractiveRunner:pane_content(tc, name)
-    if name == "si" then
-        if self.source == "live" then
-            return core.SKIP
-        end
-        return tc.stdin
+    if self:conversational() and (name == "so" or name == "se" or name == "si" or name == "eo") then
+        return core.SKIP
     end
     return core.RunnerCore.pane_content(self, tc, name)
 end
@@ -105,14 +231,21 @@ function InteractiveRunner:kill_process()
     self:kill_all_processes()
 end
 
----Re-running one row restarts its session.
+---Re-running one row restarts its session. It claims the runner while the session runs,
+---as the normal runner's `run_single` does: `idle()` reads `completed`, and a re-run that
+---left it true let the structural edits `feed` allows (`n`, `x`, a split) through
+---mid-session.
 ---@param idx integer
 function InteractiveRunner:run_single(idx)
     local tc = self.tcdata[idx]
     if not tc or tc.tcnum == "Compile" then
         return
     end
-    self:run_one_session(idx, function() end)
+    self.completed = false
+    self:run_one_session(idx, function()
+        self.completed = true
+        self:update_ui(true)
+    end)
 end
 
 ---Restart every session from the top (the UI's "run all again").
@@ -120,40 +253,148 @@ function InteractiveRunner:run_testcases()
     self:run_sessions()
 end
 
----When `live`, make the Input pane editable and map <CR> to "send this line".
+---In a conversation the three columns are scroll-bound and unwrapped, so reading back
+---through one keeps the rows of all three level. When `live`, the Live column is also
+---typed into, and <CR> sends the line being typed.
 ---@param ui table the RunnerUI
 function InteractiveRunner:on_ui_shown(ui)
+    if not self:conversational() then
+        return
+    end
+    for _, name in ipairs(CONVERSATION_PANES) do
+        local w = ui.windows[name]
+        if w and w.winid and api.nvim_win_is_valid(w.winid) then
+            api.nvim_set_option_value("scrollbind", true, { scope = "local", win = w.winid })
+            api.nvim_set_option_value("wrap", false, { scope = "local", win = w.winid })
+        end
+    end
     if self.source ~= "live" then
         return
     end
     local w = ui.windows.si
-    if not (w and api.nvim_buf_is_valid(w.bufnr)) then
+    if not (w and w.winid and api.nvim_buf_is_valid(w.bufnr)) then
         return
     end
-    if not w.winid then
-        -- A layout may leave the Input pane out, which is fine for every other mode:
-        -- here it is the pane you type into, so say so instead of leaving the user
-        -- pressing keys at a window that isn't on screen.
-        utils.notify("interactive: the 'si' (Input) pane is not in your layout, so there is nowhere to type.", "WARN")
-        return
-    end
-    vim.bo[w.bufnr].modifiable = true
-    api.nvim_buf_set_lines(w.bufnr, 0, -1, false, { "" })
+    local buf = w.bufnr
 
-    local nl = api.nvim_replace_termcodes("<CR>", true, false, true)
-    local function send_line()
-        self:live_send(api.nvim_get_current_line())
+    ---Send the line being typed, the Live column's last line, since everything above it is
+    ---conversation already. It is cleared at once rather than at the next redraw, so a key
+    ---pressed in between is not swallowed with it.
+    local function send()
+        if not (self.sol_in and not self.sol_in:is_closing()) then
+            return
+        end
+        local n = api.nvim_buf_line_count(buf)
+        local line = api.nvim_buf_get_lines(buf, n - 1, n, false)[1] or ""
+        vim.bo[buf].modifiable = true
+        api.nvim_buf_set_lines(buf, n - 1, n, false, { "" })
+        vim.bo[buf].modified = false
+        if api.nvim_win_is_valid(w.winid) then
+            pcall(api.nvim_win_set_cursor, w.winid, { n, 0 })
+        end
+        self:live_send(line)
     end
-    vim.keymap.set("i", "<CR>", function()
-        send_line()
-        -- Insert a real newline afterwards (noremap, so this mapping doesn't recurse)
-        -- so the Input pane keeps a log of what you've sent.
-        api.nvim_feedkeys(nl, "in", false)
-    end, { buffer = w.bufnr })
-    vim.keymap.set("n", "<CR>", send_line, { buffer = w.bufnr, nowait = true })
+    vim.keymap.set("i", "<CR>", send, { buffer = buf })
+    vim.keymap.set("n", "<CR>", send, { buffer = buf, nowait = true })
 end
 
----Send one line to the live session's solution and echo it into the transcript.
+---Draw the conversation for the row the UI is showing, then follow the latest line. Called
+---after every detail render, which the UI coalesces to one per tick, so a burst of output
+---is laid out once rather than once per chunk.
+---
+---During a live session the Live column ends in the line being typed, which is not part of
+---the conversation yet: the other columns get a blank line to face it, and it is carried
+---across the redraw rather than rewritten, or a keystroke landing between two chunks of
+---output would be lost. A column follows the latest line unless the cursor is in it and
+---off the bottom, which is someone reading back; with the columns scroll-bound, the
+---others then stay level with them.
+---@param ui table the RunnerUI
+---@param tc table the row being shown
+function InteractiveRunner:on_details_rendered(ui, tc)
+    if not self:conversational() then
+        return
+    end
+    local w = {}
+    for _, name in ipairs(CONVERSATION_PANES) do
+        w[name] = ui.windows[name]
+        if not (w[name] and w[name].bufnr and api.nvim_buf_is_valid(w[name].bufnr)) then
+            return
+        end
+    end
+
+    local cols
+    if tc.tcnum == "Compile" then
+        -- The build is not a conversation: it has output and errors, and nobody answers.
+        cols = {
+            so = vim.split(tc.stdout or "", "\n", { plain = true }),
+            se = vim.split(tc.stderr or "", "\n", { plain = true }),
+            si = {},
+        }
+    else
+        cols = conversation(tc.log)
+    end
+
+    local cur = api.nvim_get_current_win()
+    local follow, col_of = {}, {}
+    for _, name in ipairs(CONVERSATION_PANES) do
+        local win = w[name].winid
+        if win and api.nvim_win_is_valid(win) then
+            local pos = api.nvim_win_get_cursor(win)
+            follow[name] = win ~= cur or pos[1] >= api.nvim_buf_line_count(w[name].bufnr)
+            col_of[name] = pos[2]
+        end
+    end
+
+    local composing = self.source == "live"
+        and self.sol_in ~= nil
+        and tc.tcnum ~= "Compile"
+        and tc == self.tcdata[self.active_index]
+    if composing then
+        cols.so[#cols.so + 1] = ""
+        cols.se[#cols.se + 1] = ""
+        if self.composing_row == tc then
+            set_column(w.si.bufnr, cols.si, true, true)
+        else
+            local fresh = vim.list_extend(vim.deepcopy(cols.si), { "" })
+            set_column(w.si.bufnr, fresh, false, true)
+        end
+        self.composing_row = tc
+    else
+        self.composing_row = nil
+        set_column(w.si.bufnr, cols.si, false, false)
+        if cur == w.si.winid and api.nvim_get_mode().mode:sub(1, 1) == "i" then
+            vim.cmd("stopinsert") -- the session is over: there is nothing left to type to
+        end
+    end
+    set_column(w.so.bufnr, cols.so, false, false)
+    set_column(w.se.bufnr, cols.se, false, false)
+
+    -- Someone reading back through one column holds all three where they are: the others
+    -- are scroll-bound to it, and following the latest line would pull them out of level.
+    for _, name in ipairs(CONVERSATION_PANES) do
+        if col_of[name] ~= nil and not follow[name] then
+            return
+        end
+    end
+    for _, name in ipairs(CONVERSATION_PANES) do
+        local win = w[name].winid
+        if follow[name] then
+            local last = api.nvim_buf_line_count(w[name].bufnr)
+            pcall(api.nvim_win_set_cursor, win, { last, win == cur and col_of[name] or 0 })
+            api.nvim_win_call(win, function()
+                vim.fn.winrestview({ topline = math.max(1, last - api.nvim_win_get_height(win) + 1) })
+                -- Scrolling from code leaves the position 'scrollbind' measures from behind,
+                -- so the next scroll by hand would move the other columns by the wrong amount.
+                vim.wo[win].scrollbind = false
+                vim.wo[win].scrollbind = true
+            end)
+        end
+    end
+end
+
+---Send one line to the live session's solution. It goes into the conversation as a row of
+---the Live column's own; nothing is copied into Output, which holds only what the solution
+---printed.
 ---@param line string
 function InteractiveRunner:live_send(line)
     local tc = self.tcdata[self.active_index]
@@ -161,7 +402,7 @@ function InteractiveRunner:live_send(line)
         return
     end
     self.sol_in:write(line .. "\n")
-    tc.stdout = (tc.stdout or "") .. "< " .. line .. "\n"
+    log_append(tc, "si", line .. "\n")
     self:update_ui(false)
 end
 
@@ -260,20 +501,23 @@ function InteractiveRunner:run_live(idx, on_done)
     local tc = self.tcdata[idx]
     self.active_index = idx
     tc.status, tc.hlgroup = "LIVE", "TunaRunning"
-    tc.stdout, tc.stderr = "", ""
+    tc.stdout, tc.stderr, tc.log = "", "", {}
     self:update_ui(true)
 
     self:spawn_solution({
         on_stdout = function(data)
             tc.stdout = tc.stdout .. data
+            log_append(tc, "so", data)
             self:update_ui(false)
         end,
         on_stderr = function(data)
             tc.stderr = tc.stderr .. data
+            log_append(tc, "se", data)
             self:update_ui(false)
         end,
         on_error = function(msg)
             tc.status, tc.hlgroup, tc.stderr = "FAILED", "TunaWarning", msg
+            log_note(tc, msg)
             self.sol_in = nil
             self:update_ui(true)
             on_done()
@@ -381,16 +625,16 @@ function InteractiveRunner:run_feed(idx, on_done)
     send_next()
 end
 
----interactor: cross-wire the solution and the interactor; the interactor rules.
----The exchange is teed into the transcript (Output pane); the interactor's stderr
----goes to the Errors pane.
+---interactor: cross-wire the solution and the interactor; the interactor rules. The
+---conversation is laid out like live's: the solution's output in Output, the interactor's
+---in Live, and the interactor's stderr with tuna's own notes in Errors.
 ---@param idx integer
 ---@param on_done fun()
 function InteractiveRunner:run_interactor(idx, on_done)
     local tc = self.tcdata[idx]
     self.active_index = idx
     tc.status, tc.hlgroup = "RUNNING", "TunaRunning"
-    tc.stdout, tc.stderr = "", ""
+    tc.stdout, tc.stderr, tc.log = "", "", {}
     self:update_ui(true)
 
     local input_file = temp_with(tc.stdin or "")
@@ -466,6 +710,7 @@ function InteractiveRunner:run_interactor(idx, on_done)
         if not int_exited and not done and (code ~= 0 or (signal and signal ~= 0)) then
             verdict = false
             tc.stderr = (tc.stderr or "") .. "\n[solution exited with code " .. tostring(code) .. "]"
+            log_note(tc, "[solution exited with code " .. tostring(code) .. "]")
             finish()
         end
     end)
@@ -474,6 +719,7 @@ function InteractiveRunner:run_interactor(idx, on_done)
             safe_close(p)
         end
         tc.status, tc.hlgroup, tc.stderr = "FAILED", "TunaWarning", "could not start solution"
+        log_note(tc, tc.stderr)
         self:update_ui(true)
         return on_done()
     end
@@ -492,6 +738,7 @@ function InteractiveRunner:run_interactor(idx, on_done)
     end)
     if not int_handle then
         tc.stderr = "could not start interactor '" .. tostring(self.interactor.exec) .. "'"
+        log_note(tc, tc.stderr)
         failed = true
         finish()
         return
@@ -510,6 +757,7 @@ function InteractiveRunner:run_interactor(idx, on_done)
             vim.schedule(function()
                 if not done then
                     tc.stdout = (tc.stdout or "") .. data
+                    log_append(tc, "so", data)
                     self:update_ui(false)
                 end
             end)
@@ -527,7 +775,7 @@ function InteractiveRunner:run_interactor(idx, on_done)
             end
             vim.schedule(function()
                 if not done then
-                    tc.stdout = (tc.stdout or "") .. data
+                    log_append(tc, "si", data)
                     self:update_ui(false)
                 end
             end)
@@ -540,6 +788,7 @@ function InteractiveRunner:run_interactor(idx, on_done)
             vim.schedule(function()
                 if not done then
                     tc.stderr = (tc.stderr or "") .. data
+                    log_append(tc, "se", data)
                     self:update_ui(false)
                 end
             end)
@@ -552,6 +801,7 @@ function InteractiveRunner:run_interactor(idx, on_done)
             if not done then
                 verdict = false
                 tc.stderr = (tc.stderr or "") .. "\n[timed out after " .. self.timeout .. "ms]"
+                log_note(tc, "[timed out after " .. self.timeout .. "ms]")
                 finish()
             end
         end)
@@ -616,8 +866,18 @@ function InteractiveRunner:load_rows()
         table.sort(nums)
     end
     if #nums == 0 then
-        -- Nothing to feed/replay: a single blank session (you just interact).
-        table.insert(self.tcdata, { tcnum = 0, stdin = "", expected = nil, status = "", hlgroup = "TunaRunning" })
+        -- Nothing to feed/replay: a single blank session (you just interact). In `feed`,
+        -- where testcases are editable, it is flagged `bare` like the normal runner's row
+        -- of the same kind: nothing is on disk behind it *yet*, which is not the same as a
+        -- testcase that went missing, and typing into it is how the first one is written.
+        table.insert(self.tcdata, {
+            tcnum = 0,
+            bare = self.source == "feed" or nil,
+            stdin = "",
+            expected = nil,
+            status = "",
+            hlgroup = "TunaRunning",
+        })
     else
         for _, n in ipairs(nums) do
             table.insert(self.tcdata, {
@@ -742,6 +1002,8 @@ function M.run(bufnr, args)
         checker = r.checker,
         compare_method = r.compare_method, -- carry the per-buffer `:Tuna compare` override
         source = source,
+        -- `feed` replays a stored testcase, so it is edited like one; see `layout`.
+        editable_testcases = source == "feed",
         interactor = interactor,
         list = list,
         dir = dir,
@@ -776,6 +1038,9 @@ function M.run(bufnr, args)
         end
         tools.prepare(interactor, function(ok, err)
             if not ok then
+                -- Nothing will run, so nothing is in flight either: left `false`, the
+                -- runner would refuse every edit with "wait for the run to finish".
+                ir.completed = true
                 if ir.ui then
                     ir.ui:show_message(" interactive: interactor failed to compile ", err or "")
                 end
@@ -803,6 +1068,7 @@ function M.run(bufnr, args)
                     ce.stdout, ce.stderr, ce.exit_code = res.stdout or "", res.stderr or "", res.code
                     if res.code ~= 0 then
                         ce.status, ce.hlgroup = "RET " .. tostring(res.code), "TunaWarning"
+                        ir.completed = true -- nothing will run; see the interactor case above
                         ir:update_ui(true)
                         return
                     end
@@ -814,11 +1080,15 @@ function M.run(bufnr, args)
         )
         if not ok then
             ce.status, ce.hlgroup, ce.stderr = "FAILED", "TunaWarning", tostring(err)
+            ir.completed = true
             ir:update_ui(true)
         end
     else
         prepare_and_start()
     end
 end
+
+-- The pure half of the conversation, for the test suite.
+M._test = { log_append = log_append, conversation = conversation }
 
 return M

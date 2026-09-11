@@ -265,6 +265,16 @@ where you know one is right and slow. **Checkers** are for problems with more th
 correct answer; whatever the checker prints about a verdict (`wrong answer: expected 5,
 got 3`) shows in the Errors pane of that testcase's row.
 
+**Interactive** lays out the results grid by who plays the other side. With `live` (you)
+and `interactor` (your interactor program) the session reads as a **conversation**: beside
+the testcase list are three columns, Errors, Output and Live, and whatever one side says
+goes on a row of its own in its own column, the other two left blank on that row, so every
+reply sits on the line after the message it answers and nothing is repeated between them.
+The columns follow the latest line and scroll together. In `live` you type on the last line
+of the Live column, which wears the accent of a pane you type into, and `<CR>` sends it.
+`feed` replays a stored testcase line by line instead, so it keeps the ordinary Input and
+Expected Output panes, editable exactly as in a normal run.
+
 ### Downloading problems and contests
 
 With [Competitive Companion](https://github.com/jmerle/competitive-companion) installed,

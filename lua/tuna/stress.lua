@@ -77,8 +77,8 @@ function StressRunner:load_testcases()
     local nums = vim.tbl_keys(tctbl)
     table.sort(nums)
     self.tcdata = {}
-    -- The solution's compile step is the first row (its warnings/errors are then
-    -- viewable in the detail panes, like competitest's compile-as-testcase).
+    -- The solution's compile step is the first row, so its warnings/errors are
+    -- viewable in the detail panes.
     if self.compile_entry then
         table.insert(self.tcdata, self.compile_entry)
     end
@@ -562,7 +562,7 @@ function M.run(bufnr, count_override)
     })
 
     -- Open the results UI and show the testcase list (incl. the Compile row and any
-    -- existing testcases, pending) right away, like competitest.
+    -- existing testcases, pending) right away.
     sr:show_ui()
     sr:load_testcases()
     sr:update_ui(true)

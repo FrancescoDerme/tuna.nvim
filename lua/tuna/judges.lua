@@ -5,8 +5,8 @@
 -- and thus the on-disk folder names.
 --
 -- A *parser* normalizes one judge's contest names. Built-in parsers ship for
--- Codeforces and AtCoder (ported from the original competitest hack); users add
--- parsers for new judges — or override/disable the built-ins — via
+-- Codeforces and AtCoder; users add parsers for new judges — or override/disable the
+-- built-ins — via
 -- `config.judge_parsers`. Resolution order for a given judge:
 --
 --   config.judge_parsers[judge]   -- user parser (or `false` to disable normalizing)
@@ -60,13 +60,9 @@ M.builtin = {
             -- names a contest. Gyms keep their word, since nothing else says "gym".
             return { contest = id }
         end
-        -- Anything else keeps the group's own name. There used to be a set of
-        -- normalizers here turning "Codeforces Round 1112 (Div. 2)" into `round 1112`,
-        -- and they are deliberately gone: with the id available on every real URL they
-        -- were unreachable, and they could not be made to agree with the id-based names
-        -- because **a round number is not a contest id** — round 1112 is contest 2250,
-        -- global round 29 is contest 2119. Calling it `contest 1112` would both misname
-        -- the folder and collide with the actual contest 1112.
+        -- Anything else keeps the group's own name. A round number is not a contest id
+        -- (round 1112 is contest 2250), so a round name is never turned into a number:
+        -- it would misname the folder and collide with the real contest of that id.
         return nil
     end,
 

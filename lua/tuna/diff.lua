@@ -2,7 +2,7 @@
 --
 -- The comparison the results UI draws between your output and the expected one.
 --
--- Vim's own `:diffthis` (what competitest used) computes an *edit script*: it is
+-- Vim's own `:diffthis` computes an *edit script*: it is
 -- free to decide that a line was inserted or deleted and to re-align everything
 -- after it. That is the right model for source code, and the wrong one for a
 -- program's output. Given

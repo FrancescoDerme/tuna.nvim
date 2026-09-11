@@ -1,8 +1,8 @@
 -- lua/tuna/download.lua
 --
--- Competitive Companion integration. This module *is* the listener (it folds in
--- what used to be `http.lua`) plus the pipeline that turns downloaded tasks into
--- files on disk. Three small objects form that pipeline:
+-- Competitive Companion integration. This module is the listener plus the pipeline
+-- that turns downloaded tasks into files on disk. Three small objects form that
+-- pipeline:
 --
 --   Listener ──tasks──▶ TasksCollector ──batches──▶ BatchesSerialProcessor
 --
@@ -16,9 +16,8 @@
 --     Storing involves user prompts (paths, overwrite confirmations); serializing
 --     keeps two contests downloaded back-to-back from interleaving their dialogs.
 --
--- Compared to competitest this also exposes `status()`/`is_downloading()` so a
--- lualine component can show, at a glance, whether the listener is live and in
--- what mode — a quality-of-life win over competitest's notify-only status.
+-- It also exposes `status()`/`is_downloading()`, so a lualine component can show at a
+-- glance whether the listener is live and in what mode.
 
 local utils = require("tuna.utils")
 local config = require("tuna.config")
@@ -28,8 +27,8 @@ local judges = require("tuna.judges")
 local M = {}
 
 ---Notify from a libuv callback. The listener's accept/read handlers run in a **fast
----event context**, where `vim.notify` is not allowed (verified: it raises), so anything
----the listener has to say is deferred to the main loop.
+---event context**, where `vim.notify` raises, so anything the listener has to say is
+---deferred to the main loop.
 ---@param msg string
 ---@param level string?
 local function notify_soon(msg, level)
@@ -58,10 +57,10 @@ end
 ---Make a decoded POST body safe to put through the pipeline, or reject it.
 ---
 ---Whatever arrives on the port is untrusted: an old or patched Competitive Companion, a
----third-party sender, or a stray request from a browser. The pipeline used to index it
----directly, so a task without a `batch` took the whole listener down inside a libuv
----callback — a raw Vim traceback rather than a tuna message — and left the batch
----processor wedged, silently stalling every later download.
+---third-party sender, or a stray request from a browser. Indexed unchecked, a task
+---without a `batch` would raise inside a libuv callback (a raw Vim traceback rather
+---than a tuna message) and leave the batch processor wedged, silently stalling every
+---later download.
 ---
 ---Only the **name** is required: it is what `$(PROBLEM)` names the file and the folder
 ---after, so there is nothing sensible to invent for it. Everything else is repaired,
@@ -318,8 +317,8 @@ function BatchesSerialProcessor:process()
 
     -- Scheduled here rather than by the caller so the handler — which touches buffers,
     -- files and floating prompts — runs on the main loop *and* under a guard: an error
-    -- inside it used to leave `busy` set for good, silently stalling every download
-    -- afterwards. Reported like any other tuna failure, and the queue moves on.
+    -- inside it would otherwise leave `busy` set for good, silently stalling every
+    -- download afterwards. Reported like any other tuna failure, and the queue moves on.
     vim.schedule(function()
         local ok, err = pcall(self.callback, batch, finished)
         if not ok then
@@ -460,8 +459,7 @@ local function store_downloaded_task(filepath, task, cfg)
     -- Resolve the template. Every candidate is evaluated with the *download* modifiers
     -- as well as the file ones, so a per-judge template is expressible in `setup()`
     -- alone — `~/cp/templates/$(JUDGE).cpp`. A judge is a property of the problem
-    -- rather than of a directory, and until now the only way to say so was a `.tuna.lua`
-    -- in each judge's folder.
+    -- rather than of a directory, so it should not take a `.tuna.lua` per judge folder.
     --
     -- They are tried in order and the first that *exists* wins, which is what makes
     -- that usable: a judge you have not written a template for falls back to the

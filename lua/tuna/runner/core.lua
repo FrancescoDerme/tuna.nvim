@@ -6,7 +6,8 @@
 -- plumbing, the verdict label, kill helpers — plus one reusable "spawn a process
 -- and judge it" routine (`execute_process`). A mode subclass supplies only its own
 -- driving loop (parallel lanes / a generation search / interactive sessions) and,
--- if it wants, a `status_tail`, a `pane_content` override, or an `on_ui_shown` hook.
+-- if it wants, a `status_tail`, a `pane_content` override, an `on_ui_shown` hook, a
+-- `layout`/`pane_titles` of its own, or `on_details_rendered` to draw the panes it owns.
 --
 -- Inheritance is plain Lua metatable single-dispatch: `M.extend()` returns a
 -- subclass table chained to `RunnerCore`, and instances `setmetatable(obj, Sub)`.
@@ -188,11 +189,11 @@ function RunnerCore:execute_process(tcindex, cmd, dir, opts, on_done)
     -- One token per spawn, checked again when the result lands. A process's exit
     -- callback arrives on a *scheduled* tick, so a re-run that killed this child and
     -- spawned a replacement — or rebuilt the rows entirely — has already happened by
-    -- the time the dead child reports in. Without the token that stale report wrote
-    -- into whatever row now sits at this index: it cleared `running` (declaring a run
-    -- complete early), nilled the fresh handle (making the new process unkillable),
-    -- stamped `SIG 9` over a row mid-run, and its `on_done` pulled another lane out
-    -- of the *new* run's queue, double-running rows.
+    -- the time the dead child reports in. Without the token that stale report would
+    -- write into whatever row now sits at this index: clearing `running` (declaring a
+    -- run complete early), nilling the fresh handle (making the new process
+    -- unkillable), stamping `SIG 9` over a row mid-run, and pulling another lane out of
+    -- the *new* run's queue through its `on_done`, double-running rows.
     tc.run_id = (tc.run_id or 0) + 1
     local run_id = tc.run_id
 

@@ -152,9 +152,7 @@ function M.split_testcase(tcnum, sep)
     testcases.offer_case_counts(bufnr, numbers, before)
 end
 
----Convert this buffer's testcases to a different storage backend. Unlike
----competitest's two-way single-file↔files switch, tuna converts to any of the
----three storage modes.
+---Convert this buffer's testcases to any of the three storage backends.
 ---@param target string "files" | "single_file" | "directory"
 function M.convert_testcases(target)
     if not testcases.backends[target] then
@@ -218,10 +216,9 @@ function M.run_testcases(bufnr, list, compile, only_show)
     local tctbl = testcases.buf_get_testcases(bufnr)
 
     -- The cached runner keeps the commands/dirs/checker resolved when it was built,
-    -- while the line above re-reads the config — so an edited `.tuna.lua` used to
-    -- change which testcases were found immediately but not how they were run, until
-    -- something happened to drop the runner. If the config changed, drop it now: the
-    -- results it holds describe runs under settings that no longer apply.
+    -- while the line above re-reads the config, so an edited `.tuna.lua` would change
+    -- which testcases are found but not how they are run. If the config changed, drop
+    -- the runner: the results it holds describe runs under settings that no longer apply.
     local cached = M.runners[bufnr]
     if cached and not vim.deep_equal(cached.config, config.get_buffer_config(bufnr)) then
         cached:delete_ui()
@@ -273,8 +270,7 @@ function M.run_testcases(bufnr, list, compile, only_show)
             -- No testcases is not nothing to show: `build_rows` lists the same `No input`
             -- row a run with nothing to test would build, so the UI opens on an editable
             -- testcase 0 waiting to be typed into rather than on a warning. That is the
-            -- way in to writing a problem's first testcase from the results UI, which
-            -- refusing to open made unreachable exactly when it was wanted.
+            -- way in to writing a problem's first testcase from the results UI.
             r:load_testcases(tctbl)
         end
     else

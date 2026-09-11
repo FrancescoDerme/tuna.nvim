@@ -41,19 +41,28 @@ end
 ---@param config table
 ---@param init_winid integer window the runner was launched from
 ---@param status_rows integer? rows of the "Run" pane (default 2)
-function M.init_ui(windows, config, init_winid, status_rows)
+---@param opts { layout: table?, titles: table<string, string>? }? what the run mode
+---changes about the grid: a layout of its own, and titles it gives panes
+function M.init_ui(windows, config, init_winid, status_rows, opts)
+    opts = opts or {}
     local STATUS_HEIGHT = status_rows or 2
     for name in pairs(titles) do
         local buf = api.nvim_create_buf(false, true)
         require("tuna.surface").adopt(buf, "runner") -- the shared surface contract
         vim.bo[buf].modifiable = false
-        windows[name] = { bufnr = buf, winid = nil, title = titles[name] }
+        local title = (opts.titles and opts.titles[name]) or titles[name]
+        windows[name] = { bufnr = buf, winid = nil, title = title }
     end
 
     local vertical = config.split_ui.position == "left" or config.split_ui.position == "right"
     local key = (vertical and "vertical" or "horizontal") .. "_layout"
     local defaults = require("tuna.config").defaults.split_ui[key]
-    local layout = layout_util.resolve(config.split_ui[key], "split_ui." .. key, defaults)
+    -- A run mode that lays the grid out its own way replaces the configured layout.
+    local layout = layout_util.resolve(
+        opts.layout or config.split_ui[key],
+        opts.layout and "run mode layout" or ("split_ui." .. key),
+        defaults
+    )
 
     -- Recursively split `winid` (which already shows the sub-layout's first leaf)
     -- to realise `layout`, fixing sizes as we go.

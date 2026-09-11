@@ -552,11 +552,10 @@ M.defaults = {
             -- shared with the clean form — not a runner-only mapping.
             run_again = { "r", "R" },
             run_all_again = "<C-r>",
-            -- "stop", not "kill", because `s` has to mean something — and because that
-            -- is already what this does in stress mode (stop the search). It cannot be
-            -- `k`/`K`: `j`/`k` walk the testcase rows. `<C-s>` reaches Neovim fine —
-            -- raw mode clears the terminal's IXON, so it does not freeze the display
-            -- the way `<C-s>` does in a shell (verified in a real pty).
+            -- `s` for stop, which is also what this does in stress mode (stops the search).
+            -- `k`/`K` are unavailable: `j`/`k` walk the testcase rows. `<C-s>` reaches
+            -- Neovim, since raw mode clears the terminal's IXON, so the display does not
+            -- freeze the way it does in a shell.
             stop = { "s", "S" },
             stop_all = "<C-s>",
             view_input = { "i", "I" },
@@ -662,12 +661,9 @@ end
 ---@param opts table? user options
 function M.setup(opts)
     -- Rebuilt from the **defaults**, not layered onto whatever the last call left
-    -- behind, so calling `setup()` again is "this is my config" rather than "add this
-    -- to my config". Layering meant a nested key could not be taken back: dropping
-    -- `submit.judges.codeforces.provider` from your config and re-sourcing it left the
-    -- old value in force, since a merge can add a key but never remove one — which is
-    -- exactly the trap when trying settings out in a running editor. Costs one
-    -- `deepcopy` of the defaults (~0.16 ms, measured) on a call that happens once.
+    -- behind, so calling `setup()` again means "this is my config" rather than "add
+    -- this to my config": a merge can add a key but never remove one, so re-sourcing a
+    -- config with a nested key taken out would leave the old value in force.
     --
     -- The copy is not optional: `vim.tbl_deep_extend` copies a sub-table only where
     -- both sides have one, so everything the user did not mention lands in
@@ -684,8 +680,7 @@ function M.load_local_config(directory)
     if not directory or directory == "" then
         directory = vim.fn.getcwd()
     end
-    -- `vim.fs.find` with `upward = true` walks up the parent chain for us,
-    -- replacing competitest's hand-rolled directory loop.
+    -- `vim.fs.find` with `upward = true` walks up the parent chain.
     local found = vim.fs.find(M.current_setup.local_config_file_name, {
         path = directory,
         upward = true,

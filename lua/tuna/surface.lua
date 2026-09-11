@@ -1,13 +1,12 @@
 ---A **surface** is any buffer this plugin puts in front of the user that is not a file:
 ---the results-UI panes, its viewer, message float and key legend, and every widget
 ---(menu, picker, input, form, testcase editor). They differ in what they show and what
----their keys do; they do not differ in what Vim must be told about them, and every time
----one of them was built by hand it ended up missing a piece of that and growing a red
----error about a buffer the user never opened:
+---their keys do; they do not differ in what Vim must be told about them, and a surface
+---missing any piece of that grows a red error about a buffer the user never opened:
 ---
 ---  * unnamed  → the statusline rewrites itself as you move between panes, and `:w`
 ---    aborts with `E32` before any handler can run
----  * `nofile` → `:w` answers `E382`, and a `BufWriteCmd` on it never fires (verified),
+---  * `nofile` → `:w` answers `E382`, and a `BufWriteCmd` on it never fires,
 ---    so a surface that wants `:w` to mean something has to be `acwrite`
 ---  * `acwrite` left `modified` → Vim counts it as an unsaved *file*: `:q` answers `E37`
 ---    and quitting answers `E162`, naming a scratch buffer
@@ -74,7 +73,7 @@ function M.adopt(bufnr, kind, opts)
         -- an `on_lines` repair at all: a write that happens *after* it has fired — the
         -- form restoring its fixed rows behind a paste, a `:1d`, an undo — leaves
         -- `modified` set with nothing left to clear it. That is an unsaved *file* as far
-        -- as Vim is concerned, so a later quit answered `E37`/`E162` naming a widget
+        -- as Vim is concerned, so a later quit would answer `E37`/`E162` naming a widget
         -- buffer the user never opened. `on_lines` sees every change; the clearing is
         -- scheduled because a buffer option cannot be set from inside the callback.
         api.nvim_buf_attach(bufnr, false, {
@@ -207,13 +206,13 @@ function M.same_lines(bufnr, lines)
     return true
 end
 
----Put content on a surface. Three things this does that hand-written renders forgot:
+---Put content on a surface. Three things this does:
 ---
 ---  * **writes nothing when the content is already there**, so re-rendering leaves the
 ---    buffer's `changedtick` and the cursor of someone reading it alone;
 ---  * wraps the write in `undolevels = -1`, because a render is not an edit and must not
----    land in the user's undo history — with a dozen of them behind you, `u` walked back
----    through *our* writes before reaching yours and looked like it had failed;
+---    land in the user's undo history, where `u` would walk back through renders before
+---    reaching the user's own edits;
 ---  * clears `modified` afterwards, whatever the surface: the flag's one job is to mean
 ---    "the user typed here", and an `acwrite` buffer left modified blocks a quit.
 ---@param bufnr integer

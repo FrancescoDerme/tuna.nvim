@@ -12,9 +12,9 @@
 --                depth and match-threshold choosers)
 --
 -- Each widget is a module-level singleton holding the state of the one instance
--- that can be visible at a time. This mirrors competitest's design and, more
--- importantly, lets `resize_widgets()` rebuild whatever is open after a
--- `VimResized` event by re-invoking the same function with a `nil` first arg.
+-- that can be visible at a time, which lets `resize_widgets()` rebuild whatever is
+-- open after a `VimResized` event by re-invoking the same function with a `nil`
+-- first arg.
 --
 -- Every widget is dismissed through `map_cancel`, which is the single place cancel
 -- keys are bound (see the dismissal contract there): the same keypress means the same
@@ -68,14 +68,10 @@ local function open_float(bufnr, enter, opts)
     -- buffer the user *types* into keeps `modified` clear as they go (`keep_clean`):
     -- there is nothing to save in a prompt, and an `acwrite` buffer left modified is one
     -- Vim refuses to quit past.
-    -- `keep_clean` unconditionally, for *every* widget buffer. It used to be armed only
-    -- for a buffer that was modifiable at this moment, which is the wrong question twice
-    -- over: a widget can be made editable **after** it is adopted (the chooser form's
-    -- `Custom:` row is typed into inside an otherwise read-only list), and no widget
-    -- reads `modified` for anything — there is nothing in a dialog to save. Sampling
-    -- modifiability here left exactly that row's buffer with the flag set and nothing to
-    -- clear it, so `:Tuna clean` could leave `tuna://widget/N/tuna` behind as an unsaved
-    -- *file* and a later `:qa` answered `E37`/`E162` about it.
+    -- `keep_clean` is armed for *every* widget buffer, not only the ones modifiable at
+    -- this moment: a widget can be made editable **after** it is adopted (the chooser
+    -- form's `Custom:` row is typed into inside an otherwise read-only list), and no
+    -- widget reads `modified` for anything, there being nothing in a dialog to save.
     surface.adopt(bufnr, opts.kind or "widget", { keep_clean = true })
     -- Wiped when its window closes: every widget creates fresh buffers on every open
     -- and closes only its windows, so without this each prompt of a long session left
@@ -134,8 +130,8 @@ end
 --     half-written testcase closes on the same key as a menu.
 --   * By default `<Esc>` **while inserting only leaves insert mode**, which is what the
 --     key means everywhere else in vim. Cancelling something being typed into therefore
---     takes a second, deliberate press — the reason a stray Esc in a download path
---     prompt no longer throws away a whole download.
+--     takes a second, deliberate press, so a stray Esc in a download path prompt does
+--     not throw away a whole download.
 --   * Both lists are `config.cancel_keys`, so a user who prefers Esc to cancel straight
 --     from insert mode says so once (`cancel_keys.insert = { "<Esc>" }`) and every
 --     widget follows. Nothing is filtered out behind their back; the two-press default
@@ -146,7 +142,7 @@ end
 --
 -- Worth knowing when configuring: `<C-c>` cancels from normal mode, but listing it
 -- under `insert` does nothing — Neovim handles `i_CTRL-C` itself and never runs a
--- mapping for it (verified). `<Esc>` is the key to use there.
+-- mapping for it. `<Esc>` is the key to use there.
 --
 -- `map_cancel` is the only place cancel keys are bound, so a widget added later cannot
 -- quietly grow its own dismissal behaviour.
@@ -189,8 +185,7 @@ local PANE_STEP = 2
 
 ---Put content into a read-only preview pane: the lines, the syntax colouring and the
 ---border title. The single place that knows how such a pane is filled, so a fixed
----preview and one that follows the cursor behave identically (the cursor-following
----form used to lose the colouring, because only its per-row table was consulted).
+---preview and one that follows the cursor behave identically.
 ---
 ---Colouring goes through 'syntax', never 'filetype': a throwaway preview must not fire
 ---FileType autocmds, which would attach an LSP and run ftplugins on it.
@@ -356,14 +351,12 @@ function M.input(title, default_text, border, border_highlight, callback_only, o
     })
 
     -- Opened in **normal** mode, with the cursor at the end of the default so `a` or `A`
-    -- picks up where typing would. It used to `startinsert!`, which was only true of the
-    -- *first* prompt: a chained one (the contest download asks for a directory, then an
-    -- extension) opens from inside the previous prompt's `<CR>` mapping, and the
-    -- `stopinsert` that mapping issues does not take effect until it returns — landing
-    -- after the new prompt's `startinsert!` and dropping the user straight back out. So
-    -- one prompt began in insert and the next in normal, for no reason a user could see.
-    -- Normal is the half that was reachable either way, and it is what the rest of the
-    -- plugin's floats do.
+    -- picks up where typing would. Not insert mode: a chained prompt (the contest
+    -- download asks for a directory, then an extension) opens from inside the previous
+    -- prompt's `<CR>` mapping, and the `stopinsert` that mapping issues takes effect only
+    -- once it returns, which would drop the new prompt straight back out of insert.
+    -- Normal mode is reachable either way, and it is what the rest of the plugin's
+    -- floats do.
     pcall(api.nvim_win_set_cursor, input.winid, { 1, math.max(0, #(input.default_text or "")) })
 end
 

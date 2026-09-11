@@ -2,17 +2,16 @@
 --
 -- The runner results UI. It owns a set of windows (a testcase selector plus four
 -- detail panes: stdout/expected/stdin/stderr), keeps them in sync with the
--- `TCRunner`'s `tcdata`, and wires the interactive keymaps (run again, kill,
+-- `TCRunner`'s `tcdata`, and wires the interactive keymaps (run again, stop,
 -- view in a bigger popup, toggle diff, close).
 --
 -- The actual window geometry is delegated to an "interface" module — `popup`
 -- (floats) or `split` (real splits) — selected by `runner_ui.interface`. This
 -- module is interface-agnostic: it only touches `windows[name].bufnr/winid`.
 --
--- Design note vs competitest: all displayed content lives in the runner's
--- `tcdata`, so we don't bother hiding-and-restoring windows. Closing tears the UI
--- down; showing rebuilds it and re-renders from `tcdata`. That removes a lot of
--- nui-era state bookkeeping while looking identical to the user.
+-- All displayed content lives in the runner's `tcdata`, so windows are never hidden
+-- and restored: closing tears the UI down, and showing rebuilds it and re-renders
+-- from `tcdata`.
 
 local api = vim.api
 local utils = require("tuna.utils")
@@ -332,9 +331,8 @@ function RunnerUI:with_answer_settled(tcnum, proceed)
     local back_to = api.nvim_get_current_win()
     -- Opened *out* of the write command rather than inside it. A float entered from a
     -- `BufWriteCmd` does not keep the focus: Vim restores the window the command ran in
-    -- as it finishes the `:w`, which left the menu on screen with the cursor still in
-    -- the pane behind it and no way to answer without reaching for the mouse (verified,
-    -- then fixed).
+    -- as it finishes the `:w`, which would leave the menu on screen with the cursor
+    -- still in the pane behind it and no way to answer without reaching for the mouse.
     vim.schedule(function()
         require("tuna.widgets").menu(
             { "Don't specify output", "Expect empty output", "Keep editing" },
@@ -1169,6 +1167,19 @@ function RunnerUI:opening_row()
     return self:initial_row()
 end
 
+---@private
+---What the runner's mode changes about the grid: a layout of its own, and titles it gives
+---panes that mean something else in it. Asked of the runner rather than configured, since
+---both follow from the mode; a mode that has no opinion gets the configured layout.
+---@return table
+function RunnerUI:layout_opts()
+    local r = self.runner
+    return {
+        layout = r.layout and r:layout() or nil,
+        titles = r.pane_titles and r:pane_titles() or nil,
+    }
+end
+
 ---Show the UI, building it if needed and focusing the selector.
 function RunnerUI:show_ui()
     if self.ui_visible then
@@ -1179,7 +1190,7 @@ function RunnerUI:show_ui()
     self.restore_winid = self.restore_winid or api.nvim_get_current_win()
     -- The "Run" pane is sized to the runner's (stable) status-line count.
     local status_height = math.max(1, #self:status_lines())
-    self.interface.init_ui(self.windows, self.config, self.restore_winid, status_height)
+    self.interface.init_ui(self.windows, self.config, self.restore_winid, status_height, self:layout_opts())
     self.ui_visible = true
     self:accent_editable_panes()
     self:update_status_line()
@@ -1261,7 +1272,7 @@ function RunnerUI:show_ui()
     -- far enough to raise its own red "E37: No write since last change" about an edit
     -- the prompt is already handling. (The abort has to be set from Vimscript:
     -- `vim.v.event` reads back a *copy* in Lua, so assigning to it there is silently
-    -- lost — verified.) Two things are deliberately left alone: a `!`, an explicit
+    -- lost.) Two things are deliberately left alone: a `!`, an explicit
     -- discard (the edits are dropped and the command runs), and `:qa`, which means
     -- "leave Neovim" — intercepted only when it would throw an unsaved edit away.
     api.nvim_create_autocmd("CmdlineLeave", {
@@ -1558,7 +1569,7 @@ function RunnerUI:show_ui()
             -- unsaved edit, then a testcase that has gone missing) — and pulling the
             -- cursor back into the pane there leaves the second question on screen with
             -- no way to answer it, looking for all the world as though the first prompt
-            -- had swallowed it (verified, then fixed).
+            -- had swallowed it.
             local existing = {}
             for _, w in ipairs(api.nvim_list_wins()) do
                 existing[w] = true
@@ -1982,8 +1993,8 @@ end
 ---@private
 ---The rectangle the results UI occupies on screen, borders included, as a footprint
 ---`{ row, col, width, height }` — or nil when nothing is on screen. A bordered float's
----reported position is already its **top-left border cell** (verified against a real
----terminal), with the text one cell inside, so the two border lines are added to the
+---reported position is already its **top-left border cell**, with the text one cell
+---inside, so the two border lines are added to the
 ---size only and never subtracted from the origin — doing both shifts the box up and
 ---left by one, which is precisely a strip of the grid left showing along the bottom
 ---and the right edge. A split has no border and so needs neither.
@@ -2182,9 +2193,8 @@ function RunnerUI:status_lines()
     if self.runner.status_tail then
         vim.list_extend(entries, self.runner:status_tail())
     end
-    -- A fixed pointer at the full legend rather than a digest of it: the digest was
-    -- always either stale or too long, and an unsaved edit now says so where it
-    -- belongs — on its own row in the selector, as an `EDITED` verdict.
+    -- A fixed pointer at the full legend: a digest of the keys goes stale or runs long,
+    -- and an unsaved edit is shown where it belongs, on its own row as `EDITED`.
     entries[#entries + 1] = { "help", as_list(self.config.runner_ui.mappings.help or {})[1] or "?" }
 
     local width = 0
@@ -2316,8 +2326,8 @@ function RunnerUI:render_selector()
         -- two disagree it would be a claim about text that is no longer there.
         -- It says so on the row it is about, and lasts until the edit is saved
         -- (which re-runs it) or undone away. Unstyled (`TunaDone`, as `NOT RUN` is):
-        -- it is the *absence* of a verdict, not a bad one, and the amber it used to
-        -- wear is the plugin's warning colour — nothing is wrong with an edit.
+        -- it is the *absence* of a verdict, not a bad one, and amber is the plugin's
+        -- warning colour, while nothing is wrong with an edit.
         local status, hlgroup = tc.status, tc.hlgroup
         if unsaved[tc.tcnum] then
             status, hlgroup = "EDITED", "TunaDone"
@@ -2363,9 +2373,9 @@ end
 function RunnerUI:update_ui()
     -- One render per tick, however many updates ask for it. The flags below are
     -- cumulative and the render reads the runner's current `tcdata`, so a queued
-    -- render already covers every call that arrives before it runs — a fast runner
-    -- (stress, or a batch of testcases landing together) used to queue one full
-    -- rebuild per event.
+    -- render already covers every call that arrives before it runs, so a fast runner
+    -- (stress, or a batch of testcases landing together) costs one rebuild per tick
+    -- rather than one per event.
     if self.render_scheduled then
         return
     end
@@ -2432,6 +2442,12 @@ function RunnerUI:update_ui()
                         self.windows[name].baseline = content == base and shown
                             or vim.split(base ~= SKIP and base or "", "\n", { plain = true })
                     end
+                end
+                -- A mode that draws panes itself (interactive's conversation columns,
+                -- whose rows have to be laid out together) does it here, once every pane
+                -- it doesn't own has been rendered.
+                if self.runner.on_details_rendered then
+                    self.runner:on_details_rendered(self, tc)
                 end
                 -- Which testcase the panes are now showing, i.e. whom a later edit of
                 -- them belongs to. `nil` on a row with nothing to edit (`Compile`,

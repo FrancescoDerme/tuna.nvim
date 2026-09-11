@@ -4,7 +4,7 @@
 --
 --   * "builtin"  — plain output comparison via `compare.lua` (the
 --     `output_compare_method`: exact / squish / custom function). This is the
---     default and preserves competitest's behaviour.
+--     default.
 --   * external   — a testlib-style checker program, invoked as
 --     `checker <input> <output> <answer>` (jury input, participant output, jury
 --     answer). Exit code 0 means correct; any other code means wrong, and the

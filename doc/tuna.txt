@@ -307,6 +307,16 @@ the exchange into the transcript. Three input sources, chosen with a keyword
 and remembered per buffer: `live` (you are the other side), `feed` (the
 testcase input plays it) and `interactor`.
 
+The results grid follows the source. With `live` and `interactor` the session
+reads as a conversation: beside the testcase list are three columns, Errors,
+Output and Live, and whatever one side says goes on a row of its own in its
+own column, the other two left blank on that row. Every reply sits on the line
+after the message it answers, and nothing is repeated between columns. The
+columns follow the latest line and scroll together. In `live` you type on the
+last line of the Live column, which wears the accent of a pane you type into,
+and <CR> sends it. `feed` replays a stored testcase instead, so it keeps the
+ordinary Input and Expected Output panes, editable exactly as in a normal run.
+
 Checkers are testlib-style, invoked as `checker <input> <output> <answer>`,
 exit 0 meaning correct. They are for problems with more than one correct
 answer.
