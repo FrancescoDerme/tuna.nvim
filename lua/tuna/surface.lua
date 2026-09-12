@@ -129,6 +129,11 @@ end
 ---  wrong for content the user scrolls through.
 ---@return integer winid
 function M.float(bufnr, opts)
+    -- A new window starts with the global 'statusline', which a statusline plugin that
+    -- renders into each window (lualine) leaves blank until its next refresh: the bar
+    -- would vanish for a moment whenever a float takes focus. Starting from the bar of the
+    -- window it opens over keeps a global statusline steady.
+    local over = api.nvim_get_current_win()
     local winid = api.nvim_open_win(bufnr, opts.enter == true, {
         relative = "editor",
         width = math.max(1, opts.width),
@@ -142,6 +147,10 @@ function M.float(bufnr, opts)
         zindex = opts.layer,
     })
     require("tuna.utils").set_border_highlight(winid, opts.border_highlight, opts.border_group)
+    pcall(function()
+        local bar = api.nvim_get_option_value("statusline", { win = over })
+        api.nvim_set_option_value("statusline", bar, { scope = "local", win = winid })
+    end)
     vim.wo[winid].wrap = opts.wrap == true
     if not opts.keep_scrolloff then
         -- `scrolloff`/`sidescrolloff` are global-local, so this only affects this window:

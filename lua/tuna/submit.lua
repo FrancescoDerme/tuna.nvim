@@ -140,10 +140,8 @@ local function display_name(ctx)
     return vim.fn.fnamemodify(ctx.filepath, ":t")
 end
 
----File modification time as a `"sec.nsec"` string, or nil — used to detect a
----solution being edited after a verdict was recorded (so a stale verdict isn't
----restored across a restart). Nanosecond precision disambiguates same-second edits
----(on filesystems that provide it; otherwise it degrades to second granularity).
+---File modification time as a `"sec.nsec"` string, or nil. Only verdicts recorded with
+---an `mtime` and no `hash` are checked against it.
 ---@param path string
 ---@return string?
 local function file_mtime(path)
@@ -154,11 +152,37 @@ local function file_mtime(path)
     return st.mtime.sec .. "." .. (st.mtime.nsec or 0)
 end
 
+---The SHA-256 of a solution's source on disk, or nil when it can't be read. A verdict is
+---recorded against it, so it stays with the exact text that was submitted: a write that
+---changes nothing (a `:w`, the save before a run) keeps the verdict, and any edit drops it.
+---@param path string
+---@return string?
+local function file_hash(path)
+    local f = io.open(path, "rb")
+    if not f then
+        return nil
+    end
+    local content = f:read("*a")
+    f:close()
+    return vim.fn.sha256(content)
+end
+
+---Whether a persisted verdict still describes the file on disk.
+---@param entry table a sidecar `submit` entry
+---@param path string absolute solution path
+---@return boolean
+local function still_current(entry, path)
+    if entry.hash then
+        return entry.hash == file_hash(path)
+    end
+    return entry.mtime ~= nil and entry.mtime == file_mtime(path)
+end
+
 ---Persist a final verdict for one solution file into its directory's sidecar, keyed
----by file name. `entry.mtime` (captured at submit time) lets a later edit invalidate
+---by file name. `entry.hash` (the source as submitted) lets a later edit invalidate
 ---it. Merges so url/name/group and other files' verdicts are preserved.
 ---@param path string absolute solution path
----@param entry table { state, text, url?, mtime? }
+---@param entry table { state, text, url?, hash? }
 ---@param cfg table
 local function write_submit_status(path, entry, cfg)
     local dir = vim.fn.fnamemodify(path, ":h")
@@ -789,14 +813,14 @@ end
 
 ---Restore a persisted final verdict for a buffer from its sidecar, so the lualine
 ---indicator survives a restart. Skips if already tracked, if the entry isn't a final
----verdict, or if the file's mtime no longer matches the one recorded at submit time
----(the solution was edited since). Called from the `BufReadPost` autocmd.
+---verdict, or if the file on disk is no longer the source it was recorded against
+---(`still_current`). Called from the `BufReadPost` autocmd.
 ---@param bufnr integer
 ---The last submit verdict recorded for `path`, whoever recorded it and whether or not
 ---the file is open. Read straight from the sidecar rather than from `M.state`, so the
 ---dashboard can say how a problem went without opening it — and guarded by the same
----mtime rule `M.restore` applies, since a verdict describes the source it was submitted
----from and says nothing about one edited since.
+---`still_current` rule `M.restore` applies, since a verdict describes the source it was
+---submitted from and says nothing about one edited since.
 ---@param path string absolute solution path
 ---@return { state: string, text: string }? verdict, nil when there is none or it is stale
 function M.verdict_for(path)
@@ -812,7 +836,7 @@ function M.verdict_for(path)
     if type(entry) ~= "table" or not FINAL[entry.state] then
         return nil
     end
-    if entry.mtime ~= file_mtime(path) then
+    if not still_current(entry, path) then
         return nil -- edited since the verdict was recorded
     end
     return { state = entry.state, text = entry.text }
@@ -830,7 +854,7 @@ function M.restore(bufnr)
     if type(entry) ~= "table" or not FINAL[entry.state] then
         return
     end
-    if entry.mtime ~= file_mtime(path) then
+    if not still_current(entry, path) then
         return -- edited since the verdict was recorded
     end
     set_state(path, entry.state, entry.text, entry.url)
@@ -1135,9 +1159,9 @@ local function run_watch(ctx, cmd)
         end)
     end
 
-    -- The file was just saved by M.context, so this mtime identifies the exact
-    -- source the verdict belongs to; persist it so a later edit invalidates it.
-    local submit_mtime = file_mtime(path)
+    -- The file was just saved by M.context, so this hash identifies the exact source the
+    -- verdict belongs to; persist it so a later edit invalidates it.
+    local submit_hash = file_hash(path)
     -- This job "owns" the buffer's state only while its own tokens are the latest;
     -- a manual clear or a newer submit supersedes it, and its exit handler must not
     -- clobber that. `my_token` tracks our last write; `reached_final` records our
@@ -1169,7 +1193,7 @@ local function run_watch(ctx, cmd)
                 reached_final = true
                 -- Persist the verdict (survives a restart) and drop it the moment
                 -- the solution is edited.
-                write_submit_status(path, { state = state, text = seg, url = url, mtime = submit_mtime }, ctx.cfg)
+                write_submit_status(path, { state = state, text = seg, url = url, hash = submit_hash }, ctx.cfg)
                 arm_invalidation(ctx.bufnr)
             end
         end

@@ -172,7 +172,7 @@ is relative. Every configured path goes through these: compile/running directori
 
 - **`sidecar.lua`**: `problem_store_file` (`.tuna.json`) beside the source. Keys:
   - `url`/`name`/`group`/`mirror`/`mirror_at`, the downloaded task;
-  - `submit = { [basename] = { state, text, url, mtime } }`;
+  - `submit = { [basename] = { state, text, url, hash } }`;
   - `run = { [basename] = { mode, explicit, checker, source, compare } }`.
 
   Entries are keyed by **basename** because one folder can hold several problems or several
@@ -386,7 +386,8 @@ as `checker <input> <output> <answer>` (exit 0 means correct) and is compiled vi
 **`surface.lua`** is the contract every scratch buffer/window follows. Each rule prevents a
 specific Vim error about a buffer the user never opened.
 - `adopt(buf, kind, opts)`: name `tuna://<kind>/<bufnr>/tuna` (constant last component for
-  statuslines), `filetype=tuna`, `buftype=acwrite` with a write handler (`nofile` gives E382 and
+  statuslines), `filetype=tuna` (what statuslines key on to keep describing the file underneath,
+  e.g. lualine's `ignore_focus`), `buftype=acwrite` with a write handler (`nofile` gives E382 and
   never fires `BufWriteCmd`), `keep_clean` for prompts (watches `TextChanged*` and `on_lines`).
 - `read_only(buf)`: unmodifiable, and `CHANGE_KEYS` mapped to `<Nop>` wherever nothing else
   claims them. Call it **after** binding real keys; claims are compared on terminal codes
@@ -394,7 +395,9 @@ specific Vim error about a buffer the user never opened.
 - `render(buf, content, opts)`: no write when unchanged, `undolevels = -1` around the write,
   `modified` cleared.
 - `float(buf, opts)` with `LAYER`: grid 50, viewer 60, overlay 70, dialog 80. Neovim's default
-  is 50, so always set a layer.
+  is 50, so always set a layer. A float starts with the `statusline` of the window it opens
+  over: a new window otherwise takes the global value, which lualine leaves blank until its
+  next refresh, so the bar would flicker whenever a float takes focus.
 - `group(wins, on_close)`: windows that close together, keyed on `WinClosed`.
 
 **`widgets.lua`**
@@ -489,10 +492,12 @@ specific Vim error about a buffer the user never opened.
   - Jobs: one per file in `jobs[path]`. A new submit supersedes the old job, and callbacks check
     they still own the slot. `watch_timeout` stops a hung poll; `M.clear` cancels.
 - Verdict state is per file (`M.state[path]`) and drives `status`/`status_hl`/`is_submitting`.
-  Final verdicts persist in the sidecar with the file's mtime. `restore` (on `BufReadPost`)
-  reloads one only while the mtime matches, and `arm_invalidation` drops shown and stored
-  verdicts on the first edit. `verdict_for(path)` reads a verdict without an open buffer
-  (dashboard).
+  Final verdicts persist in the sidecar with the SHA-256 of the submitted source, not its
+  mtime, because a write that changes nothing (a `:w`, the save before a run) must not drop
+  one. `restore` (on `BufReadPost`) reloads a verdict only while `still_current` holds (the
+  hash matches; an entry carrying only an `mtime` is compared on that), and
+  `arm_invalidation` drops shown and stored verdicts on the first edit. `verdict_for(path)`
+  reads a verdict without an open buffer (dashboard).
 - `persist_task` backfills the sidecar's `url`, and `name`/`group` from header markers when
   missing.
 

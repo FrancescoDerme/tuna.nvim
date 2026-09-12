@@ -61,8 +61,8 @@ end
 
 ---How a problem's local run went, if it is still known. Results are not persisted —
 ---they describe a build that may no longer exist, which is why a submit verdict carries
----an mtime and a run does not — so this answers only for a file whose runner is still
----in this session. That is the common case for the problem you are on and never the
+---the hash of its source and a run does not — so this answers only for a file whose
+---runner is still in this session. That is the common case for the problem you are on and never the
 ---case for one you have not opened, which is exactly the right side to be wrong on.
 ---@param path string
 ---@return string? e.g. "4/5 passed"

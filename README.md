@@ -382,8 +382,15 @@ opens the same catalogue in telescope.
 Two optional [lualine](https://github.com/nvim-lualine/lualine.nvim) components: the
 download listener while it is waiting, and the current problem's submit verdict.
 
+Every tuna window has the filetype `tuna`. Listing it in lualine's `ignore_focus` keeps
+the statusline describing the file underneath (its name, LSP clients and verdict) while a
+tuna window has focus.
+
 ```lua
 require("lualine").setup({
+    options = {
+        ignore_focus = { "tuna" },
+    },
     sections = {
         lualine_x = {
             {

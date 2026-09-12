@@ -413,7 +413,8 @@ function M.save_sources(bufnr, cfg)
         vim.cmd("silent! wall")
     elseif cfg.save_current_file and vim.api.nvim_buf_is_valid(bufnr) then
         vim.api.nvim_buf_call(bufnr, function()
-            vim.cmd("silent! write")
+            -- `update`, not `write`: an unchanged file is left untouched on disk.
+            vim.cmd("silent! update")
         end)
     end
 end

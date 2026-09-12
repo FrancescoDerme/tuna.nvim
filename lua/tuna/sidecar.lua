@@ -12,7 +12,7 @@
 --
 -- Current keys:
 --   url / name / group  — the downloaded task's metadata (download.lua, submit.lua)
---   submit = { [basename] = { state, text, url, mtime } } — last verdict per file
+--   submit = { [basename] = { state, text, url, hash } } — last verdict per file
 --   run    = { [basename] = { mode, explicit, checker, source, compare } }
 --                         — the per-problem run state of `tools.lua`
 --
