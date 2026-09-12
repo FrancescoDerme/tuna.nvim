@@ -844,7 +844,7 @@ end
 ---@param i integer index into `files`
 ---@param restore integer? window to refocus after each menu
 ---@param stats { deleted: integer, dirs: integer, emptied: table<string, boolean>, stopped: boolean? }
----@param ui { width: integer, notice: table? } fixed menu width shared by every file
+---@param ui { width: integer, notice: table?, row: integer? } fixed menu width shared by every file
 ---  this run, plus an optional notice pane shown above each prompt
 ---@param done fun() continuation, run once the last file has been decided
 local function confirm_each(files, i, restore, stats, ui, done)
@@ -861,6 +861,8 @@ local function confirm_each(files, i, restore, stats, ui, done)
         width = ui.width,
     }
     widgets.menu({ "Delete", "Keep", "Stop" }, confirm_title(files, i), function(idx)
+        -- The next prompt starts on this answer, so a run of the same one is a key each.
+        ui.row = idx
         if idx == 3 then -- Stop
             stats.stopped = true
             return done()
@@ -883,7 +885,7 @@ local function confirm_each(files, i, restore, stats, ui, done)
             end
         end
         confirm_each(files, i + 1, restore, stats, ui, done) -- idx 2 (Keep) lands here too
-    end, restore, nil, preview, ui.notice)
+    end, restore, nil, preview, ui.notice, ui.row)
 end
 
 ---Wipe the buffers backing anything inside a directory that is about to be removed,
@@ -940,7 +942,7 @@ end
 ---@param i integer
 ---@param restore integer?
 ---@param stats { deleted: integer, dirs: integer, stopped: boolean? }
----@param ui { width: integer, notice: table? }
+---@param ui { width: integer, notice: table?, row: integer? }
 ---@param done fun()
 local function confirm_dirs(dirs, i, restore, stats, ui, done)
     if i > #dirs then
@@ -953,6 +955,7 @@ local function confirm_dirs(dirs, i, restore, stats, ui, done)
     local preview = { title = d.rel .. "/", lines = dir_listing(d.path), width = ui.width }
     local title = ("[%d/%d] %s"):format(i, #dirs, prune_reason(d))
     widgets.menu({ "Delete", "Keep", "Stop" }, title, function(idx)
+        ui.row = idx -- the next prompt starts on this answer, as in `confirm_each`
         if idx == 3 then -- Stop
             stats.stopped = true
             return done()
@@ -974,7 +977,7 @@ local function confirm_dirs(dirs, i, restore, stats, ui, done)
             end
         end
         confirm_dirs(dirs, i + 1, restore, stats, ui, done)
-    end, restore, nil, preview, ui.notice)
+    end, restore, nil, preview, ui.notice, ui.row)
 end
 
 ---Offer to remove the directories left empty — either found that way or emptied by
@@ -1205,10 +1208,17 @@ local function scan_and_confirm(dir, cfg, restore, depth, threshold, bufnr)
     end
 end
 
--- The pure deciders, exposed for the local test suite: reaching them through
+-- The pure deciders, exposed for the test suite: reaching them through
 -- `M.clean` would mean driving a chooser form and a confirmation per file. Not part of
 -- the plugin's interface.
-M._test = { classify = classify, solution_templates = solution_templates, similarity = similarity, is_artifact = is_artifact }
+M._test = {
+    classify = classify,
+    solution_templates = solution_templates,
+    similarity = similarity,
+    is_artifact = is_artifact,
+    confirm_each = confirm_each,
+    confirm_dirs = confirm_dirs,
+}
 
 ---Entry point for `:Tuna clean`. Choose a directory, recursion depth, and match
 ---threshold together (one form, all three lists visible), then confirm each unused

@@ -55,7 +55,7 @@ library, contest navigation, a scratch file, an unused-file cleaner, a dashboard
 - This file is `export-ignore`d (`.gitattributes`). Keep it dry and current: no roadmap and no
   history of how the code got here.
 
-**Git**: don't commit unless asked. `tests/` is untracked.
+**Git**: don't commit unless asked.
 
 ## Repository layout
 
@@ -95,7 +95,7 @@ lua/tuna/
   keymaps.lua       opt-in keymaps and preset
   health.lua        :checkhealth tuna
 doc/tuna.txt        vimdoc
-tests/              local-only suite (untracked)
+tests/              test suite (`tests/run.sh`)
 tuna.nvim.json      package metadata
 ```
 
@@ -410,6 +410,9 @@ specific Vim error about a buffer the user never opened.
   statuslines), `filetype=tuna` (what statuslines key on to keep describing the file underneath,
   e.g. lualine's `ignore_focus`), `buftype=acwrite` with a write handler (`nofile` gives E382 and
   never fires `BufWriteCmd`), `keep_clean` for prompts (watches `TextChanged*` and `on_lines`).
+  Adopt a buffer **before** its window opens: entering fires `BufEnter`, and plugins that
+  skip tuna's windows by filetype read it right then (scrollEOF otherwise writes the global
+  `scrolloff` from a small float's height).
 - `read_only(buf)`: unmodifiable, and `CHANGE_KEYS` mapped to `<Nop>` wherever nothing else
   claims them. Call it **after** binding real keys; claims are compared on terminal codes
   (`<C-R>` equals `<C-r>`).
@@ -428,7 +431,8 @@ specific Vim error about a buffer the user never opened.
 - `input` opens in **normal** mode, because chained prompts can't reliably start in insert.
 - `menu`: optional `on_close`; `preview` (fixed lines or cursor-following `content(idx)`, colour
   via `'syntax'` not `'filetype'`, list capped at `MENU_LIST_SHARE` of the height); `notice`
-  pane above the menu, outside the focus cycle.
+  pane above the menu, outside the focus cycle; `row` to start the cursor on (a resize keeps
+  the row it is on).
 - `panels`: side-by-side lists where `<CR>` acts on the focused list only (the dashboard).
   `form`: stacked lists where `<CR>` submits every selection (clean). They differ in what
   `<CR>` means, so they stay separate. `panels` has an optional header dropped when space is
@@ -532,7 +536,8 @@ specific Vim error about a buffer the user never opened.
     the sidecar (`task_of`). A file with no template counts only when empty. The template file
     itself is never offered.
   - The flow is floats only: a `form` for directory, depth and threshold, then one
-    `Delete`/`Keep`/`Stop` menu per file with a preview, sorted by match, at a fixed width.
+    `Delete`/`Keep`/`Stop` menu per file with a preview, sorted by match, at a fixed width,
+    each starting on the answer last given (`ui.row`), and the same for directories.
   - **Scan cost is bounded**: pruning at traversal (`descend_into`, `clean.skip_dirs`,
     dot-directories), a shared `clean.max_entries` budget reported through the `notice` pane,
     early rejection on the line-count ceiling, and a 1 MiB size guard.
@@ -561,10 +566,18 @@ specific Vim error about a buffer the user never opened.
     `group`.
   - `change_dir` honours `cd_command` (`cd`/`tcd`/`lcd`/`false`). `snapshot()` returns the
     loaded state for the dashboard.
-- **`temp.lua`**: the scratch is the template minus its leading modifier header
-  (`split_template`). `download sync` sets `M.pending`; `M.absorb` keeps the downloaded file's
-  header, replaces the body with the scratch *buffer* lines, saves, moves the cursor, and
-  deletes the scratch. It never refuses: with no usable template the scratch is empty.
+- **`temp.lua`**: the scratch is a template minus its leading modifier header
+  (`split_template`). A scratch with anything written in it (its loaded buffer, else its file)
+  asks `Resume` / `Restart`, previewing what it holds. Restarting, and a missing or blank
+  scratch, go to the template question, opened straight from the first menu's choice (which
+  fires after that menu has closed) so no frame is drawn without a dialog, a menu with a
+  body preview: `template_choices` offers every existing file a `template_file` candidate can
+  match, a task-only modifier (`$(JUDGE)`) read as a glob wildcard since no problem exists
+  yet, plus an empty file. Dismissing creates nothing, and with no template file at all the
+  scratch opens empty. `download sync` sets `M.pending`; `M.absorb(filepath, cfg, template)`
+  keeps as many header lines as the template the problem was written from (returned by
+  `store_downloaded_task`), replaces the body with the scratch *buffer* lines, saves, moves the
+  cursor, and deletes the scratch.
 - **`dashboard.lua`**: `widgets.panels` with a banner. Recent (from `recent.snapshot()`, status
   from `submit.verdict_for`, else local results off a live runner, which are never persisted)
   sits beside Commands; the commands that need a runnable buffer are dropped for other buffers.
@@ -583,12 +596,15 @@ specific Vim error about a buffer the user never opened.
 
 ## Testing
 
-- `tests/` is **local-only and untracked**. Run `tests/run.sh` (all files, one headless nvim
-  each, non-zero exit on failure) or `tests/run.sh runner`. Each file prints
+- Run `tests/run.sh` (all files, one headless nvim each, non-zero exit on failure) or
+  `tests/run.sh runner`. Keep it passing: it ships with the plugin. Each file prints
   `N checks, M failures` through `tests/harness.lua` (`ok`/`eq`/`has`/`report`).
 - Files:
-  - `surfaces.lua`: conformance of every surface to the `surface.lua` contract, plus every
-    `runner_ui.mappings` key still resolving to an action;
+  - `surfaces.lua`: conformance of every surface to the `surface.lua` contract, every float
+    tagged before it is entered, and every `runner_ui.mappings` key still resolving to an
+    action;
+  - `temp.lua`: the templates a scratch can start from, when a scratch is resumed, the
+    resume/restart and template menus, and absorbing keeping the header of the template actually used;
   - `testcases.lua`, `compare.lua`, `judges.lua`, `download.lua`, `clean.lua`, `submit.lua`:
     unit tests of pure rules;
   - `runner.lua`: all four run modes with `vim.system` stubbed, covering what each child is
@@ -597,7 +613,7 @@ specific Vim error about a buffer the user never opened.
     (`settle_results`), using real UI windows. `testcases.lua` also covers the
     `single_file` rewrite keeping untouched testcases.
 - Modules expose file-local helpers to tests through `M._test` (`download`, `submit`, `clean`,
-  `interactive`). They are not public interface.
+  `interactive`, `temp`). They are not public interface.
 - **Mutation-check new tests**: break the rule each test describes and confirm it fails, and
   confirm a harmless edit doesn't.
 - The suite doesn't cover real processes, verdicts coming back, or most UI interaction. Verify

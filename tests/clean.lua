@@ -125,4 +125,41 @@ t.ok("nor is a stem no solution was removed for", not clean.is_artifact("/p", "h
 t.ok("nor anything in another directory", not clean.is_artifact("/other", "main", art))
 t.ok("and a run that removed nothing has no artifacts at all", not clean.is_artifact("/p", "main", { artifacts = {} }))
 
+--------------------------------------------------------------------------------
+-- Stepping through the confirmations
+--------------------------------------------------------------------------------
+
+-- Each prompt starts on the answer last given, so a run of files (or directories) that
+-- all get the same answer costs one key each.
+do
+    local widgets = require("tuna.widgets")
+    local real_menu = widgets.menu
+    local rows, answers = {}, {}
+    widgets.menu = function(_, _, on_choice, _, _, _, _, row)
+        rows[#rows + 1] = row or 1
+        on_choice(answers[#rows])
+    end
+
+    local fdir = t.tempdir()
+    local files = {}
+    for _, name in ipairs({ "a.cpp", "b.cpp", "c.cpp" }) do
+        t.write(fdir, name, "")
+        files[#files + 1] = { path = fdir .. "/" .. name, rel = name, reason = "empty file", sim = 1 }
+    end
+    answers = { 2, 1, 2 } -- Keep, Delete, Keep
+    clean.confirm_each(files, 1, nil, { deleted = 0, dirs = 0, emptied = {}, artifacts = {} }, { width = 40 }, function() end)
+    t.eq("each file prompt starts on the answer to the one before", rows, { 1, 2, 1 })
+    t.eq("while doing what each answer says", vim.uv.fs_stat(fdir .. "/b.cpp"), nil)
+
+    rows, answers = {}, { 2, 2 } -- Keep, Keep
+    local d1, d2 = t.tempdir(), t.tempdir()
+    clean.confirm_dirs({ { path = d1, rel = "d1", files = 0 }, { path = d2, rel = "d2", files = 0 } }, 1, nil, { deleted = 0, dirs = 0 }, { width = 40 }, function() end)
+    t.eq("and so does each directory prompt", rows, { 1, 2 })
+
+    widgets.menu = real_menu
+    vim.fn.delete(fdir, "rf")
+    vim.fn.delete(d1, "rf")
+    vim.fn.delete(d2, "rf")
+end
+
 t.report()

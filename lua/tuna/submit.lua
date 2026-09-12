@@ -1430,7 +1430,7 @@ function M.submit(bufnr)
     provider(ctx) -- the provider drives the per-buffer submit state
 end
 
--- The pure output-reading helpers, exposed for the local test suite: reaching them
+-- The pure output-reading helpers, exposed for the test suite: reaching them
 -- through `M.submit` would mean spawning a real submitter. Not part of the plugin's
 -- interface.
 M._test = {

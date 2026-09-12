@@ -53,6 +53,51 @@ local function template_path(ext, cfg)
     return nil, #utils.template_candidates(cfg.template_file, ext) > 0
 end
 
+---Every template a scratch could start from: the existing files each configured candidate
+---can match. A scratch is written before there is a problem, so a modifier only a problem
+---fills in (`$(JUDGE)` in `~/cp/template.$(JUDGE).cpp`) matches any text in its place,
+---and each judge's template is offered on its own. In candidate order, each file once.
+---@param ext string
+---@param cfg table
+---@return string[] paths
+local function template_choices(ext, cfg)
+    local out, seen = {}, {}
+    for _, candidate in ipairs(utils.template_candidates(cfg.template_file, ext)) do
+        -- Task modifiers become a marker the file-modifier pass leaves alone, then a glob
+        -- wildcard; the file modifiers expand against a name in the cwd.
+        local marked = candidate:gsub("%$%(([^)]*)%)", function(name)
+            if name ~= "" and utils.file_format_modifiers[name] == nil then
+                return "\1"
+            end
+        end)
+        local path = utils.eval_string(vim.fn.getcwd() .. "/temp." .. ext, marked)
+        if path then
+            local pattern = utils.expand_home(path):gsub("[%[%]%?%*]", "\\%0"):gsub("\1", "*")
+            for _, match in ipairs(vim.fn.glob(pattern, false, true)) do
+                if not seen[match] and vim.fn.isdirectory(match) == 0 then
+                    seen[match] = true
+                    out[#out + 1] = match
+                end
+            end
+        end
+    end
+    return out
+end
+
+---Whether a scratch holds anything to resume: its loaded buffer, or else its file, has
+---more than whitespace in it. An empty scratch is nothing written, so it is started over,
+---template question and all.
+---@param path string
+---@return boolean
+local function resumable(path)
+    local buf = vim.fn.bufnr(path)
+    if buf ~= -1 and vim.api.nvim_buf_is_loaded(buf) then
+        return table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n"):find("%S") ~= nil
+    end
+    local content = utils.file_exists(path) and utils.read_file(path) or nil
+    return content ~= nil and content:find("%S") ~= nil
+end
+
 ---Split a template into its header and its body. The header is the run of leading
 ---lines carrying `$(...)` modifiers — the part only a real problem can fill in — plus
 ---the blank lines under it. Counting instead of hard-coding a number keeps this
@@ -126,9 +171,109 @@ local function template_header(ext, cfg)
     return split_template(vim.split(utils.read_file(tmpl) or "", "\n", { plain = true }))
 end
 
----`:Tuna temp` — open the scratch solution, creating it from the template's body.
----An existing scratch is reopened rather than overwritten, so an interrupted session
----(or a restart) resumes where it left off.
+---Write the scratch from `tmpl`'s body (empty without one) and open it. A blank scratch
+---buffer still loaded from before is dropped first, or it would be shown instead of what
+---was just written.
+---@param path string
+---@param cfg table
+---@param tmpl string?
+local function create(path, cfg, tmpl)
+    local header, blanks, body = 0, 0, { "" }
+    if tmpl then
+        local lines = vim.split(utils.read_file(tmpl) or "", "\n", { plain = true })
+        header, blanks = split_template(lines)
+        body = vim.list_slice(lines, header + blanks + 1)
+    end
+    local stale = vim.fn.bufnr(path)
+    if stale ~= -1 then
+        pcall(vim.api.nvim_buf_delete, stale, { force = true })
+    end
+    if not utils.write_file(path, table.concat(body, "\n")) then
+        utils.notify("temp: could not write the scratch file at '" .. path .. "'.", "WARN")
+        return
+    end
+    vim.cmd.edit(vim.fn.fnameescape(path))
+    place_cursor(cfg, header, blanks)
+end
+
+---Reopen the scratch as it is, with the cursor where starting it would put it.
+---@param path string
+---@param ext string
+---@param cfg table
+local function resume(path, ext, cfg)
+    vim.cmd.edit(vim.fn.fnameescape(path))
+    -- Resuming has to land where starting did: reopening the scratch is the same
+    -- gesture as opening it, so it must not drop the user on line 1.
+    local header, blanks = 0, 0
+    if type(cfg.template_cursor) == "number" then
+        header, blanks = template_header(ext, cfg)
+    end
+    place_cursor(cfg, header, blanks)
+    utils.notify(
+        "temp: resumed the existing scratch, use ':Tuna download sync' to fold it into a problem or contest.",
+        "INFO"
+    )
+end
+
+---What a scratch holds right now: its loaded buffer, else its file.
+---@param path string
+---@return string[]
+local function scratch_lines(path)
+    local buf = vim.fn.bufnr(path)
+    if buf ~= -1 and vim.api.nvim_buf_is_loaded(buf) then
+        return vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    end
+    return vim.split(utils.read_file(path) or "", "\n", { plain = true })
+end
+
+---Ask which template to start the scratch from, then write it. Dismissing the question
+---writes nothing, so a scratch being restarted is left as it was.
+---@param path string
+---@param ext string
+---@param cfg table
+local function start_over(path, ext, cfg)
+    local choices = template_choices(ext, cfg)
+    if #choices == 0 then
+        -- No template to open from is not a reason to refuse: the scratch is what was
+        -- asked for, and `:Tuna download sync` writes the problem from the template that
+        -- does apply later. It says so only when templates *were* configured, the case
+        -- where one was expected.
+        if #utils.template_candidates(cfg.template_file, ext) > 0 then
+            utils.notify(
+                "temp: no template file exists for '" .. ext .. "', starting an empty scratch.",
+                "INFO"
+            )
+        end
+        create(path, cfg, nil)
+        return
+    end
+
+    local items = {}
+    for i, tmpl in ipairs(choices) do
+        items[i] = vim.fn.fnamemodify(tmpl, ":~")
+    end
+    items[#items + 1] = "Empty file"
+    require("tuna.widgets").menu(items, "Start the scratch from", function(idx)
+        create(path, cfg, choices[idx])
+    end, vim.api.nvim_get_current_win(), function() end, {
+        width = math.max(40, math.floor(vim.o.columns * 0.6)),
+        filetype = vim.filetype.match({ filename = "scratch." .. ext }),
+        content = function(idx)
+            local tmpl = choices[idx]
+            if not tmpl then
+                return { title = " empty ", lines = { "" } }
+            end
+            local lines = vim.split(utils.read_file(tmpl) or "", "\n", { plain = true })
+            local header, blanks = split_template(lines)
+            return { title = " " .. vim.fn.fnamemodify(tmpl, ":t") .. " ", lines = vim.list_slice(lines, header + blanks + 1) }
+        end,
+    })
+end
+
+---`:Tuna temp` — open the scratch solution. An existing one asks whether to resume it or
+---restart, with what it holds on show: picking up where a session left off and starting
+---a fresh contest from a template are both what the command is for. Restarting, and a
+---scratch with nothing in it, go to the template question.
 ---@param bufnr integer? defaults to the current buffer
 function M.start(bufnr)
     bufnr = bufnr or vim.api.nvim_get_current_buf()
@@ -138,49 +283,24 @@ function M.start(bufnr)
     local ext = scratch_ext(bufnr, cfg)
     local path = scratch_path(ext, cfg)
 
-    if utils.file_exists(path) then
-        vim.cmd.edit(vim.fn.fnameescape(path))
-        -- Resuming has to land where starting did: reopening the scratch is the same
-        -- gesture as opening it, so it must not drop the user on line 1.
-        local header, blanks = 0, 0
-        if type(cfg.template_cursor) == "number" then
-            header, blanks = template_header(ext, cfg)
+    if not resumable(path) then
+        start_over(path, ext, cfg)
+        return
+    end
+    require("tuna.widgets").menu({ "Resume", "Restart" }, "A scratch already exists", function(idx)
+        if idx == 1 then
+            resume(path, ext, cfg)
+        else
+            -- Straight from the choice, which fires once this menu's windows are closed:
+            -- no frame is drawn without a dialog on screen.
+            start_over(path, ext, cfg)
         end
-        place_cursor(cfg, header, blanks)
-        utils.notify(
-            "temp: resumed the existing scratch, use ':Tuna download sync' to fold it into a problem or contest.",
-            "INFO"
-        )
-        return
-    end
-
-    -- No template to open from is not a reason to refuse: the scratch is what was
-    -- asked for, and its value is somewhere to type now plus `:Tuna download sync`
-    -- folding it into the problem later — which is written from the template that does
-    -- apply, header and all. So it opens empty, and says so only when a template *was*
-    -- configured and none of the candidates could be used here, since that is the case
-    -- where the user expects one and a fallback entry would fix it.
-    local tmpl, configured = template_path(ext, cfg)
-    local header, blanks, body = 0, 0, { "" }
-    if tmpl then
-        local lines = vim.split(utils.read_file(tmpl) or "", "\n", { plain = true })
-        header, blanks = split_template(lines)
-        body = vim.list_slice(lines, header + blanks + 1)
-    elseif configured then
-        utils.notify(
-            "temp: no template applies to a scratch for '"
-                .. ext
-                .. "', starting empty, add a problem-independent one to `template_file` to change that.",
-            "INFO"
-        )
-    end
-
-    if not utils.write_file(path, table.concat(body, "\n")) then
-        utils.notify("temp: could not write the scratch file at '" .. path .. "'.", "WARN")
-        return
-    end
-    vim.cmd.edit(vim.fn.fnameescape(path))
-    place_cursor(cfg, header, blanks)
+    end, vim.api.nvim_get_current_win(), function() end, {
+        title = " " .. vim.fn.fnamemodify(path, ":t") .. " ",
+        lines = scratch_lines(path),
+        filetype = vim.filetype.match({ filename = "scratch." .. ext }),
+        width = math.max(40, math.floor(vim.o.columns * 0.6)),
+    })
 end
 
 ---`:Tuna download sync` — download the problem this scratch was written for and fold the
@@ -226,7 +346,8 @@ end
 ---unless `:Tuna download sync` armed it.
 ---@param filepath string the downloaded problem just opened
 ---@param cfg table resolved configuration for that directory
-function M.absorb(filepath, cfg)
+---@param template string? the template the problem was written from, whose header it keeps
+function M.absorb(filepath, cfg, template)
     local pending = M.pending
     if not pending then
         return
@@ -241,7 +362,7 @@ function M.absorb(filepath, cfg)
 
     -- The header to keep is as long as the template's, since that is what produced it.
     local ext = vim.fn.fnamemodify(filepath, ":e")
-    local tmpl = template_path(ext, cfg)
+    local tmpl = template or template_path(ext, cfg)
     local header, blanks = 0, 0
     if tmpl then
         header, blanks = split_template(vim.split(utils.read_file(tmpl) or "", "\n", { plain = true }))
@@ -274,5 +395,7 @@ function M.absorb(filepath, cfg)
     end
     utils.notify("temp: scratch folded into " .. vim.fn.fnamemodify(filepath, ":~:."), "INFO")
 end
+
+M._test = { template_choices = template_choices, resumable = resumable }
 
 return M

@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
 # tests/run.sh — run every test file, report, exit non-zero if any failed.
 #
-# This directory is local-only (untracked, see .gitignore): the suite is nowhere near
-# complete, so it is a working net rather than something a user of the plugin gets.
-#
 #   tests/run.sh            all of them
 #   tests/run.sh submit     just tests/submit.lua
 set -uo pipefail

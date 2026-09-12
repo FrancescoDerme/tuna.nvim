@@ -43,6 +43,20 @@ local M = {}
 ---@param opts table { width, height, row, col, border, border_highlight, title }
 ---@return integer winid
 local function open_float(bufnr, enter, opts)
+    -- Everything Vim has to be told about a scratch surface — the name, the `tuna`
+    -- filetype other plugins target, and a `:w` that answers instead of erroring — comes
+    -- from one place, so a widget added later cannot be born missing a piece of it. A
+    -- buffer the user *types* into keeps `modified` clear as they go (`keep_clean`):
+    -- there is nothing to save in a prompt, and an `acwrite` buffer left modified is one
+    -- Vim refuses to quit past.
+    -- `keep_clean` is armed for *every* widget buffer, not only the ones modifiable at
+    -- this moment: a widget can be made editable **after** it is adopted (the chooser
+    -- form's `Custom:` row is typed into inside an otherwise read-only list), and no
+    -- widget reads `modified` for anything, there being nothing in a dialog to save.
+    -- Adopted before the window opens: entering it fires `BufEnter`, and plugins that
+    -- leave tuna's windows alone by filetype read it right then (scrollEOF otherwise
+    -- writes the global `scrolloff` from a small float's height).
+    surface.adopt(bufnr, opts.kind or "widget", { keep_clean = true })
     -- A widget is a dialog: always the thing the user is being asked to act on, so it is
     -- drawn above every layer the runner UI uses — including 50, Neovim's default for a
     -- float and the grid's own, where the two would fight and a pane would appear to
@@ -62,17 +76,6 @@ local function open_float(bufnr, enter, opts)
         -- keeps the user's own scrolloff.
         keep_scrolloff = opts.keep_scrolloff,
     })
-    -- Everything Vim has to be told about a scratch surface — the name, the `tuna`
-    -- filetype other plugins target, and a `:w` that answers instead of erroring — comes
-    -- from one place, so a widget added later cannot be born missing a piece of it. A
-    -- buffer the user *types* into keeps `modified` clear as they go (`keep_clean`):
-    -- there is nothing to save in a prompt, and an `acwrite` buffer left modified is one
-    -- Vim refuses to quit past.
-    -- `keep_clean` is armed for *every* widget buffer, not only the ones modifiable at
-    -- this moment: a widget can be made editable **after** it is adopted (the chooser
-    -- form's `Custom:` row is typed into inside an otherwise read-only list), and no
-    -- widget reads `modified` for anything, there being nothing in a dialog to save.
-    surface.adopt(bufnr, opts.kind or "widget", { keep_clean = true })
     -- Wiped when its window closes: every widget creates fresh buffers on every open
     -- and closes only its windows, so without this each prompt of a long session left
     -- a hidden `tuna://widget` buffer (and its buffer-local autocmds) behind for good
@@ -668,10 +671,16 @@ local menu = { ui_visible = false }
 ---  content pane; with `content` it follows the highlighted row (pin `width`/`height`)
 ---@param notice { title: string?, lines: string[] }? a read-only pane *above* the menu,
 ---  for something the user needs to know before choosing (e.g. that a scan was partial)
-function M.menu(items, title, on_choice, restore_winid, on_close, preview, notice)
+---@param row integer? the row the cursor starts on (default 1), so a caller asking the same
+---  question over and over can leave the answer last given under the cursor
+function M.menu(items, title, on_choice, restore_winid, on_close, preview, notice, row)
     if items == nil then -- resize
         if not menu.ui_visible then
             return
+        end
+        -- Rebuilt on the row the cursor is on, not back at the top.
+        if menu.winid and api.nvim_win_is_valid(menu.winid) then
+            menu.row = api.nvim_win_get_cursor(menu.winid)[1]
         end
         -- A resize closes and rebuilds the windows; keep that self-inflicted
         -- WinClosed from being mistaken for a user cancellation (firing on_close).
@@ -700,6 +709,7 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
         menu.restore_winid = restore_winid
         menu.preview = preview
         menu.notice = notice
+        menu.row = row
     end
 
     local cfg = config.get_buffer_config(api.nvim_get_current_buf())
@@ -717,7 +727,8 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
         end
         return pv
     end
-    local shown = preview_data(1)
+    local start_row = math.min(math.max(menu.row or 1, 1), #menu.items)
+    local shown = preview_data(start_row)
     -- The user's cursorline, captured before opening any of our floats, so the
     -- preview (read like a normal buffer) can honour it.
     local user_cursorline = api.nvim_get_option_value("cursorline", { scope = "global" })
@@ -842,6 +853,7 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
     -- latter also writes cursorline's global default, leaking a UI choice into the
     -- user's editor. scope="local" keeps it to this float.
     api.nvim_set_option_value("cursorline", true, { scope = "local", win = menu.winid })
+    api.nvim_win_set_cursor(menu.winid, { start_row, 0 })
 
     if pv then
         menu.preview_buf = api.nvim_create_buf(false, true)
@@ -863,7 +875,7 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
         if pv.content then
             -- Follow the selection. Only the border title is reconfigured (not the
             -- geometry), so the float doesn't repaint as the cursor moves.
-            menu.preview_idx = 1
+            menu.preview_idx = start_row
             api.nvim_create_autocmd("CursorMoved", {
                 buffer = menu.menu_buf,
                 callback = function()

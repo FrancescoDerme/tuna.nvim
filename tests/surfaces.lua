@@ -138,6 +138,18 @@ end
 -- The surfaces, one at a time (each cleans up after itself).
 --------------------------------------------------------------------------------
 
+-- A tuna window has to be recognisable the moment it is entered: `BufEnter` fires as the
+-- window opens, and plugins that leave tuna's windows alone by filetype read it then
+-- (scrollEOF writes the global `scrolloff` from the focused window's height).
+local entered_untagged = {}
+api.nvim_create_autocmd("BufEnter", {
+    callback = function()
+        if api.nvim_win_get_config(0).relative ~= "" and vim.bo.filetype ~= "tuna" then
+            entered_untagged[#entered_untagged + 1] = api.nvim_buf_get_name(0)
+        end
+    end,
+})
+
 local widgets = require("tuna.widgets")
 
 vim.cmd("Tuna show_ui")
@@ -225,6 +237,32 @@ settle(150)
 conforms("widgets.editor")
 close_layer(80)
 
+-- A menu can start on a given row (a following preview with it), and a resize keeps the
+-- row the cursor is on rather than going back to the top.
+widgets.menu({ "one", "two", "three" }, "a menu", function() end, nil, nil, nil, nil, 2)
+settle(150)
+ok("a menu starts on the row it is given", api.nvim_win_get_cursor(0)[1] == 2, api.nvim_win_get_cursor(0)[1])
+api.nvim_win_set_cursor(0, { 3, 0 })
+widgets.menu(nil)
+settle(150)
+ok("and a resize keeps the row the cursor is on", api.nvim_win_get_cursor(0)[1] == 3, api.nvim_win_get_cursor(0)[1])
+close_layer(80)
+widgets.menu({ "one", "two" }, "a menu", function() end, nil, nil, {
+    width = 40,
+    content = function(i)
+        return { lines = { "row " .. i } }
+    end,
+}, nil, 2)
+settle(150)
+local previewed
+for _, f in ipairs(floats()) do
+    if f.win ~= api.nvim_get_current_win() and f.zindex == 80 then
+        previewed = api.nvim_buf_get_lines(f.buf, 0, -1, false)[1]
+    end
+end
+ok("a following preview starts on that row too", previewed == "row 2", previewed)
+close_layer(80)
+
 -- A float starts from the statusline of the window it opens over: a statusline plugin that
 -- renders into each window (lualine) otherwise blanks the bar whenever a float takes focus.
 local code = api.nvim_get_current_win()
@@ -235,6 +273,8 @@ local focused = api.nvim_get_current_win()
 local bar = api.nvim_get_option_value("statusline", { win = focused })
 ok("a float starts with the statusline of the window it opened over", focused ~= code and bar == "CODE BAR", bar)
 close_layer(80)
+
+ok("every float is tagged as tuna's before it is entered", #entered_untagged == 0, entered_untagged)
 
 vim.fn.delete(dir, "rf")
 print(string.format("\n%d checks, %d failures", checks, failures))

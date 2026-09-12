@@ -453,6 +453,7 @@ end
 ---@param filepath string source file absolute path
 ---@param task tuna.CCTask
 ---@param cfg table resolved configuration for the target directory
+---@return string? template the template file the source was written from
 local function store_downloaded_task(filepath, task, cfg)
     local file_extension = vim.fn.fnamemodify(filepath, ":e")
 
@@ -503,6 +504,7 @@ local function store_downloaded_task(filepath, task, cfg)
     -- Persist the task's URL beside the source so `:Tuna submit` can find it even
     -- when the file carries no header marker.
     require("tuna.submit").write_task_store(vim.fn.fnamemodify(filepath, ":h"), task, cfg)
+    return template_file
 end
 
 ---Store downloaded testcases into an open buffer (the `testcases` download mode).
@@ -592,14 +594,14 @@ local function store_single_problem(task, cfg, finished)
             local local_cfg = config.load_local_config_and_extend(vim.fn.fnamemodify(filepath, ":h"))
 
             local function proceed()
-                store_downloaded_task(filepath, task, local_cfg)
+                local template = store_downloaded_task(filepath, task, local_cfg)
                 -- Recorded even when the problem isn't opened, so `:Tuna last problem`
                 -- takes you to what was just downloaded either way.
                 require("tuna.recent").record_problem(filepath, local_cfg)
                 if local_cfg.open_downloaded_problems then
                     vim.cmd.edit(vim.fn.fnameescape(filepath))
                     utils.place_cursor(local_cfg)
-                    require("tuna.temp").absorb(filepath, local_cfg)
+                    require("tuna.temp").absorb(filepath, local_cfg, template)
                 end
                 -- After the open, so an `lcd` lands on the window the problem was just
                 -- opened in. Like the contest case, independent of whether it was
@@ -694,7 +696,7 @@ local function store_contest(tasks, cfg, finished)
                         local first_problem
                         for _, t in ipairs(targets) do
                             if not (skip_existing and utils.file_exists(t.filepath)) then
-                                store_downloaded_task(t.filepath, t.task, local_cfg)
+                                t.template = store_downloaded_task(t.filepath, t.task, local_cfg)
                                 first_problem = first_problem or t.filepath
                                 -- Open the first problem actually written, so a partial
                                 -- download lands on something new rather than on a
@@ -704,7 +706,7 @@ local function store_contest(tasks, cfg, finished)
                                     utils.place_cursor(local_cfg)
                                     -- A `:Tuna temp` scratch waiting for this contest
                                     -- folds into the first problem opened.
-                                    require("tuna.temp").absorb(t.filepath, local_cfg)
+                                    require("tuna.temp").absorb(t.filepath, local_cfg, t.template)
                                     opened = true
                                 end
                             end
@@ -939,7 +941,7 @@ function M.start_downloading(mode, port, notify_on_start, notify_on_download, bu
     return nil
 end
 
--- The two boundary helpers, exposed for the local test suite. They are what keeps a
+-- The two boundary helpers, exposed for the test suite. They are what keeps a
 -- malformed request from reaching the pipeline at all, and calling them is the only way
 -- to check that without a live listener. Not part of the plugin's interface.
 ---Evaluate a configured path against a downloaded task, exactly as the download

@@ -373,8 +373,9 @@ opens the same catalogue in telescope.
 - `:Tuna last problem` / `:Tuna last contest` go back to what you were working on, across
   restarts, and move Neovim's directory there with you.
 - `:Tuna temp` opens a scratch solution for the minutes before a contest starts, when
-  there is no problem to download yet. `:Tuna download sync` then folds what you wrote
-  into the first problem it downloads, header and all.
+  there is no problem to download yet, asking which of your templates to start from. An
+  existing scratch first asks whether to resume it or restart. `:Tuna download sync` then
+  folds what you wrote into the first problem it downloads, header and all.
 - `:Tuna clean` removes files you created and never used — templated solutions still
   holding the template, scaffolds you never filled in — and then the directories they
   leave empty. Every deletion is confirmed one at a time, with the file in front of you.
