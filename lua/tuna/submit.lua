@@ -158,13 +158,7 @@ end
 ---@param path string
 ---@return string?
 local function file_hash(path)
-    local f = io.open(path, "rb")
-    if not f then
-        return nil
-    end
-    local content = f:read("*a")
-    f:close()
-    return vim.fn.sha256(content)
+    return utils.file_hash(path)
 end
 
 ---Whether a persisted verdict still describes the file on disk.
@@ -818,7 +812,7 @@ end
 ---@param bufnr integer
 ---The last submit verdict recorded for `path`, whoever recorded it and whether or not
 ---the file is open. Read straight from the sidecar rather than from `M.state`, so the
----dashboard can say how a problem went without opening it — and guarded by the same
+---menu can say how a problem went without opening it — and guarded by the same
 ---`still_current` rule `M.restore` applies, since a verdict describes the source it was
 ---submitted from and says nothing about one edited since.
 ---@param path string absolute solution path

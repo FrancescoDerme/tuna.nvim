@@ -115,6 +115,14 @@ settled(r)
 vim.system = real_system
 check_spawns("run", r.rc.exec)
 t.ok("both testcases ran", #spawns >= 3, #spawns) -- compile + two testcases
+vim.wait(1000, function()
+    return r.completed
+end, 20)
+local core = require("tuna.runner.core")
+local sidecar = require("tuna.sidecar")
+-- The stub prints nothing: testcase 0 is WRONG, and testcase 1 has no answer to judge.
+t.eq("a finished run saves its local verdict, over the testcases it judged", { core.local_verdict(dir .. "/sol.cpp") }, { 0, 1 })
+sidecar.set_entry(dir .. "/sol.cpp", "results", nil)
 
 --------------------------------------------------------------------------------
 -- No testcases at all: the program still runs, on empty stdin
@@ -161,6 +169,11 @@ local mr = require("tuna.multi").active[buf]
 settled(mr)
 vim.system = real_system
 t.ok("run all built a matrix", mr ~= nil and #mr.tcdata >= 2, mr and #mr.tcdata)
+vim.wait(1000, function()
+    return mr and mr.completed
+end, 20)
+t.eq("run all saves each solution's local verdict", { core.local_verdict(dir .. "/sol.cpp") }, { 0, 1 })
+sidecar.set_entry(dir .. "/sol.cpp", "results", nil)
 for _, row in ipairs(mr and mr.tcdata or {}) do
     if row.kind == "case" then
         t.eq("a run-all case row has a string stdin", type(row.stdin), "string")
@@ -344,6 +357,24 @@ if fui then
     vim.wait(500, function()
         return fr.completed
     end, 20)
+    -- Feed talks to the built program itself, which the stub never built: a script standing
+    -- in for it prints the answer.
+    local exec = fr.r.rc.exec
+    if exec:sub(1, 1) ~= "/" then
+        exec = dir .. "/" .. exec:gsub("^%./", "")
+    end
+    local had_exec = vim.uv.fs_stat(exec) ~= nil
+    if not had_exec then
+        vim.fn.writefile({ "#!/bin/sh", "echo 42" }, exec)
+        vim.fn.setfperm(exec, "rwxr-xr-x")
+        fr:run_testcases()
+        vim.wait(2000, function()
+            return fr.completed
+        end, 20)
+        t.eq("a finished feed session saves its local verdict", { core.local_verdict(dir .. "/sol.cpp") }, { 1, 1 })
+        vim.fn.delete(exec)
+        sidecar.set_entry(dir .. "/sol.cpp", "results", nil)
+    end
     local idx
     for i, row in ipairs(fr.tcdata) do
         if row.tcnum == 0 then

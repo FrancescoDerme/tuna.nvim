@@ -138,7 +138,7 @@ t.eq("www is not part of the name", s.judge_of("https://www.codechef.com/x"), "c
 -- The verdict a problem carries, read without opening it
 --------------------------------------------------------------------------------
 
--- The dashboard says how a problem went beside its name, for a problem that is not the
+-- The menu says how a problem went beside its name, for a problem that is not the
 -- one you are on and may not be open at all — so the verdict has to be readable from a
 -- path. Same source and same staleness rule as `M.restore`: a verdict describes the
 -- source it was submitted from, and says nothing about one edited since.

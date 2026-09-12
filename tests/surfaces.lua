@@ -226,9 +226,9 @@ conforms("widgets.panels")
 -- `conforms` cannot demand this of every widget — the chooser form has a row that is
 -- typed into — but a board of lists has nothing to type, and a scratch buffer is
 -- modifiable until told otherwise. Left that way, `open_float` skips `read_only` and the
--- dashboard becomes something you can edit, a keystroke away from `E21`.
+-- menu becomes something you can edit, a keystroke away from `E21`.
 for i, f in ipairs(floats()) do
-    ok(("widgets.panels [float %d]: list is read-only"):format(i), not vim.bo[f.buf].modifiable, "editable dashboard")
+    ok(("widgets.panels [float %d]: list is read-only"):format(i), not vim.bo[f.buf].modifiable, "editable menu")
 end
 close_layer(80)
 

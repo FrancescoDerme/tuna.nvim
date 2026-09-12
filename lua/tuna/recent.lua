@@ -45,13 +45,42 @@ local WRITE_DELAY = 1000
 ---@class tuna.RecentContest
 ---@field dir string absolute contest directory
 ---@field name string display name (the judge's contest name when known)
+---@field judge string? the judge it is on, as `judges.parse` names it
 ---@field problem string? the last problem visited inside it
 
----@type { problem: tuna.RecentProblem?, contest: tuna.RecentContest? }
+---@type { problems: tuna.RecentProblem[]?, contests: tuna.RecentContest[]? }
 M.state = {}
 
 local loaded = false
 local timer = nil
+
+---How many entries of a kind are remembered, from `recent.problems` or `recent.contests`.
+---@param kind "problems"|"contests"
+---@return integer
+local function capacity(kind)
+    local n = ((config.current_setup or config.defaults).recent or {})[kind]
+    return (type(n) == "number" and n >= 1) and math.floor(n) or 1
+end
+
+---Put `entry` at the top of a most-recent-first list, keeping the rest in order but dropping
+---its older copy (`same` says which) and any entry whose directory is gone, up to `limit`.
+---@param list table[]?
+---@param entry table
+---@param same fun(e: table): boolean
+---@param limit integer
+---@return table[]
+local function push_front(list, entry, same, limit)
+    local kept = { entry }
+    for _, e in ipairs(list or {}) do
+        if #kept >= limit then
+            break
+        end
+        if type(e) == "table" and e.dir and not same(e) and utils.directory_exists(e.dir) then
+            kept[#kept + 1] = e
+        end
+    end
+    return kept
+end
 
 --------------------------------------------------------------------------------
 -- Persistence
@@ -71,14 +100,23 @@ local function load()
     local ok, decoded = pcall(vim.json.decode, content)
     if ok and type(decoded) == "table" then
         M.state = decoded
+        -- A state file holding a single `problem` or `contest` is a history of one.
+        if type(M.state.problems) ~= "table" then
+            M.state.problems = type(M.state.problem) == "table" and { M.state.problem } or nil
+        end
+        if type(M.state.contests) ~= "table" then
+            M.state.contests = type(M.state.contest) == "table" and { M.state.contest } or nil
+        end
+        M.state.problem, M.state.contest = nil, nil
     end
 end
 
----What `:Tuna last problem` / `last contest` would return to, hydrated from disk if this
----session has not read it yet. Exported so the dashboard can *show* what those commands
+---The recent problems and contests, most recent first (the first of each being what
+---`:Tuna last problem` and `last contest` return to), hydrated from disk if this session has
+---not read them yet. Exported so the menu can *show* what those commands
 ---would do without doing it — the state itself is `M.state`, but reading that directly
 ---would see an empty table until something else happened to load it.
----@return { problem: table?, contest: table? }
+---@return { problems: tuna.RecentProblem[]?, contests: tuna.RecentContest[]? }
 function M.snapshot()
     load()
     return M.state
@@ -117,22 +155,30 @@ end
 -- Recording
 --------------------------------------------------------------------------------
 
----The `group` recorded beside a problem by `download` (its contest, as the judge
----names it), or nil when there is no sidecar.
+---The task recorded beside a problem by `download` (`url`, `group`, …), or nil when there is
+---no sidecar or it names no contest group.
 ---@param dir string problem directory
 ---@param cfg table
----@return string?
-local function sidecar_group(dir, cfg)
-    local file = require("tuna.sidecar").path(dir, cfg)
-    local content = utils.read_file(file)
+---@return table?
+local function sidecar_task(dir, cfg)
+    local content = utils.read_file(require("tuna.sidecar").path(dir, cfg))
     if not content then
         return nil
     end
     local ok, store = pcall(vim.json.decode, content)
     if ok and type(store) == "table" and type(store.group) == "string" and store.group ~= "" then
-        return store.group
+        return store
     end
     return nil
+end
+
+---The `group` recorded beside a problem (its contest, as the judge names it), or nil.
+---@param dir string problem directory
+---@param cfg table
+---@return string?
+local function sidecar_group(dir, cfg)
+    local task = sidecar_task(dir, cfg)
+    return task and task.group
 end
 
 -- How many sibling directories to look at when inferring a contest. A contest has
@@ -148,10 +194,11 @@ local SIBLING_LIMIT = 40
 ---@param cfg table
 ---@return tuna.RecentContest?
 local function infer_contest(dir, cfg)
-    local group = sidecar_group(dir, cfg)
-    if not group then
+    local task = sidecar_task(dir, cfg)
+    if not task then
         return nil
     end
+    local group = task.group
     local parent = vim.fs.dirname(dir)
     local self_name = vim.fn.fnamemodify(dir, ":t")
     local seen = 0
@@ -162,7 +209,9 @@ local function infer_contest(dir, cfg)
                 break
             end
             if sidecar_group(parent .. "/" .. name, cfg) == group then
-                return { dir = parent, name = group }
+                -- Named the way a download names it, so both show the same contest.
+                local judge, contest = require("tuna.judges").parse(task, cfg.judge_parsers)
+                return { dir = parent, name = contest, judge = judge }
             end
         end
     end
@@ -178,31 +227,37 @@ function M.record_problem(file, cfg)
     local dir = vim.fs.dirname(file)
     cfg = cfg or config.load_local_config_and_extend(dir)
 
-    local prev = M.state.problem
-    if prev and prev.file == file then
+    -- The remembered contest this problem is in, if any.
+    local contest
+    for _, c in ipairs(M.state.contests or {}) do
+        if c.dir and file:sub(1, #c.dir + 1) == c.dir .. "/" then
+            contest = c
+            break
+        end
+    end
+    local problems = M.state.problems or {}
+    if problems[1] and problems[1].file == file and (not contest or contest == M.state.contests[1]) then
         return -- already the current one; nothing to write
     end
-
-    M.state.problem = {
+    M.state.problems = push_front(problems, {
         file = file,
         dir = dir,
-        -- The directory names the problem in the usual one-directory-per-problem
-        -- layout ("B"); with the problems as plain files it is the file itself.
+        -- The directory names the problem in the usual one-directory-per-problem layout ("B").
         name = vim.fn.fnamemodify(dir, ":t"),
-    }
+    }, function(p)
+        return p.file == file
+    end, capacity("problems"))
 
-    -- Keep the contest in step: either this problem is inside the one we know, or a
-    -- sibling agrees on a contest group. Anything else leaves the contest alone —
-    -- opening an unrelated problem is no reason to forget the contest you are in.
-    local contest = M.state.contest
-    if contest and contest.dir and file:sub(1, #contest.dir + 1) == contest.dir .. "/" then
+    -- Keep the contests in step: a problem inside one we know brings it back to the top as
+    -- the contest being worked in, and otherwise a sibling agreeing on a contest group adds
+    -- one. Anything else leaves them alone: opening an unrelated problem is no reason to
+    -- forget a contest.
+    contest = contest or infer_contest(dir, cfg)
+    if contest then
         contest.problem = file
-    else
-        local found = infer_contest(dir, cfg)
-        if found then
-            found.problem = file
-            M.state.contest = found
-        end
+        M.state.contests = push_front(M.state.contests, contest, function(c)
+            return c.dir == contest.dir
+        end, capacity("contests"))
     end
     persist()
 end
@@ -211,14 +266,19 @@ end
 ---@param dir string
 ---@param name string? display name (the judge's contest name)
 ---@param problem string? the problem opened inside it
-function M.record_contest(dir, name, problem)
+---@param judge string? the judge it is on
+function M.record_contest(dir, name, problem, judge)
     load()
     dir = vim.fs.normalize(vim.fn.fnamemodify(dir, ":p")):gsub("/$", "")
-    M.state.contest = {
+    local entry = {
         dir = dir,
         name = (name and name ~= "" and name) or vim.fn.fnamemodify(dir, ":t"),
+        judge = judge,
         problem = problem and vim.fs.normalize(vim.fn.fnamemodify(problem, ":p")) or nil,
     }
+    M.state.contests = push_front(M.state.contests, entry, function(c)
+        return c.dir == dir
+    end, capacity("contests"))
     persist()
 end
 
@@ -285,7 +345,7 @@ function M.setup()
     api.nvim_create_autocmd("VimLeavePre", {
         group = group,
         callback = M.flush,
-        desc = "Persist Tuna's last problem/contest",
+        desc = "Persist Tuna's recent problems and contests",
     })
 end
 
@@ -336,9 +396,10 @@ local function pretty(path)
 end
 
 ---`:Tuna last problem` — reopen the solution last worked on and cd to its directory.
-function M.open_problem()
+---@param index integer? which recent problem, 1 (the default) being the most recent
+function M.open_problem(index)
     load()
-    local p = M.state.problem
+    local p = (M.state.problems or {})[index or 1]
     if not p then
         utils.notify("last: no problem visited yet, download one or open a solution with its testcases.", "WARN")
         return
@@ -398,10 +459,65 @@ local function contest_entry(contest, cfg)
     return nil
 end
 
+---Every problem of a contest, as the solution file it is judged by, in name order: each
+---runnable file directly in the contest directory (problems as plain files), then the
+---solution in each problem directory, `like` choosing among several there as `:Tuna next`
+---does. Helper files are never problems.
+---@param dir string contest directory
+---@param like string? a solution whose name to prefer inside problem directories
+---@param cfg table
+---@return string[]
+function M.contest_problems(dir, like, cfg)
+    local tools = require("tuna.tools")
+    local navigate = require("tuna.navigate")
+    local files, subdirs = {}, {}
+    for name, typ in vim.fs.dir(dir) do
+        if name:sub(1, 1) ~= "." then
+            local path = dir .. "/" .. name
+            if typ == "directory" then
+                subdirs[#subdirs + 1] = path
+            elseif not tools.is_helper(path, cfg) then
+                local ft = vim.filetype.match({ filename = path }) or ""
+                if ft ~= "" and (cfg.run_command or {})[ft] then
+                    files[#files + 1] = path
+                end
+            end
+        end
+    end
+    table.sort(files)
+    table.sort(subdirs)
+    for _, sub in ipairs(subdirs) do
+        local file = navigate.solution_in(sub, like, cfg)
+        if file then
+            files[#files + 1] = file
+        end
+    end
+    return files
+end
+
+---A contest's judge and name, as the menu shows them. An entry carrying no judge takes it
+---from the sidecar of the problem last visited in it, and when the entry is named by the raw
+---sidecar group, the contest name that group parses into as well.
+---@param contest tuna.RecentContest
+---@param cfg table
+---@return string? judge, string name
+function M.contest_label(contest, cfg)
+    if contest.judge or not contest.problem then
+        return contest.judge, contest.name
+    end
+    local task = sidecar_task(vim.fs.dirname(contest.problem), cfg)
+    if not task then
+        return nil, contest.name
+    end
+    local judge, parsed = require("tuna.judges").parse(task, cfg.judge_parsers)
+    return judge, contest.name == task.group and parsed or contest.name
+end
+
 ---`:Tuna last contest` — cd to the contest last worked on and open a problem in it.
-function M.open_contest()
+---@param index integer? which recent contest, 1 (the default) being the most recent
+function M.open_contest(index)
     load()
-    local c = M.state.contest
+    local c = (M.state.contests or {})[index or 1]
     if not c then
         utils.notify("last: no contest visited yet, get one with `:Tuna download contest`.", "WARN")
         return

@@ -10,7 +10,7 @@
 --     filetypes via a `FileType` autocmd, so they follow the user from one problem
 --     to the next, as an ftplugin would.
 --   * `keymaps.global`   — always-available maps set once at setup, regardless of
---     the current buffer (handy for buffer-agnostic actions like `dashboard`/`download_*`).
+--     the current buffer (handy for buffer-agnostic actions like `menu`/`download_*`).
 --
 -- Nothing is mapped unless the user opts in (both tables empty by default).
 
@@ -19,7 +19,7 @@ local M = {}
 -- Action name -> the Ex command a mapping runs (wrapped as `<cmd>… <cr>`). Keep
 -- these aligned with the :Tuna subcommand surface in commands.lua.
 M.actions = {
-    dashboard = "Tuna", -- bare :Tuna opens the dashboard
+    menu = "Tuna", -- bare :Tuna opens the menu
     run = "Tuna run",
     run_all = "Tuna run all",
     run_stress = "Tuna run stress",
@@ -56,7 +56,7 @@ M.actions = {
 --   <leader>tta  Add                <leader>tr  Run            <leader>tdt  Testcases
 --   <leader>tte  Edit               <leader>tu  Show ui        <leader>tdp  Problem
 --   <leader>ttd  Delete             <leader>ts  Submit         <leader>tdc  Contest
---   <leader>tn   Next problem       <leader>tm  Dashboard      <leader>tds  Sync
+--   <leader>tn   Next problem       <leader>tm  Menu           <leader>tds  Sync
 --   <leader>tp   Prev problem       <leader>tw  Temp
 --   <leader>tl   Library
 --   <leader>tgp  Problem            <leader>tgc Contest
@@ -68,7 +68,7 @@ M.actions = {
 --
 -- No group prefix is itself a mapping, so none of them costs a `timeoutlen` wait.
 -- `:Tuna clean` is deliberately absent: it is run once in a while, not during a
--- contest, and the dashboard is where it belongs (the `clean` action is still there
+-- contest, and the menu is where it belongs (the `clean` action is still there
 -- for anyone who wants to map it).
 --
 -- `buffer` maps are set on solution filetypes only; `global` ones are always there,
@@ -90,7 +90,7 @@ M.preset = {
         download_testcases = "dt",
     },
     global = {
-        dashboard = "m",
+        menu = "m",
         temp = "w", -- w for write-ahead: the scratch written before the problem exists
         download_sync = "ds",
         download_problem = "dp",

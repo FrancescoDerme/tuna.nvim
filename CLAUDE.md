@@ -13,7 +13,7 @@ competitest.nvim, not a port. Everything is reached through one user command,
 `:Tuna <subcommand>`: testcase storage and inline editing, compile/run with verdicts in a
 floating results UI, run modes (normal, run-all, stress, interactive), checkers, Competitive
 Companion downloads, submitting through external tools with the verdict in lualine, a snippet
-library, contest navigation, a scratch file, an unused-file cleaner, a dashboard and
+library, contest navigation, a scratch file, an unused-file cleaner, a menu and
 `:checkhealth tuna`.
 
 ## Rules
@@ -91,7 +91,7 @@ lua/tuna/
   recent.lua        :Tuna last problem / contest, cwd changes
   temp.lua          scratch solution, folded into a download by `download sync`
   scaffold.lua      helper-file starters (checker/gen/brute/interactor)
-  dashboard.lua     bare :Tuna board
+  menu.lua          bare :Tuna menu
   keymaps.lua       opt-in keymaps and preset
   health.lua        :checkhealth tuna
 doc/tuna.txt        vimdoc
@@ -177,7 +177,8 @@ is relative. Every configured path goes through these: compile/running directori
   - `url`/`name`/`group`/`mirror`/`mirror_at`, the downloaded task;
   - `submit = { [basename] = { state, text, url, hash } }`;
   - `run = { [basename] = { mode, source, checker, compare } }`, holding only what was forced
-    (older entries' `explicit = false` and `checker = false` still read).
+    (older entries' `explicit = false` and `checker = false` still read);
+  - `results = { [basename] = { passed, total, hash } }`, the local verdict (see Runners).
 
   Entries are keyed by **basename** because one folder can hold several problems or several
   attempts. Writers merge. `set_entry(…, nil)` removes an entry and deletes the file once it is
@@ -236,6 +237,12 @@ is relative. Every configured path goes through these: compile/running directori
   - `save_testcase(tcnum, input, expected, expect_empty_output)` writes, updates every row
     showing that testcase, clears `bare`, and re-runs, unless the runner is `preloaded`.
 - `effective_compare()` returns the per-buffer override, else the config.
+- **Local verdicts**: `save_local_verdict(solution, rows)` writes the sidecar's `results` when
+  a run finishes: normal `check_complete`, run-all completion and `settle_single`
+  (`save_local_verdicts`, each solution over its own case rows), and interactive session ends
+  (`save_buffer_verdict` skips a wiped buffer). Stress saves none. Only judged rows count
+  (CORRECT passes; WRONG, TIMEOUT, RET, SIG fail), so a run that judged nothing leaves the
+  entry alone. The source hash is recorded, and `local_verdict` answers only while it matches.
 
 **Normal runner (`runner/init.lua`)**
 - `runner.new(bufnr)` resolves compile/run commands, directories and the checker. Stress,
@@ -452,10 +459,19 @@ specific Vim error about a buffer the user never opened.
   via `'syntax'` not `'filetype'`, list capped at `MENU_LIST_SHARE` of the height); `notice`
   pane above the menu, outside the focus cycle; `row` to start the cursor on (a resize keeps
   the row it is on).
-- `panels`: side-by-side lists where `<CR>` acts on the focused list only (the dashboard).
-  `form`: stacked lists where `<CR>` submits every selection (clean). They differ in what
-  `<CR>` means, so they stay separate. `panels` has an optional header dropped when space is
-  short, lists sized to their own content, and explicitly unmodifiable buffers.
+- `panels`: lists in columns where `<CR>` acts on the focused list only (the `:Tuna` menu).
+  `form`: stacked lists where `<CR>` submits every selection (clean). A `panels` section may
+  carry `highlights`, byte-range spans drawn as extmarks in `tuna_panels`. They differ in what
+  `<CR>` means, so they stay separate. `panels` has an optional borderless header dropped when space is
+  short, lists sized to their own content, and explicitly unmodifiable buffers. A section's
+  `column` stacks it with others: a column is as wide as its widest list, its lists share the
+  band's rows smallest first (a list given fewer rows than items scrolls, with the user's
+  scrolloff), and `switch_window_keys` move by position (`neighbour`: within the stack, or to
+  the list level with this one in the next column). Tab/S-Tab walk the lists in order.
+  A section's `format(width)` lays it out for a content width (nil: its natural one) in place
+  of `items`, again on every build and resize. When the board is too wide, a column made
+  only of such sections gives up width first, down to `FIT_MIN`, before the whole board
+  scales, so those lists shorten what they show while other lists stay whole.
 - `form` custom rows are edited in place, with an inline virtual-text label (left gravity).
   `expr` maps allow editing only on that row, `guard_section` (`on_lines`) repairs other changes,
   and `validate` errors keep the form open.
@@ -541,7 +557,7 @@ specific Vim error about a buffer the user never opened.
   one. `restore` (on `BufReadPost`) reloads a verdict only while `still_current` holds (the
   hash matches; an entry carrying only an `mtime` is compared on that), and
   `arm_invalidation` drops shown and stored verdicts on the first edit. `verdict_for(path)`
-  reads a verdict without an open buffer (dashboard).
+  reads a verdict without an open buffer (the menu).
 - `persist_task` backfills the sidecar's `url`, and `name`/`group` from header markers when
   missing.
 
@@ -578,13 +594,22 @@ specific Vim error about a buffer the user never opened.
   `solution_in` prefers the same file name, then the same extension, then any runnable
   non-helper file. The ends of a contest warn instead of wrapping.
 - **`recent.lua`**: `stdpath("state")/tuna/recent.json`, written with a debounce and flushed on
-  `VimLeavePre`, read once per session.
+  `VimLeavePre`, read once per session. It holds `problems` and `contests`, most recent first
+  and capped by `recent.problems`/`recent.contests` (read from `config.current_setup` when
+  recording). `push_front` moves a recorded entry to the top and drops entries whose
+  directory is gone. A file holding a single `problem` or `contest` loads as a list of one.
+  `open_problem(i)`/`open_contest(i)` open any of them, 1 by default.
   - A `BufEnter` records a buffer only when it looks like a problem (runnable, non-helper,
     with testcases or a sidecar beside it).
-  - A contest is recorded by downloads, or inferred when a sibling problem shares the sidecar
-    `group`.
+  - Recording a problem inside a remembered contest moves that contest to the top with the
+    problem as its `problem`, even when the problem was already on top. A contest is
+    otherwise recorded by downloads, or inferred when a sibling problem shares the sidecar
+    `group`. Both store the `judge` and contest `judges.parse` gives, and `contest_label`
+    reads an entry without a judge from its last problem's sidecar (the parsed contest too,
+    when the entry is named by the raw group).
   - `change_dir` honours `cd_command` (`cd`/`tcd`/`lcd`/`false`). `snapshot()` returns the
-    loaded state for the dashboard.
+    loaded state for the menu. `contest_problems` lists a contest's solutions in both
+    layouts (plain files in the contest directory, and one per problem directory).
 - **`temp.lua`**: the scratch is a template minus its leading modifier header
   (`split_template`). A scratch with anything written in it (its loaded buffer, else its file)
   asks `Resume` / `Restart`, previewing what it holds. Restarting, and a missing or blank
@@ -597,13 +622,30 @@ specific Vim error about a buffer the user never opened.
   keeps as many header lines as the template the problem was written from (returned by
   `store_downloaded_task`), replaces the body with the scratch *buffer* lines, saves, moves the
   cursor, and deletes the scratch.
-- **`dashboard.lua`**: `widgets.panels` with a banner. Recent (from `recent.snapshot()`, status
-  from `submit.verdict_for`, else local results off a live runner, which are never persisted)
-  sits beside Commands; the commands that need a runnable buffer are dropped for other buffers.
-  Its Run entry runs the resolved mode without forcing it, and shows whether that mode is
-  forced; a forced mode adds an entry making it automatic, and the checker entry shows
-  automatic (with the file in use) or off.
-  Modules are required lazily.
+- **`menu.lua`**: the `:Tuna` menu, built on `widgets.panels` (not `widgets.menu`) with a
+  free-standing banner: Contests stacked over Problems in the left column (from
+  `recent.snapshot()`), the commands on the right under "Catch of the day".
+  - A problem's status (`entry_status`) is the judge's verdict from `submit.verdict_for` while
+    it is current, else `core.local_verdict`, else nothing: the judge's answer settles a
+    problem, so it always wins. A contest's (`contest_status`) counts current judge verdicts
+    over `recent.contest_problems`, like `2/5 ACCEPTED, 1 REJECTED`. Local verdicts don't
+    count there, because they exist only for problems that were run.
+  - Statuses are `{ text, highlight? }` segments in the results grid's words and colours
+    (`ACCEPTED`/`TunaCorrect`, `REJECTED`/`TunaWrong`, `PARTIAL`/`TunaWarning`, `PASSED` green
+    only when all pass). Counts are their own uncoloured segments, and a zero `ACCEPTED` is
+    `TunaDone`.
+  - `recent_layout(lists, width)` lays both lists out together: names on the left (a
+    contest's judge before its name), every status right of the longest name and flush right,
+    with byte-range `highlights`. The sections pass it as `format`, so a narrow column
+    shortens names with an ellipsis (`entry_name`: a contest's judge first) and never
+    statuses.
+    `problem_names` tells same-named problems apart by their contest directory (`2263/A`),
+    and two attempts in one directory by file. An empty list gets a `—` row whose `<CR>`
+    shows `recent`'s explanation.
+  - Commands that need a runnable buffer are dropped for other buffers. Run runs the resolved
+    mode without forcing it and shows whether it is forced; a forced mode adds an entry making
+    it automatic, and the checker entry shows automatic (with the file in use) or off.
+  - Modules are required lazily.
 - **`keymaps.lua`**: `M.actions` maps actions to `:Tuna` commands. `mappings` are buffer-local
   via a `FileType` autocmd over `keymaps.filetypes`; `global` are global. `setup()` can be
   re-run (it tracks `applied_global` and clears the augroup). `preset` expands under a prefix
@@ -619,12 +661,25 @@ specific Vim error about a buffer the user never opened.
 ## Testing
 
 - Run `tests/run.sh` (all files, one headless nvim each, non-zero exit on failure) or
-  `tests/run.sh runner`. Keep it passing: it ships with the plugin. Each file prints
+  `tests/run.sh runner`. Keep it passing: it ships with the plugin. Each file gets a throwaway
+  `XDG_STATE_HOME` (tests open problems, which tuna records into `recent.json` on exit) and
+  the plugin on the runtimepath by absolute path (a test may change directory). Each file prints
   `N checks, M failures` through `tests/harness.lua` (`ok`/`eq`/`has`/`report`).
 - Files:
   - `surfaces.lua`: conformance of every surface to the `surface.lua` contract, every float
     tagged before it is entered, and every `runner_ui.mappings` key still resolving to an
     action;
+  - `menu.lua`: the contest summary over both layouts, counting current judge verdicts
+    only, a problem's judge verdict beating its local one and either lapsing with an edit,
+    which rows a local verdict counts, statuses in the results grid's words and colours with
+    counts uncoloured, right of every name and flush right, names giving way to a narrow
+    width (a contest's judge first), and `panels` stacking, scrolling, moving focus and
+    squeezing a `format` column before the others, and the real menu's titles and
+    free-standing banner;
+  - `recent.lua`: both histories (default and configured sizes, move to top, a problem
+    bringing its contest back, contests named by their parsed judge and contest or from the
+    sidecar when no judge was recorded, dropping deleted directories, loading single-entry files,
+    opening any entry, what is written);
   - `modes.lua`: the helper and run-setting rule end to end: availability (files, configured
     paths and commands, missing ones), automatic choices, forcing and `auto`, forced settings
     giving way and coming back, old sidecar entries, runners refreshing the checker per run,
@@ -636,10 +691,11 @@ specific Vim error about a buffer the user never opened.
   - `runner.lua`: all four run modes with `vim.system` stubbed, covering what each child is
     handed, bare rows, save/answer semantics, disk drift and restore, path resolution, the
     swapfile contract, interactive grids and the conversation model, and the run gate
-    (`settle_results`), using real UI windows. `testcases.lua` also covers the
+    (`settle_results`), and the local verdict a finished normal, run-all and feed run saves,
+    using real UI windows. `testcases.lua` also covers the
     `single_file` rewrite keeping untouched testcases.
 - Modules expose file-local helpers to tests through `M._test` (`download`, `submit`, `clean`,
-  `interactive`, `temp`). They are not public interface.
+  `interactive`, `temp`, `menu`). They are not public interface.
 - **Mutation-check new tests**: break the rule each test describes and confirm it fails, and
   confirm a harmless edit doesn't.
 - The suite doesn't cover real processes, verdicts coming back, or most UI interaction. Verify

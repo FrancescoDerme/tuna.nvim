@@ -250,6 +250,7 @@ function InteractiveRunner:run_single(idx)
     self:with_helpers(function()
         self:run_one_session(idx, function()
             self.completed = true
+            core.save_buffer_verdict(self.bufnr, self.tcdata)
             self:update_ui(true)
         end)
     end)
@@ -883,6 +884,7 @@ function InteractiveRunner:run_sessions()
         k = k + 1
         if k > #order then
             self.completed = true
+            core.save_buffer_verdict(self.bufnr, self.tcdata)
             self:update_ui(true)
             return
         end

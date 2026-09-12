@@ -15,6 +15,8 @@
 --   submit = { [basename] = { state, text, url, hash } } — last verdict per file
 --   run    = { [basename] = { mode, source, checker, compare } }
 --                         — the per-problem run state of `tools.lua`
+--   results = { [basename] = { passed, total, hash } }
+--                         — the local verdict of the last finished run (`runner/core.lua`)
 --
 -- The two per-file sections are keyed by file *basename* rather than by directory,
 -- because a folder may hold several problems (`a.cpp`, `b.cpp`) as easily as one

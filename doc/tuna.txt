@@ -89,10 +89,13 @@ dependencies to install.
 ==============================================================================
 QUICK START                                                  *tuna-quickstart*
 
-Bare `:Tuna` opens the dashboard: on the left the contest and problem you were
-last working on, each with how it went; on the right everything tuna can do
-from the file you are in. Both columns are lists — `j`/`k` to move, `<CR>` to
-act, `<C-h>`/`<C-l>` or `<Tab>` to switch between them.
+Bare `:Tuna` opens the menu. On the left, stacked, are your recent
+contests, each with its judge and how many of its problems the judge
+accepted, and your recent problems, each with its verdict or how its last
+run went. On the right is everything tuna can do from the file you are in.
+All three are lists: `j`/`k` to move, `<CR>` to act, `<C-h>`/`<C-j>`/`<C-k>`/
+`<C-l>` or `<Tab>` to switch between them. A list too long for the screen
+scrolls, and names too wide for it are shortened, never the verdicts.
 
 The loop it exists to serve:
 
@@ -121,7 +124,7 @@ COMMANDS                                                       *tuna-commands*
 Everything is one `:Tuna` subcommand, with tab-completion at every position. A
 lowercase `:tuna` expands to it.
                                                                        *:Tuna*
-:Tuna                   Open the dashboard. `:Tuna dashboard` is the same.
+:Tuna                   Open the menu. `:Tuna menu` is the same.
 
 :Tuna run [mode] [n...]
                         Compile and run. An optional leading mode keyword,
@@ -432,6 +435,14 @@ only what tuna opened: any solution buffer whose directory holds testcases or
 a downloaded-problem sidecar counts, so opening one by hand counts too, while
 a template or a scratch never overwrites it.
 
+The menu lists the last `recent.contests` contests and `recent.problems`
+problems (three and five by default), most recent first, and `<CR>` on one
+goes there. A problem's status is the judge's verdict while that still
+describes the source. Otherwise it is how the last finished run went, like
+`3/4 PASSED`, saved in the problem's `.tuna.json` and shown only while the
+source is the one that ran. Only testcases with a verdict count: one with no
+expected output, stopped, or unable to start is left out.
+
 `:Tuna temp` opens a scratch solution for the minutes before a contest starts,
 when there is no problem to download yet. It asks which template to start
 from, per-judge templates included, and the scratch is that template minus
@@ -640,8 +651,8 @@ TESTCASE OPTIONS                                       *tuna-config-testcases*
 
 `problem_store_file`
         The per-problem sidecar, default `".tuna.json"`: the
-        downloaded task, the last submit verdict, and how the problem
-        is run.
+        downloaded task, the last submit verdict, the last run's result,
+        and how the problem is run.
 ------------------------------------------------------------------------------
 DOWNLOAD OPTIONS                                        *tuna-config-download*
 
@@ -768,7 +779,7 @@ With `preset = "<leader>t"` you get `<leader>tr` run, `<leader>tu` results,
 `<leader>ts` submit, `<leader>tn` and `<leader>tp` problem navigation,
 `<leader>tta`, `tte` and `ttd` for testcases, `<leader>tdp` and `tdc` for
 downloads, `<leader>tgp` and `tgc` back to the last problem or contest, and
-`<leader>tm` the dashboard.
+`<leader>tm` the menu.
 
 ------------------------------------------------------------------------------
 APPEARANCE                                            *tuna-config-appearance*
@@ -841,8 +852,13 @@ LIBRARY, SCRATCH, CLEAN                                     *tuna-config-misc*
 `temp.download`
         What `:Tuna download sync` downloads. Default `"contest"`.
 
-`dashboard.header`
+`menu.header`
         Your own banner lines, or `false` for none.
+
+`recent.problems`
+`recent.contests`
+        How many recent problems and contests `:Tuna last` and the
+        menu remember. Default `5` and `3`.
 
 `clean.min_width`
 `clean.max_width`
@@ -1005,8 +1021,6 @@ Five things tuna does not do, left out deliberately rather than overlooked.
   - A library that says what a snippet is: a description and a complexity
     beside each entry, so the catalogue reads as a reference and `:Tuna lib
     search` has something to match on between a name and a whole body.
-  - Going back further than one problem and one contest. `:Tuna last` returns
-    to the most recent of each; a bounded history is a different thing.
 
 ==============================================================================
 HEALTH CHECK                                                     *tuna-health*

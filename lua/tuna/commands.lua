@@ -488,7 +488,7 @@ local function compare_token(path)
 end
 
 ---Advance the per-buffer compare method to the next one in `COMPARE_CYCLE` (used by
----the dashboard, where a click cycles rather than takes an argument).
+---the menu, where a click cycles rather than takes an argument).
 ---@param bufnr integer
 function M.cycle_compare(bufnr)
     local path = api.nvim_buf_get_name(bufnr)
@@ -718,8 +718,8 @@ M.subcommands = {
     temp = function()
         require("tuna.temp").start(api.nvim_get_current_buf())
     end,
-    dashboard = function()
-        require("tuna.dashboard").open(api.nvim_get_current_buf())
+    menu = function()
+        require("tuna.menu").open(api.nvim_get_current_buf())
     end,
 }
 

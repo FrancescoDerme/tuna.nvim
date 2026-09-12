@@ -724,8 +724,8 @@ local function store_contest(tasks, cfg, finished)
                         -- This is the one moment the contest directory is known for
                         -- certain, so record it for `:Tuna last contest` — whether or
                         -- not a problem was opened.
-                        local _, contest_name = judges.parse(tasks[1], local_cfg.judge_parsers)
-                        require("tuna.recent").record_contest(directory, contest_name, first_problem)
+                        local judge, contest_name = judges.parse(tasks[1], local_cfg.judge_parsers)
+                        require("tuna.recent").record_contest(directory, contest_name, first_problem, judge)
                         if finished then
                             finished()
                         end

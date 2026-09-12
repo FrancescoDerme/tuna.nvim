@@ -46,6 +46,68 @@ function M.answer(text)
     return text
 end
 
+---Whether a row's status is a verdict on the solution, what a local verdict counts. A
+---testcase with no answer (`DONE`), one stopped (`KILLED`) or one that could not start
+---(`FAILED`) says nothing about whether the solution is right.
+---@param status string
+---@return boolean
+local function judged(status)
+    return status == "CORRECT"
+        or status == "WRONG"
+        or status == "TIMEOUT"
+        or status:match("^RET ") ~= nil
+        or status:match("^SIG ") ~= nil
+end
+
+---Save how a finished run of `solution` went over `rows`: how many judged testcases passed,
+---with the hash of the source they ran, so the menu can say how a problem went until a
+---judge says otherwise, and only while the source is unchanged. A run that judged nothing
+---(every testcase without an answer) leaves what was saved alone.
+---@param solution string absolute path of the solution
+---@param rows table[]
+function M.save_local_verdict(solution, rows)
+    if not solution or solution == "" then
+        return
+    end
+    local passed, total = 0, 0
+    for _, tc in ipairs(rows) do
+        if type(tc.tcnum) == "number" and type(tc.status) == "string" and judged(tc.status) then
+            total = total + 1
+            if tc.status == "CORRECT" then
+                passed = passed + 1
+            end
+        end
+    end
+    local hash = total > 0 and require("tuna.utils").file_hash(solution)
+    if hash then
+        require("tuna.sidecar").set_entry(solution, "results", { passed = passed, total = total, hash = hash })
+    end
+end
+
+---`save_local_verdict` for the solution a runner's buffer holds, when that buffer is still
+---there: a run can settle after the buffer is wiped, and its file is then unknown.
+---@param bufnr integer
+---@param rows table[]
+function M.save_buffer_verdict(bufnr, rows)
+    if vim.api.nvim_buf_is_valid(bufnr) then
+        M.save_local_verdict(vim.api.nvim_buf_get_name(bufnr), rows)
+    end
+end
+
+---How the last finished run of `solution` went, while its source is still the one that ran.
+---@param solution string absolute path of the solution
+---@return integer? passed, integer? total
+function M.local_verdict(solution)
+    local entry = require("tuna.sidecar").get_entry(solution, "results")
+    if not (entry and type(entry.passed) == "number" and type(entry.total) == "number") then
+        return nil
+    end
+    if entry.hash ~= require("tuna.utils").file_hash(solution) then
+        return nil
+    end
+    return entry.passed, entry.total
+end
+
 ---Create a subclass table chained to `RunnerCore` (so instances resolve
 ---subclass method → base method).
 ---@return table

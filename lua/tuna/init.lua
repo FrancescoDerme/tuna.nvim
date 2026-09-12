@@ -98,7 +98,7 @@ function M.setup(user_opts)
 
     vim.api.nvim_create_user_command("Tuna", function(opts)
         if #opts.fargs == 0 then
-            require("tuna.dashboard").open() -- bare `:Tuna` opens the dashboard
+            require("tuna.menu").open() -- bare `:Tuna` opens the menu
             return
         end
         require("tuna.commands").execute(opts.fargs)

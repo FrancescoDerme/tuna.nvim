@@ -6,7 +6,7 @@
 --   * `input`  — a single-line prompt (used by download to confirm paths)
 --   * `editor` — side-by-side input/output buffers for editing a testcase
 --   * `picker` — a list to choose a testcase from
---   * `menu`   — a single-choice chooser (dashboard, confirmations; optional
+--   * `menu`   — a single-choice chooser (confirmations, templates; optional
 --                read-only preview pane beneath it)
 --   * `form`   — several single-choice lists visible at once (clean's directory,
 --                depth and match-threshold choosers)
@@ -654,7 +654,7 @@ end
 ---@field notice_buf integer?
 local menu = { ui_visible = false }
 
----Open a generic single-choice menu (drives the `:Tuna` dashboard). `on_choice`
+---Open a generic single-choice menu. `on_choice`
 ---receives the 1-based index of the picked item. An optional `preview` renders a
 ---read-only pane *under* the menu (used by `:Tuna clean` to show the file about to
 ---be deleted): scroll it with `<C-d>`/`<C-u>`, or step into it with the pane-switch
@@ -1403,11 +1403,41 @@ end
 
 ---@class tuna.PanelSection
 ---@field title string border title
----@field items string[] rows, pre-formatted by the caller
+---@field items string[]? rows, pre-formatted by the caller
+---@field format (fun(width: integer?): string[], table[]?)? rows (and `highlights`) laid out for
+---a content width, nil meaning as wide as they need, in place of `items`: called again for
+---whatever width the list ends up with, so a narrow editor shortens rows instead of cutting
+---them off
+---@field column integer? the column to stack the list in, left to right (default: a column of
+---its own)
+---@field highlights { row: integer, col: integer, end_col: integer, group: string }[]? spans to
+---colour: `row` is 1-based, `col`/`end_col` byte columns, `end_col` exclusive
+
+local panels_ns = api.nvim_create_namespace("tuna_panels")
+
+-- Blank rows between the free-standing banner and the lists under it.
+local HEAD_GAP = 1
+
+-- The narrowest a column of self-laying-out lists is squeezed to before the board scales.
+local FIT_MIN = 24
+
+---Give a list its rows for a content `width` (nil: as wide as they need), from its `format`
+---when it has one. An empty list still gets one blank row to stand on.
+---@param sec table a `panels.sections` entry
+---@param width integer?
+local function lay_out(sec, width)
+    if sec.format then
+        sec.items, sec.highlights = sec.format(width)
+    end
+    if #sec.items == 0 then
+        sec.items = { "" }
+    end
+end
 
 ---@class tuna.PanelsWidget
 ---@field ui_visible boolean
----@field sections { title: string, items: string[], sel: integer }[]
+---@field sections { title: string, items: string[], format: function?, column: integer, sel: integer }[]
+---@field place { column: integer, top: integer }[] where each list was drawn, for moving focus
 ---@field wins integer[]
 ---@field bufs integer[]
 ---@field header string[]? banner rows drawn above the lists
@@ -1421,9 +1451,9 @@ end
 ---@field skip_close boolean swallow WinClosed events during a resize/teardown
 local panels = { ui_visible = false, sections = {}, wins = {}, bufs = {}, focused = 1 }
 
----A row of single-choice lists, all visible, one focused. `<CR>` chooses from the
----focused list only. Call with `sections == nil` to rebuild on `VimResized`, keeping
----each list's selection and which one had focus.
+---Single-choice lists in columns, a column stacking several top to bottom, all visible and
+---one focused. `<CR>` chooses from the focused list only. Call with `sections == nil` to
+---rebuild on `VimResized`, keeping each list's selection and which one had focus.
 ---@param sections tuna.PanelSection[]? nil to resize
 ---@param title string? unused today, kept for symmetry with the other widgets
 ---@param on_choice fun(section: integer, item: integer)?
@@ -1462,7 +1492,10 @@ function M.panels(sections, title, on_choice, restore_winid, on_close, header)
         for _, sec in ipairs(sections) do
             panels.sections[#panels.sections + 1] = {
                 title = sec.title,
-                items = #sec.items > 0 and sec.items or { "" },
+                items = sec.items or {},
+                highlights = sec.highlights,
+                format = sec.format,
+                column = sec.column or #panels.sections + 1,
                 sel = 1,
             }
         end
@@ -1478,36 +1511,67 @@ function M.panels(sections, title, on_choice, restore_winid, on_close, header)
     local vim_width = utils.get_ui_size()
     local n = #panels.sections
 
-    -- Each list is as wide as its own content wants; the board is then scaled down as a
-    -- whole if the editor cannot hold it, so a long command name never squeezes the
-    -- column beside it out of existence.
-    local widths, total = {}, 0
+    -- Columns left to right, each a stack of lists top to bottom.
+    local col_ids, stacks = {}, {}
     for i, sec in ipairs(panels.sections) do
-        local w = #sec.title + 4
-        for _, it in ipairs(sec.items) do
-            w = math.max(w, api.nvim_strwidth(it))
+        if not stacks[sec.column] then
+            stacks[sec.column] = {}
+            col_ids[#col_ids + 1] = sec.column
         end
-        widths[i] = w + 2
-        total = total + widths[i] + PANE_STEP
+        table.insert(stacks[sec.column], i)
+    end
+    table.sort(col_ids)
+
+    -- A column is as wide as its widest list, so a stack reads as one column. When the editor
+    -- cannot hold the board, a column whose lists all lay themselves out (`format`) gives up
+    -- width first, down to FIT_MIN: those lists shorten what they show and keep what matters,
+    -- where any other list would only be cut off. Whatever is still too wide is then scaled
+    -- down as a whole, so a long command name never squeezes the column beside it out of
+    -- existence.
+    local widths, fits, total = {}, {}, 0
+    for c, id in ipairs(col_ids) do
+        local w = 0
+        fits[c] = true
+        for _, i in ipairs(stacks[id]) do
+            local sec = panels.sections[i]
+            lay_out(sec, nil)
+            fits[c] = fits[c] and sec.format ~= nil
+            w = math.max(w, #sec.title + 4)
+            for _, it in ipairs(sec.items) do
+                w = math.max(w, api.nvim_strwidth(it))
+            end
+        end
+        widths[c] = w + 2
+        total = total + widths[c] + PANE_STEP
     end
     local room = vim_width - 2
+    for c = 1, #col_ids do
+        if total > room and fits[c] then
+            local give = math.min(total - room, math.max(0, widths[c] - FIT_MIN))
+            widths[c] = widths[c] - give
+            total = total - give
+        end
+    end
     if total > room then
         local scale = room / total
         total = 0
-        for i = 1, n do
-            widths[i] = math.max(6, math.floor(widths[i] * scale))
-            total = total + widths[i] + PANE_STEP
+        for c = 1, #col_ids do
+            widths[c] = math.max(6, math.floor(widths[c] * scale))
+            total = total + widths[c] + PANE_STEP
+        end
+    end
+    for c, id in ipairs(col_ids) do
+        for _, i in ipairs(stacks[id]) do
+            if panels.sections[i].format then
+                lay_out(panels.sections[i], widths[c] - 2)
+            end
         end
     end
 
-    -- Each list is as tall as its own content, bounded by the band, and they are aligned
-    -- at the top. A shared height would be the tidier-sounding choice and is the wrong
-    -- one: these lists are unrelated, so a two-row column beside a twenty-row one would
-    -- be drawn twenty rows tall around two lines of text.
     local band_row, band_h = utils.float_band()
 
     -- The banner is an ornament, so it is the first thing given up: it is drawn only if
-    -- the lists still fit under it, and never at their expense. A dashboard that will
+    -- the lists still fit under it, and never at their expense. A menu that will
     -- not open on a small terminal would be a worse trade than one without a title.
     local head = panels.header
     local head_w, head_h = 0, 0
@@ -1516,34 +1580,55 @@ function M.panels(sections, title, on_choice, restore_winid, on_close, header)
             head_w = math.max(head_w, api.nvim_strwidth(l))
         end
         head_h = #head
+        local deepest = 1
+        for _, id in ipairs(col_ids) do
+            deepest = math.max(deepest, #stacks[id])
+        end
         -- Room for the banner *and* at least a few rows of every list under it.
-        if head_w + 2 > vim_width or band_h < head_h + PANE_STEP * 2 + 3 then
+        if head_w + 2 > vim_width or band_h < head_h + HEAD_GAP + (PANE_STEP + 3) * deepest then
             head, head_w, head_h = nil, 0, 0
         end
     else
         head = nil
     end
 
-    local cap = math.max(1, band_h - PANE_STEP - (head and head_h + PANE_STEP or 0))
-    local heights, tallest = {}, 1
-    for i, sec in ipairs(panels.sections) do
-        heights[i] = math.max(1, math.min(#sec.items, cap))
-        tallest = math.max(tallest, heights[i])
+    -- Each list is as tall as its own content, and the columns are aligned at the top: a
+    -- shared height would draw a two-row list twenty rows tall beside a twenty-row one. A
+    -- column's lists share the rows the band leaves, handed out smallest need first so a
+    -- short list keeps all its rows, and a list given fewer rows than it has items scrolls.
+    local avail = band_h - (head and head_h + HEAD_GAP or 0)
+    local heights, tallest = {}, 0
+    for _, id in ipairs(col_ids) do
+        local stack = stacks[id]
+        local left = avail - PANE_STEP * #stack
+        local by_need = vim.list_slice(stack)
+        table.sort(by_need, function(a, b)
+            return #panels.sections[a].items < #panels.sections[b].items
+        end)
+        for k, i in ipairs(by_need) do
+            local share = math.floor(left / (#by_need - k + 1))
+            heights[i] = math.max(1, math.min(#panels.sections[i].items, share))
+            left = left - heights[i]
+        end
+        local footprint = 0
+        for _, i in ipairs(stack) do
+            footprint = footprint + heights[i] + PANE_STEP
+        end
+        tallest = math.max(tallest, footprint)
     end
-    local board_h = tallest + PANE_STEP + (head and head_h + PANE_STEP or 0)
+    local board_h = tallest + (head and head_h + HEAD_GAP or 0)
     local row = band_row + math.max(0, math.floor((band_h - board_h) / 2))
     -- The banner spans the wider of itself and the lists, everything centred on one
     -- axis, so the board reads as a single object however the two compare.
-    local board_w = math.max(total, head and head_w + PANE_STEP or 0)
+    local board_w = math.max(total, head and head_w or 0)
     local col = math.max(0, math.floor((vim_width - board_w) / 2))
 
     panels.header_win, panels.header_buf = nil, nil
     if head then
         local hb = api.nvim_create_buf(false, true)
-        -- Centred by padding the lines, not by narrowing the float: the banner spans the
-        -- board so its frame lines up with the lists under it, and a block of art sitting
-        -- against the left edge of a wide frame reads as a mistake.
-        local inner = board_w - PANE_STEP
+        -- Centred by padding the lines across the board's width, so the art sits over the
+        -- middle of the lists whichever of the two is wider.
+        local inner = board_w
         local pad = string.rep(" ", math.max(0, math.floor((inner - head_w) / 2)))
         local centred = {}
         for i, l in ipairs(head) do
@@ -1552,45 +1637,56 @@ function M.panels(sections, title, on_choice, restore_winid, on_close, header)
         api.nvim_buf_set_lines(hb, 0, -1, false, centred)
         vim.bo[hb].modifiable = false
         panels.header_buf = hb
+        -- Free-standing: no border and the editor's own background, so the wordmark reads
+        -- as a title over the board rather than as one more box in it.
         panels.header_win = open_float(hb, false, {
-            width = board_w - PANE_STEP,
+            width = board_w,
             height = head_h,
             row = row,
             col = col,
-            border = cfg.floating_border,
-            border_highlight = cfg.floating_border_highlight,
+            border = "none",
         })
-        row = row + head_h + PANE_STEP
+        local hl = vim.wo[panels.header_win].winhighlight
+        vim.wo[panels.header_win].winhighlight = (hl ~= "" and hl .. "," or "") .. "NormalFloat:Normal"
+        row = row + head_h + HEAD_GAP
     end
     -- The lists are centred under the banner rather than left-aligned with it.
     col = math.max(0, math.floor((vim_width - total) / 2))
 
     panels.skip_close = false -- fresh windows: a real close should count again
-    panels.wins, panels.bufs = {}, {}
-    for i, sec in ipairs(panels.sections) do
-        local b = api.nvim_create_buf(false, true)
-        api.nvim_buf_set_lines(b, 0, -1, false, sec.items)
-        vim.bo[b].modifiable = false
-        local w = open_float(b, i == panels.focused, {
-            width = widths[i],
-            height = heights[i],
-            row = row,
-            col = col,
-            border = cfg.floating_border,
-            border_highlight = cfg.floating_border_highlight,
-            title = " " .. sec.title .. " ",
-            -- A list that has to scroll is read like a buffer, so the user's own
-            -- scrolloff applies; one that fits keeps the pin so its edge rows stay
-            -- reachable (the same rule the menu follows).
-            keep_scrolloff = heights[i] < #sec.items,
-        })
-        -- setlocal, so focusing a list does not leak cursorline's global default into
-        -- the user's editor (see the menu note).
-        api.nvim_set_option_value("cursorline", true, { scope = "local", win = w })
-        pcall(api.nvim_win_set_cursor, w, { math.min(sec.sel, #sec.items), 0 })
-        panels.wins[i] = w
-        panels.bufs[i] = b
-        col = col + widths[i] + PANE_STEP -- the next list's border starts where this one ends
+    panels.wins, panels.bufs, panels.place = {}, {}, {}
+    for c, id in ipairs(col_ids) do
+        local top = row
+        for _, i in ipairs(stacks[id]) do
+            local sec = panels.sections[i]
+            local b = api.nvim_create_buf(false, true)
+            api.nvim_buf_set_lines(b, 0, -1, false, sec.items)
+            for _, h in ipairs(sec.highlights or {}) do
+                pcall(api.nvim_buf_set_extmark, b, panels_ns, h.row - 1, h.col, { end_col = h.end_col, hl_group = h.group })
+            end
+            vim.bo[b].modifiable = false
+            local w = open_float(b, i == panels.focused, {
+                width = widths[c],
+                height = heights[i],
+                row = top,
+                col = col,
+                border = cfg.floating_border,
+                border_highlight = cfg.floating_border_highlight,
+                title = " " .. sec.title .. " ",
+                -- A list that has to scroll is read like a buffer, so the user's own
+                -- scrolloff applies; one that fits keeps the pin so its edge rows stay
+                -- reachable (the same rule the menu follows).
+                keep_scrolloff = heights[i] < #sec.items,
+            })
+            -- setlocal, so focusing a list does not leak cursorline's global default into
+            -- the user's editor (see the menu note).
+            api.nvim_set_option_value("cursorline", true, { scope = "local", win = w })
+            pcall(api.nvim_win_set_cursor, w, { math.min(sec.sel, #sec.items), 0 })
+            panels.wins[i], panels.bufs[i] = w, b
+            panels.place[i] = { column = c, top = top }
+            top = top + heights[i] + PANE_STEP -- the next list's border starts where this one ends
+        end
+        col = col + widths[c] + PANE_STEP
     end
     panels.ui_visible = true
 
@@ -1629,25 +1725,46 @@ function M.panels(sections, title, on_choice, restore_winid, on_close, header)
         end
     end
 
-    ---Move focus by `delta`, wrapping. Focus is the active window (cursor + cursorline),
-    ---as everywhere else in the plugin, so this only moves the cursor.
-    local function refocus(delta)
-        panels.focused = (panels.focused - 1 + delta) % n + 1
-        if api.nvim_win_is_valid(panels.wins[panels.focused]) then
-            api.nvim_set_current_win(panels.wins[panels.focused])
+    ---Focus list `j` (nothing happens for nil). Focus is the active window (cursor +
+    ---cursorline), as everywhere else in the plugin, so this only moves the cursor.
+    local function focus(j)
+        if j and api.nvim_win_is_valid(panels.wins[j]) then
+            panels.focused = j
+            api.nvim_set_current_win(panels.wins[j])
         end
     end
 
-    -- The plugin-wide pane keys, taken as { left, down, up, right }: right/down move to
-    -- the next list, left/up to the previous. Tab/S-Tab are the portable fallback.
+    ---The list a directional key lands on from list `i`: the one above or below in the same
+    ---column, or in the neighbouring column the lowest one starting at or above this one's
+    ---top (its first otherwise), which is the list beside it. Nil at the board's edge.
+    local function neighbour(i, dcol, drow)
+        local at = panels.place[i]
+        local stack = stacks[col_ids[at.column]]
+        if drow ~= 0 then
+            for k, j in ipairs(stack) do
+                if j == i then
+                    return stack[k + drow]
+                end
+            end
+            return nil
+        end
+        local id = col_ids[at.column + dcol]
+        if not id then
+            return nil
+        end
+        local beside = stacks[id][1]
+        for _, j in ipairs(stacks[id]) do
+            if panels.place[j].top <= at.top then
+                beside = j
+            end
+        end
+        return beside
+    end
+
+    -- The plugin-wide pane keys, taken as { left, down, up, right }, move by position, the
+    -- way they move between the results UI's panes. Tab/S-Tab walk the lists in order.
     local sw = cfg.switch_window_keys or {}
-    local next_keys, prev_keys = { "<Tab>" }, { "<S-Tab>" }
-    for _, k in ipairs({ sw[4], sw[2] }) do
-        next_keys[#next_keys + 1] = k
-    end
-    for _, k in ipairs({ sw[1], sw[3] }) do
-        prev_keys[#prev_keys + 1] = k
-    end
+    local moves = { { -1, 0 }, { 0, 1 }, { 0, -1 }, { 1, 0 } }
 
     for i, b in ipairs(panels.bufs) do
         local sec = panels.sections[i]
@@ -1657,12 +1774,19 @@ function M.panels(sections, title, on_choice, restore_winid, on_close, header)
         map_keys({ "k", "<up>" }, "n", b, function()
             move_cursor(panels.wins[i], #sec.items, -1)
         end)
-        map_keys(next_keys, "n", b, function()
-            refocus(1)
+        map_keys({ "<Tab>" }, "n", b, function()
+            focus((i % n) + 1)
         end)
-        map_keys(prev_keys, "n", b, function()
-            refocus(-1)
+        map_keys({ "<S-Tab>" }, "n", b, function()
+            focus(((i - 2) % n) + 1)
         end)
+        for k, move in ipairs(moves) do
+            if sw[k] then
+                map_keys({ sw[k] }, "n", b, function()
+                    focus(neighbour(i, move[1], move[2]))
+                end)
+            end
+        end
         map_keys(cfg.picker_ui.mappings.submit, "n", b, function()
             choose(i)
         end)

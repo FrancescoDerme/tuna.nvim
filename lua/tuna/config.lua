@@ -262,12 +262,19 @@ M.defaults = {
     -- Three ways in: `:Tuna lib` (file, then snippet), `:Tuna lib snippet` (straight
     -- from every snippet) and `:Tuna lib search` (the same catalogue in telescope,
     -- matching names first and code second — needs telescope, the others do not).
-    -- dashboard (bare `:Tuna`)
-    dashboard = {
+    -- menu (bare `:Tuna`)
+    menu = {
         -- The banner across the top: a list of lines to draw instead of the shipped
         -- wordmark, or `false` for none. It is an ornament and is dropped automatically
         -- when the editor is too small to hold it and the lists both.
         header = nil,
+    },
+
+    -- `:Tuna last` and the menu: how many problems and contests are remembered, most
+    -- recent first. The menu lists them all, and a list too long to fit scrolls.
+    recent = {
+        problems = 5,
+        contests = 3,
     },
 
     library = {
@@ -451,7 +458,7 @@ M.defaults = {
     -- `preset` takes the whole ready-made set under a prefix of your choosing:
     --   keymaps = { preset = "<leader>t" }
     -- giving <leader>tr run, <leader>tu show ui, <leader>tt{a,e,d} testcases,
-    -- <leader>ts submit, <leader>tn/tp next/previous problem, <leader>tm dashboard,
+    -- <leader>ts submit, <leader>tn/tp next/previous problem, <leader>tm menu,
     -- <leader>tw scratch + <leader>tds sync, and <leader>td{t,p,c} download
     -- testcases/problem/contest (see keymaps.lua `M.preset`).
     --
@@ -462,7 +469,7 @@ M.defaults = {
     --   * `mappings` — buffer-local, set on solution files (filetypes in `filetypes`)
     --     via a FileType autocmd, so they follow you from one solution to the next.
     --   * `global`   — always available, set once regardless of the current buffer
-    --     (for what you reach for when no solution is open: download, dashboard, …).
+    --     (for what you reach for when no solution is open: download, menu, …).
     -- Example:
     --   keymaps = {
     --     preset   = "<leader>t",

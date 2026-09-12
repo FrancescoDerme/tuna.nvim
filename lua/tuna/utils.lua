@@ -308,6 +308,20 @@ function M.delete_file(path)
     return vim.uv.fs_unlink(path) ~= nil
 end
 
+---The SHA-256 of a file's contents, or nil when it can't be read. What a saved verdict is
+---recorded against, so it describes exactly the source it was about.
+---@param path string
+---@return string?
+function M.file_hash(path)
+    local f = io.open(path, "rb")
+    if not f then
+        return nil
+    end
+    local content = f:read("*a")
+    f:close()
+    return vim.fn.sha256(content)
+end
+
 ---Name one of the plugin's scratch buffers.
 ---
 ---Every tuna window is a throwaway buffer, and a statusline shows `%:t` — the *last*

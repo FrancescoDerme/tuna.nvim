@@ -453,6 +453,7 @@ function MultiRunner:next_case_lane()
         self:next_case_lane()
         if self.qpos >= #self.queue and self.running_cases == 0 and not self.completed then
             self.completed = true
+            self:save_local_verdicts()
             self:update_ui(true)
         end
     end)
@@ -512,6 +513,18 @@ end
 function MultiRunner:settle_single()
     if (self.running_cases or 0) == 0 and (self.qpos or 0) >= #(self.queue or {}) then
         self.completed = true
+        self:save_local_verdicts()
+    end
+end
+
+---Save each solution's local verdict over its own testcase rows (`core.save_local_verdict`).
+function MultiRunner:save_local_verdicts()
+    for _, sol in ipairs(self.files or {}) do
+        local rows = {}
+        for _, ci in ipairs(sol.case_idxs or {}) do
+            rows[#rows + 1] = self.tcdata[ci]
+        end
+        core.save_local_verdict(sol.path, rows)
     end
 end
 

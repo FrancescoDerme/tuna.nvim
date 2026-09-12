@@ -257,7 +257,7 @@ function M.create(kind, bufnr, ext)
     end
 
     -- The file already exists: ask via the plugin's floating chooser (same UI as
-    -- the `:Tuna` dashboard) rather than a plain `confirm` command-line prompt.
+    -- the `:Tuna` menu) rather than a plain `confirm` command-line prompt.
     local restore_winid = vim.api.nvim_get_current_win()
     widgets.menu({ "Open it", "Overwrite", "Cancel" }, '"' .. fname .. '" already exists', function(idx)
         if idx == 1 then

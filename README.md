@@ -53,7 +53,7 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim):
 
 ## Quick start
 
-1. **`:Tuna`** opens the dashboard,
+1. **`:Tuna`** opens the menu,
 2. **`:Tuna download problem`** begins listening for a problem from Competitive companion,
    press the green plus in your browser to download.
    A solution file is created from your template, the testcases are written beside it,
@@ -70,8 +70,8 @@ Every command is a subcommand of `:Tuna` with tab-completion.
 
 <table>
 <tr>
-  <td><code>:Tuna</code> / <code>:Tuna dashboard</code></td>
-  <td>the dashboard</td>
+  <td><code>:Tuna</code> / <code>:Tuna menu</code></td>
+  <td>the menu</td>
 </tr>
 <tr>
   <td><code>:Tuna run [auto|normal|all|stress|interactive] [n…]</code></td>
@@ -381,7 +381,12 @@ opens the same catalogue in telescope.
 - `:Tuna next` / `:Tuna prev` step between the problems of a contest, preferring the same
   file name you are leaving (`A/main.cpp` → `B/main.cpp`).
 - `:Tuna last problem` / `:Tuna last contest` go back to what you were working on, across
-  restarts, and move Neovim's directory there with you.
+  restarts, and move Neovim's directory there with you. The menu lists your recent
+  contests and problems, and `<CR>` on one goes there. A contest shows its judge and how
+  many of its problems the judge accepted. A problem shows its verdict, or while the judge
+  hasn't judged the source as it is now, how its last finished run went (`3/4 PASSED`),
+  which is saved beside it and forgotten when you edit. Names too long for the screen are
+  shortened, never the verdicts.
 - `:Tuna temp` opens a scratch solution for the minutes before a contest starts, when
   there is no problem to download yet, asking which of your templates to start from. An
   existing scratch first asks whether to resume it or restart. `:Tuna download sync` then
@@ -425,7 +430,7 @@ require("lualine").setup({
 - **Default keymaps**, opt-in with one line: `keymaps = { preset = "<leader>t" }` gives
   `<leader>tr` run, `<leader>tu` results, `<leader>ts` submit, `<leader>tn`/`<leader>tp`
   problem navigation, `<leader>tta`/`tte`/`ttd` testcases, `<leader>tdp`/`tdc` downloads,
-  `<leader>tgp`/`tgc` back to the last problem/contest, and `<leader>tm` the dashboard.
+  `<leader>tgp`/`tgc` back to the last problem/contest, and `<leader>tm` the menu.
   Move or drop any of them without giving up the rest.
 - **`:checkhealth tuna`** reports what tuna can see: your Neovim version, whether each
   configured compiler and interpreter is actually on `PATH`, the Competitive Companion
@@ -588,7 +593,7 @@ word-split or glob-expanded behind your back.
 | `testcases_directory_format`            | `"tests/$(TCNUM)"`                                                    | `directory` backend                                                                                                                       |
 | `testcases_directory_input` / `_output` | `"input.txt"` / `"output.txt"`                                        | filenames inside each testcase directory                                                                                                  |
 | `testcases_split_markers`               | `"-"`                                                                 | the character `:Tuna testcase split` brackets cases with                                                                                  |
-| `problem_store_file`                    | `".tuna.json"`                                                        | the per-problem sidecar: the downloaded task, the last submit verdict, and how the problem is run                                         |
+| `problem_store_file`                    | `".tuna.json"`                                                        | the per-problem sidecar: the downloaded task, the last submit verdict, the last run's result, and how the problem is run                  |
 
 A format without `$(TCNUM)` names a _single_ testcase, which is what makes a bare
 `in.txt` / `out.txt` pair work.
@@ -683,7 +688,7 @@ Highlight groups: `TunaCorrect`, `TunaWrong`, `TunaWarning`, `TunaRunning`, `Tun
 Override any of them with `:hi` after startup — they are re-applied on `ColorScheme`, so
 they follow your theme.
 
-### Library, scratch, dashboard, clean
+### Library, scratch, menu, clean
 
 | option                             | default                                    |                                                                                                                          |
 | ---------------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
@@ -692,7 +697,9 @@ they follow your theme.
 | `library.depth`                    | `3`                                        | how deep to search below each path                                                                                       |
 | `temp.file`                        | `stdpath("cache") .. "/tuna_temp.$(FEXT)"` | where `:Tuna temp` writes its scratch                                                                                    |
 | `temp.extension` / `temp.download` | `"cpp"` / `"contest"`                      | the scratch's language, and what `:Tuna download sync` downloads                                                         |
-| `dashboard.header`                 | `nil`                                      | your own banner lines, or `false` for none                                                                               |
+| `menu.header`                      | `nil`                                      | your own banner lines, or `false` for none                                                                               |
+| `recent.problems`                  | `5`                                        | how many recent problems `:Tuna last` and the menu remember                                                              |
+| `recent.contests`                  | `3`                                        | how many recent contests they remember                                                                                   |
 | `clean.min_width` / `max_width`    | `0.5` / `0.7`                              | the confirmation float's size bounds                                                                                     |
 | `clean.max_entries`                | `20000`                                    | how much of a tree a scan may walk before reporting itself partial                                                       |
 | `clean.skip_dirs`                  | `node_modules`, `target`, `build`, …       | never descended into                                                                                                     |
@@ -859,10 +866,6 @@ something is missing is worth as much as knowing what is there.
 - **A library that says what a snippet _is_.** A short description and a complexity beside
   each entry, so the catalogue reads as a reference and not only as a paste buffer — and so
   `:Tuna lib search` has something to match on between a name and a whole body.
-- **Going back further than one problem and one contest.** `:Tuna last …` returns to the
-  most recent of each. A bounded history — the round you were on yesterday, the problem you
-  left half-solved on Tuesday — is a different thing, and the interesting question is not
-  the storage but whether walking it should be a picker or a pair of keys.
 
 ## Acknowledgements
 

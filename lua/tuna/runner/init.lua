@@ -284,6 +284,7 @@ function TCRunner:check_complete()
         end
     end
     self.completed = true
+    core.save_buffer_verdict(self.bufnr, self.tcdata)
     self:update_ui(true)
     if self.on_complete then
         self.on_complete(self)
