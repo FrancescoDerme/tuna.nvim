@@ -540,6 +540,12 @@ function MultiRunner:run_single(idx)
     if not tc then
         return
     end
+    -- Nothing is built yet: the first run key builds and runs the whole matrix.
+    if self:built_first(function()
+        self:run_testcases()
+    end) then
+        return
+    end
     if tc.kind == "solution" then
         self:rerun_solution(tc.sol)
         return
@@ -555,6 +561,11 @@ end
 
 ---Re-run the whole matrix (the UI's "run all again").
 function MultiRunner:run_testcases()
+    if self:built_first(function()
+        self:run_testcases()
+    end) then
+        return
+    end
     for _, tc in ipairs(self.tcdata) do
         if tc.kind == "case" then
             self:reset_row(tc)
@@ -577,7 +588,9 @@ end
 
 ---Run every sibling solution version against the testcases, in a matrix UI.
 ---@param bufnr integer? defaults to the current buffer
-function M.run(bufnr)
+---@param opts { show_only: boolean? }? open the UI with the rows listed and nothing run
+function M.run(bufnr, opts)
+    opts = opts or {}
     bufnr = bufnr or vim.api.nvim_get_current_buf()
     config.load_buffer_config(bufnr)
     local cfg = config.get_buffer_config(bufnr)
@@ -636,11 +649,16 @@ function M.run(bufnr)
     end
 
     -- Flush buffers before running: run_all runs *every* sibling version.
-    tools.save_sources(bufnr, cfg)
-    if cfg.save_current_file or cfg.save_all_files then
-        for _, p in ipairs(paths) do
-            tools.flush_buffer(p.path)
+    local function save()
+        tools.save_sources(bufnr, cfg)
+        if cfg.save_current_file or cfg.save_all_files then
+            for _, p in ipairs(paths) do
+                tools.flush_buffer(p.path)
+            end
         end
+    end
+    if not opts.show_only then
+        save()
     end
 
     -- With a real solution buffer, use its testcases directly. Otherwise anchor on a
@@ -671,6 +689,7 @@ function M.run(bufnr)
     local timeout = (cfg.maximum_time and cfg.maximum_time > 0) and cfg.maximum_time or nil
 
     if M.active[bufnr] then
+        M.active[bufnr]:kill_all_processes()
         M.active[bufnr]:delete_ui()
     end
 
@@ -706,8 +725,26 @@ function M.run(bufnr)
 
     mr:show_ui()
     mr:load_rows()
+    if opts.show_only then
+        -- Listed, not run: the first run key saves and runs the matrix (`built_first`),
+        -- `run_all` compiling every solution first.
+        mr:mark_not_run()
+        mr.completed = true
+        mr.build = function(cont)
+            save()
+            cont()
+        end
+        mr:update_ui(true)
+        return
+    end
     mr:update_ui(true)
     mr:run_all()
+end
+
+---Open the run-all UI for a buffer with its rows listed and nothing run.
+---@param bufnr integer
+function M.show(bufnr)
+    M.run(bufnr, { show_only = true })
 end
 
 return M

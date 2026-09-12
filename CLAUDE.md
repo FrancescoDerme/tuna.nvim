@@ -151,6 +151,9 @@ is relative. Every configured path goes through these: compile/running directori
   - `buf_save_testcase` always keeps the input, even an empty one, and keeps an empty answer
     only when passed `expect_empty_output`. `buf_write_testcases` (bulk) keeps plain
     "empty means absent".
+  - A `single_file` save or delete rewrites the whole store, so the testcases it is not
+    touching go through `keep_stored` and are written back exactly as they were; the bulk
+    rule would otherwise drop a stored empty testcase and an expected empty answer.
   - In memory, typed text goes through `core.answer`, which turns `""` into `nil`. `sync_rows`
     takes the disk's answer as it is, so a stored empty answer survives a reload.
 - `tc_directory(source_dir, filepath, cfg)` is the only place `testcases_directory` is
@@ -233,6 +236,13 @@ is relative. Every configured path goes through these: compile/running directori
 - `load_testcases` builds the same rows as `NOT RUN` with `preloaded = true` (`:Tuna show_ui`
   before any run). A preloaded runner has built nothing, so `run_single` compiles first
   (`build_first`) and `run_testcases(nil)` saves sources first.
+- `:Tuna show_ui` (`commands.show_results_ui`) opens the mode last run in this session, else
+  the one saved for the problem (`tools.resolve_mode`), since after a restart nothing has
+  run. Interactive, stress and run-all open the same way when they have no runner yet:
+  `M.show(bufnr)` (`M.run(…, { show_only = true })`) lists the rows with
+  `RunnerCore:mark_not_run` and keeps the build step on the runner as `build(cont)`. Their
+  run keys go through `RunnerCore:built_first`, so the first one builds and then runs, and
+  nothing is saved or spawned before it.
 - `run_single` **claims the runner** (`completed = false`) until it settles; otherwise edits
   could slip through mid-run.
 
@@ -332,9 +342,18 @@ as `checker <input> <output> <answer>` (exit 0 means correct) and is compiled vi
   case-count question settles.
 
 **Gates** (all menus, all ending in `Keep editing`/`Stop`, which is also what dismissal gives)
-- `with_pending_settled(tcnum, what, proceed)`: re-running with unsaved edits asks
-  `Save and <what>` / `Discard and <what>` / `Keep editing`. `request_close` uses the same
+- `with_pending_settled(tcnum, what, proceed, after_save)`: re-running with unsaved edits
+  asks `Save and <what>` / `Discard and <what>` / `Keep editing`. Saving re-runs what it
+  saved, so `proceed` follows a save only with `after_save`. `request_close` uses the same
   `unsaved_items`.
+- `commands.settle_results(bufnr, { run, keep }, proceed)` is what every run and `show_ui`
+  go through, so switching modes loses nothing and a buffer shows one results UI at a time.
+  Before a run it asks about an unwritten edit in any of the buffer's runners (interactive,
+  stress and run-all replace the whole runner, `pending` with it), then stops every run of
+  the buffer: a live session would wait on its input forever, and stress rebuilds the binary
+  the new run executes. Every UI but `keep` is then hidden with `RunnerUI:delete`, which
+  keeps `pending` on its runner. `runners_of` only looks in mode modules already loaded.
+  The mode modules also stop the runner they replace, for callers that bypass `commands`.
 - `with_answer_settled`: `:w` asks only when a **real answer would become empty**:
   `Don't specify output` / `Expect empty output` / `Keep editing`. It asks nothing about empty
   inputs, or about answers already absent or empty. The menu is opened with `vim.schedule`,
@@ -360,7 +379,9 @@ as `checker <input> <output> <answer>` (exit 0 means correct) and is compiled vi
 **Keys**
 - Actions (`run_again` r/R, `run_all_again` <C-r>, `stop` s/S, `stop_all` <C-s>,
   `toggle_diff`, `view_*`, add/delete/undo/split) are bound on **every read-only pane**, in
-  both letter cases. Editable panes get only close, pane switching and `?`.
+  both letter cases. Editable panes get only close, pane switching and `?`. Add, delete,
+  undo and split are bound in every mode and do nothing where testcases can't be edited;
+  left unbound, `n`/`N` would fall through to Vim's search.
 - `close` (`<Esc>`, `<C-c>`, `q`, `Q`) is bound on every pane in **normal mode only**.
   `switch_window_keys` (default `<C-hjkl>`, a top-level option shared with widgets) also work
   in insert mode and move by window geometry; `st` is never a focus target.
@@ -572,7 +593,9 @@ specific Vim error about a buffer the user never opened.
     unit tests of pure rules;
   - `runner.lua`: all four run modes with `vim.system` stubbed, covering what each child is
     handed, bare rows, save/answer semantics, disk drift and restore, path resolution, the
-    swapfile contract, interactive grids and the conversation model, using real UI windows.
+    swapfile contract, interactive grids and the conversation model, and the run gate
+    (`settle_results`), using real UI windows. `testcases.lua` also covers the
+    `single_file` rewrite keeping untouched testcases.
 - Modules expose file-local helpers to tests through `M._test` (`download`, `submit`, `clean`,
   `interactive`). They are not public interface.
 - **Mutation-check new tests**: break the rule each test describes and confirm it fails, and

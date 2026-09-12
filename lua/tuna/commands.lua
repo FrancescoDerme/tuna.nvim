@@ -220,7 +220,10 @@ function M.run_testcases(bufnr, list, compile, only_show)
     -- which testcases are found but not how they are run. If the config changed, drop
     -- the runner: the results it holds describe runs under settings that no longer apply.
     local cached = M.runners[bufnr]
-    if cached and not vim.deep_equal(cached.config, config.get_buffer_config(bufnr)) then
+    -- Kept when only showing a runner that holds unsaved edits: they would go with it, and
+    -- a run asks about them before getting here (`settle_results`).
+    local holds_edits = only_show and cached and cached.ui and cached.ui:has_pending()
+    if cached and not holds_edits and not vim.deep_equal(cached.config, config.get_buffer_config(bufnr)) then
         cached:delete_ui()
         M.runners[bufnr] = nil
     end
@@ -286,36 +289,105 @@ end
 ---@param compile boolean compile before running (normal mode only)
 ---@param bufnr integer
 function M.dispatch_mode(mode, args, compile, bufnr)
-    M.last_mode[bufnr] = mode
-    if mode == "all" then
-        require("tuna.multi").run(bufnr)
-    elseif mode == "stress" then
-        require("tuna.stress").run(bufnr, tonumber(args[1]))
-    elseif mode == "interactive" then
-        require("tuna.interactive").run(bufnr, #args > 0 and args or nil)
-    else -- "normal"
-        M.run_testcases(bufnr, #args > 0 and args or nil, compile, false)
+    M.settle_results(bufnr, { run = true, keep = mode == "normal" and M.runners[bufnr] or nil }, function()
+        M.last_mode[bufnr] = mode
+        if mode == "all" then
+            require("tuna.multi").run(bufnr)
+        elseif mode == "stress" then
+            require("tuna.stress").run(bufnr, tonumber(args[1]))
+        elseif mode == "interactive" then
+            require("tuna.interactive").run(bufnr, #args > 0 and args or nil)
+        else -- "normal"
+            M.run_testcases(bufnr, #args > 0 and args or nil, compile, false)
+        end
+    end)
+end
+
+---Every runner a buffer has, whichever run mode built it. A mode module is only looked
+---at when it is already loaded: a mode that never ran has no runner.
+---@param bufnr integer
+---@return table[]
+local function runners_of(bufnr)
+    local list = {}
+    if M.runners[bufnr] then
+        list[#list + 1] = M.runners[bufnr]
     end
+    for _, mod in ipairs({ "tuna.interactive", "tuna.stress", "tuna.multi" }) do
+        local m = package.loaded[mod]
+        if m and m.active and m.active[bufnr] then
+            list[#list + 1] = m.active[bufnr]
+        end
+    end
+    return list
+end
+
+---Settle a buffer's results UIs before `proceed` puts one on screen. One results UI per
+---buffer is shown at a time, so every other one is hidden, its unsaved edits kept on the
+---runner that holds them.
+---
+---Before a **run** (`opts.run`) two more things hold. An unwritten testcase edit is asked
+---about first (`Save and run` / `Discard and run` / `Keep editing`), because a run replaces
+---the rows the edit lives in, and interactive, stress and run-all replace the whole runner.
+---And the buffer's other runs are stopped, since one mode runs at a time: a live session
+---left behind would wait on its input forever, and a stress search keeps rebuilding the
+---binary the new run executes.
+---@param bufnr integer
+---@param opts { run: boolean?, keep: table? } `keep`: the runner `proceed` shows, left on screen
+---@param proceed fun()
+function M.settle_results(bufnr, opts, proceed)
+    local runners = runners_of(bufnr)
+    if opts.run then
+        for _, r in ipairs(runners) do
+            local ui = r.ui
+            if ui and ui:has_pending() then
+                if not ui.ui_visible then
+                    r:show_ui()
+                end
+                ui:with_pending_settled(nil, "run", function()
+                    M.settle_results(bufnr, opts, proceed)
+                end, true)
+                return
+            end
+        end
+        for _, r in ipairs(runners) do
+            r:kill_all_processes()
+        end
+    end
+    for _, r in ipairs(runners) do
+        if r ~= opts.keep and r.ui and r.ui.ui_visible then
+            r.ui:delete()
+        end
+    end
+    proceed()
 end
 
 ---(Re)open the results UI for a buffer without running — honouring the last run's
 ---mode, so a stress run re-opens its own UI rather than a fresh normal one.
 ---@param bufnr integer
 function M.show_results_ui(bufnr)
-    -- Stress and interactive keep their own live runner (with a re-showable UI);
-    -- reopen whichever matches the last run, else fall back to the normal runner.
-    local last = M.last_mode[bufnr]
-    local mod = (last == "stress" and "tuna.stress")
-        or (last == "interactive" and "tuna.interactive")
-        or (last == "all" and "tuna.multi")
-    if mod then
-        local active = require(mod).active[bufnr]
+    -- The mode last run in this session, else the one the problem is set to: after a
+    -- restart nothing has run, and the sidecar still says how this problem is run.
+    config.load_buffer_config(bufnr)
+    local path = api.nvim_buf_get_name(bufnr)
+    local mode = M.last_mode[bufnr]
+        or tools.resolve_mode(path, vim.fn.fnamemodify(path, ":p:h"), config.get_buffer_config(bufnr))
+    local mod = (mode == "stress" and "tuna.stress")
+        or (mode == "interactive" and "tuna.interactive")
+        or (mode == "all" and "tuna.multi")
+    local active = mod and require(mod).active[bufnr] or nil
+    local keep = active or (not mod and M.runners[bufnr]) or nil
+    M.settle_results(bufnr, { keep = keep }, function()
+        M.last_mode[bufnr] = mode
         if active then
             active:show_ui()
-            return
+        elseif mod then
+            -- No runner of that mode yet: its UI opens with the rows listed and nothing
+            -- run, as the normal runner's does, and the run keys start it.
+            require(mod).show(bufnr)
+        else
+            M.run_testcases(bufnr, nil, false, true)
         end
-    end
-    M.run_testcases(bufnr, nil, false, true)
+    end)
 end
 
 ---Handle `:Tuna run [mode] [args]`. A leading mode keyword switches the buffer's
@@ -531,7 +603,10 @@ M.subcommands = {
     run_no_compile = function(args)
         local bufnr = M.solution_bufnr()
         if bufnr then
-            M.run_testcases(bufnr, #args > 0 and args or nil, false, false)
+            M.settle_results(bufnr, { run = true, keep = M.runners[bufnr] }, function()
+                M.last_mode[bufnr] = "normal"
+                M.run_testcases(bufnr, #args > 0 and args or nil, false, false)
+            end)
         end
     end,
     show_ui = function()

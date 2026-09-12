@@ -98,6 +98,30 @@ function RunnerCore:delete_ui()
     self.ui = nil
 end
 
+---List the rows without running them: every row reads `NOT RUN` (the absence of a
+---verdict, so unstyled) and the runner is `preloaded` until its first run.
+function RunnerCore:mark_not_run()
+    for _, tc in ipairs(self.tcdata) do
+        tc.status, tc.hlgroup = "NOT RUN", "TunaDone"
+    end
+    self.preloaded = true
+end
+
+---A runner opened only to list its rows (`preloaded`, carrying a `build` of its own) has
+---built nothing, so its first run builds and then does `cont`. Returns whether it took
+---over; a runner that has run goes on as usual.
+---@param cont fun()
+---@return boolean
+function RunnerCore:built_first(cont)
+    local build = self.preloaded and self.build
+    if not build then
+        return false
+    end
+    self.preloaded, self.build = false, nil
+    build(cont)
+    return true
+end
+
 ---The effective output-compare method: a per-buffer runtime override
 ---(`:Tuna compare …`, carried on the runner as `compare_method`) if set, else the
 ---configured `output_compare_method`.

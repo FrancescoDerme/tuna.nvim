@@ -67,7 +67,7 @@ end
 ---exactly what must not happen underneath a structural edit.
 ---@return boolean
 function StressRunner:idle()
-    return self:aborted()
+    return self.preloaded or self:aborted()
 end
 
 ---Load the existing testcases into `tcdata` (pending), resetting the counters
@@ -381,6 +381,11 @@ end
 ---Re-run the solution on one displayed testcase and re-judge it.
 ---@param idx integer
 function StressRunner:run_single(idx)
+    if self:built_first(function()
+        self:run_single(idx)
+    end) then
+        return
+    end
     self:execute_entry(idx)
 end
 
@@ -389,6 +394,11 @@ end
 ---edited one rebuilds, and one whose first compile failed is retried instead of the
 ---search spawning a binary that was never produced.
 function StressRunner:run_testcases()
+    if self:built_first(function()
+        self:run_testcases()
+    end) then
+        return
+    end
     self.stopped = false
     self.finished = false
     self.iter = 0
@@ -456,7 +466,9 @@ end
 ---Run stress testing for a buffer's solution.
 ---@param bufnr integer? defaults to the current buffer
 ---@param count_override integer? overrides `stress.count`
-function M.run(bufnr, count_override)
+---@param opts { show_only: boolean? }? open the UI with the rows listed and nothing run
+function M.run(bufnr, count_override, opts)
+    opts = opts or {}
     bufnr = bufnr or vim.api.nvim_get_current_buf()
     config.load_buffer_config(bufnr)
 
@@ -468,7 +480,9 @@ function M.run(bufnr, count_override)
     local cfg = r.config
     local scfg = cfg.stress or {}
     local dir = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(bufnr), ":p:h")
-    tools.save_sources(bufnr, cfg) -- save the solution (helpers are saved in tools.prepare)
+    if not opts.show_only then
+        tools.save_sources(bufnr, cfg) -- save the solution (helpers are saved in tools.prepare)
+    end
 
     -- Resolve a helper (generator/reference): an explicit config spec wins,
     -- otherwise discover a sibling source file (gen.* / brute.*) and compile it.
@@ -516,6 +530,7 @@ function M.run(bufnr, count_override)
 
     -- Tear down a previous stress UI for this buffer before starting a fresh run.
     if M.active[bufnr] then
+        M.active[bufnr]:kill_all_processes() -- stop the previous search
         M.active[bufnr]:delete_ui()
     end
 
@@ -616,8 +631,13 @@ function M.run(bufnr, count_override)
         end)
     end
 
-    -- Compile the solution once (if it needs compiling), driving the Compile row.
-    if r.compile then
+    -- Compile the solution once (if it needs compiling), driving the Compile row, then
+    -- run `cont`.
+    local function build(cont)
+        if not r.compile then
+            cont()
+            return
+        end
         local ce = sr.compile_entry
         ce.status, ce.hlgroup, ce.start_time = "RUNNING", "TunaRunning", vim.uv.now()
         sr:update_ui(true)
@@ -641,7 +661,7 @@ function M.run(bufnr, count_override)
                     -- Success (warnings, if any, are viewable by selecting this row).
                     ce.status, ce.hlgroup = "DONE", "TunaDone"
                     sr:update_ui(true)
-                    start()
+                    cont()
                 end)
             end
         )
@@ -649,9 +669,25 @@ function M.run(bufnr, count_override)
             ce.status, ce.hlgroup, ce.stderr = "FAILED", "TunaWarning", tostring(err)
             sr:update_ui(true)
         end
-    else
-        start()
     end
+
+    if opts.show_only then
+        -- Listed, not run: the first run key builds and starts the search (`built_first`).
+        sr:mark_not_run()
+        sr.build = function(cont)
+            tools.save_sources(bufnr, cfg)
+            build(cont)
+        end
+        sr:update_ui(true)
+        return
+    end
+    build(start)
+end
+
+---Open the stress UI for a buffer with its rows listed and nothing run.
+---@param bufnr integer
+function M.show(bufnr)
+    M.run(bufnr, nil, { show_only = true })
 end
 
 return M

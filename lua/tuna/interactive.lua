@@ -242,6 +242,11 @@ function InteractiveRunner:run_single(idx)
         return
     end
     self.completed = false
+    if self:built_first(function()
+        self:run_single(idx)
+    end) then
+        return
+    end
     self:run_one_session(idx, function()
         self.completed = true
         self:update_ui(true)
@@ -250,6 +255,11 @@ end
 
 ---Restart every session from the top (the UI's "run all again").
 function InteractiveRunner:run_testcases()
+    if self:built_first(function()
+        self:run_testcases()
+    end) then
+        return
+    end
     self:run_sessions()
 end
 
@@ -935,7 +945,9 @@ end
 ---Run interactive judging for a buffer's solution.
 ---@param bufnr integer? defaults to the current buffer
 ---@param args string[]? a leading source keyword (live|feed|interactor) then testcase numbers
-function M.run(bufnr, args)
+---@param opts { show_only: boolean? }? open the UI with the rows listed and nothing run
+function M.run(bufnr, args, opts)
+    opts = opts or {}
     bufnr = bufnr or api.nvim_get_current_buf()
     config.load_buffer_config(bufnr)
 
@@ -946,7 +958,9 @@ function M.run(bufnr, args)
     local cfg = r.config
     local dir = vim.fn.fnamemodify(api.nvim_buf_get_name(bufnr), ":p:h")
     local path = api.nvim_buf_get_name(bufnr)
-    tools.save_sources(bufnr, cfg) -- save the solution (interactor saved in tools.prepare)
+    if not opts.show_only then
+        tools.save_sources(bufnr, cfg) -- save the solution (interactor saved in tools.prepare)
+    end
 
     -- Pull a leading source keyword out of the args (the rest are testcase numbers).
     local list = args and vim.deepcopy(args) or nil
@@ -992,6 +1006,7 @@ function M.run(bufnr, args)
     utils.ensure_directory(rundir)
 
     if M.active[bufnr] then
+        M.active[bufnr]:kill_all_processes() -- a session left running waits on its input forever
         M.active[bufnr]:delete_ui()
     end
 
@@ -1030,28 +1045,32 @@ function M.run(bufnr, args)
     ir:load_rows()
     ir:update_ui(true)
 
-    -- Compile the interactor (if any) then run the sessions.
-    local function prepare_and_start()
-        if source ~= "interactor" then
-            ir:run_sessions()
-            return
-        end
-        tools.prepare(interactor, function(ok, err)
-            if not ok then
-                -- Nothing will run, so nothing is in flight either: left `false`, the
-                -- runner would refuse every edit with "wait for the run to finish".
-                ir.completed = true
-                if ir.ui then
-                    ir.ui:show_message(" interactive: interactor failed to compile ", err or "")
-                end
+    -- Build the solution once (driving the Compile row) and the interactor, if any, then
+    -- run `cont`.
+    local function build(cont)
+        local function prepare_and_start()
+            if source ~= "interactor" then
+                cont()
                 return
             end
-            ir:run_sessions()
-        end)
-    end
+            tools.prepare(interactor, function(ok, err)
+                if not ok then
+                    -- Nothing will run, so nothing is in flight either: left `false`, the
+                    -- runner would refuse every edit with "wait for the run to finish".
+                    ir.completed = true
+                    if ir.ui then
+                        ir.ui:show_message(" interactive: interactor failed to compile ", err or "")
+                    end
+                    return
+                end
+                cont()
+            end)
+        end
 
-    -- Compile the solution once (driving the Compile row), like the other runners.
-    if r.compile then
+        if not r.compile then
+            prepare_and_start()
+            return
+        end
         local ce = ir.compile_entry
         ce.status, ce.hlgroup, ce.start_time = "RUNNING", "TunaRunning", vim.uv.now()
         ir:update_ui(true)
@@ -1083,9 +1102,28 @@ function M.run(bufnr, args)
             ir.completed = true
             ir:update_ui(true)
         end
-    else
-        prepare_and_start()
     end
+
+    if opts.show_only then
+        -- Listed, not run: the first run key builds and starts the sessions (`built_first`).
+        ir:mark_not_run()
+        ir.completed = true
+        ir.build = function(cont)
+            tools.save_sources(bufnr, cfg)
+            build(cont)
+        end
+        ir:update_ui(true)
+        return
+    end
+    build(function()
+        ir:run_sessions()
+    end)
+end
+
+---Open the interactive UI for a buffer with its rows listed and nothing run.
+---@param bufnr integer
+function M.show(bufnr)
+    M.run(bufnr, nil, { show_only = true })
 end
 
 -- The pure half of the conversation, for the test suite.

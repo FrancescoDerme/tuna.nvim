@@ -619,7 +619,9 @@ end
 ---@param tcnum integer? only care about this testcase (nil: any unsaved edit at all)
 ---@param what string the action each answer names, e.g. "re-run all"
 ---@param proceed fun()
-function RunnerUI:with_pending_settled(tcnum, what, proceed)
+---@param after_save boolean? run `proceed` after saving too, for an action that replaces
+---the run a save starts rather than being that run
+function RunnerUI:with_pending_settled(tcnum, what, proceed, after_save)
     self:capture_pending()
     local nums = self:unsaved_testcases()
     if tcnum ~= nil then
@@ -639,6 +641,9 @@ function RunnerUI:with_pending_settled(tcnum, what, proceed)
             if idx == 1 then
                 -- Saving re-runs what it saved, so the run is already under way.
                 self:save_all_pending()
+                if after_save then
+                    proceed()
+                end
             elseif idx == 2 then
                 self:discard_pending()
                 proceed()
@@ -1476,20 +1481,20 @@ function RunnerUI:show_ui()
     map_tc("view_stderr", function()
         self:show_viewer("se")
     end)
-    if self.runner.editable_testcases then
-        map_tc("add_testcase", function()
-            self:add_testcase()
-        end)
-        map_tc("delete_testcase", function()
-            self:delete_testcase()
-        end)
-        map_tc("split_testcase", function()
-            self:split_testcase()
-        end)
-        map_tc("undo_delete", function()
-            self:undo_delete()
-        end)
-    end
+    -- Bound in every mode, and silent where testcases can't be edited: each one checks
+    -- for itself. Left unbound, `n`/`N` would fall through to Vim's search.
+    map_tc("add_testcase", function()
+        self:add_testcase()
+    end)
+    map_tc("delete_testcase", function()
+        self:delete_testcase()
+    end)
+    map_tc("split_testcase", function()
+        self:split_testcase()
+    end)
+    map_tc("undo_delete", function()
+        self:undo_delete()
+    end)
 
     -- Keys that would start an edit are inert on a read-only pane. Left alone they
     -- enter insert/replace/operator-pending on a buffer that cannot take a change, so

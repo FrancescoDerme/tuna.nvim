@@ -655,6 +655,19 @@ function M.buf_clear(bufnr)
     M.backend(cfg.testcases_storage).buf_clear(bufnr)
 end
 
+---Mark every testcase already in a single-file store to be written back exactly as it is.
+---Saving or deleting one testcase rewrites the whole file, and the bulk rule in
+---`single_file.write` (empty means absent) would otherwise drop a stored empty testcase
+---and turn an expected empty answer into no answer, while saving an unrelated one.
+---@param tctbl table<integer, table>
+---@return table<integer, table>
+local function keep_stored(tctbl)
+    for _, entry in pairs(tctbl) do
+        entry.keep_empty = { input = true, output = entry.output == "" or nil }
+    end
+    return tctbl
+end
+
 ---Create or replace a single testcase for a buffer. Saving a testcase **stores** it,
 ---even with nothing in it: an empty input is written as an empty file rather than as
 ---the removal an empty write means in bulk, so a testcase never disappears because it
@@ -680,7 +693,7 @@ function M.buf_save_testcase(bufnr, tcnum, input, output, expect_empty_output)
     }
     if cfg.testcases_storage == "single_file" then
         -- single file holds everything, so edit the whole table and rewrite
-        local tctbl = M.single_file.buf_load(bufnr)
+        local tctbl = keep_stored(M.single_file.buf_load(bufnr))
         tctbl[tcnum] = entry
         M.single_file.buf_write(bufnr, tctbl)
     else
@@ -694,7 +707,7 @@ end
 function M.buf_delete_testcase(bufnr, tcnum)
     local cfg = config.get_buffer_config(bufnr)
     if cfg.testcases_storage == "single_file" then
-        local tctbl = M.single_file.buf_load(bufnr)
+        local tctbl = keep_stored(M.single_file.buf_load(bufnr))
         tctbl[tcnum] = nil
         M.single_file.buf_write(bufnr, tctbl)
     else

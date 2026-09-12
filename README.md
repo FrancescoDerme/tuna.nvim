@@ -226,7 +226,9 @@ by itself.
 **The Input and Expected Output panes are editable.** They are ordinary buffers with an
 accent on their border, so there is no key to learn: move in, type, and `:w`. That writes
 the testcase and re-runs it. Nothing reaches disk before `:w`, unwritten edits survive
-moving to another row, and closing with one pending asks rather than dropping it.
+moving to another row, and closing with one pending asks rather than dropping it. So does
+starting a run, in this mode or another: a problem shows one results UI at a time, and
+switching modes stops the previous run and puts its UI away.
 
 **The diff is positional.** Vim's own diff may decide a line was deleted and re-pair
 everything after it, which for `2 2 0 2` against `2 2 2 5` reports one deletion and then
