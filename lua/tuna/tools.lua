@@ -11,7 +11,7 @@
 --
 -- Three concerns live here:
 --   * discovery   — `find()` locates a helper by role (checker/generator/…)
---   * resolution  — `program()`/`checker_spec()` turn a path into a runnable spec
+--   * resolution  — `program()` turns a path into a runnable spec, `helper()` finds a role's helper
 --                   ({ exec, args, compile?, cwd }) using the buffer config
 --   * compilation — `prepare()` compiles a spec once and caches the result, so a
 --                   dozen parallel `checker.judge` calls don't recompile (or race)
@@ -235,31 +235,104 @@ function M.program(path, cfg)
     return spec
 end
 
----Resolve a checker path into a `checker.judge`-ready spec: like `program`, but
----with the testlib `<input> <output> <answer>` placeholders appended so the
----checker is invoked `<exec> <run-args> <input> <output> <answer>`. A path with
----no filetype/run command is treated as an already-runnable binary (`{ exec }`),
----and `checker.judge` supplies the default testlib args itself.
+-- The arguments a role's program is handed after its own run arguments: a testlib checker
+-- reads `<input> <output> <answer>`, an interactor `<input> <answer>`.
+local ROLE_ARGS = {
+    checker = CHECKER_ARGS,
+    interactor = { "$(INPUT)", "$(ANSWER)" },
+}
+
+-- The option that sets each role's helper in the config, instead of discovering one.
+local ROLE_OPTION = {
+    checker = { "checker" },
+    generator = { "stress", "generator" },
+    reference = { "stress", "reference" },
+    interactor = { "interactive", "interactor" },
+}
+
+-- The placeholders a helper's arguments keep until it is spawned for one testcase.
+local RUN_PLACEHOLDERS = { INPUT = true, OUTPUT = true, ANSWER = true }
+
+---Expand the file modifiers in a configured argument against the solution, leaving the
+---per-run placeholders for the spawn that fills them.
+---@param solution string
+---@param arg string
+---@return string?
+local function eval_helper_arg(solution, arg)
+    local kept = arg:gsub("%$%((%u+)%)", function(name)
+        if RUN_PLACEHOLDERS[name] then
+            return "\1" .. name .. "\2"
+        end
+    end)
+    local out = utils.eval_string(solution, kept)
+    return out and (out:gsub("\1(%u+)\2", "$(%1)")) or nil
+end
+
+---A runnable spec for a helper file: compiled and run with its language's commands, or run
+---as it is when tuna knows no command for its language (a prebuilt binary).
+---@param role string
 ---@param path string
----@param cfg table buffer configuration
----@return table # a checker spec accepted by `checker.judge`
-function M.checker_spec(path, cfg)
+---@param cfg table
+---@return table
+local function spec_for_file(role, path, cfg)
     local spec, err = M.program(path, cfg)
     if not spec then
-        -- No run command for the filetype: an unknown language is the normal shape of
-        -- a prebuilt, directly-runnable binary, so nothing is wrong. Any *other*
-        -- failure means a language tuna knows whose command is malformed — falling
-        -- back to executing the source file will not work, so say why first.
+        -- An unknown language is the normal shape of a prebuilt binary. Any other failure
+        -- is a known language with a malformed command, which running the file as a
+        -- binary won't fix, so it is worth a word.
         if err and not err:match("^no run command") then
             utils.notify(
-                "checker: " .. err .. ", treating '" .. vim.fn.fnamemodify(path, ":t") .. "' as a prebuilt binary.",
+                role .. ": " .. err .. ", running '" .. vim.fn.fnamemodify(path, ":t") .. "' as a prebuilt binary.",
                 "WARN"
             )
         end
-        return { exec = path, cwd = vim.fn.fnamemodify(path, ":p:h") }
+        spec = { exec = path, args = {}, cwd = vim.fn.fnamemodify(path, ":p:h") }
     end
-    spec.args = vim.list_extend(spec.args, vim.deepcopy(CHECKER_ARGS))
+    spec.args = vim.list_extend(spec.args, vim.deepcopy(ROLE_ARGS[role] or {}))
     return spec
+end
+
+---The helper filling `role` for a solution, as a spec ready to prepare and spawn, or nil
+---when there is none. One rule for every role: a helper set in the config (`checker`,
+---`stress.generator`, `stress.reference`, `interactive.interactor`) is used instead of a
+---sibling file found through `tool_names`. A string there is a path to a helper file, a
+---table an `{ exec, args }` command. Nothing is cached, so what is on disk now decides.
+---@param role "checker"|"generator"|"reference"|"interactor"
+---@param solution string absolute path of the solution
+---@param cfg table resolved configuration
+---@return table? spec
+---@return string? note why a configured helper can't be used, when it can't
+function M.helper(role, solution, cfg)
+    local set = cfg
+    for _, key in ipairs(ROLE_OPTION[role]) do
+        set = type(set) == "table" and set[key] or nil
+    end
+    local dir = vim.fn.fnamemodify(solution, ":p:h")
+    if type(set) == "string" then
+        local path = utils.eval_string(solution, set)
+        path = path and utils.normalize_path(utils.expand_home(path), dir)
+        if not (path and utils.file_exists(path)) then
+            return nil, ("the configured %s '%s' does not exist"):format(role, set)
+        end
+        return spec_for_file(role, path, cfg)
+    elseif type(set) == "table" and set.exec then
+        local exec = utils.eval_string(solution, set.exec)
+        if not exec or vim.fn.executable(exec) ~= 1 then
+            return nil, ("the configured %s command '%s' can't be run"):format(role, tostring(set.exec))
+        end
+        local args = {}
+        for i, a in ipairs(set.args or {}) do
+            args[i] = eval_helper_arg(solution, a)
+            if not args[i] then
+                return nil, ("the configured %s command has a malformed argument '%s'"):format(role, a)
+            end
+        end
+        return { exec = exec, args = args, cwd = dir }
+    elseif set ~= nil then
+        return nil, ("the configured %s is neither a path nor an { exec, args } command"):format(role)
+    end
+    local path = M.find(dir, role, cfg)
+    return path and spec_for_file(role, path, cfg) or nil
 end
 
 --------------------------------------------------------------------------------
@@ -325,7 +398,7 @@ local function command_key(cmd)
     return (cmd.exec or "") .. "\0" .. table.concat(cmd.args or {}, "\0")
 end
 
----Ensure a spec produced by `program`/`checker_spec` is compiled, then call `cb`.
+---Ensure a spec produced by `program`/`helper` is compiled, then call `cb`.
 ---The result is cached (persistently, across specs) keyed by the source path +
 ---mtime + compile command, so a batch of parallel `judge`s compiles once
 ---(concurrent callers queue behind the in-flight compile) and repeated runs skip
@@ -420,19 +493,18 @@ function M.save_sources(bufnr, cfg)
 end
 
 --------------------------------------------------------------------------------
--- Per-buffer run state (active mode + checker toggle)
+-- Per-problem run settings: each automatic unless forced
 --------------------------------------------------------------------------------
 
 M.MODES = { "normal", "all", "stress", "interactive" }
+M.SOURCES = { "live", "feed", "interactor" }
 
----Runtime state keyed by a buffer's file path (not bufnr) so it survives the
----buffer being unloaded and reopened during a session. `explicit` records whether
----the user chose the mode by hand (`:Tuna run <mode>` / the menu); until they do,
----the mode is auto-detected from the sibling files present.
----@type table<string, { mode: string, explicit: boolean, checker: boolean, source: string?, compare: tuna.CompareSpec? }>
+---Runtime state keyed by a solution's file path (not bufnr), so it survives the buffer
+---being unloaded and reopened. `mode`, `source` and `checker` hold only what the user
+---forced; nil is automatic. The checker can only be forced `"off"`, since forcing it on
+---would mean the same as automatic.
+---@type table<string, { mode: string?, source: string?, checker: "off"?, compare: tuna.CompareSpec? }>
 local state = {}
-
-local DEFAULT_STATE = { mode = "normal", explicit = false, checker = true, source = nil, compare = nil }
 
 ---@private
 ---Whether an entry says anything the defaults don't, so an untouched problem never
@@ -440,11 +512,7 @@ local DEFAULT_STATE = { mode = "normal", explicit = false, checker = true, sourc
 ---@param s table
 ---@return boolean
 local function is_default(s)
-    return s.mode == DEFAULT_STATE.mode
-        and s.explicit == DEFAULT_STATE.explicit
-        and s.checker == DEFAULT_STATE.checker
-        and s.source == nil
-        and s.compare == nil
+    return s.mode == nil and s.source == nil and s.checker == nil and s.compare == nil
 end
 
 ---@private
@@ -503,22 +571,22 @@ end
 ---@return table
 local function state_for(path)
     if not state[path] then
-        local s = vim.tbl_extend("force", {}, DEFAULT_STATE)
+        local s = {}
         if path ~= "" then
             local stored = require("tuna.sidecar").get_entry(path, "run")
             if stored then
                 -- Validated on the way in: the sidecar is a plain file a user may edit
                 -- (or copy between problems), and a nonsense mode would send a bare
-                -- `:Tuna run` somewhere impossible.
-                if vim.tbl_contains(M.MODES, stored.mode) then
+                -- `:Tuna run` somewhere impossible. An entry carrying `explicit = false`
+                -- forces no mode, and `checker = false` is the checker forced off.
+                if vim.tbl_contains(M.MODES, stored.mode) and stored.explicit ~= false then
                     s.mode = stored.mode
-                    s.explicit = stored.explicit == true
                 end
-                if type(stored.checker) == "boolean" then
-                    s.checker = stored.checker
-                end
-                if vim.tbl_contains({ "live", "feed", "interactor" }, stored.source) then
+                if vim.tbl_contains(M.SOURCES, stored.source) then
                     s.source = stored.source
+                end
+                if stored.checker == "off" or stored.checker == false then
+                    s.checker = "off"
                 end
                 s.compare = decode_compare(stored.compare)
             end
@@ -544,98 +612,117 @@ local function persist(path)
     end
     require("tuna.sidecar").set_entry(path, "run", {
         mode = s.mode,
-        explicit = s.explicit,
-        checker = s.checker,
         source = s.source,
+        checker = s.checker,
         compare = encode_compare(s.compare),
     })
 end
 
+---The mode forced for a solution, or nil when its mode is automatic.
 ---@param path string
----@return string # the raw stored mode (see `resolve_mode` for the effective one)
+---@return string?
 function M.get_mode(path)
     return state_for(path).mode
 end
 
----Set the buffer's mode as an explicit user choice (so it sticks across runs).
+---Force a mode, which sticks across runs and restarts, or pass nil to make it automatic.
 ---@param path string
----@param mode string
+---@param mode string?
 function M.set_mode(path, mode)
-    local s = state_for(path)
-    s.mode = mode
-    s.explicit = true
+    state_for(path).mode = mode
     persist(path)
 end
 
----Auto-detect a run mode from the helper files sitting beside the solution:
----an `interactor.*` ⇒ interactive; both a `gen.*` and a `brute.*` ⇒ stress;
----otherwise normal. (A `checker.*` is orthogonal — it's applied within any mode
----via the checker toggle, so it doesn't select a mode.)
----@param dir string problem directory
----@param cfg table buffer config
+---The mode a problem's helpers point to: an interactor means interactive, a generator
+---and a reference mean stress, anything else normal. Run-all is never chosen for you.
+---@param solution string absolute path of the solution
+---@param cfg table
 ---@return string
-function M.detect_mode(dir, cfg)
-    if M.find(dir, "interactor", cfg) then
+function M.detect_mode(solution, cfg)
+    if M.helper("interactor", solution, cfg) then
         return "interactive"
     end
-    if M.find(dir, "generator", cfg) and M.find(dir, "reference", cfg) then
+    if M.helper("generator", solution, cfg) and M.helper("reference", solution, cfg) then
         return "stress"
     end
     return "normal"
 end
 
----The mode a bare `:Tuna run` should use. If the user picked a mode explicitly it
----sticks — unless the files that mode needs have since disappeared (e.g. `brute.*`
----was deleted), in which case we fall back to auto-detection so the run doesn't
----fail on a now-impossible mode. Otherwise the mode is auto-detected each time.
----@param path string solution file path
----@param dir string problem directory
----@param cfg table buffer config
----@return string
-function M.resolve_mode(path, dir, cfg)
-    local s = state_for(path)
-    if s.explicit then
-        local m = s.mode
-        local usable = true
-        if m == "stress" then
-            usable = M.find(dir, "generator", cfg) ~= nil and M.find(dir, "reference", cfg) ~= nil
-        end
-        -- interactive stays usable even with no interactor.* — its live/feed sources
-        -- need no helper files, so an explicit interactive choice always sticks.
-        if usable then
-            return m
-        end
+---The mode a run without a mode keyword uses: the forced one while it can run, else the
+---automatic one. Of the modes only stress needs helpers to run (interactive can always
+---run live), so a forced stress missing its generator or reference gives way, and
+---applies again once both are back.
+---@param solution string absolute path of the solution
+---@param cfg table
+---@return string mode
+---@return string? note what gave way, when something did
+function M.resolve_mode(solution, cfg)
+    local auto = M.detect_mode(solution, cfg)
+    local forced = state_for(solution).mode
+    if forced == "stress" and not (M.helper("generator", solution, cfg) and M.helper("reference", solution, cfg)) then
+        return auto, "stress is forced but needs a generator and a reference, running " .. auto .. " until both are back"
     end
-    return M.detect_mode(dir, cfg)
+    return forced or auto, nil
 end
 
----@param path string
----@return boolean
-function M.checker_enabled(path)
-    return state_for(path).checker
-end
-
----@param path string
----@param enabled boolean
-function M.set_checker(path, enabled)
-    state_for(path).checker = enabled
-    persist(path)
-end
-
----The buffer's chosen interactive source ("live"|"feed"|"interactor"), or nil when
----unset (the caller then defaults it — interactor if one exists, else live).
+---The interactive source forced for a solution, or nil when it is automatic.
 ---@param path string
 ---@return string?
 function M.get_source(path)
     return state_for(path).source
 end
 
----Remember the interactive source so a later bare `:Tuna run` repeats it.
+---Force an interactive source, or pass nil to make it automatic.
 ---@param path string
----@param source string
+---@param source string?
 function M.set_source(path, source)
     state_for(path).source = source
     persist(path)
+end
+
+---The interactive source a run uses: the forced one while it can run, else the
+---interactor when there is one, else live. Only `interactor` needs a helper, so a forced
+---interactor with none gives way to live, and applies again once one is back.
+---@param solution string absolute path of the solution
+---@param cfg table
+---@return string source
+---@return string? note what gave way, when something did
+function M.resolve_source(solution, cfg)
+    local has_interactor = M.helper("interactor", solution, cfg) ~= nil
+    local auto = has_interactor and "interactor" or "live"
+    local forced = state_for(solution).source
+    if forced == "interactor" and not has_interactor then
+        return auto, "the interactor source is forced but there is no interactor, running live until one is back"
+    end
+    return forced or auto, nil
+end
+
+---The checker setting of a solution: `"auto"` (use one when there is one) or `"off"`.
+---@param path string
+---@return "auto"|"off"
+function M.checker_setting(path)
+    return state_for(path).checker or "auto"
+end
+
+---@param path string
+---@param setting "auto"|"off"
+function M.set_checker(path, setting)
+    state_for(path).checker = setting == "off" and "off" or nil
+    persist(path)
+end
+
+---The checker a run judges with: the problem's checker while the setting is automatic and
+---there is one, else `"builtin"`, plain output comparison.
+---@param solution string absolute path of the solution
+---@param cfg table
+---@return "builtin"|table checker
+---@return string? note why a configured checker can't be used
+function M.resolve_checker(solution, cfg)
+    if state_for(solution).checker == "off" then
+        return "builtin", nil
+    end
+    local spec, note = M.helper("checker", solution, cfg)
+    return spec or "builtin", note
 end
 
 ---The buffer's runtime compare-method override (set via `:Tuna compare …`), or nil

@@ -74,8 +74,8 @@ Every command is a subcommand of `:Tuna` with tab-completion.
   <td>the dashboard</td>
 </tr>
 <tr>
-  <td><code>:Tuna run [normal|all|stress|interactive] [n…]</code></td>
-  <td>run; mode keyword switches the problem's mode, numbers limit the run to those testcases</td>
+  <td><code>:Tuna run [auto|normal|all|stress|interactive] [n…]</code></td>
+  <td>run; a mode keyword forces that mode and <code>auto</code> hands it back, numbers limit the run to those testcases</td>
 </tr>
 <tr>
   <td><code>:Tuna run_no_compile [n…]</code></td>
@@ -102,8 +102,8 @@ Every command is a subcommand of `:Tuna` with tab-completion.
   <td>override the comparison for this problem</td>
 </tr>
 <tr>
-  <td><code>:Tuna checker [on|off|toggle]</code></td>
-  <td>toggle the special judge</td>
+  <td><code>:Tuna checker [auto|off|toggle]</code></td>
+  <td>judge with the problem's checker when there is one, or compare outputs</td>
 </tr>
 <tr>
   <td><code>:Tuna download &lt;testcases|problem|contest|sync|persistently|status|stop&gt;</code></td>
@@ -188,16 +188,16 @@ somewhere in a wall of output.
 cores, by default — and opens the results grid:
 
 ```
-┌ Run ──────────┬ Output ─────────────┬ Expected Output ────┐
-│ mode : normal │ 3                   │ 3                   │
-│ judge: squish │                     │                     │
-│ diff : off    │                     │                     │
-│ help : ?      │                     │                     │
-├ Testcases ────┼ Errors ─────────────┼ Input ──────────────┤
-│ Compile  DONE │                     │ 1 2                 │
-│ TC 0  CORRECT │                     │                     │
-│ TC 1  WRONG   │                     │                     │
-└───────────────┴─────────────────────┴─────────────────────┘
+┌ Run ─────────────────────┬ Output ───────────┬ Expected Output ──┐
+│ mode : normal, automatic │ 3                 │ 3                 │
+│ judge: squish            │                   │                   │
+│ diff : off               │                   │                   │
+│ help : ?                 │                   │                   │
+├ Testcases ───────────────┼ Errors ───────────┼ Input ────────────┤
+│ Compile  DONE            │                   │ 1 2               │
+│ TC 0  CORRECT            │                   │                   │
+│ TC 1  WRONG              │                   │                   │
+└──────────────────────────┴───────────────────┴───────────────────┘
 ```
 
 Output faces Expected Output across the top, because the comparison is read _across_;
@@ -256,9 +256,19 @@ there is no manifest to maintain:
 | —                       | **run all**          | every sibling solution against the shared testcases, as a solution×testcase matrix                            |
 | `checker.cpp`           | _(any of the above)_ | a testlib-style special judge decides correctness instead of string comparison                                |
 
-`:Tuna run stress`, `:Tuna run interactive`, `:Tuna run all` pick one explicitly and it
-sticks. `:Tuna scaffold generator|brute|interactor|checker` drops in a dependency-free
-starter file in your language.
+**Automatic until you force it.** Every helper is found the same way: a file named after it
+beside your solution, or the option pointing at one of your own (`checker`,
+`stress.generator` and `.reference`, `interactive.interactor`), which is used instead. The
+mode, interactive's source and the checker each follow the helpers present until you force
+them: `:Tuna run <mode>` forces a mode, `:Tuna run interactive <source>` a source,
+`:Tuna checker off` plain comparison, and `auto` hands any of them back. A forced choice
+that needs a helper you have since deleted, stress without its reference say, runs the
+automatic choice instead, says so, and comes back with the helper. Every run looks the
+helpers up again, so adding, deleting or editing one takes effect on the next run, and a
+rerun from an open results UI whose mode has lost its helper says so rather than running.
+
+`:Tuna scaffold generator|brute|interactor|checker` drops in a dependency-free starter file
+in your language.
 
 **Run all** is for the shape where you have `main.cpp` and `main2.cpp` and want to know
 which one is right — including when they are in _different languages_, since each is
@@ -558,7 +568,7 @@ becomes part of a path.
 | `multiple_testing`      | `-1`                             | testcases at once: `-1` your core count, `0` all of them, `n` exactly n                                           |
 | `maximum_time`          | `5000`                           | per-process limit in ms; past it the process is killed and the row reads `TIMEOUT`                                |
 | `output_compare_method` | `"squish"`                       | `"exact"`, `"squish"`, `{ "float", tol = 1e-6 }`, or `function(output, expected) -> boolean`                      |
-| `checker`               | `"builtin"`                      | `"builtin"`, a path to a testlib-style checker, or `{ exec, args }`                                               |
+| `checker`               | `nil`                            | a path to a testlib-style checker or `{ exec, args }`, used instead of a `checker.*` file                         |
 | `save_current_file`     | `true`                           | write the buffer before running                                                                                   |
 | `save_all_files`        | `false`                          | write every buffer before running                                                                                 |
 
@@ -628,7 +638,7 @@ cursor alone, so one written for C++ is harmless to a Python template.
 | `stress.seed_arg`                 | `true`                                                                             | pass the iteration number to the generator as an argument           |
 | `stress.saves_per_run`            | `1`                                                                                | stop after saving this many counterexamples                         |
 | `stress.max_saved`                | `10`                                                                               | stop once the problem has this many testcases in total              |
-| `stress.generator` / `.reference` | `nil`                                                                              | explicit paths, if you would rather not use the filename convention |
+| `stress.generator` / `.reference` | `nil`                                                                              | a path or `{ exec, args }`, used instead of the file `tool_names` finds |
 | `interactive.interactor`          | `nil`                                                                              | likewise                                                            |
 | `scaffold.files`                  | `checker`, `gen`, `brute`, `interactor`                                            | basenames `:Tuna scaffold` creates                                  |
 | `scaffold.templates`              | `nil` per kind                                                                     | your own starter files, `{ [ext] = path }`                          |

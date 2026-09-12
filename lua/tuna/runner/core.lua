@@ -134,9 +134,20 @@ end
 ---@return string
 function RunnerCore:judge_label()
     if type(self.checker) == "table" then
-        return "checker"
+        return vim.fn.fnamemodify(self.checker.source or self.checker.exec, ":t")
     end
     return require("tuna.compare").method_name(self:effective_compare())
+end
+
+---Look the checker up again, as every run does, so a checker added, deleted or switched
+---off since the last run is the one that judges this run.
+---@param solution string absolute path of the solution being run
+function RunnerCore:refresh_checker(solution)
+    local checker, note = require("tuna.tools").resolve_checker(solution, self.config)
+    self.checker = checker
+    if note then
+        require("tuna.utils").notify("checker: " .. note .. ", comparing outputs instead.", "WARN")
+    end
 end
 
 ---What text a detail pane should show for `tc`. Overridable so a mode can own or

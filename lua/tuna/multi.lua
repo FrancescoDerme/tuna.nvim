@@ -100,24 +100,6 @@ local function load_dir_testcases(source_dir, anchor, cfg)
     return tctbl
 end
 
----Resolve the shared checker for a problem directory (mirrors `runner.new`).
----@param dir string problem directory
----@param cfg table
----@return "builtin"|table
-local function resolve_checker(dir, cfg)
-    if cfg.checker == "builtin" then
-        local cpath = tools.find(dir, "checker", cfg)
-        return cpath and tools.checker_spec(cpath, cfg) or "builtin"
-    elseif type(cfg.checker) == "string" then
-        local exec = utils.eval_string(dir, cfg.checker)
-        return exec and tools.checker_spec(exec, cfg) or "builtin"
-    elseif type(cfg.checker) == "table" and cfg.checker.exec then
-        local exec = utils.eval_string(dir, cfg.checker.exec)
-        return exec and { exec = exec, args = cfg.checker.args } or "builtin"
-    end
-    return "builtin"
-end
-
 --------------------------------------------------------------------------------
 -- MultiRunner (a RunnerCore subclass the runner UI drives)
 --------------------------------------------------------------------------------
@@ -381,6 +363,7 @@ end
 ---testcase across all compiled solutions through a shared pool of `multiple_testing`
 ---concurrent processes. Header `correct/total`s update live as cases land.
 function MultiRunner:run_all()
+    self:refresh_checker(self.solution)
     self.completed = false
     self.stopped = false
 
@@ -546,6 +529,7 @@ function MultiRunner:run_single(idx)
     end) then
         return
     end
+    self:refresh_checker(self.solution)
     if tc.kind == "solution" then
         self:rerun_solution(tc.sol)
         return
@@ -696,7 +680,9 @@ function M.run(bufnr, opts)
     local mr = setmetatable({
         config = cfg,
         bufnr = bufnr,
-        checker = resolve_checker(dir, cfg),
+        checker = tools.resolve_checker(curpath or paths[1].path, cfg),
+        -- The solution helpers and the checker are looked up against.
+        solution = curpath or paths[1].path,
         compare_method = tools.get_compare(vim.api.nvim_buf_get_name(bufnr)), -- per-buffer `:Tuna compare` override
         mode = "all",
         files = files,

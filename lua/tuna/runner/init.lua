@@ -84,38 +84,10 @@ function M.new(bufnr)
         return nil
     end
 
-    -- Resolve the checker. The per-buffer toggle (tools.checker_enabled) forces
-    -- plain comparison when off. Otherwise:
-    --   * "builtin"          -> auto-discover a sibling checker.* source file; if
-    --                           found it's compiled (on first judge) and used, else
-    --                           plain output_compare_method comparison.
-    --   * a path string      -> a checker source file (compiled) or prebuilt binary.
-    --   * a { exec, args }    -> a prebuilt checker; only exec is modifier-expanded,
-    --     table                 args keep their $(INPUT)/$(OUTPUT)/$(ANSWER) markers.
+    -- Every run looks the checker up again (`refresh_checker`); this first answer is what
+    -- the results UI shows before one.
     local path = vim.api.nvim_buf_get_name(bufnr)
-    local resolved_checker = "builtin"
-    if not tools.checker_enabled(path) then
-        resolved_checker = "builtin"
-    elseif cfg.checker == "builtin" then
-        local cpath = tools.find(filedir, "checker", cfg)
-        if cpath then
-            resolved_checker = tools.checker_spec(cpath, cfg)
-        end
-    elseif type(cfg.checker) == "string" then
-        local expanded = utils.buf_eval_string(bufnr, cfg.checker)
-        if expanded then
-            resolved_checker = tools.checker_spec(expanded, cfg)
-        else
-            utils.notify("checker path is malformed, falling back to builtin comparison.", "WARN")
-        end
-    elseif type(cfg.checker) == "table" and cfg.checker.exec then
-        local exec = utils.buf_eval_string(bufnr, cfg.checker.exec)
-        if exec then
-            resolved_checker = { exec = exec, args = cfg.checker.args }
-        else
-            utils.notify("checker command is malformed, falling back to builtin comparison.", "WARN")
-        end
-    end
+    local resolved_checker = tools.resolve_checker(path, cfg)
 
     return setmetatable({
         config = cfg,
@@ -225,6 +197,7 @@ function TCRunner:run_testcases(tctbl, do_compile)
     if tctbl or self.preloaded then
         tools.save_sources(self.bufnr, self.config)
     end
+    self:refresh_checker(vim.api.nvim_buf_get_name(self.bufnr))
     self.preloaded = false
     if tctbl then
         self:build_rows(tctbl, do_compile)
@@ -332,6 +305,7 @@ function TCRunner:run_single(tcindex)
     -- idle, or the structural edits (`n`/`x`/`c`/`u`) that wait on `idle()` would be
     -- let through mid-flight. `check_complete` flips it back once the row settles.
     self.completed = false
+    self:refresh_checker(vim.api.nvim_buf_get_name(self.bufnr))
     -- These rows were only ever *listed* (`:Tuna show_ui` before any run), so nothing has
     -- been built: running one on its own would spawn a binary that does not exist yet and
     -- report `ENOENT` as the testcase's verdict. Compile first, then run the row — the

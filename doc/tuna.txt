@@ -124,9 +124,9 @@ lowercase `:tuna` expands to it.
 :Tuna                   Open the dashboard. `:Tuna dashboard` is the same.
 
 :Tuna run [mode] [n...]
-                        Compile and run. An optional leading mode keyword —
-                        `normal`, `all`, `stress` or `interactive` — switches
-                        the problem's run mode and sticks; see
+                        Compile and run. An optional leading mode keyword,
+                        `normal`, `all`, `stress` or `interactive`, forces
+                        that mode, and `auto` makes it automatic again; see
                         |tuna-run-modes|. Trailing numbers limit the run to
                         those testcases.
 
@@ -154,8 +154,9 @@ lowercase `:tuna` expands to it.
                         `squish`, `float [tol]`, or `default` to clear it. The
                         choice is remembered across restarts.
 
-:Tuna checker [on/off/toggle]
-                        Use the discovered special judge, or don't.
+:Tuna checker [auto/off/toggle]
+                        Judge with the problem's checker when there is one
+                        (`auto`, the default), or compare outputs (`off`).
 
 :Tuna download {mode}   One of `testcases`, `problem`, `contest`, `sync`,
                         `persistently`, `status`, `stop`; see |tuna-download|.
@@ -305,10 +306,10 @@ each compiled and run with its own filetype's commands, so a C++ and a Python
 attempt run together. It is for the shape where you have two solutions and
 want to know which is right.
 
-Interactive cross-wires your solution with an interactor over pipes, teeing
-the exchange into the transcript. Three input sources, chosen with a keyword
-and remembered per buffer: `live` (you are the other side), `feed` (the
-testcase input plays it) and `interactor`.
+Interactive cross-wires your solution with an interactor over pipes. Three
+input sources: `live` (you are the other side), `feed` (the testcase input
+plays it) and `interactor`. Without a keyword the source is the interactor
+when there is one, else live.
 
 The results grid follows the source. With `live` and `interactor` the session
 reads as a conversation: beside the testcase list are three columns, Errors,
@@ -323,6 +324,16 @@ ordinary Input and Expected Output panes, editable exactly as in a normal run.
 Checkers are testlib-style, invoked as `checker <input> <output> <answer>`,
 exit 0 meaning correct. They are for problems with more than one correct
 answer.
+
+Every helper is found the same way: a file named after it beside the solution
+(|tuna-config-run-modes| lists the names), or the option pointing at one of
+your own, which is used instead. The mode, interactive's source and the
+checker each follow the helpers present until you force them: `:Tuna run
+{mode}`, `:Tuna run interactive {source}` and `:Tuna checker off`, with `auto`
+handing any of them back. A forced choice that needs a helper you have since
+deleted runs the automatic choice instead, says so, and applies again once
+the helper is back. Every run looks the helpers up again, and a rerun from an
+open results UI whose mode has lost its helper says so rather than running.
 
 `:Tuna scaffold` drops in a dependency-free starter for any of them.
 
@@ -580,8 +591,9 @@ COMPILING AND RUNNING                                    *tuna-config-compile*
         a function of output and expected returning a boolean.
 
 `checker`
-        `"builtin"` (default), a path to a testlib-style checker, or
-        `{ exec, args }`.
+        A path to a testlib-style checker, or `{ exec, args }`, used
+        instead of a `checker.*` file beside the solution. Default: none,
+        so that file judges when there is one.
 
 `save_current_file`
         Write the buffer before running. Default `true`.
@@ -725,8 +737,9 @@ RUN MODES AND HELPERS                                  *tuna-config-run-modes*
 `stress.generator`
 `stress.reference`
 `interactive.interactor`
-        Explicit paths, if you would rather not use the filename
-        convention.
+        A path, or `{ exec, args }`, used instead of the file
+        `tool_names` finds. A configured helper counts as present just
+        as the file does.
 
 `scaffold.files`
         The basenames `:Tuna scaffold` creates.

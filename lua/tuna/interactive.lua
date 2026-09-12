@@ -247,9 +247,11 @@ function InteractiveRunner:run_single(idx)
     end) then
         return
     end
-    self:run_one_session(idx, function()
-        self.completed = true
-        self:update_ui(true)
+    self:with_helpers(function()
+        self:run_one_session(idx, function()
+            self.completed = true
+            self:update_ui(true)
+        end)
     end)
 end
 
@@ -260,7 +262,42 @@ function InteractiveRunner:run_testcases()
     end) then
         return
     end
-    self:run_sessions()
+    self:with_helpers(function()
+        self:run_sessions()
+    end)
+end
+
+---Look this run's helpers up again before a rerun, as every run does: the checker, and for
+---the interactor source the interactor, prepared again so an edited one rebuilds. A rerun
+---keeps its source, so an interactor that is gone is reported and nothing runs: `:Tuna run`
+---picks the source again.
+---@param cont fun()
+function InteractiveRunner:with_helpers(cont)
+    local solution = api.nvim_buf_get_name(self.bufnr)
+    self:refresh_checker(solution)
+    if self.source ~= "interactor" then
+        return cont()
+    end
+    local function stop(title, text)
+        self.completed = true
+        if self.ui then
+            self.ui:show_message(title, text)
+        else
+            utils.notify("interactive: " .. text, "WARN")
+        end
+        self:update_ui(true)
+    end
+    local spec, missing = tools.helper("interactor", solution, self.config)
+    if not spec then
+        return stop(" interactive: no interactor ", (missing or "the interactor is gone") .. ", :Tuna run picks the source again.")
+    end
+    self.interactor = spec
+    tools.prepare(spec, function(ok, err)
+        if not ok then
+            return stop(" interactive: interactor failed to compile ", err or "")
+        end
+        cont()
+    end)
 end
 
 ---In a conversation the three columns are scroll-bound and unwrapped, so reading back
@@ -905,36 +942,6 @@ end
 -- Helpers + entry point
 --------------------------------------------------------------------------------
 
----Resolve a command spec (string or `{ exec, args }`) into argv. Only the exec is
----modifier-expanded; args are kept raw so their per-run $(INPUT)/$(ANSWER)
----placeholders survive.
----@param bufnr integer
----@param spec string|{ exec: string, args: string[]? }
----@return { exec: string, args: string[] }?
-local function resolve_cmd(bufnr, spec)
-    if type(spec) == "string" then
-        local exec = utils.buf_eval_string(bufnr, spec)
-        return exec and { exec = exec, args = {} } or nil
-    elseif type(spec) == "table" and spec.exec then
-        local exec = utils.buf_eval_string(bufnr, spec.exec)
-        if not exec then
-            return nil
-        end
-        return { exec = exec, args = vim.deepcopy(spec.args or {}) }
-    end
-    return nil
-end
-
----@param cfg table
----@param dir string
----@return boolean # whether an interactor is configured or discoverable
-local function interactor_available(cfg, dir)
-    if cfg.interactive and cfg.interactive.interactor then
-        return true
-    end
-    return tools.find(dir, "interactor", cfg) ~= nil
-end
-
 ---Rebuild any open interactive UIs after a `VimResized`.
 function M.resize_all()
     for _, ir in pairs(M.active) do
@@ -962,43 +969,40 @@ function M.run(bufnr, args, opts)
         tools.save_sources(bufnr, cfg) -- save the solution (interactor saved in tools.prepare)
     end
 
-    -- Pull a leading source keyword out of the args (the rest are testcase numbers).
+    -- Pull a leading source keyword out of the args (the rest are testcase numbers). A
+    -- source typed now is forced and runs as typed, `auto` makes it automatic again.
     local list = args and vim.deepcopy(args) or nil
-    if list and list[1] and SOURCES[list[1]] then
-        tools.set_source(path, table.remove(list, 1))
+    local typed
+    if list and list[1] and (SOURCES[list[1]] or list[1] == "auto") then
+        typed = table.remove(list, 1)
+        tools.set_source(path, typed ~= "auto" and typed or nil)
     end
     if list and #list == 0 then
         list = nil
     end
-    local source = tools.get_source(path) or (interactor_available(cfg, dir) and "interactor" or "live")
+    local source, note
+    if typed and typed ~= "auto" then
+        source = typed
+    else
+        source, note = tools.resolve_source(path, cfg)
+    end
 
-    -- Resolve the interactor only when it's the chosen source.
     local interactor
     if source == "interactor" then
-        local icfg = cfg.interactive or {}
-        if icfg.interactor then
-            interactor = resolve_cmd(bufnr, icfg.interactor)
-            if not interactor then
-                utils.notify("interactive: 'interactive.interactor' command is malformed.")
-                return
-            end
-        else
-            local ipath = tools.find(dir, "interactor", cfg)
-            if not ipath then
-                utils.notify(
-                    "interactive: no interactor found, create a sibling 'interactor.*' file, "
-                        .. "set 'interactive.interactor', or use ':Tuna run interactive live|feed'."
-                )
-                return
-            end
-            local spec, err = tools.program(ipath, cfg)
-            if not spec then
-                utils.notify("interactive: interactor " .. err .. ".")
-                return
-            end
-            interactor = spec
-            interactor.args = vim.list_extend(interactor.args, { "$(INPUT)", "$(ANSWER)" })
+        local missing
+        interactor, missing = tools.helper("interactor", path, cfg)
+        if not interactor then
+            utils.notify(
+                "interactive: "
+                    .. (missing or "no interactor, add an interactor.* file or set interactive.interactor")
+                    .. ", or run ':Tuna run interactive live' or 'feed'.",
+                "WARN"
+            )
+            return
         end
+    end
+    if note then
+        utils.notify("interactive: " .. note .. ".", "INFO")
     end
 
     local timeout = (cfg.maximum_time and cfg.maximum_time > 0) and cfg.maximum_time or nil
@@ -1053,7 +1057,7 @@ function M.run(bufnr, args, opts)
                 cont()
                 return
             end
-            tools.prepare(interactor, function(ok, err)
+            tools.prepare(ir.interactor, function(ok, err)
                 if not ok then
                     -- Nothing will run, so nothing is in flight either: left `false`, the
                     -- runner would refuse every edit with "wait for the run to finish".

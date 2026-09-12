@@ -45,6 +45,30 @@ M.active = {}
 -- verdicts exactly as a normal run would.
 local StressRunner = core.extend()
 
+---The generator and reference of a solution, or nil and what to tell the user about the
+---ones that are missing.
+---@param solution string
+---@param cfg table
+---@return table? gen, table? ref, string? missing
+local function stress_helpers(solution, cfg)
+    local gen, gen_note = tools.helper("generator", solution, cfg)
+    local ref, ref_note = tools.helper("reference", solution, cfg)
+    if gen and ref then
+        return gen, ref
+    end
+    local names = cfg.tool_names or tools.DEFAULT_NAMES
+    local missing = {}
+    if not gen then
+        missing[#missing + 1] = gen_note
+            or ("no generator (a " .. names.generator[1] .. ".* file or stress.generator)")
+    end
+    if not ref then
+        missing[#missing + 1] = ref_note
+            or ("no reference (a " .. names.reference[1] .. ".* file or stress.reference)")
+    end
+    return nil, nil, "stress needs a generator and a reference, " .. table.concat(missing, " and ")
+end
+
 ---Extra "Run" pane rows below mode/judge: the live stress counters, as
 ---{ label, value } pairs (the UI aligns the colons), one per line.
 ---@return string[][]
@@ -386,6 +410,7 @@ function StressRunner:run_single(idx)
     end) then
         return
     end
+    self:refresh_checker(vim.api.nvim_buf_get_name(self.bufnr))
     self:execute_entry(idx)
 end
 
@@ -399,6 +424,22 @@ function StressRunner:run_testcases()
     end) then
         return
     end
+    -- A restart looks its helpers up again, as every run does. It keeps its mode, so a
+    -- helper that is gone is reported and nothing runs: `:Tuna run` picks the mode again.
+    local solution = vim.api.nvim_buf_get_name(self.bufnr)
+    local gen, ref, missing = stress_helpers(solution, self.config)
+    if not gen then
+        self.finished = true
+        if self.ui then
+            self.ui:show_message(" stress: a helper is missing ", missing .. ".\n\n:Tuna run picks the run mode again.")
+        else
+            utils.notify(missing .. ".", "WARN")
+        end
+        self:update_ui(true)
+        return
+    end
+    self.gen, self.ref = gen, ref
+    self:refresh_checker(solution)
     self.stopped = false
     self.finished = false
     self.iter = 0
@@ -430,32 +471,6 @@ end
 -- Entry point
 --------------------------------------------------------------------------------
 
----Resolve a stress command spec (a string, or a `{ exec, args }` table) into an
----argv table, expanding `$(FNOEXT)` etc. against the buffer.
----@param bufnr integer
----@param spec string|{ exec: string, args: string[]? }
----@return { exec: string, args: string[] }?
-local function resolve_cmd(bufnr, spec)
-    if type(spec) == "string" then
-        local exec = utils.buf_eval_string(bufnr, spec)
-        return exec and { exec = exec, args = {} } or nil
-    elseif type(spec) == "table" and spec.exec then
-        local exec = utils.buf_eval_string(bufnr, spec.exec)
-        if not exec then
-            return nil
-        end
-        local args = {}
-        for i, a in ipairs(spec.args or {}) do
-            args[i] = utils.buf_eval_string(bufnr, a)
-            if not args[i] then
-                return nil
-            end
-        end
-        return { exec = exec, args = args }
-    end
-    return nil
-end
-
 ---Rebuild any open stress UIs after a `VimResized`.
 function M.resize_all()
     for _, sr in pairs(M.active) do
@@ -484,43 +499,9 @@ function M.run(bufnr, count_override, opts)
         tools.save_sources(bufnr, cfg) -- save the solution (helpers are saved in tools.prepare)
     end
 
-    -- Resolve a helper (generator/reference): an explicit config spec wins,
-    -- otherwise discover a sibling source file (gen.* / brute.*) and compile it.
-    local function resolve_helper(role, override, label)
-        if override then
-            local spec = resolve_cmd(bufnr, override)
-            if not spec then
-                utils.notify("stress: 'stress." .. label .. "' command is malformed.")
-            end
-            return spec
-        end
-        local path = tools.find(dir, role, cfg)
-        if not path then
-            utils.notify(
-                "stress: no "
-                    .. label
-                    .. " found, create a sibling '"
-                    .. tools.DEFAULT_NAMES[role][1]
-                    .. ".*' "
-                    .. "file, or set 'stress."
-                    .. label
-                    .. "'."
-            )
-            return nil
-        end
-        local spec, err = tools.program(path, cfg)
-        if not spec then
-            utils.notify("stress: " .. label .. " " .. err .. ".")
-        end
-        return spec
-    end
-
-    local gen = resolve_helper("generator", scfg.generator, "generator")
+    local gen, ref, missing = stress_helpers(vim.api.nvim_buf_get_name(bufnr), cfg)
     if not gen then
-        return
-    end
-    local ref = resolve_helper("reference", scfg.reference, "reference")
-    if not ref then
+        utils.notify(missing .. ", `:Tuna scaffold` writes starters.", "WARN")
         return
     end
 
@@ -593,12 +574,12 @@ function M.run(bufnr, count_override, opts)
     -- Compile the generator and reference; `cb()` once both are ready. Kept on the
     -- runner so a restart (`run_testcases`) can re-prepare them too.
     local function prepare_helpers(cb)
-        tools.prepare(gen, function(gok, gerr)
+        tools.prepare(sr.gen, function(gok, gerr)
             if not gok then
                 helper_compile_failed("generator", gerr)
                 return
             end
-            tools.prepare(ref, function(rok, rerr)
+            tools.prepare(sr.ref, function(rok, rerr)
                 if not rok then
                     helper_compile_failed("reference", rerr)
                     return

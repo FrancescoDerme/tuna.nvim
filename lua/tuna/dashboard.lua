@@ -179,7 +179,8 @@ local function command_entries(sol, cur)
 
     if runnable(sol) then
         local cfg = config.get_buffer_config(sol)
-        local mode = tools.resolve_mode(path, dir, cfg)
+        local mode = tools.resolve_mode(path, cfg)
+        local forced = tools.get_mode(path)
         local compare = require("tuna.compare")
         local cmp = tools.get_compare(path)
         local cmp_label = cmp and compare.method_name(cmp)
@@ -191,7 +192,15 @@ local function command_entries(sol, cur)
                 commands.dispatch_mode(m, {}, true, sol)
             end
         end
-        add("Run  (" .. mode .. ")", switch(mode))
+        add(("Run  (%s, %s)"):format(mode, forced == mode and "forced" or "automatic"), function()
+            commands.dispatch_mode(mode, {}, true, sol)
+        end)
+        if forced then
+            add("Make the run mode automatic", function()
+                tools.set_mode(path, nil)
+                commands.dispatch_mode((tools.resolve_mode(path, cfg)), {}, true, sol)
+            end)
+        end
         add("Run all versions", switch("all"))
         add("Stress test", switch("stress"))
         add("Interactive", switch("interactive"))
@@ -204,7 +213,10 @@ local function command_entries(sol, cur)
         add("Add testcase", function()
             commands.execute({ "testcase", "add" })
         end)
-        add("Checker: " .. (tools.checker_enabled(path) and "on" or "off"), function()
+        local checker = tools.resolve_checker(path, cfg)
+        local checker_label = tools.checker_setting(path) == "off" and "off"
+            or ("automatic, " .. (type(checker) == "table" and vim.fn.fnamemodify(checker.source or checker.exec, ":t") or "none found"))
+        add("Checker: " .. checker_label, function()
             commands.set_checker(sol)
         end)
         add("Compare: " .. cmp_label, function()

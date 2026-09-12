@@ -17,12 +17,12 @@ local M = {}
 
 -- Sub-argument completions for subcommands that take a second word.
 local subcommand_args = {
-    run = tools.MODES,
+    run = vim.list_extend({ "auto" }, vim.deepcopy(tools.MODES)),
     testcase = { "add", "edit", "delete", "split" },
     convert = { "files", "single_file", "directory" },
     download = { "testcases", "problem", "contest", "sync", "persistently", "status", "stop" },
     scaffold = { "checker", "generator", "brute", "interactor" },
-    checker = { "on", "off", "toggle" },
+    checker = { "auto", "off", "toggle" },
     compare = { "exact", "squish", "float", "default" },
     submit = { "clear" },
     lib = { "snippet", "search" },
@@ -30,7 +30,7 @@ local subcommand_args = {
 }
 
 -- Third-level completions: `:Tuna run interactive <Tab>` offers its input sources.
-local interactive_sources = { "live", "feed", "interactor" }
+local interactive_sources = { "auto", "live", "feed", "interactor" }
 
 -- Run modes selectable via `:Tuna run <mode>` and the menu. Kept as a set for
 -- quick "is this arg a mode keyword?" checks.
@@ -38,6 +38,7 @@ local MODE_SET = {}
 for _, m in ipairs(tools.MODES) do
     MODE_SET[m] = true
 end
+MODE_SET.auto = true
 
 --------------------------------------------------------------------------------
 -- Testcase editing
@@ -370,7 +371,7 @@ function M.show_results_ui(bufnr)
     config.load_buffer_config(bufnr)
     local path = api.nvim_buf_get_name(bufnr)
     local mode = M.last_mode[bufnr]
-        or tools.resolve_mode(path, vim.fn.fnamemodify(path, ":p:h"), config.get_buffer_config(bufnr))
+        or (tools.resolve_mode(path, config.get_buffer_config(bufnr)))
     local mod = (mode == "stress" and "tuna.stress")
         or (mode == "interactive" and "tuna.interactive")
         or (mode == "all" and "tuna.multi")
@@ -390,9 +391,9 @@ function M.show_results_ui(bufnr)
     end)
 end
 
----Handle `:Tuna run [mode] [args]`. A leading mode keyword switches the buffer's
----active mode (and is consumed); otherwise the buffer's current mode is used, so
----a bare `:Tuna run` repeats whatever mode you last selected.
+---Handle `:Tuna run [mode] [args]`. A leading mode keyword forces that mode (it sticks)
+---and runs it, `auto` makes the mode automatic again. Without one the resolved mode runs:
+---the forced one while it can run, else the one the problem's helpers point to.
 ---@param args string[] the arguments after `run`
 function M.run_mode(args)
     local bufnr = M.solution_bufnr()
@@ -400,32 +401,46 @@ function M.run_mode(args)
         return
     end
     local path = api.nvim_buf_get_name(bufnr)
-    local mode
+    local mode, note
     if args[1] and MODE_SET[args[1]] then
-        mode = table.remove(args, 1)
-        tools.set_mode(path, mode)
-    else
-        -- No mode given: use the buffer's explicit choice if it still applies,
-        -- otherwise auto-detect from the sibling helper files present.
-        local dir = vim.fn.fnamemodify(path, ":p:h")
-        mode = tools.resolve_mode(path, dir, config.get_buffer_config(bufnr))
+        local chosen = table.remove(args, 1)
+        tools.set_mode(path, chosen ~= "auto" and chosen or nil)
+        mode = chosen ~= "auto" and chosen or nil
+    end
+    if not mode then
+        mode, note = tools.resolve_mode(path, config.get_buffer_config(bufnr))
+    end
+    if note then
+        utils.notify("run: " .. note .. ".", "INFO")
     end
     M.dispatch_mode(mode, args, true, bufnr)
 end
 
----Toggle (or set) the per-buffer checker: when off, runs fall back to plain
----output comparison even if a checker.* file exists. Drops the cached runner so
----the next run re-resolves the checker.
+---Set a problem's checker to automatic or off, or flip between the two. Every run looks
+---the checker up, so it applies to the next run of any mode, and an open results UI shows
+---the new judge straight away.
 ---@param bufnr integer
----@param want boolean? explicit target state; nil flips the current value
+---@param want "auto"|"off"|nil nil flips the current setting
 function M.set_checker(bufnr, want)
     local path = api.nvim_buf_get_name(bufnr)
     if want == nil then
-        want = not tools.checker_enabled(path)
+        want = tools.checker_setting(path) == "off" and "auto" or "off"
     end
     tools.set_checker(path, want)
-    M.runners[bufnr] = nil -- force checker re-resolution on the next run
-    utils.notify("checker " .. (want and "enabled" or "disabled") .. " for this buffer.", "INFO")
+    local cfg = config.get_buffer_config(bufnr)
+    local checker = tools.resolve_checker(path, cfg)
+    for _, r in ipairs(runners_of(bufnr)) do
+        r.checker = checker
+        r:update_ui()
+    end
+    if want == "off" then
+        utils.notify("checker: off for this problem, comparing outputs.", "INFO")
+    elseif type(checker) == "table" then
+        local name = vim.fn.fnamemodify(checker.source or checker.exec, ":t")
+        utils.notify("checker: automatic for this problem, using " .. name .. ".", "INFO")
+    else
+        utils.notify("checker: automatic for this problem, none found, comparing outputs.", "INFO")
+    end
 end
 
 ---Parse `:Tuna compare` args into a compare-method spec (or nil to clear the
@@ -494,7 +509,7 @@ function M.cycle_compare(bufnr)
 end
 
 ---Set (or clear) the per-buffer output-compare override. Drops the cached runner so
----the next run re-resolves. Mirrors `set_checker`.
+---the next run re-resolves.
 ---@param bufnr integer
 ---@param args string[]
 function M.set_compare(bufnr, args)
@@ -625,11 +640,12 @@ M.subcommands = {
         M.download(args[1])
     end,
     checker = function(args)
-        local want = nil
-        if args[1] == "on" then
-            want = true
-        elseif args[1] == "off" then
-            want = false
+        local want
+        if args[1] == "auto" or args[1] == "off" then
+            want = args[1]
+        elseif args[1] ~= nil and args[1] ~= "toggle" then
+            utils.notify("checker: use auto, off or toggle.", "WARN")
+            return
         end
         local bufnr = M.solution_bufnr()
         if bufnr then

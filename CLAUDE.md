@@ -176,20 +176,32 @@ is relative. Every configured path goes through these: compile/running directori
 - **`sidecar.lua`**: `problem_store_file` (`.tuna.json`) beside the source. Keys:
   - `url`/`name`/`group`/`mirror`/`mirror_at`, the downloaded task;
   - `submit = { [basename] = { state, text, url, hash } }`;
-  - `run = { [basename] = { mode, explicit, checker, source, compare } }`.
+  - `run = { [basename] = { mode, source, checker, compare } }`, holding only what was forced
+    (older entries' `explicit = false` and `checker = false` still read).
 
   Entries are keyed by **basename** because one folder can hold several problems or several
   attempts. Writers merge. `set_entry(…, nil)` removes an entry and deletes the file once it is
   empty. This is problem state that travels with the folder; machine state belongs in
   `stdpath("state")` (`recent.lua`).
 - **`tools.lua`**:
-  - Helpers are sibling source files named by `tool_names` (`checker.*`, `gen.*`, `brute.*`,
-    `interactor.*`) and compiled with their own filetype's commands. `prepare` caches builds
-    session-wide, keyed by path + mtime + compile command, and queues concurrent callers.
-  - Run state per file: `mode` (`detect_mode` infers it from the helper files present;
-    `resolve_mode` keeps an explicit choice while its files exist), checker toggle,
-    interactive source, and compare override. It is persisted in the sidecar, loaded lazily,
-    and removed when equal to the defaults.
+  - **One rule for every helper and every setting**, kept consistent on purpose.
+    `helper(role, solution, cfg)` finds any role (checker, generator, reference, interactor):
+    the configured option (`checker`, `stress.generator`/`reference`,
+    `interactive.interactor`; a string is a helper file, compiled or a prebuilt binary, a
+    table an `{ exec, args }` command whose args expand file modifiers but keep
+    `$(INPUT)`/`$(OUTPUT)`/`$(ANSWER)`) wins over a sibling file named by `tool_names`, and a
+    configured one that doesn't exist returns a note. Nothing is cached: disk decides now.
+  - The run settings, mode, interactive source and checker, are each **automatic until
+    forced** (`get_mode`/`set_mode`, `get_source`/`set_source`, `checker_setting`/
+    `set_checker`, nil or `"auto"` being automatic; the checker can only be forced `"off"`).
+    Automatic: `detect_mode` (interactor, then generator + reference, else normal),
+    interactor-else-live, the checker when there is one. `resolve_mode`/`resolve_source`/
+    `resolve_checker` return the forced choice while what it needs is available, else the
+    automatic one plus a note (only stress and the interactor source need helpers). Keywords
+    typed now force and run as typed; `auto` clears. Persisted in the sidecar with the compare
+    override, loaded lazily, removed when nothing is forced.
+  - `prepare` caches builds session-wide, keyed by path + mtime + compile command, and queues
+    concurrent callers.
   - Compare methods are stored **by name** (`{ method = "float", tol }`), because a mixed
     array/hash table does not survive JSON. Every field is validated on read.
   - `solution_bufnr` redirects a run started from a helper file to the sibling solution. Loading
@@ -227,7 +239,8 @@ is relative. Every configured path goes through these: compile/running directori
 
 **Normal runner (`runner/init.lua`)**
 - `runner.new(bufnr)` resolves compile/run commands, directories and the checker. Stress,
-  interactive and multi reuse it.
+  interactive and multi reuse it. Every run in every mode calls `RunnerCore:refresh_checker`,
+  so a checker added, deleted or switched off applies to the next run of a cached runner.
 - `build_rows`: row 1 is `Compile` when compiling, and the build gates the testcases. With **no
   testcases** it builds one `bare` testcase 0, labelled `No input`, run on empty stdin with no
   answer (so `DONE`) and editable; saving it creates the testcase. `n` in the UI reuses an
@@ -247,8 +260,10 @@ is relative. Every configured path goes through these: compile/running directori
   could slip through mid-run.
 
 **Stress (`stress.lua`)**: `StressRunner`.
-- Helpers are resolved through `prepare_helpers` on every restart (the cache makes that free),
-  and spawns in the loop are `pcall`ed.
+- Helpers come from `stress_helpers` (`tools.helper` for both roles). A restart resolves them
+  again: missing ones are shown in a message and nothing runs, since a rerun keeps its mode.
+  `prepare_helpers` compiles them (the cache makes that free), and spawns in the loop are
+  `pcall`ed.
 - The solution's existing testcases re-run while the generator and brute force compile.
 - A counterexample becomes a saved testcase only if its input is new. The search stops at
   `saves_per_run` or `max_saved`.
@@ -277,7 +292,9 @@ is relative. Every configured path goes through these: compile/running directori
     unmodifiable, and insert mode is left.
   - Only live's Live pane wears the editable accent.
 - interactor: `vim.uv.spawn` pipes cross-wire the solution and the interactor; the verdict is
-  the interactor's exit code, and it gets `$(INPUT)`/`$(ANSWER)`.
+  the interactor's exit code, and it gets `$(INPUT)`/`$(ANSWER)`. Reruns go through
+  `with_helpers`, which refreshes the checker and, for the interactor source, resolves and
+  prepares the interactor again, reporting a missing one instead of running.
 - `M._test` exposes `log_append` and `conversation`.
 
 **Run-all (`multi.lua`)**
@@ -288,9 +305,11 @@ is relative. Every configured path goes through these: compile/running directori
 - All solutions compile first, then everything runs in one shared pool of `multiple_testing`.
   A compile failure is a `CE` row.
 - `run_single`/`rerun_solution` settle through `settle_single`. Its `save_testcase` override
-  keeps the shared `tctbl` in step.
+  keeps the shared `tctbl` in step. The checker comes from `tools.resolve_checker` against
+  `solution` (the buffer's file, else the first solution), so `:Tuna checker off` applies.
 
-**Checker (`checker.lua`)**: `"builtin"` delegates to `compare.lua`. An external checker runs
+**Checker (`checker.lua`)**: `"builtin"` (what `resolve_checker` returns when there is no
+checker) delegates to `compare.lua`. An external checker runs
 as `checker <input> <output> <answer>` (exit 0 means correct) and is compiled via
 `tools.prepare`. Its message (`tc.checker_message`) is appended to the Errors pane by the base
 `pane_content`, and `reset_row` clears it.
@@ -319,8 +338,8 @@ as `checker <input> <output> <answer>` (exit 0 means correct) and is compiled vi
   `update_details`).
 - `opening_row()` uses the runner's `last_row_id` (matched by `row_id`), else `initial_row()`:
   the first testcase, or Compile when it has output or is still running.
-- `status_lines()`: mode, verdict source, diff on/off, runner tail, `help: ?`. Its row count is
-  fixed per runner.
+- `status_lines()`: mode (with forced or automatic), judge (the checker file, else the
+  compare method), diff on/off, runner tail, `help: ?`. Its row count is fixed per runner.
 
 **Inline editing**
 - Editable panes are always-modifiable `acwrite` buffers. `:w` from **any** pane saves the row
@@ -581,6 +600,9 @@ specific Vim error about a buffer the user never opened.
 - **`dashboard.lua`**: `widgets.panels` with a banner. Recent (from `recent.snapshot()`, status
   from `submit.verdict_for`, else local results off a live runner, which are never persisted)
   sits beside Commands; the commands that need a runnable buffer are dropped for other buffers.
+  Its Run entry runs the resolved mode without forcing it, and shows whether that mode is
+  forced; a forced mode adds an entry making it automatic, and the checker entry shows
+  automatic (with the file in use) or off.
   Modules are required lazily.
 - **`keymaps.lua`**: `M.actions` maps actions to `:Tuna` commands. `mappings` are buffer-local
   via a `FileType` autocmd over `keymaps.filetypes`; `global` are global. `setup()` can be
@@ -603,6 +625,10 @@ specific Vim error about a buffer the user never opened.
   - `surfaces.lua`: conformance of every surface to the `surface.lua` contract, every float
     tagged before it is entered, and every `runner_ui.mappings` key still resolving to an
     action;
+  - `modes.lua`: the helper and run-setting rule end to end: availability (files, configured
+    paths and commands, missing ones), automatic choices, forcing and `auto`, forced settings
+    giving way and coming back, old sidecar entries, runners refreshing the checker per run,
+    run-all honouring `checker off`, and stress/interactor reruns reporting a missing helper;
   - `temp.lua`: the templates a scratch can start from, when a scratch is resumed, the
     resume/restart and template menus, and absorbing keeping the header of the template actually used;
   - `testcases.lua`, `compare.lua`, `judges.lua`, `download.lua`, `clean.lua`, `submit.lua`:

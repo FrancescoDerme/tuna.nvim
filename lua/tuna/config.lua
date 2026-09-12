@@ -47,19 +47,17 @@ M.defaults = {
     -- or relative error (non-numeric tokens must match exactly) — for problems with
     -- floating-point answers, no custom checker needed.
     output_compare_method = "squish",
-    -- Verdict source. Default "builtin" means: plain comparison via
-    -- output_compare_method, *unless* a sibling `checker.*` source file is found
-    -- (see tool_names) and the per-buffer checker toggle is on — then that file is
-    -- compiled and used as a special judge. Set explicitly to override:
-    --   "builtin"                 -> always plain comparison, no auto-discovery
-    --   a path string, or a       -> testlib-style external checker, invoked as
-    --   command table { exec,args }   `checker <input> <output> <answer>`. A path to
-    --                                a *source* file is compiled first; args expand
-    --                                $(INPUT)/$(OUTPUT)/$(ANSWER), exec expands
-    --                                $(FNOEXT) etc.
-    -- An external checker accepts any correct answer (special judge), which is how
-    -- problems with multiple valid outputs are supported.
-    checker = "builtin",
+    -- Special judge. Like every helper, discovered by default: a sibling `checker.*` file
+    -- (see tool_names) judges when there is one, plain comparison via
+    -- output_compare_method otherwise. Set it to use a checker of your own instead:
+    --   a path string        -> a checker file, compiled and run by its language, or a
+    --                           prebuilt binary
+    --   { exec, args } table -> a command; args expand $(FNOEXT) etc. and keep
+    --                           $(INPUT)/$(OUTPUT)/$(ANSWER) for each testcase
+    -- Checkers are testlib-style, `checker <input> <output> <answer>`, exit 0 meaning
+    -- correct, which is how problems with several valid outputs are judged.
+    -- `:Tuna checker off` compares outputs for one problem regardless.
+    checker = nil,
     view_output_diff = false,
 
     -- Helper programs (checker / generator / reference / interactor) for the
@@ -76,9 +74,9 @@ M.defaults = {
 
     -- stress testing (:Tuna run stress) — hunt for an input where the solution and
     -- a trusted reference disagree. generator/reference are discovered by
-    -- convention (gen.* / brute.*); set these only to override — a command spec (a
-    -- string, or { exec, args }) expanded with the usual $(FNOEXT)/$(ABSDIR)/…
-    -- modifiers. The generator gets the iteration number appended as a seed (unless
+    -- convention (gen.* / brute.*); set these to use your own instead: a path to
+    -- a helper file (compiled and run by its language, or a prebuilt binary), or an
+    -- { exec, args } command, expanded with the usual $(FNOEXT)/$(ABSDIR)/… modifiers. The generator gets the iteration number appended as a seed (unless
     -- seed_arg = false) so failures are reproducible.
     stress = {
         generator = nil, -- override discovery, e.g. { exec = "python3", args = { "$(ABSDIR)/gen.py" } }

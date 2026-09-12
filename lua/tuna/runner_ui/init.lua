@@ -2190,8 +2190,14 @@ function RunnerUI:status_lines()
     -- between rows, which turns a state row into a running commentary, and the panes
     -- themselves already say it (no answer, no run, or two texts that agree).
     local diff_state = self.diff_view and "on" or "off"
+    -- Whether the mode was forced or picked for you is half of why the run looks the way
+    -- it does, so it is said beside the mode.
+    local mode = self.runner.mode or "normal"
+    local bufnr = self.runner.bufnr
+    local path = (bufnr and api.nvim_buf_is_valid(bufnr)) and api.nvim_buf_get_name(bufnr) or ""
+    local forced = path ~= "" and require("tuna.tools").get_mode(path) == mode
     local entries = {
-        { "mode", self.runner.mode or "normal" },
+        { "mode", mode .. (forced and ", forced" or ", automatic") },
         { "judge", self.runner.judge_label and self.runner:judge_label() or "builtin" },
         { "diff", diff_state },
     }
