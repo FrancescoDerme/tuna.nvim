@@ -390,9 +390,14 @@ end
 stub_system()
 require("tuna.interactive").run(buf, { "feed" })
 local fr = require("tuna.interactive").active[buf]
-vim.wait(300, function()
-    return fr ~= nil and fr.ui ~= nil and fr.ui.ui_visible
+-- A run opens on its build step, which is shown with Errors alone, so the panes of the mode
+-- are there once the build has handed the row over.
+vim.wait(2000, function()
+    return fr ~= nil and fr.ui ~= nil and fr.ui.ui_visible and fr.ui.update_testcase ~= 1
 end, 20)
+vim.wait(200, function()
+    return false
+end)
 vim.system = real_system
 local fui = fr and fr.ui
 t.ok("feed opened its results UI", fui ~= nil and fui.ui_visible)
@@ -579,9 +584,13 @@ t.write(dir, "interactor.cpp", "int main(){}\n")
 stub_system()
 require("tuna.interactive").run(buf, { "interactor" })
 local xr = require("tuna.interactive").active[buf]
-vim.wait(300, function()
-    return xr ~= nil and xr.ui ~= nil and xr.ui.ui_visible
+-- Once the build has handed the row over, so the mode's own panes are the ones drawn.
+vim.wait(2000, function()
+    return xr ~= nil and xr.ui ~= nil and xr.ui.ui_visible and xr.ui.update_testcase ~= 1
 end, 20)
+vim.wait(200, function()
+    return false
+end)
 vim.system = real_system
 local xui = xr and xr.ui
 t.ok("interactor opened its results UI", xui ~= nil and xui.ui_visible)
@@ -1390,6 +1399,36 @@ t.eq("with the cursor on it", vim.api.nvim_win_get_cursor(shrink.ui.windows.tc.w
 shrink:delete_ui()
 vim.system = real_system
 
+-- Which row a board opens on, as a rule over the rows themselves. A run's build is the row
+-- from the moment the run starts, not from the moment the compiler is spawned: the two are a
+-- tick apart, and a board opened in between drew the panes of a run for a build about to
+-- start, then redrew them — the flash of a grid that was never the right one.
+stub_system()
+local opening = require("tuna.runner").new(wbuf)
+opening:load_testcases(wtcs)
+opening:show_ui()
+vim.wait(1000, function()
+    return opening.ui.update_testcase == 2
+end, 20)
+local build_row = opening.tcdata[1]
+t.eq("listed, with nothing built, the board opens on the first testcase", opening.ui:initial_row(), 2)
+opening.preloaded = false
+build_row.running, build_row.exit_code = false, nil
+t.eq("a run whose build has not finished opens on it, spawned or not", opening.ui:initial_row(), 1)
+build_row.exit_code = 0
+t.eq("and on the first testcase once the build ends with nothing to say", opening.ui:initial_row(), 2)
+build_row.stderr = "warning: unused variable"
+t.eq("unless it said something", opening.ui:initial_row(), 1)
+-- The row last looked at is where a board reopens, except while a run is building: every run
+-- starts on its build, rather than the first one differing from the ones after it.
+build_row.stderr, build_row.exit_code = "", 0
+opening.ui:goto_row(3)
+t.eq("a board reopens on the row last looked at", opening.ui:opening_row(), 3)
+build_row.exit_code = nil
+t.eq("unless a run is building, which every run opens on", opening.ui:opening_row(), 1)
+opening:delete_ui()
+vim.system = real_system
+
 -- A build still going keeps the cursor on itself, whatever drives it: interactive and stress
 -- compile by hand rather than through a testcase row, and a row that is building has to say so
 -- or the board moves off it before there is anything to move to.
@@ -1557,6 +1596,60 @@ end, 20)
 t.eq("and its build step is shown the same way as everything else's", drawn_panes(conv_grid.ui), BUILD_GRID)
 conv_grid:kill_all_processes()
 conv_grid:delete_ui()
+
+-- Each interactive source draws the grid `interactive.layouts` gives it.
+require("tuna.interactive").run(wbuf, { "live" }, { show_only = true })
+local shaped = require("tuna.interactive").active[wbuf]
+vim.wait(1000, function()
+    return shaped.ui ~= nil and shaped.ui.ui_visible and #shaped.tcdata > 0
+end, 20)
+t.eq("live draws the conversation by default", drawn_panes(shaped.ui), { "se", "si", "so", "st", "tc" })
+t.eq("named by the option it came from", select(2, shaped:layout()), "interactive.layouts.live")
+shaped.config = vim.tbl_deep_extend("force", shaped.config, {
+    interactive = { layouts = { live = { { 1, "tc" }, { 1, "eo" } } } },
+})
+shaped:update_ui(true)
+vim.wait(1000, function()
+    return #drawn_panes(shaped.ui) == 3
+end, 20)
+t.eq("and a grid of your own instead", drawn_panes(shaped.ui), { "eo", "st", "tc" })
+
+-- A layout that does not hold up is reported as the option it came from, not as "the run
+-- mode's", which is no help in finding it.
+local said = {}
+local real_notify = vim.notify
+vim.notify = function(msg)
+    said[#said + 1] = tostring(msg)
+end
+shaped.config = vim.tbl_deep_extend("force", shaped.config, {
+    interactive = { layouts = { live = { { 1, "so" } } } }, -- no selector
+})
+shaped:update_ui(true)
+vim.wait(1000, function()
+    return #said > 0
+end, 20)
+vim.notify = real_notify
+t.ok("a broken layout is reported by the option it came from", (said[1] or ""):find("interactive.layouts.live", 1, true) ~= nil, said)
+shaped:kill_all_processes()
+shaped:delete_ui()
+
+-- `feed` replays a stored testcase, so it keeps the grid configured for a run until told not to.
+require("tuna.interactive").run(wbuf, { "feed" }, { show_only = true })
+local fed = require("tuna.interactive").active[wbuf]
+vim.wait(1000, function()
+    return fed.ui ~= nil and fed.ui.ui_visible and #fed.tcdata > 0
+end, 20)
+t.eq("feed keeps the grid of a run", { fed:layout() }, {})
+fed.config = vim.tbl_deep_extend("force", fed.config, {
+    interactive = { layouts = { feed = { { 1, "tc" }, { 2, "si" } } } },
+})
+fed:update_ui(true)
+vim.wait(1000, function()
+    return #drawn_panes(fed.ui) == 3
+end, 20)
+t.eq("until one is configured for it", drawn_panes(fed.ui), { "si", "st", "tc" })
+fed:kill_all_processes()
+fed:delete_ui()
 
 -- `runner_ui.compile_layout = false` keeps whatever grid the mode draws.
 local kept_grid = require("tuna.runner").new(wbuf)

@@ -106,6 +106,18 @@ M.defaults = {
     -- as args).
     interactive = {
         interactor = nil, -- override discovery, e.g. { exec = "python3", args = { "$(ABSDIR)/interactor.py" } }
+        -- The grid each source draws, in the shape `popup_ui.layout` takes: a nested
+        -- `{ ratio, pane }` tree over `tc`, `so`, `eo`, `si`, `se`. `live` and `interactor`
+        -- read as a conversation, so they default to the selector beside Output, Live and
+        -- Errors, with no Expected Output — there is no one right answer to compare against.
+        -- `feed` replays a stored testcase, so it keeps the grid you configured for a run.
+        -- `false` means exactly that: whatever `popup_ui.layout` (or `split_ui`) says.
+        -- In `live` you type into `si`, so a layout without it leaves nowhere to talk.
+        layouts = {
+            live = { { 3, "tc" }, { 3, "so" }, { 3, "si" }, { 2, "se" } },
+            interactor = { { 3, "tc" }, { 3, "so" }, { 3, "si" }, { 2, "se" } },
+            feed = false,
+        },
     },
 
     -- scaffolding (:Tuna scaffold <checker|generator|brute|interactor> [ext]) — drop

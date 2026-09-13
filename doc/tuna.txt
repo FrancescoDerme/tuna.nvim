@@ -835,6 +835,13 @@ APPEARANCE                                            *tuna-config-appearance*
         The grid drawn while the build row is the one on screen. Default:
         the selector and the Errors pane. `false` keeps the grid of a run.
 
+`interactive.layouts`
+        The grid each interactive source draws, keyed by source and shaped
+        like `popup_ui.layout`. `live` and `interactor` default to the
+        conversation columns, `feed` to `false`, which means the grid you
+        configured for a run. In `live` you type into the `si` pane, so a
+        layout without it leaves nowhere to talk.
+
 `popup_ui.layout`
         A nested weight-and-pane tree over `tc`, `so`, `eo`, `si` and
         `se`. A pane you leave out is not drawn, and stays reachable

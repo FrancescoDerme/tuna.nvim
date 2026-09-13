@@ -560,6 +560,9 @@ function M.run(bufnr, count_override, opts)
     -- Open the results UI and show the testcase list (incl. the Compile row and any
     -- existing testcases, pending) right away.
     sr:load_testcases()
+    if opts.show_only then
+        sr:mark_not_run()
+    end
     sr:show_ui()
     sr:update_ui(true)
 
@@ -658,7 +661,6 @@ function M.run(bufnr, count_override, opts)
 
     if opts.show_only then
         -- Listed, not run: the first run key builds and starts the search (`built_first`).
-        sr:mark_not_run()
         sr.build = function(cont)
             tools.save_sources(bufnr, cfg)
             build(cont)

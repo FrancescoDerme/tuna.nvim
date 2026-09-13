@@ -1181,22 +1181,41 @@ end
 
 ---@private
 ---Which selector row the UI should open on. The first testcase, whenever the Compile
----step has nothing to say: an empty compile row leaves four empty panes in front of
+---step has nothing to say: an empty compile row leaves the panes of a run in front of
 ---someone who opened the UI to read a verdict — or, before any run, to read the
 ---testcase itself. Row 1 (Compile) is kept for the two cases where it is the row worth
----reading: a compilation that printed warnings or errors, and a run still in flight,
----where the cursor must not be moved out from under the user as results land.
+---reading: a compilation that printed warnings or errors, and a run whose build has not
+---finished, where the cursor must not be moved out from under the user as results land.
 ---@return integer
 function RunnerUI:initial_row()
     local first = self.runner.tcdata[1]
     if not first or first.tcnum ~= "Compile" or not self.runner.tcdata[2] then
         return 1
     end
-    -- Worth reading: it printed warnings or errors, or it is still being written to.
-    if (first.stdout or "") ~= "" or (first.stderr or "") ~= "" or first.running or first.judging then
+    -- Worth reading: it printed warnings or errors.
+    if (first.stdout or "") ~= "" or (first.stderr or "") ~= "" then
+        return 1
+    end
+    if self:building() then
         return 1
     end
     return 2
+end
+
+---@private
+---Whether a run's build is under way: a Compile row that has not finished, on a runner that is
+---running rather than listing its rows (`preloaded`). It is about the *run*, not the process:
+---asking whether the compiler runs right now leaves a window between the rows being built and
+---it being spawned, and a UI opened inside that window draws the panes of a run for a build
+---about to start, only to redraw them a tick later.
+---@return boolean
+function RunnerUI:building()
+    local first = self.runner.tcdata[1]
+    return first ~= nil
+        and first.tcnum == "Compile"
+        and self.runner.tcdata[2] ~= nil
+        and not self.runner.preloaded
+        and first.exit_code == nil
 end
 
 ---@private
@@ -1206,6 +1225,12 @@ end
 ---was deleted, or after a fresh set of testcases was loaded.
 ---@return integer
 function RunnerUI:opening_row()
+    -- A run opens on its build, whatever was last looked at: that is where the run is, and
+    -- `follow_after_compile` hands the row over the moment it ends with nothing to say. Every
+    -- run then starts the same way, rather than the first one differing from the rest.
+    if self:building() then
+        return 1
+    end
     local id = self.runner.last_row_id
     if id then
         for i, tc in ipairs(self.runner.tcdata) do
@@ -1247,8 +1272,11 @@ function RunnerUI:row_layout(idx)
     if tc and tc.tcnum == "Compile" and compile then
         return compile, "runner_ui.compile_layout"
     end
-    local own = self.runner.layout and self.runner:layout() or nil
-    return own, own and "run mode layout" or nil
+    if not self.runner.layout then
+        return nil, nil
+    end
+    local own, own_name = self.runner:layout()
+    return own, own and (own_name or "run mode layout") or nil
 end
 
 ---@private

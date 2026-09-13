@@ -237,7 +237,6 @@ end
 local function command_entries(sol, cur)
     local commands = require("tuna.commands")
     local path = api.nvim_buf_get_name(sol)
-    local dir = vim.fn.fnamemodify(path, ":p:h")
     local out = {}
     local function add(label, run)
         out[#out + 1] = { label = label, run = run }
@@ -325,15 +324,36 @@ end
 
 --------------------------------------------------------------------------------
 
----The display width of a status, all its segments together.
----@param status table[]
+---The display width of a run of segments.
+---@param segments table[]
 ---@return integer
-local function status_width(status)
+local function segments_width(segments)
     local w = 0
-    for _, seg in ipairs(status) do
+    for _, seg in ipairs(segments) do
         w = w + api.nvim_strwidth(seg[1])
     end
     return w
+end
+
+---A status in its three parts: the count that leads it (`2/7 `, `3/4 `, or nothing), the
+---verdict word (the first coloured segment), and whatever a contest counts besides
+---(`, 1 REJECTED`). The count and the word each get a column of their own, filled from the
+---right, so the counts stack however long the words beside them are and the words end on one
+---edge however long the counts are.
+---@param status table[]
+---@return table[] count, table? word, table[] rest
+local function status_parts(status)
+    local count, word, rest = {}, nil, {}
+    for _, seg in ipairs(status) do
+        if word then
+            rest[#rest + 1] = seg
+        elseif seg[2] then
+            word = seg
+        else
+            count[#count + 1] = seg
+        end
+    end
+    return count, word, rest
 end
 
 ---`text` cut to at most `max` display cells, an ellipsis marking the cut.
@@ -378,36 +398,58 @@ end
 
 ---Lay the recent lists out together, in rows at most `width` display cells wide (nil: as wide
 ---as they need): names on the left, and every status right of the longest name in any of the
----lists, flush right, so statuses line up down the whole stack and never sit under another
----row's name. A width too narrow for that shortens the names, never the statuses.
+---lists, so statuses line up down the whole stack and never sit under another row's name. A
+---status is laid out in the columns `status_parts` gives it, what a contest counts besides
+---trailing past them. A width too narrow for all that shortens the names, never the statuses.
 ---@param lists table[][] entry lists
 ---@param width integer?
 ---@return { rows: string[], highlights: { row: integer, col: integer, end_col: integer, group: string }[] }[]
 local function recent_layout(lists, width)
-    local name_w, status_w = 0, 0
-    for _, entries in ipairs(lists) do
-        for _, e in ipairs(entries) do
+    -- What each row is made of, and how wide each column has to be for all of them.
+    local parts = {}
+    local name_w, count_w, word_w, rest_w = 0, 0, 0, 0
+    for l, entries in ipairs(lists) do
+        parts[l] = {}
+        for i, e in ipairs(entries) do
+            local count, word, rest = status_parts(e.status)
+            parts[l][i] = { entry = e, count = count, word = word, rest = rest }
             name_w = math.max(name_w, api.nvim_strwidth(entry_name(e)))
-            status_w = math.max(status_w, status_width(e.status))
+            count_w = math.max(count_w, segments_width(count))
+            word_w = math.max(word_w, word and api.nvim_strwidth(word[1]) or 0)
+            rest_w = math.max(rest_w, segments_width(rest))
         end
     end
-    local gap = status_w > 0 and 2 or 0
+    local gap = (count_w + word_w + rest_w) > 0 and 2 or 0
     if width then
-        name_w = math.max(0, math.min(name_w, width - gap - status_w))
+        name_w = math.max(0, math.min(name_w, width - gap - count_w - word_w - rest_w))
     end
+
     local out = {}
-    for l, entries in ipairs(lists) do
+    for l, list in ipairs(parts) do
         local rows, highlights = {}, {}
-        for i, e in ipairs(entries) do
-            local row = entry_name(e, name_w)
-            local sw = status_width(e.status)
-            if sw > 0 then
-                row = row .. string.rep(" ", name_w - api.nvim_strwidth(row) + gap + status_w - sw)
-                for _, seg in ipairs(e.status) do
-                    if seg[2] then
-                        highlights[#highlights + 1] = { row = i, col = #row, end_col = #row + #seg[1], group = seg[2] }
+        for i, part in ipairs(list) do
+            local row = entry_name(part.entry, name_w)
+            ---Put a segment on the row, remembering where a coloured one landed.
+            ---@param seg { [1]: string, [2]: string? }
+            local function put(seg)
+                if seg[2] then
+                    highlights[#highlights + 1] = { row = i, col = #row, end_col = #row + #seg[1], group = seg[2] }
+                end
+                row = row .. seg[1]
+            end
+
+            if #part.count > 0 or part.word then
+                -- Past the longest name, then each column filled from the right.
+                row = row .. string.rep(" ", name_w - api.nvim_strwidth(row) + gap + count_w - segments_width(part.count))
+                for _, seg in ipairs(part.count) do
+                    put(seg)
+                end
+                if part.word then
+                    row = row .. string.rep(" ", word_w - api.nvim_strwidth(part.word[1]))
+                    put(part.word)
+                    for _, seg in ipairs(part.rest) do
+                        put(seg)
                     end
-                    row = row .. seg[1]
                 end
             end
             rows[i] = row

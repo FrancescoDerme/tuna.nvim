@@ -128,14 +128,47 @@ local WORDS = {
     { { 1, "ACCEPTED", "TunaCorrect" }, { 3, "PASSED", "TunaWrong" } },
 }
 
--- Names are 31 cells at most ("C2. …"), statuses 24 ("1/2 ACCEPTED, 1 REJECTED").
+---Where each row's verdict ends: the edge that has to be the same everywhere, whether the
+---verdict is a judge's (`ACCEPTED`) or a run's (`3/4 PASSED`), counted or not.
+local function verdict_columns(laid)
+    local cols = {}
+    for _, list in ipairs(laid) do
+        local seen = {}
+        for _, h in ipairs(list.highlights) do
+            if not seen[h.row] then
+                seen[h.row] = true
+                cols[#cols + 1] = vim.api.nvim_strwidth(list.rows[h.row]:sub(1, h.end_col))
+            end
+        end
+    end
+    return cols
+end
+
+---Where each row's count ends: the edge the counts stack on, whatever stands beside them.
+local function count_columns(laid)
+    local cols = {}
+    for _, list in ipairs(laid) do
+        for _, row in ipairs(list.rows) do
+            local _, e = row:find("%d+/%d+")
+            if e then
+                cols[#cols + 1] = vim.api.nvim_strwidth(row:sub(1, e))
+            end
+        end
+    end
+    return cols
+end
+
+-- Names are 31 cells at most ("C2. …"), counts 4 ("1/2 ") and verdicts 8 ("ACCEPTED"), with
+-- ", 1 REJECTED" trailing past the edge the verdicts end on.
 local laid = menu.recent_layout(lists)
 t.eq("a contest row is its judge and name, then its status", laid[1].rows, { "codeforces 2263" .. (" "):rep(18) .. "1/2 ACCEPTED, 1 REJECTED" })
-t.eq("every status sits right of the longest name, flush right", laid[2].rows, {
-    "A" .. (" "):rep(48) .. "ACCEPTED",
+t.eq("a status sits right of the longest name, its count before its verdict", laid[2].rows, {
+    "A" .. (" "):rep(36) .. "ACCEPTED",
     "C2. Floor of MEX (Hard Version)",
-    "C" .. (" "):rep(46) .. "3/4 PASSED",
+    "C" .. (" "):rep(32) .. "3/4   PASSED",
 })
+t.eq("and every verdict ends on the same edge, counted or not", verdict_columns(laid), { 45, 45, 45 })
+t.eq("while the counts stack, whatever stands beside them", count_columns(laid), { 36, 36 })
 t.eq("each colour covers exactly its word", covered(laid), WORDS)
 
 local function widest(l)
@@ -150,9 +183,11 @@ end
 laid = menu.recent_layout(lists, 40)
 t.eq("too narrow, the names give way, a contest's judge first", { laid[1].rows, laid[2].rows }, {
     { "codeforc… 2263  1/2 ACCEPTED, 1 REJECTED" },
-    { "A" .. (" "):rep(31) .. "ACCEPTED", "C2. Floor of…", "C" .. (" "):rep(29) .. "3/4 PASSED" },
+    { "A" .. (" "):rep(19) .. "ACCEPTED", "C2. Floor of…", "C" .. (" "):rep(15) .. "3/4   PASSED" },
 })
 t.eq("and the rows fit", widest(laid), 40)
+t.eq("the verdicts still ending together", verdict_columns(laid), { 28, 28, 28 })
+t.eq("and the counts still stacked", count_columns(laid), { 19, 19 })
 t.eq("with the colours still on their words", covered(laid), WORDS)
 laid = menu.recent_layout(lists, 30)
 t.eq("narrower still, the judge goes and the names shorten", { laid[1].rows[1], laid[2].rows[2] }, { "2263  1/2 ACCEPTED, 1 REJECTED", "C2.…" })
@@ -242,7 +277,7 @@ for _, name in ipairs({ "Contests", "Problems" }) do
     end
 end
 t.ok("the recent lists are laid out again for the width they get", fitted, { lines(b.Contests.win), lines(b.Problems.win), b.Problems.width })
-t.eq("keeping their statuses whole", lines(b.Problems.win)[3]:sub(-10), "3/4 PASSED")
+t.ok("keeping their statuses whole", lines(b.Problems.win)[3]:match("3/4%s+PASSED$") ~= nil, lines(b.Problems.win))
 t.eq("and their colours", marks(b.Problems.win), 2)
 vim.o.columns = 140
 press("<Esc>")

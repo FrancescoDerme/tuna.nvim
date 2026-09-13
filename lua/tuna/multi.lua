@@ -722,13 +722,16 @@ function M.run(bufnr, opts)
         end,
     })
 
-    -- Rows first, so the UI opens on the row it will actually show (see interactive).
+    -- Rows first, and marked before the board opens, so it opens on the row it will show
+    -- (see interactive).
     mr:load_rows()
+    if opts.show_only then
+        mr:mark_not_run()
+    end
     mr:show_ui()
     if opts.show_only then
         -- Listed, not run: the first run key saves and runs the matrix (`built_first`),
         -- `run_all` compiling every solution first.
-        mr:mark_not_run()
         mr.completed = true
         mr.build = function(cont)
             save()

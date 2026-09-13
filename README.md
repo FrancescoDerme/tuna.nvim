@@ -290,7 +290,8 @@ where you know one is right and slow. **Checkers** are for problems with more th
 correct answer; whatever the checker prints about a verdict (`wrong answer: expected 5,
 got 3`) shows in the Errors pane of that testcase's row.
 
-**Interactive** lays out the results grid by who plays the other side. With `live` (you)
+**Interactive** lays out the results grid by who plays the other side (`interactive.layouts`
+gives each source a grid of its own). With `live` (you)
 and `interactor` (your interactor program) the session reads as a **conversation**: beside
 the testcase list are three columns, Output, Live and Errors, and whatever one side says
 goes on a row of its own in its own column, the other two left blank on that row, so every
@@ -696,6 +697,7 @@ the rest. The preset groups keys by subject, so which-key shows a `t` testcases 
 | `runner_ui.viewer`                    | `0.8` × `0.8`                                    | the full-screen pane view; `open_when_compilation_fails` pops it on a build error                                                                            |
 | `runner_ui.editable_border_highlight` | `"TunaEditable"`                                 | the accent on the two editable panes; `false` turns it off                                                                                                   |
 | `runner_ui.compile_layout`            | selector + Errors                                | the grid drawn while the build row is the one on screen; `false` keeps the grid of a run                                                                     |
+| `interactive.layouts`                 | conversation / run                               | the grid each interactive source draws (`live`, `interactor`, `feed`); `false` for any of them keeps the configured one                                      |
 | `popup_ui.layout`                     | three columns                                    | a nested `{ weight, pane }` tree over `tc`, `so`, `eo`, `si`, `se`; a pane you leave out is simply not drawn, and stays reachable in the viewer              |
 | `split_ui`                            | `"right"`, `0.3`                                 | position and size when `interface = "split"`                                                                                                                 |
 | `editor_ui`, `picker_ui`              |                                                  | the standalone testcase editor and picker                                                                                                                    |

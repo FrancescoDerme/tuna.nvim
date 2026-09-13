@@ -170,16 +170,21 @@ end
 ---row of the others. Expected output has no place in it, a sample exchange being one
 ---example of a conversation rather than the only correct one.
 ---@return table?
+---The grid this source draws, from `interactive.layouts` (`false` there means the configured
+---one), and the name to report it by when it does not validate.
+---
+---The shipped conversation grid gives the selector the share it has in the configured one
+---(3 of 11), so it is the width it is in every other mode, compile time and all. Output and
+---Live share a ratio, which is what makes them the same width: the last column absorbs
+---whatever the grid's division leaves over, so Errors goes last, its two lines of tuna's own
+---notes being what can spare a cell.
+---@return table? layout, string? name
 function InteractiveRunner:layout()
-    if not self:conversational() then
+    local own = ((self.config.interactive or {}).layouts or {})[self.source]
+    if not own then
         return nil
     end
-    -- The selector takes the share it has in the configured grid (3 of 11), so it is the
-    -- width it is in every other mode, compile time and all. Output and Live share a ratio,
-    -- which is what makes them the same width: the last column absorbs whatever the grid's
-    -- division leaves over, so Errors goes last, its two lines of tuna's own notes being
-    -- what can spare a cell.
-    return { { 3, "tc" }, { 3, "so" }, { 3, "si" }, { 2, "se" } }
+    return own, "interactive.layouts." .. self.source
 end
 
 ---`si` is named for what it is in a conversation: the other side of it, not a stored
@@ -1107,9 +1112,13 @@ function M.run(bufnr, args, opts)
         end,
     })
 
-    -- Rows first: the UI lays its grid out for the row it opens on, and an empty list leaves
-    -- it nothing to open on but line 1.
+    -- Rows first, and marked before the board opens: the UI lays its grid out for the row it
+    -- opens on, which an empty list leaves as line 1, and which is the build step while a run
+    -- is building but a testcase when the rows are only being listed.
     ir:load_rows()
+    if opts.show_only then
+        ir:mark_not_run()
+    end
     ir:show_ui()
     ir:update_ui(true)
 
@@ -1178,7 +1187,6 @@ function M.run(bufnr, args, opts)
 
     if opts.show_only then
         -- Listed, not run: the first run key builds and starts the sessions (`built_first`).
-        ir:mark_not_run()
         ir.completed = true
         ir.build = function(cont)
             tools.save_sources(bufnr, cfg)

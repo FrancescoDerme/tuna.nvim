@@ -290,11 +290,13 @@ is relative. Every configured path goes through these: compile/running directori
   set per instance). Its no-testcase row is `bare`. `run_single` claims the runner, and every
   path where nothing will run (build failed or didn't start, interactor didn't compile) sets
   `completed = true`.
-- **live** and **interactor** are a **conversation**. `layout()` returns selector | Output |
-  Live | Errors columns (`so`/`si`/`se`), with no Expected Output. The ratios are `3/3/3/2`,
-  the selector's 3 of 11 being the configured grid's, so it is as wide as in every other mode;
-  `so` and `si` share a ratio and so a width, which works only because the *last* column
-  absorbs the grid's rounding (`rec_compute_layout`), hence Errors last.
+- **live** and **interactor** are a **conversation**. `layout()` returns the grid
+  `interactive.layouts[source]` gives and the option's name with it, so a bad one is reported
+  as what it is; `false` there (feed's default) means the configured grid. The shipped
+  conversation is selector | Output | Live | Errors (`so`/`si`/`se`), with no Expected Output,
+  at ratios `3/3/3/2`: the selector's 3 of 11 is the configured grid's, so it is as wide as in
+  every other mode, and `so`/`si` share a ratio and so a width, which works only because the
+  *last* column absorbs the grid's rounding (`rec_compute_layout`), hence Errors last.
   - Each row keeps `tc.log`, one entry per rendered row `{ col, text, open }`, blank in the
     other columns. `log_append` continues an open row only while no other column has spoken.
     `log_note` puts tuna's own notes (timeout, exit code, spawn failure) on an Errors row.
@@ -391,8 +393,14 @@ as `checker <input> <output> <answer>` (exit 0 means correct) and is compiled vi
   cursor event reads as a move by hand: `show_ui` leaves `update_testcase` on line 1 until the
   tick chooses, and `render_selector` puts the cursor back on the chosen row after a rebuild
   that would otherwise clamp it onto another one.
-- `opening_row()` uses the runner's `last_row_id` (matched by `row_id`), else `initial_row()`:
-  the first testcase, or Compile when it has output or is still running.
+- `opening_row()`: a run whose build has not finished opens on it (`building`), whatever was
+  last looked at, so every run starts the same way; otherwise the runner's `last_row_id`
+  (matched by `row_id`), else `initial_row()` — the first testcase, or Compile when it printed
+  something. `building` is about the *run*, not the process (`not preloaded and
+  exit_code == nil`): asking whether the compiler runs right now leaves a tick between the rows
+  being built and the process being spawned, and a UI opened inside it drew the panes of a run
+  for a build about to start and redrew them a moment later. For the same reason the mode
+  modules `mark_not_run` before `show_ui`, not after.
 - `render_selector` lays the rows out in three columns (header, verdict, time) through
   `selector_columns`: 10 wide while the pane holds them, content-sized plus a space when it
   doesn't, and without the time rather than letting the pane cut a number in half. The
@@ -694,8 +702,13 @@ specific Vim error about a buffer the user never opened.
     only when all pass). Counts are their own uncoloured segments, and a zero `ACCEPTED` is
     `TunaDone`.
   - `recent_layout(lists, width)` lays both lists out together: names on the left (a
-    contest's judge before its name), every status right of the longest name and flush right,
-    with byte-range `highlights`. The sections pass it as `format`, so a narrow column
+    contest's judge before its name), every status right of the longest name, and the status
+    itself in the three parts `status_parts` gives it: the count, the verdict word, and what a
+    contest counts besides. The first two get a column each, both filled from the right, so the
+    counts stack however long the words beside them are and the words end on one edge however
+    long the counts are; `, 1 REJECTED` trails past both. Aligning count and word together
+    moves a count whenever its word changes length, and aligning whole statuses puts a bare
+    `ACCEPTED` under another row's `REJECTED`. Byte-range `highlights` come with the rows. The sections pass it as `format`, so a narrow column
     shortens names with an ellipsis (`entry_name`: a contest's judge first) and never
     statuses.
     `problem_names` tells same-named problems apart by their contest directory (`2263/A`),
@@ -731,7 +744,8 @@ specific Vim error about a buffer the user never opened.
   - `menu.lua`: the contest summary over both layouts, counting current judge verdicts
     only, a problem's judge verdict beating its local one and either lapsing with an edit,
     which rows a local verdict counts, statuses in the results grid's words and colours with
-    counts uncoloured, right of every name and flush right, names giving way to a narrow
+    counts uncoloured and stacked in a column of their own while every verdict ends on one
+    edge, counted or not, names giving way to a narrow
     width (a contest's judge first), and `panels` stacking, scrolling, moving focus and
     squeezing a `format` column before the others, and the real menu's titles and
     free-standing banner;
