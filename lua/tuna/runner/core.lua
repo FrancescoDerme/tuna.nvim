@@ -6,7 +6,7 @@
 -- plumbing, the verdict label, kill helpers — plus one reusable "spawn a process
 -- and judge it" routine (`execute_process`). A mode subclass supplies only its own
 -- driving loop (parallel lanes / a generation search / interactive sessions) and,
--- if it wants, a `status_tail`, a `pane_content` override, an `on_ui_shown` hook, a
+-- if it wants, a `status_settings`/`status_tail`, a `pane_content` override, an `on_ui_shown` hook, a
 -- `layout`/`pane_titles` of its own, or `on_details_rendered` to draw the panes it owns.
 --
 -- Inheritance is plain Lua metatable single-dispatch: `M.extend()` returns a
@@ -201,12 +201,16 @@ function RunnerCore:judge_label()
     return require("tuna.compare").method_name(self:effective_compare())
 end
 
----Look the checker up again, as every run does, so a checker added, deleted or switched
----off since the last run is the one that judges this run.
+---Look the judge up again, as every run does, so a checker added, deleted or switched off
+---since the last run, and a comparison overridden since, are the ones that judge this run.
+---The two are one setting to the user (the "judge" row of the Run pane), so they are resolved
+---in one place and at one moment, like every helper.
 ---@param solution string absolute path of the solution being run
-function RunnerCore:refresh_checker(solution)
-    local checker, note = require("tuna.tools").resolve_checker(solution, self.config)
+function RunnerCore:refresh_judge(solution)
+    local tools = require("tuna.tools")
+    local checker, note = tools.resolve_checker(solution, self.config)
     self.checker = checker
+    self.compare_method = tools.get_compare(solution)
     if note then
         require("tuna.utils").notify("checker: " .. note .. ", comparing outputs instead.", "WARN")
     end

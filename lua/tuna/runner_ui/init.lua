@@ -21,6 +21,13 @@ local SKIP = require("tuna.runner.core").SKIP
 
 local M = {}
 
+-- Which runner each pane buffer belongs to (`M.owner_of`). A `:Tuna` command typed in a pane
+-- is about the solution that pane is showing, and this answers "whose pane is this?" without
+-- asking every mode module for its runners. Cleared when a UI goes: a pane buffer is wiped
+-- with its window, and an entry left behind would point a command at a runner that is gone.
+---@type table<integer, table>
+local pane_owner = {}
+
 local ns = api.nvim_create_namespace("tuna_runner_ui")
 -- Its own namespace, so the diff can be painted and cleared without touching the
 -- selector's status highlights.
@@ -77,6 +84,10 @@ function M.new(runner)
         update_windows = false,
         update_details = false,
         update_testcase = nil,
+        -- Whether the selector has been moved by hand. Until it has, the UI picks the row
+        -- worth looking at (`follow_row`); afterwards the choice is the user's and nothing
+        -- moves it out from under them.
+        user_moved = false,
         diff_view = false,
         viewer_winid = nil,
         viewer_content = nil,
@@ -835,6 +846,9 @@ end
 ---Select a selector row, first rescuing any unsaved edit shown in the panes.
 ---@param idx integer
 function RunnerUI:select_row(idx)
+    -- A row has been chosen, so the opening choice is settled: it must not overrule a row
+    -- selected between the UI being built and its first render.
+    self.opening = false
     if idx == self.update_testcase then
         return
     end
@@ -1135,6 +1149,37 @@ function RunnerUI:goto_row(idx)
 end
 
 ---@private
+---Move to `idx` while the row on screen is still the UI's own choice. Everything that picks
+---a row *for* the user goes through this: opening the board, a build that turned out to have
+---nothing to say, the row a conversation is being held on. Once the selector has been moved
+---by hand it stops moving on its own, since the row someone chose to read is not a default.
+---@param idx integer
+function RunnerUI:follow_row(idx)
+    if not self.ui_visible or self.user_moved then
+        return
+    end
+    self:goto_row(idx)
+end
+
+---@private
+---Once the build is over and had nothing to say, the row worth looking at is the first
+---testcase: the Compile row is only where a run *starts*. A build that failed or printed
+---something is the row that answers the run, so it keeps the cursor, as does one still going.
+function RunnerUI:follow_after_compile()
+    local first = self.runner.tcdata[1]
+    if not (first and first.tcnum == "Compile" and self.runner.tcdata[2]) then
+        return -- no build step, or nothing to move on to
+    end
+    if self.update_testcase ~= 1 or first.running or first.judging or first.exit_code == nil then
+        return
+    end
+    if first.exit_code ~= 0 or (first.stdout or "") ~= "" or (first.stderr or "") ~= "" then
+        return
+    end
+    self:follow_row(2)
+end
+
+---@private
 ---Which selector row the UI should open on. The first testcase, whenever the Compile
 ---step has nothing to say: an empty compile row leaves four empty panes in front of
 ---someone who opened the UI to read a verdict — or, before any run, to read the
@@ -1177,12 +1222,104 @@ end
 ---panes that mean something else in it. Asked of the runner rather than configured, since
 ---both follow from the mode; a mode that has no opinion gets the configured layout.
 ---@return table
-function RunnerUI:layout_opts()
+---@param idx integer? the row the grid is for (default: the row on screen)
+function RunnerUI:layout_opts(idx)
     local r = self.runner
+    local layout, name = self:row_layout(idx)
     return {
-        layout = r.layout and r:layout() or nil,
+        layout = layout,
+        layout_name = name,
         titles = r.pane_titles and r:pane_titles() or nil,
     }
+end
+
+---@private
+---The grid the row on screen wants, and what to call it when it doesn't validate. The build
+---step is not a testcase: it has no input, no answer and no output to compare, so the four
+---panes of a run would face someone reading a compiler's complaint with three empty frames.
+---It gets the selector and Errors (`runner_ui.compile_layout`, `false` to keep the grid the
+---mode draws). Every other row is the mode's own layout, or the configured one (nil).
+---@param idx integer? the row to lay out for (default: the row on screen)
+---@return table? layout, string? name
+function RunnerUI:row_layout(idx)
+    local tc = self.runner.tcdata[idx or self.update_testcase or 1]
+    local compile = self.config.runner_ui.compile_layout
+    if tc and tc.tcnum == "Compile" and compile then
+        return compile, "runner_ui.compile_layout"
+    end
+    local own = self.runner.layout and self.runner:layout() or nil
+    return own, own and "run mode layout" or nil
+end
+
+---@private
+---Lay the grid out again, in place: the panes keep their buffers, and with them their
+---content, their keymaps and anything typed into them but not written. This is what a change
+---of layout needs — the editor being resized, or the row on screen changing kind — and doing
+---it by rebuilding the UI instead would drop all of that and race the rows landing in it.
+function RunnerUI:redraw_grid()
+    if not self.ui_visible then
+        return
+    end
+    local tc = self.windows.tc
+    if not (tc and tc.bufnr and api.nvim_buf_is_valid(tc.bufnr)) then
+        return -- the panes are gone (wiped out from under the UI); there is nothing to lay out
+    end
+    local opts = self:layout_opts()
+    self.drawn_layout = opts.layout
+    -- Windows opening and closing here are the UI's own: a `WinClosed` on one of them is not
+    -- the user closing the UI, and the cursor events they raise are not a move by hand. The
+    -- flag outlives the call by a tick, which is when those events are delivered.
+    self.relayouting = true
+    self.interface.relayout(self.windows, self.config, self.restore_winid, math.max(1, #self:status_lines()), opts)
+    vim.schedule(function()
+        self.relayouting = false
+    end)
+
+    -- Windows have come and gone: what is bound per window is bound again, while everything
+    -- bound per buffer (the keymaps, the write handler) is still where it was.
+    api.nvim_clear_autocmds({ group = self.augroup, event = "WinClosed" })
+    for _, w in pairs(self.windows) do
+        if w.winid then
+            self:watch_pane_window(w.winid)
+        end
+    end
+    self:accent_editable_panes()
+    if self.diff_view then
+        self:set_diff_bind(true)
+    end
+    -- A mode that owns panes sets them up again (interactive's scroll-bound columns).
+    if self.runner.on_ui_shown then
+        self.runner:on_ui_shown(self)
+    end
+    if self.viewer_winid then
+        local was = self.viewer_content
+        self:close_viewer()
+        self:show_viewer(was)
+    end
+    self.update_windows = true
+    self:update_ui()
+end
+
+---@private
+---Close the whole UI when one of its windows is closed: a results grid is one thing, not six
+---windows to dismiss one at a time. Not while the grid is being laid out again, where the
+---closing is the UI's own.
+---@param winid integer
+function RunnerUI:watch_pane_window(winid)
+    api.nvim_create_autocmd("WinClosed", {
+        group = self.augroup,
+        pattern = tostring(winid),
+        callback = function()
+            if self.relayouting then
+                return
+            end
+            -- Out of the autocmd before touching windows: this fires *during* the close,
+            -- where opening or closing more of them is unsafe.
+            vim.schedule(function()
+                self:request_close(true)
+            end)
+        end,
+    })
 end
 
 ---Show the UI, building it if needed and focusing the selector.
@@ -1195,8 +1332,19 @@ function RunnerUI:show_ui()
     self.restore_winid = self.restore_winid or api.nvim_get_current_win()
     -- The "Run" pane is sized to the runner's (stable) status-line count.
     local status_height = math.max(1, #self:status_lines())
-    self.interface.init_ui(self.windows, self.config, self.restore_winid, status_height, self:layout_opts())
+    -- Laid out for the row it is about to open on, not for line 1: the two differ exactly
+    -- when the build step is not the row worth reading, and drawing the build's grid first
+    -- would rebuild every pane a tick later.
+    local opening = next(self.runner.tcdata) ~= nil and self:opening_row() or nil
+    local opts = self:layout_opts(opening)
+    self.drawn_layout = opts.layout
+    self.interface.init_ui(self.windows, self.config, self.restore_winid, status_height, opts)
     self.ui_visible = true
+    for _, w in pairs(self.windows) do
+        if w.bufnr then
+            pane_owner[w.bufnr] = self.runner
+        end
+    end
     self:accent_editable_panes()
     self:update_status_line()
 
@@ -1255,17 +1403,7 @@ function RunnerUI:show_ui()
         -- A pane the layout left out has a buffer but no window, so there is nothing
         -- to watch for it (its content is still reachable through the viewer).
         if w.winid then
-            api.nvim_create_autocmd("WinClosed", {
-                group = self.augroup,
-                pattern = tostring(w.winid),
-                callback = function()
-                    -- Out of the autocmd before touching windows: this fires *during*
-                    -- the close, where opening or closing more of them is unsafe.
-                    vim.schedule(function()
-                        self:request_close(true)
-                    end)
-                end,
-            })
+            self:watch_pane_window(w.winid)
         end
     end
 
@@ -1601,8 +1739,14 @@ function RunnerUI:show_ui()
         group = self.augroup,
         buffer = tc_buf,
         callback = function()
+            if self.relayouting then
+                return -- the grid is being laid out again; the cursor is following it
+            end
             local idx = self:cursor_tc()
+            -- Anything the UI moves selects the row before the cursor event arrives, so a
+            -- selection that changes *here* is one the user made.
             if idx ~= self.update_testcase then
+                self.user_moved = true
                 self:select_row(idx)
                 self:update_ui()
             end
@@ -1611,18 +1755,14 @@ function RunnerUI:show_ui()
 
     api.nvim_set_current_win(self.windows.tc.winid)
     self.update_windows = true
-    local initial = self:opening_row()
-    self.update_testcase = initial
+    -- The row under the cursor, which is line 1 until the selector has lines to put it on.
+    -- Choosing here would leave the two disagreeing, and the first cursor event the editor
+    -- sends would then read as a move made by hand. `opening` says the choice is still to be
+    -- made: the first render makes it, by which time the rows exist (interactive and run-all
+    -- open their UI and *then* build them).
+    self.update_testcase = 1
+    self.opening = true
     self:update_ui()
-
-    -- The selector is filled on a scheduled tick, so the row only exists by the time
-    -- this (queued after it) runs.
-    vim.schedule(function()
-        if self.ui_visible and self.windows.tc and api.nvim_win_is_valid(self.windows.tc.winid) then
-            local line_count = api.nvim_buf_line_count(self.windows.tc.bufnr)
-            api.nvim_win_set_cursor(self.windows.tc.winid, { math.min(initial, line_count), 0 })
-        end
-    end)
 
     -- A rebuilt UI (after a resize) keeps the diff it had. Only the binding is
     -- re-armed here: the panes are filled on the scheduled render queued just above,
@@ -1899,6 +2039,11 @@ function RunnerUI:delete()
     if not self.ui_visible then
         return
     end
+    for _, w in pairs(self.windows) do
+        if w.bufnr and pane_owner[w.bufnr] == self.runner then
+            pane_owner[w.bufnr] = nil
+        end
+    end
     -- The pane buffers are about to be wiped, so anything typed into them has to be
     -- moved into `pending` first — that is what lets a resize (which tears the UI
     -- down and rebuilds it) and a close-and-reopen keep an edit in progress.
@@ -1936,27 +2081,7 @@ end
 
 ---Rebuild the UI after a `VimResized`, preserving the selected testcase.
 function RunnerUI:resize_ui()
-    if not self.ui_visible then
-        return
-    end
-    local cursor = self:cursor_tc()
-    local viewer_was = self.viewer_content
-    local viewer_visible = self.viewer_winid ~= nil
-    local restore = self.restore_winid
-    self:delete()
-    self.restore_winid = restore
-    self:show_ui()
-    -- show_ui repopulates the selector on a scheduled tick; restore the cursor
-    -- (and the viewer) afterwards so the line is actually present.
-    vim.schedule(function()
-        if self.windows.tc and api.nvim_win_is_valid(self.windows.tc.winid) then
-            local line_count = api.nvim_buf_line_count(self.windows.tc.bufnr)
-            api.nvim_win_set_cursor(self.windows.tc.winid, { math.min(cursor, line_count), 0 })
-        end
-        if viewer_visible then
-            self:show_viewer(viewer_was)
-        end
-    end)
+    self:redraw_grid()
 end
 
 ---Show an ad-hoc message (e.g. a compilation error) in a large float, closable
@@ -2175,8 +2300,70 @@ local function fit(len, str)
 end
 
 ---@private
----The lines shown in the "Run" status pane: the run mode and verdict source, then
----any runner-specific tail (e.g. the stress iteration/save counters). The compile
+---The selector's three columns for a pane `width` wide: how wide the header and the verdict
+---columns are, and whether the time still fits after them. Ten-wide columns are what every
+---mode's rows line up on, so they are kept while they fit. A pane too narrow for them (the
+---conversation layout's selector, which gives most of its width to the three columns of the
+---conversation) sizes both to their content instead, and failing that gives the time up: a
+---pane cutting a number in half says something untrue about the run.
+---@param entries { header: string, status: string, time: string }[]
+---@param width integer? nil when the selector has no window, so nothing is cutting the rows
+---@return integer head_col, integer status_col, boolean with_time
+local function selector_columns(entries, width)
+    local WIDE = 10
+    local head_w, st_w, time_w = 0, 0, 0
+    for _, e in ipairs(entries) do
+        head_w = math.max(head_w, vim.fn.strwidth(e.header))
+        st_w = math.max(st_w, vim.fn.strwidth(e.status))
+        time_w = math.max(time_w, vim.fn.strwidth(e.time))
+    end
+    -- A content-sized column keeps one space after it, so the longest header or verdict
+    -- still reads as a column rather than running into the next one.
+    local options = {
+        { WIDE, WIDE, true },
+        { math.min(head_w, WIDE) + 1, math.min(st_w, WIDE) + 1, true },
+        { math.min(head_w, WIDE) + 1, math.min(st_w, WIDE) + 1, false },
+        -- Narrower than even that: split what there is between the two, so `fit` marks the
+        -- cut with an ellipsis rather than the pane's edge swallowing the end of a word.
+        { math.max(3, math.floor((width or WIDE * 2) / 2)), math.max(3, math.ceil((width or WIDE * 2) / 2)), false },
+    }
+    for _, try in ipairs(options) do
+        if not width or try[1] + try[2] + (try[3] and time_w or 0) <= width then
+            return try[1], try[2], try[3]
+        end
+    end
+    local last = options[#options]
+    return last[1], last[2], last[3]
+end
+
+---The runner whose UI holds `bufnr`, if that is one of its panes (the viewer borrows a pane's
+---buffer, so it is covered too).
+---@param bufnr integer
+---@return table?
+function M.owner_of(bufnr)
+    local r = pane_owner[bufnr]
+    if r and r.bufnr and api.nvim_buf_is_valid(r.bufnr) then
+        return r
+    end
+    return nil
+end
+
+---@private
+---How wide the selector pane is, or nil when the layout gave it no window (its buffer is
+---still kept, and nothing truncates a buffer).
+---@return integer?
+function RunnerUI:selector_width()
+    local w = self.windows.tc
+    if w and w.winid and api.nvim_win_is_valid(w.winid) then
+        return api.nvim_win_get_width(w.winid)
+    end
+    return nil
+end
+
+---@private
+---The lines shown in the "Run" status pane: the run mode, the verdict source, a mode's own
+---settings (`status_settings`), which of those were forced, then any runner-specific tail
+---(e.g. the stress counters). The compile
 ---step is *not* here — it's a testcase row, so its warnings are viewable. The
 ---count is stable for a given runner, so it can size the pane at build time.
 ---@return string[]
@@ -2190,17 +2377,38 @@ function RunnerUI:status_lines()
     -- between rows, which turns a state row into a running commentary, and the panes
     -- themselves already say it (no answer, no run, or two texts that agree).
     local diff_state = self.diff_view and "on" or "off"
-    -- Whether the mode was forced or picked for you is half of why the run looks the way
-    -- it does, so it is said beside the mode.
     local mode = self.runner.mode or "normal"
     local bufnr = self.runner.bufnr
     local path = (bufnr and api.nvim_buf_is_valid(bufnr)) and api.nvim_buf_get_name(bufnr) or ""
-    local forced = path ~= "" and require("tuna.tools").get_mode(path) == mode
+    -- Which settings are your choice rather than tuna's, on a row of their own: this is one
+    -- fact about the run, not one per setting, and a word appended to each value is the
+    -- first thing a pane this narrow cuts off. The names are the rows they speak for.
+    local tools = require("tuna.tools")
+    local forced = {}
+    if path ~= "" then
+        if tools.get_mode(path) == mode then
+            forced[#forced + 1] = "mode"
+        end
+        -- A checker is only ever found, never forced on, so the judge is your choice when you
+        -- turned the checker off, or when the comparison it falls back to is overridden.
+        if type(self.runner.checker) ~= "table" and (tools.checker_setting(path) == "off" or tools.get_compare(path)) then
+            forced[#forced + 1] = "judge"
+        end
+        if self.runner.source and tools.get_source(path) == self.runner.source then
+            forced[#forced + 1] = "source"
+        end
+    end
     local entries = {
-        { "mode", mode .. (forced and ", forced" or ", automatic") },
+        { "mode", mode },
         { "judge", self.runner.judge_label and self.runner:judge_label() or "builtin" },
-        { "diff", diff_state },
     }
+    -- A mode's own settings stand with the others, above the row saying which were forced
+    -- (interactive's input source). Counters and the like come after, in `status_tail`.
+    if self.runner.status_settings then
+        vim.list_extend(entries, self.runner:status_settings())
+    end
+    entries[#entries + 1] = { "forced", #forced > 0 and table.concat(forced, ", ") or "none" }
+    entries[#entries + 1] = { "diff", diff_state }
     if self.runner.status_tail then
         vim.list_extend(entries, self.runner:status_tail())
     end
@@ -2311,7 +2519,7 @@ function RunnerUI:render_selector()
     for _, n in ipairs(edited) do
         unsaved[n] = true
     end
-    local lines, regions = {}, {}
+    local entries = {}
     for i, tc in ipairs(self.runner.tcdata) do
         -- The left column: a mode may relabel rows (run-all groups solution
         -- header rows above indented per-testcase rows).
@@ -2343,12 +2551,7 @@ function RunnerUI:render_selector()
         if unsaved[tc.tcnum] then
             status, hlgroup = "EDITED", "TunaDone"
         end
-        -- The highlight is byte-addressed while `fit` pads by *display* width, so the
-        -- status column's byte offset has to be measured off the padded header — a
-        -- multibyte or truncated header (run-all's solution names) shifts it past 10.
-        local head, st = fit(10, header), fit(10, status)
-        table.insert(lines, head .. st .. timestr)
-        table.insert(regions, { line = i - 1, hlgroup = hlgroup, col = #head, len = #(st:gsub("%s+$", "")) })
+        entries[i] = { header = header, status = status, time = timestr, hlgroup = hlgroup }
 
         -- Auto-pop the viewer onto a fresh compilation failure's stderr.
         if
@@ -2366,8 +2569,32 @@ function RunnerUI:render_selector()
         end
     end
 
+    local head_col, st_col, with_time = selector_columns(entries, self:selector_width())
+    local lines, regions = {}, {}
+    for i, e in ipairs(entries) do
+        -- The highlight is byte-addressed while `fit` pads by *display* width, so the
+        -- status column's byte offset has to be measured off the padded header — a
+        -- multibyte or truncated header (run-all's solution names) shifts it past its column.
+        local head, st = fit(head_col, e.header), fit(st_col, e.status)
+        lines[i] = head .. st .. (with_time and e.time or "")
+        regions[i] = { line = i - 1, hlgroup = e.hlgroup, col = #head, len = #(st:gsub("%s+$", "")) }
+    end
+
     local buf = self.windows.tc.bufnr
     surface.render(buf, lines)
+    -- While the choice is still the UI's, its row stays under the cursor, and follows the
+    -- list when a rebuild is shorter than it: Vim would otherwise clamp the cursor onto
+    -- another row, which is indistinguishable from a move made by hand.
+    local tc_win = self.windows.tc.winid
+    if not self.user_moved and self.update_testcase and tc_win and api.nvim_win_is_valid(tc_win) then
+        local want = math.max(1, math.min(self.update_testcase, #lines))
+        if want ~= self.update_testcase then
+            self:select_row(want)
+        end
+        if api.nvim_win_get_cursor(tc_win)[1] ~= want then
+            pcall(api.nvim_win_set_cursor, tc_win, { want, 0 })
+        end
+    end
     api.nvim_buf_clear_namespace(buf, ns, 0, -1)
     for _, r in ipairs(regions) do
         if r.len > 0 then
@@ -2403,6 +2630,21 @@ function RunnerUI:update_ui()
         -- captures while you type — see `on_pane_edit` — so this is where that cost is
         -- paid: once per render, not once per keystroke.)
         self:capture_pending()
+        -- Which row to open on, decided now that there are rows to choose from. The cursor is
+        -- put on it by the render below, so the two never disagree.
+        if self.opening and next(self.runner.tcdata) ~= nil then
+            self.opening = false
+            if not self.user_moved then
+                self.update_testcase = self:opening_row()
+            end
+        end
+        -- The row on screen decides the grid (the build step gets Errors and nothing else),
+        -- so a row of another kind means the panes are rebuilt before anything is drawn into
+        -- them. The redraw renders on its own tick.
+        if not vim.deep_equal((self:row_layout()), self.drawn_layout) then
+            self:redraw_grid()
+            return
+        end
         -- Always refresh the status line (stress progress updates even before any
         -- testcase/counterexample exists).
         self:update_status_line()
@@ -2415,6 +2657,7 @@ function RunnerUI:update_ui()
             self.update_details = true
             self:render_selector()
         end
+        self:follow_after_compile()
 
         local rendered_details = self.update_details
         if self.update_details then
@@ -2489,5 +2732,8 @@ function RunnerUI:update_ui()
         end
     end)
 end
+
+-- The pure half of the selector's layout, for the test suite.
+M._test = { selector_columns = selector_columns }
 
 return M

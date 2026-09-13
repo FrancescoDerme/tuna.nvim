@@ -81,11 +81,16 @@ function M.read_or_nil(dir, cfg)
     return (ok and type(decoded) == "table") and decoded or nil
 end
 
----Write a sidecar table back to disk.
+---Write a sidecar table back to disk. A sidecar travels with a problem's folder, so there is
+---nothing to write for a path that has no folder: a buffer that is not a file (a results pane,
+---named `tuna://…`) would otherwise leave a `tuna:/…` tree wherever the editor was started.
 ---@param dir string
 ---@param cfg table?
 ---@param store table
 function M.write(dir, cfg, store)
+    if vim.fn.isdirectory(vim.fs.normalize(dir)) ~= 1 then
+        return
+    end
     local ok, encoded = pcall(vim.json.encode, store)
     if ok then
         utils.write_file(M.path(dir, cfg), encoded)

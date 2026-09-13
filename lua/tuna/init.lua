@@ -61,6 +61,13 @@ function M.setup_highlight_groups()
         -- `TunaEditable` still wins, and `runner_ui.editable_border_highlight` points
         -- at any group you like.
         TunaEditable = { ctermfg = "magenta", fg = "#c678dd", bold = true },
+        -- The letters of the `:Tuna` menu's banner. Its window is blended all the way, so
+        -- the editor shows between them instead of a panel the rest of the board doesn't
+        -- have; a blended cell takes the colours of whatever is under it, which would paint
+        -- the wordmark in the syntax colours of the code behind it. `blend = 0` keeps the
+        -- letters out of that, and their colour follows `Normal`, the art being the editor's
+        -- own text.
+        TunaMenuTitle = { fg = normal.fg, blend = 0 },
     }
     for name, val in pairs(groups) do
         val.default = true
@@ -98,7 +105,9 @@ function M.setup(user_opts)
 
     vim.api.nvim_create_user_command("Tuna", function(opts)
         if #opts.fargs == 0 then
-            require("tuna.menu").open() -- bare `:Tuna` opens the menu
+            -- Bare `:Tuna` opens the menu, for the solution behind a results pane when
+            -- that is where it is typed.
+            require("tuna.menu").open(require("tuna.commands").target_buffer())
             return
         end
         require("tuna.commands").execute(opts.fargs)

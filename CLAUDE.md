@@ -116,6 +116,12 @@ tuna.nvim.json      package metadata
 - `keymaps.setup()` runs on every `setup()`, outside the once-only guard.
 - `commands` drops a cached runner whose config no longer `deep_equal`s the buffer's current
   config.
+- `commands.target_buffer(bufnr?)` is the buffer every `:Tuna` subcommand acts on (and bare
+  `:Tuna`, from `init.lua`): a results pane resolves to the solution it shows, through
+  `runner_ui.owner_of`, a registry the UI fills for its pane buffers and clears when it is
+  deleted. A pane is not a file, so a command acting on one compiled nothing and kept the
+  problem's run state under a name that is not a path. A helper file is *not* resolved here;
+  each run does that itself (`tools.solution_bufnr`).
 
 **Modifiers.** There are two sets. The *file* set (`$(FNAME)`, `$(FNOEXT)`, `$(FEXT)`,
 `$(FABSPATH)`, `$(ABSDIR)`, `$(DIRNAME)`, `$(HOME)`, `$(CWD)`) resolves from a path via
@@ -222,7 +228,8 @@ is relative. Every configured path goes through these: compile/running directori
   local). The judge callback re-checks the token.
 - **UI seams** keep `runner_ui` mode-agnostic:
   - `pane_content(tc, name)` returns text, or `core.SKIP` to leave a pane alone;
-  - `row_label(tc)` and `status_tail()`;
+  - `row_label(tc)`, `status_settings()` (rows with the mode and judge) and `status_tail()`
+    (rows after them);
   - `on_ui_shown(ui)` and `owns_pane(name)`;
   - `layout()` supplies a mode-specific grid that replaces the configured one;
   - `pane_titles()`;
@@ -246,8 +253,9 @@ is relative. Every configured path goes through these: compile/running directori
 
 **Normal runner (`runner/init.lua`)**
 - `runner.new(bufnr)` resolves compile/run commands, directories and the checker. Stress,
-  interactive and multi reuse it. Every run in every mode calls `RunnerCore:refresh_checker`,
-  so a checker added, deleted or switched off applies to the next run of a cached runner.
+  interactive and multi reuse it. Every run in every mode calls `RunnerCore:refresh_judge`,
+  so a checker added, deleted or switched off, and a comparison overridden since
+  (`compare_method`), apply to the next run of a cached runner.
 - `build_rows`: row 1 is `Compile` when compiling, and the build gates the testcases. With **no
   testcases** it builds one `bare` testcase 0, labelled `No input`, run on empty stdin with no
   answer (so `DONE`) and editable; saving it creates the testcase. `n` in the UI reuses an
@@ -282,8 +290,11 @@ is relative. Every configured path goes through these: compile/running directori
   set per instance). Its no-testcase row is `bare`. `run_single` claims the runner, and every
   path where nothing will run (build failed or didn't start, interactor didn't compile) sets
   `completed = true`.
-- **live** and **interactor** are a **conversation**. `layout()` returns selector | Errors |
-  Output | Live columns (`se`/`so`/`si`), with no Expected Output.
+- **live** and **interactor** are a **conversation**. `layout()` returns selector | Output |
+  Live | Errors columns (`so`/`si`/`se`), with no Expected Output. The ratios are `3/3/3/2`,
+  the selector's 3 of 11 being the configured grid's, so it is as wide as in every other mode;
+  `so` and `si` share a ratio and so a width, which works only because the *last* column
+  absorbs the grid's rounding (`rec_compute_layout`), hence Errors last.
   - Each row keeps `tc.log`, one entry per rendered row `{ col, text, open }`, blank in the
     other columns. `log_append` continues an open row only while no other column has spoken.
     `log_note` puts tuna's own notes (timeout, exit code, spawn failure) on an Errors row.
@@ -293,6 +304,15 @@ is relative. Every configured path goes through these: compile/running directori
   - Columns are `scrollbind` and `nowrap`. All three follow the latest line unless one is being
     read back (cursor in it, not at the bottom), in which case none move. `scrollbind` is
     re-armed after a scroll made from code, or later manual scrolls drift.
+  - `run_one_session` hands the cursor to the row it is about to talk to (`ui:goto_row`):
+    that row's columns are the conversation, and in live it is the only row whose column is
+    typable, so the UI would otherwise sit on Compile with nothing to show and nothing to
+    type into.
+  - In live, the keys that start typing (`i`/`I`/`a`/`A`/`o`/`O` and `<CR>`) are bound on the
+    Live column: while it is typable they are Vim's own (replayed through `feedkeys`), and
+    before that they run the session instead of raising `E21` (`start_talking` — a session on
+    another row just moves the cursor there). `type_when_live` is then consumed by the render
+    that makes the column typable, which puts the cursor at its end and starts insert.
   - In live, the Live column ends in the line being typed, faced by blank lines in the other
     columns, and it is preserved across redraws (`keep_last`). `<CR>` clears it synchronously
     and then calls `live_send`. When the session ends the line is removed, the column becomes
@@ -336,17 +356,54 @@ as `checker <input> <output> <answer>` (exit 0 means correct) and is compiled vi
 - Panes: `st` (the "Run" status, carved from `tc`'s rectangle), `tc` (selector), `so`, `eo`,
   `si`, `se`. `popup.lua` tiles floats and `split.lua` builds native splits, from the same
   recursive `{ ratio, child }` layout; levels alternate between columns and rows.
+- `M.owner_of(bufnr)` answers which runner a pane buffer belongs to, from the module-level
+  `pane_owner` map filled in `show_ui` and cleared in `delete` (`commands.target_buffer`).
 - `layout.resolve` validates a layout (known names, no duplicates, well-formed pairs, `tc`
   present) and falls back to the default with one WARN. A pane the layout omits still gets a
   **buffer** (content kept, viewer can open it) but no window.
 - `init_ui(windows, config, winid, status_rows, opts)`; `opts` comes from
-  `RunnerUI:layout_opts()` (runner `layout`/`pane_titles`).
+  `RunnerUI:layout_opts(idx?)` (`row_layout` + runner `pane_titles`).
+- **The grid follows the row on screen.** `row_layout` answers the build step with
+  `runner_ui.compile_layout` (selector + Errors, `false` to keep the mode's grid) and every
+  other row with the mode's `layout()` or the configured one. The render tick compares it
+  with `drawn_layout` and calls `redraw_grid`, which asks the interface to `relayout`: the
+  panes keep their buffers (content, keymaps, unwritten edits) and are only moved, opened or
+  closed, because rebuilding them would drop all of that and race the rows landing in them.
+  `resize_ui` is the same call. While it runs, `relayouting` marks the windows closing and
+  opening as the UI's own, so neither `WinClosed` (which means the user closed the UI) nor a
+  cursor event (which means a move by hand) is believed; it is cleared a tick later, when
+  those events are delivered. `watch_pane_window` re-arms the per-window `WinClosed` after a
+  relayout, and `draw_pane`/`build_windows` skip a pane whose buffer was wiped from under the
+  UI (`:%bwipeout`).
 - Rendering is **coalesced to one per tick** (`render_scheduled`, flags `update_windows` and
   `update_details`).
+- **Which row is shown** is the UI's choice until the selector is moved by hand: `user_moved`
+  is set only when a `CursorMoved` actually *changes* the selection, which a code-driven move
+  never does (those select first, so the event finds nothing to change). `follow_row` is how
+  the UI chooses and does nothing once the user has. Three things choose: `show_ui` takes
+  `opening_row()` on its scheduled tick, *after* the rows exist (interactive and run-all build
+  theirs after opening, so deciding earlier would always land on line 1); every render calls
+  `follow_after_compile`, which moves off a Compile row that ended with exit 0 and printed
+  nothing (a failed or talkative build is the row that answers the run, and one still running
+  must not move under the user); and interactive's `run_one_session` follows the row it is
+  talking to, sessions being held one at a time and live's row being the only typable one.
+  The cursor and the selection must agree while the choice is the UI's, or the editor's own
+  cursor event reads as a move by hand: `show_ui` leaves `update_testcase` on line 1 until the
+  tick chooses, and `render_selector` puts the cursor back on the chosen row after a rebuild
+  that would otherwise clamp it onto another one.
 - `opening_row()` uses the runner's `last_row_id` (matched by `row_id`), else `initial_row()`:
   the first testcase, or Compile when it has output or is still running.
-- `status_lines()`: mode (with forced or automatic), judge (the checker file, else the
-  compare method), diff on/off, runner tail, `help: ?`. Its row count is fixed per runner.
+- `render_selector` lays the rows out in three columns (header, verdict, time) through
+  `selector_columns`: 10 wide while the pane holds them, content-sized plus a space when it
+  doesn't, and without the time rather than letting the pane cut a number in half. The
+  conversation layout gives its selector a 4 share for that reason.
+- `status_lines()`: mode, judge (the checker file, else the compare method), the mode's own
+  settings (`status_settings`, interactive's source), forced, diff on/off, runner tail,
+  `help: ?`. Its row count is fixed per runner. The `forced` row names
+  the settings that are the user's choice (`mode`, `judge`, `source`), else `none`, rather
+  than appending a word to each value, which the pane is too narrow to hold: `judge` counts
+  as forced when the checker is off or the comparison is overridden, never when a checker
+  was simply found.
 
 **Inline editing**
 - Editable panes are always-modifiable `acwrite` buffers. `:w` from **any** pane saves the row
@@ -623,7 +680,9 @@ specific Vim error about a buffer the user never opened.
   `store_downloaded_task`), replaces the body with the scratch *buffer* lines, saves, moves the
   cursor, and deletes the scratch.
 - **`menu.lua`**: the `:Tuna` menu, built on `widgets.panels` (not `widgets.menu`) with a
-  free-standing banner: Contests stacked over Problems in the left column (from
+  free-standing banner (no border and `winblend = 100`, so the editor shows between the
+  wordmark's letters, which are extmarked `TunaMenuTitle`, whose `blend = 0` keeps them out
+  of the blending that would otherwise paint them in the colours underneath): Contests stacked over Problems in the left column (from
   `recent.snapshot()`), the commands on the right under "Catch of the day".
   - A problem's status (`entry_status`) is the judge's verdict from `submit.verdict_for` while
     it is current, else `core.local_verdict`, else nothing: the judge's answer settles a
@@ -683,7 +742,8 @@ specific Vim error about a buffer the user never opened.
   - `modes.lua`: the helper and run-setting rule end to end: availability (files, configured
     paths and commands, missing ones), automatic choices, forcing and `auto`, forced settings
     giving way and coming back, old sidecar entries, runners refreshing the checker per run,
-    run-all honouring `checker off`, and stress/interactor reruns reporting a missing helper;
+    run-all honouring `checker off`, the Run pane's settings rows and which of them read as
+    forced, and stress/interactor reruns reporting a missing helper;
   - `temp.lua`: the templates a scratch can start from, when a scratch is resumed, the
     resume/restart and template menus, and absorbing keeping the header of the template actually used;
   - `testcases.lua`, `compare.lua`, `judges.lua`, `download.lua`, `clean.lua`, `submit.lua`:
@@ -691,8 +751,8 @@ specific Vim error about a buffer the user never opened.
   - `runner.lua`: all four run modes with `vim.system` stubbed, covering what each child is
     handed, bare rows, save/answer semantics, disk drift and restore, path resolution, the
     swapfile contract, interactive grids and the conversation model, and the run gate
-    (`settle_results`), and the local verdict a finished normal, run-all and feed run saves,
-    using real UI windows. `testcases.lua` also covers the
+    (`settle_results`), the local verdict a finished normal, run-all and feed run saves, and
+    live's typing keys starting a session, using real UI windows. `testcases.lua` also covers the
     `single_file` rewrite keeping untouched testcases.
 - Modules expose file-local helpers to tests through `M._test` (`download`, `submit`, `clean`,
   `interactive`, `temp`, `menu`). They are not public interface.

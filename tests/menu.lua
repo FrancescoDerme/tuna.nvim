@@ -312,7 +312,13 @@ t.eq("the menu's lists, the commands being the catch of the day", titles, { "Cat
 t.ok("the banner is drawn", banner ~= nil)
 if banner then
     t.ok("with no border around it", borderless(banner.config), banner.config.border)
-    t.has("on the editor's own background", vim.wo[banner.win].winhighlight, "NormalFloat:Normal")
+    t.eq("blended all the way, so the editor shows between its letters", vim.wo[banner.win].winblend, 100)
+    -- The letters are drawn in a group that stays out of that blending, or they would be
+    -- painted in the colours of whatever is behind the banner.
+    local letters = vim.api.nvim_buf_get_extmarks(api.nvim_win_get_buf(banner.win), ns, 0, -1, { details = true })
+    t.ok("its letters are highlighted", #letters > 0, #letters)
+    t.eq("in the banner's own group", letters[1] and letters[1][4].hl_group, "TunaMenuTitle")
+    t.eq("which is exempt from the blending", vim.api.nvim_get_hl(0, { name = "TunaMenuTitle" }).blend, 0)
     t.eq("a blank row above the lists", lists_top, banner.config.row + banner.config.height + 1)
 end
 press("<Esc>")

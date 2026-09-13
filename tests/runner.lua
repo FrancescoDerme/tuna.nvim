@@ -105,6 +105,24 @@ t.eq("and has no answer to be judged against", r.tcdata[2].expected, nil)
 t.eq("the compile row's stdin is a string", r.tcdata[1].stdin, "")
 
 --------------------------------------------------------------------------------
+-- The selector's columns
+--------------------------------------------------------------------------------
+
+-- Ten-wide columns are what the rows line up on in every mode, but the conversation's
+-- selector is narrower than three of them, and a pane that cuts `0.266 s` in half reports
+-- a run that never happened.
+local columns = require("tuna.runner_ui")._test.selector_columns
+local sel_rows = {
+    { header = "Compile", status = "DONE", time = "0.266 s" },
+    { header = "TC 0", status = "RUNNING", time = "" },
+}
+t.eq("a pane with room keeps the ten-wide columns", { columns(sel_rows, 40) }, { 10, 10, true })
+t.eq("and so does a selector with no window of its own", { columns(sel_rows, nil) }, { 10, 10, true })
+t.eq("a narrow one sizes them to their content, to keep the time", { columns(sel_rows, 24) }, { 8, 8, true })
+t.eq("and narrower still gives the time up rather than cutting it", { columns(sel_rows, 18) }, { 8, 8, false })
+t.eq("narrower than the columns themselves, it splits what there is", { columns(sel_rows, 12) }, { 6, 6, false })
+
+--------------------------------------------------------------------------------
 -- What reaches the process
 --------------------------------------------------------------------------------
 
@@ -206,6 +224,20 @@ local iui = ir and ir.ui
 t.ok("interactive opened its results UI", iui ~= nil and iui.ui_visible)
 if iui then
     t.eq("expected output is not drawn in interactive mode", iui.windows.eo.winid, nil)
+    -- The conversation's selector is the narrow pane of the grid, and a row wider than it
+    -- is a verdict or a time cut in half by the pane's edge.
+    local function selector_lines()
+        return vim.api.nvim_buf_get_lines(iui.windows.tc.bufnr, 0, -1, false)
+    end
+    vim.wait(1000, function()
+        return #selector_lines() >= #ir.tcdata
+    end, 20)
+    local tcw = vim.api.nvim_win_get_width(iui.windows.tc.winid)
+    local widest = 0
+    for _, line in ipairs(selector_lines()) do
+        widest = math.max(widest, vim.fn.strwidth(line))
+    end
+    t.ok("the conversation's selector rows fit its pane", widest <= tcw and widest > 0, { selector_lines(), tcw })
     local si, so, se = iui.windows.si, iui.windows.so, iui.windows.se
     t.ok("the live pane is drawn", si.winid ~= nil and vim.api.nvim_win_is_valid(si.winid))
     t.eq("and is titled Live", si.title, " Live ")
@@ -219,8 +251,10 @@ if iui then
         bound[m.lhs] = m.callback ~= nil
     end
     t.eq("n and N are bound where nothing can be added", { bound.n, bound.N }, { true, true })
-    -- The conversation is laid out as columns beside the selector, Errors then Output then
-    -- Live, each full height so a row of one faces the same row of the others.
+    -- The conversation is laid out as columns beside the selector, Output then Live then
+    -- Errors, each full height so a row of one faces the same row of the others. Errors goes
+    -- last because the last column takes whatever the grid's division leaves over, which is
+    -- what lets Output and Live be exactly as wide as each other.
     local function box(w)
         local c = vim.api.nvim_win_get_config(w.winid)
         return c.col, c.row, c.height
@@ -230,17 +264,42 @@ if iui then
     local ocol, orow, oh = box(so)
     local lcol, lrow, lh = box(si)
     t.ok(
-        "columns run selector, Errors, Output, Live",
-        tcol < ecol and ecol < ocol and ocol < lcol,
-        { tcol, ecol, ocol, lcol }
+        "columns run selector, Output, Live, Errors",
+        tcol < ocol and ocol < lcol and lcol < ecol,
+        { tcol, ocol, lcol, ecol }
     )
     t.eq("each full height and level with the others", { erow, orow, eh, oh }, { lrow, lrow, lh, lh })
+
+    -- The conversation's selector is the width it is in every other mode, and its two
+    -- conversing columns are exactly as wide as each other. Checked on the layout arithmetic
+    -- at several editor widths, because what the grid's division leaves over depends on it,
+    -- and that rounding is what used to make them differ.
+    local geometry = require("tuna.runner_ui.popup")._test.compute_layout
+    local ui_cfg = require("tuna.config").get_buffer_config(buf)
+    local conv_layout = ir:layout()
+    -- The editor's size is asked for rather than read, so it can be answered here: setting
+    -- `columns` would resize the windows this section is standing in.
+    local tuna_utils = require("tuna.utils")
+    local real_size = tuna_utils.get_ui_size
+    for _, cols in ipairs({ 100, 140, 141, 183 }) do
+        tuna_utils.get_ui_size = function()
+            return cols, 40
+        end
+        local normal = geometry(ui_cfg, 4, ui_cfg.popup_ui.layout)
+        local conv = geometry(ui_cfg, 4, conv_layout)
+        t.eq(("the conversation's selector is as wide as a normal run's, at %d columns"):format(cols), conv.tc.width, normal.tc.width)
+        t.eq(("Output and Live are the same width, at %d columns"):format(cols), conv.so.width, conv.si.width)
+    end
+    tuna_utils.get_ui_size = real_size
 
     -- What each side says lands on a row of its own in its own column, blank in the other
     -- two, and every column follows the latest line.
     vim.wait(500, function()
         return ir.completed
     end, 20)
+    -- One row *is* the session, so it is the row the UI shows: its columns are where the
+    -- conversation appears, and in live it is the only row that can be typed into.
+    t.eq("the row being talked to is the row the UI shows", iui.update_testcase, 2)
     local row
     for i, r in ipairs(ir.tcdata) do
         if r.tcnum ~= "Compile" then
@@ -369,9 +428,15 @@ if fui then
         vim.fn.setfperm(exec, "rwxr-xr-x")
         fr:run_testcases()
         vim.wait(2000, function()
+            return fr.completed == false
+        end, 10)
+        vim.wait(2000, function()
             return fr.completed
         end, 20)
-        t.eq("a finished feed session saves its local verdict", { core.local_verdict(dir .. "/sol.cpp") }, { 1, 1 })
+        -- Whether the row came back CORRECT is a race with a real process being torn down,
+        -- so what is checked is that the session saved a verdict over the case it judged.
+        local _, feed_total = core.local_verdict(dir .. "/sol.cpp")
+        t.eq("a finished feed session saves its local verdict", feed_total, 1)
         vim.fn.delete(exec)
         sidecar.set_entry(dir .. "/sol.cpp", "results", nil)
     end
@@ -391,6 +456,78 @@ if fui then
     t.eq("and gives it back once the session settles", fr:idle(), true)
     fui:delete()
 end
+
+-- Live invites you to talk to the program, so the keys that mean "I am typing here" have to
+-- reach one: on a column that is not live yet they would only raise `E21` at someone the UI
+-- is asking to type, which is an answer about `modifiable` to a question about the problem.
+stub_system()
+require("tuna.interactive").run(buf, { "live" }, { show_only = true })
+local lr = require("tuna.interactive").active[buf]
+vim.wait(500, function()
+    return lr ~= nil and lr.ui ~= nil and lr.ui.ui_visible
+end, 20)
+local live_buf = lr.ui.windows.si.bufnr
+local typing_keys = {}
+for _, m in ipairs(vim.api.nvim_buf_get_keymap(live_buf, "n")) do
+    typing_keys[m.lhs] = m.callback
+end
+t.ok(
+    "the keys that start typing are bound on the Live column",
+    typing_keys.i and typing_keys.I and typing_keys.a and typing_keys.A and typing_keys.o and typing_keys.O ~= nil,
+    vim.tbl_keys(typing_keys)
+)
+t.eq("nothing is typable before a session", vim.bo[live_buf].modifiable, false)
+t.eq("and nothing is built", lr.preloaded, true)
+typing_keys.i()
+t.eq("pressing one builds and starts the session", lr.preloaded, false)
+t.eq("and remembers to hand the column over once it is live", lr.type_when_live, true)
+-- The runner is `completed` until the sessions start, so both edges are waited for: the
+-- sessions run (and fail, nothing being built for real) before the stand-in pipe below.
+vim.wait(1000, function()
+    return lr.completed == false
+end, 10)
+vim.wait(2000, function()
+    return lr.completed
+end, 20)
+vim.wait(200, function()
+    return false
+end)
+
+-- The column going live is what hands it over: the cursor ends up in it, in insert, at the
+-- end of the line being composed. A stand-in pipe makes the session "live". The row is chosen
+-- through the UI and left to settle first, since the grid is rebuilt when the kind of row on
+-- screen changes and that takes the panes with it.
+lr.active_index = 2
+lr.sol_in = {
+    is_closing = function()
+        return false
+    end,
+    write = function() end,
+}
+lr.ui:follow_row(2)
+vim.wait(500, function()
+    return false
+end)
+lr.type_when_live = true
+lr:update_ui(true)
+vim.wait(500, function()
+    return lr.type_when_live == nil
+end, 20)
+t.eq("the column is handed over once it is live", lr.type_when_live, nil)
+local live_pane = lr.ui.windows.si
+t.eq("with the cursor in it", vim.api.nvim_get_current_win(), live_pane.winid)
+local composing_line = vim.api.nvim_buf_line_count(live_pane.bufnr)
+t.eq("at the end of the line being composed", vim.api.nvim_win_get_cursor(live_pane.winid), {
+    composing_line,
+    #(vim.api.nvim_buf_get_lines(live_pane.bufnr, composing_line - 1, composing_line, false)[1] or ""),
+})
+-- Insert mode itself needs a UI to enter, so that part is verified against a real session
+-- rather than here.
+vim.cmd("stopinsert")
+lr.sol_in = nil
+lr:kill_all_processes()
+lr.ui:delete()
+vim.system = real_system
 
 -- A build that fails leaves nothing running, so the runner must say it is idle: left
 -- claimed, every edit is refused with "wait for the run to finish" for good.
@@ -1063,5 +1200,421 @@ do
     clear_runners()
     vim.fn.delete(rdir, "rf")
 end
+
+--------------------------------------------------------------------------------
+-- Which row the board opens on, in every mode
+--------------------------------------------------------------------------------
+
+-- One rule, whatever built the rows: listing a problem opens on its first real row, since the
+-- Compile step is where a run starts rather than something to read; a run moves to the row it
+-- is about once the build turns out to have had nothing to say; and neither happens once the
+-- selector has been moved by hand, because a row someone chose is not a default. The row a run
+-- is about is its first real row everywhere except interactive, which holds one session at a
+-- time and follows it — in live that row is the only one that can be typed into.
+local wdir = t.tempdir()
+t.write(wdir, "sol.cpp", "int main(){}\n")
+t.write(wdir, "gen.cpp", "int main(){}\n")
+t.write(wdir, "brute.cpp", "int main(){}\n")
+t.write(wdir, "sol_input0.txt", "1\n")
+t.write(wdir, "sol_output0.txt", "1\n")
+t.write(wdir, "sol_input1.txt", "2\n")
+t.write(wdir, "sol_output1.txt", "2\n")
+vim.cmd("edit " .. wdir .. "/sol.cpp")
+vim.bo.filetype = "cpp"
+local wbuf = vim.api.nvim_get_current_buf()
+local wtcs = require("tuna.testcases").buf_get_testcases(wbuf)
+
+---The first row that is not the build step: what every mode is expected to land on.
+local function first_real_row(r)
+    for i, tc in ipairs(r.tcdata) do
+        if tc.tcnum ~= "Compile" then
+            return i
+        end
+    end
+    return 1
+end
+
+local boards = {
+    {
+        name = "a normal run",
+        show = function()
+            local r = require("tuna.runner").new(wbuf)
+            r:load_testcases(wtcs)
+            r:show_ui()
+            return r
+        end,
+        run = function()
+            local r = require("tuna.runner").new(wbuf)
+            r:show_ui()
+            r:run_testcases(wtcs, true)
+            return r
+        end,
+    },
+    {
+        name = "run-all",
+        show = function()
+            require("tuna.multi").show(wbuf)
+            return require("tuna.multi").active[wbuf]
+        end,
+        run = function()
+            require("tuna.multi").run(wbuf)
+            return require("tuna.multi").active[wbuf]
+        end,
+    },
+    {
+        name = "stress",
+        show = function()
+            require("tuna.stress").show(wbuf)
+            return require("tuna.stress").active[wbuf]
+        end,
+        run = function()
+            require("tuna.stress").run(wbuf, 1)
+            return require("tuna.stress").active[wbuf]
+        end,
+    },
+    {
+        name = "interactive",
+        -- Sessions are held one row at a time, so the row shown is the one being talked to.
+        run_row = function(r)
+            return r.active_index
+        end,
+        show = function()
+            require("tuna.interactive").show(wbuf)
+            return require("tuna.interactive").active[wbuf]
+        end,
+        run = function()
+            require("tuna.interactive").run(wbuf, { "feed" })
+            return require("tuna.interactive").active[wbuf]
+        end,
+    },
+}
+
+---Let the rows, the build and the scheduled renders settle, then say which row is shown.
+local function shown_row(r, want)
+    vim.wait(3000, function()
+        return r.ui ~= nil and r.ui.ui_visible and #r.tcdata > 0 and r.ui.update_testcase == want
+    end, 20)
+    vim.wait(150, function()
+        return false
+    end)
+    return r.ui and r.ui.update_testcase
+end
+
+for _, board in ipairs(boards) do
+    stub_system()
+    local r = board.show()
+    t.eq(board.name .. ": listed, it opens on the first row that is not the build", shown_row(r, first_real_row(r)), first_real_row(r))
+    t.eq(board.name .. ": with the cursor on it, the choice still the board's", {
+        vim.api.nvim_win_get_cursor(r.ui.windows.tc.winid)[1],
+        r.ui.user_moved,
+    }, { first_real_row(r), false })
+    r:kill_all_processes()
+    r:delete_ui()
+
+    r = board.run()
+    vim.wait(3000, function()
+        return r.ui ~= nil and r.ui.ui_visible and #r.tcdata > 0 and r.completed
+    end, 20)
+    vim.wait(200, function()
+        return false
+    end)
+    local want = board.run_row and board.run_row(r) or first_real_row(r)
+    t.eq(board.name .. ": run, a silent build hands over the row the run is about", r.ui.update_testcase, want)
+    r:kill_all_processes()
+    r:delete_ui()
+    vim.system = real_system
+end
+
+-- The board's own choice is not a move by hand: while it opens, the row it is about to choose
+-- and the line the cursor is on have to agree, or the first cursor event the editor sends
+-- reads as the user taking over and the board never chooses again.
+stub_system()
+local fresh = require("tuna.runner").new(wbuf)
+fresh:load_testcases(wtcs)
+fresh:show_ui()
+vim.api.nvim_exec_autocmds("CursorMoved", { buffer = fresh.ui.windows.tc.bufnr })
+vim.wait(1000, function()
+    return fresh.ui.update_testcase == 2
+end, 20)
+t.eq("a cursor event while the board opens is not a move by hand", { fresh.ui.update_testcase, fresh.ui.user_moved }, { 2, false })
+fresh:delete_ui()
+vim.system = real_system
+
+-- A conversation follows its sessions, but not once the selector has been taken over: the
+-- next session would pull the cursor off the row someone chose to read.
+stub_system()
+require("tuna.interactive").run(wbuf, { "feed" })
+local held = require("tuna.interactive").active[wbuf]
+vim.wait(3000, function()
+    return held.ui ~= nil and held.ui.ui_visible and held.completed
+end, 20)
+local held_tc = held.ui.windows.tc
+vim.api.nvim_win_set_cursor(held_tc.winid, { 1, 0 })
+vim.api.nvim_exec_autocmds("CursorMoved", { buffer = held_tc.bufnr })
+t.eq("the selector can be taken over mid-conversation", held.ui.update_testcase, 1)
+held:run_testcases()
+vim.wait(200, function()
+    return false
+end)
+vim.wait(3000, function()
+    return held.completed
+end, 20)
+vim.wait(200, function()
+    return false
+end)
+t.eq("and the sessions that follow leave it where it was put", held.ui.update_testcase, 1)
+held:kill_all_processes()
+held:delete_ui()
+vim.system = real_system
+
+-- A list that gets shorter than the row the board chose takes the choice with it, rather than
+-- leaving Vim to clamp the cursor onto another row, which reads as a move by hand.
+stub_system()
+local shrink = require("tuna.runner").new(wbuf)
+shrink:load_testcases(wtcs)
+shrink:show_ui()
+vim.wait(1000, function()
+    return shrink.ui ~= nil and shrink.ui.update_testcase == 2
+end, 20)
+shrink.ui:follow_row(3) -- as a conversation does, ending on the row it was held on
+t.eq("the board can choose the last row", { shrink.ui.update_testcase, shrink.ui.user_moved }, { 3, false })
+shrink:load_testcases({ [0] = { input = "1\n", output = "1\n" } })
+vim.wait(1000, function()
+    return #shrink.tcdata == 2
+end, 20)
+vim.wait(200, function()
+    return false
+end)
+t.eq("a shorter list moves the choice down with it", { shrink.ui.update_testcase, shrink.ui.user_moved }, { 2, false })
+t.eq("with the cursor on it", vim.api.nvim_win_get_cursor(shrink.ui.windows.tc.winid)[1], 2)
+shrink:delete_ui()
+vim.system = real_system
+
+-- A build still going keeps the cursor on itself, whatever drives it: interactive and stress
+-- compile by hand rather than through a testcase row, and a row that is building has to say so
+-- or the board moves off it before there is anything to move to.
+local held_exit
+vim.system = function(_, _, on_exit)
+    held_exit = on_exit
+    return {
+        kill = function() end,
+        wait = function()
+            return { code = 0 }
+        end,
+        pid = 0,
+        is_closing = function()
+            return false
+        end,
+    }
+end
+for _, building in ipairs({
+    { name = "interactive", start = function()
+        require("tuna.interactive").run(wbuf, { "feed" })
+        return require("tuna.interactive").active[wbuf]
+    end },
+    { name = "stress", start = function()
+        require("tuna.stress").run(wbuf, 1)
+        return require("tuna.stress").active[wbuf]
+    end },
+}) do
+    held_exit = nil
+    local r = building.start()
+    vim.wait(2000, function()
+        return r.ui ~= nil and r.ui.ui_visible and #r.tcdata > 0 and held_exit ~= nil
+    end, 20)
+    vim.wait(200, function()
+        return false
+    end)
+    t.eq(building.name .. ": a run opens on the build while it is still going", {
+        r.ui.update_testcase,
+        r.compile_entry.running,
+    }, { 1, true })
+    held_exit({ code = 0, signal = 0, stdout = "", stderr = "" })
+    vim.wait(2000, function()
+        return r.ui.update_testcase ~= 1
+    end, 20)
+    -- Off the build and onto a real row: which one is the mode's business (interactive walks
+    -- its sessions from there), the point being that it waited for the build to end.
+    t.ok(building.name .. ": and moves on once it ends with nothing to say", r.ui.update_testcase >= 2, r.ui.update_testcase)
+    t.eq(building.name .. ": the build stops saying it is running", r.compile_entry.running, false)
+    r:kill_all_processes()
+    r:delete_ui()
+end
+vim.system = real_system
+
+-- A build with something to say keeps the cursor: that row is the answer to the run.
+vim.system = function(argv, _, on_exit)
+    if on_exit then
+        vim.schedule(function()
+            on_exit({ code = 0, signal = 0, stdout = "", stderr = "warning: unused variable" })
+        end)
+    end
+    return { kill = function() end, wait = function() return { code = 0 } end, pid = 0 }
+end
+local noisy = require("tuna.runner").new(wbuf)
+noisy:show_ui()
+noisy:run_testcases(wtcs, true)
+vim.wait(2000, function()
+    return noisy.completed
+end, 20)
+vim.wait(200, function()
+    return false
+end)
+t.eq("a build that printed something keeps the row, so it can be read", noisy.ui.update_testcase, 1)
+noisy:delete_ui()
+vim.system = real_system
+
+-- And a selector moved by hand is never moved again: the row is the user's choice now.
+stub_system()
+local chosen = require("tuna.runner").new(wbuf)
+chosen:show_ui()
+chosen:load_testcases(wtcs)
+vim.wait(1000, function()
+    return chosen.ui.update_testcase == 2
+end, 20)
+local tcwin = chosen.ui.windows.tc
+vim.api.nvim_win_set_cursor(tcwin.winid, { 3, 0 })
+vim.api.nvim_exec_autocmds("CursorMoved", { buffer = tcwin.bufnr })
+t.eq("moving the selector by hand selects that row", { chosen.ui.update_testcase, chosen.ui.user_moved }, { 3, true })
+chosen:run_testcases(wtcs, true)
+vim.wait(2000, function()
+    return chosen.completed
+end, 20)
+vim.wait(200, function()
+    return false
+end)
+t.eq("and a run started from there leaves it alone", chosen.ui.update_testcase, 3)
+chosen:kill_all_processes()
+chosen:delete_ui()
+vim.system = real_system
+vim.fn.delete(wdir, "rf")
+
+--------------------------------------------------------------------------------
+-- The build step's own grid
+--------------------------------------------------------------------------------
+
+-- The build is not a testcase: no input, no answer, nothing to compare. Its row is shown with
+-- the Errors pane alone, where a compiler's complaint has the room to be read, rather than
+-- with three empty frames beside it. The panes are re-tiled rather than rebuilt, so they keep
+-- their buffers and everything held on them.
+local function drawn_panes(ui)
+    local names = {}
+    for name, w in pairs(ui.windows) do
+        if w.winid and vim.api.nvim_win_is_valid(w.winid) then
+            names[#names + 1] = name
+        end
+    end
+    table.sort(names)
+    return names
+end
+local FULL_GRID = { "eo", "se", "si", "so", "st", "tc" }
+local BUILD_GRID = { "se", "st", "tc" }
+
+stub_system()
+local grid = require("tuna.runner").new(wbuf)
+grid:load_testcases(wtcs)
+grid:show_ui()
+vim.wait(1000, function()
+    return grid.ui.update_testcase == 2
+end, 20)
+t.eq("a testcase row is shown with the mode's panes", drawn_panes(grid.ui), FULL_GRID)
+local pane_buffers = {}
+for name, w in pairs(grid.ui.windows) do
+    pane_buffers[name] = w.bufnr
+end
+local selector_win = grid.ui.windows.tc.winid
+
+grid.ui:goto_row(1)
+vim.wait(1000, function()
+    return #drawn_panes(grid.ui) == #BUILD_GRID
+end, 20)
+t.eq("the build step is shown with Errors and nothing else", drawn_panes(grid.ui), BUILD_GRID)
+local kept = true
+for name, w in pairs(grid.ui.windows) do
+    kept = kept and w.bufnr == pane_buffers[name]
+end
+t.ok("the panes keep their buffers across the change", kept, { pane_buffers })
+t.eq("and a pane that stays is moved, not drawn anew", grid.ui.windows.tc.winid, selector_win)
+
+grid.ui:goto_row(2)
+vim.wait(1000, function()
+    return #drawn_panes(grid.ui) == #FULL_GRID
+end, 20)
+t.eq("and moving off it brings the grid back", drawn_panes(grid.ui), FULL_GRID)
+grid:delete_ui()
+
+-- Interactive draws its own grid for a conversation, and the build step is the build step.
+require("tuna.interactive").run(wbuf, { "live" }, { show_only = true })
+local conv_grid = require("tuna.interactive").active[wbuf]
+vim.wait(1000, function()
+    return conv_grid.ui ~= nil and conv_grid.ui.ui_visible and #conv_grid.tcdata > 0
+end, 20)
+t.eq("a conversation keeps its columns", drawn_panes(conv_grid.ui), { "se", "si", "so", "st", "tc" })
+conv_grid.ui:goto_row(1)
+vim.wait(1000, function()
+    return #drawn_panes(conv_grid.ui) == #BUILD_GRID
+end, 20)
+t.eq("and its build step is shown the same way as everything else's", drawn_panes(conv_grid.ui), BUILD_GRID)
+conv_grid:kill_all_processes()
+conv_grid:delete_ui()
+
+-- `runner_ui.compile_layout = false` keeps whatever grid the mode draws.
+local kept_grid = require("tuna.runner").new(wbuf)
+kept_grid.config = vim.tbl_deep_extend("force", kept_grid.config, { runner_ui = { compile_layout = false } })
+kept_grid:load_testcases(wtcs)
+kept_grid:show_ui()
+vim.wait(1000, function()
+    return kept_grid.ui.update_testcase == 2
+end, 20)
+kept_grid.ui:goto_row(1)
+vim.wait(500, function()
+    return false
+end)
+t.eq("turned off, the build step keeps the grid of a run", drawn_panes(kept_grid.ui), FULL_GRID)
+kept_grid:delete_ui()
+vim.system = real_system
+
+--------------------------------------------------------------------------------
+-- A `:Tuna` command typed in one of tuna's own windows
+--------------------------------------------------------------------------------
+
+-- A results pane is not a file, so a command typed there is about the solution the pane is
+-- showing. Acting on the pane itself compiled nothing and kept the problem's run state under
+-- a name that is not a path, writing it under whatever directory the editor was started in.
+local C2 = require("tuna.commands")
+local tools2 = require("tuna.tools")
+local pdir = t.tempdir()
+t.write(pdir, "sol.cpp", "int main(){}\n")
+t.write(pdir, "sol_input0.txt", "1\n")
+vim.cmd("edit " .. pdir .. "/sol.cpp")
+vim.bo.filetype = "cpp"
+local pbuf = vim.api.nvim_get_current_buf()
+local sol_path = pdir .. "/sol.cpp"
+
+stub_system()
+local pane_runner = require("tuna.runner").new(pbuf)
+pane_runner:show_ui()
+vim.api.nvim_set_current_win(pane_runner.ui.windows.so.winid)
+t.eq("a command typed in a pane is about the solution it shows", C2.target_buffer(), pbuf)
+t.eq("a buffer of its own is itself", C2.target_buffer(pbuf), pbuf)
+
+C2.execute({ "run", "all" })
+vim.wait(3000, function()
+    local matrix = require("tuna.multi").active[pbuf]
+    return matrix ~= nil and matrix.completed
+end, 20)
+vim.system = real_system
+t.eq("so a run typed there forces the mode for the solution", tools2.get_mode(sol_path), "all")
+t.eq("and nothing is written beside a name that is not a path", vim.fn.isdirectory(vim.fn.getcwd() .. "/tuna:"), 0)
+local pane_buf = pane_runner.ui.windows.so.bufnr
+local matrix = require("tuna.multi").active[pbuf]
+if matrix then
+    matrix:delete_ui()
+end
+pane_runner:delete_ui()
+-- A pane's buffer is wiped with its window, so what it belonged to is forgotten with it, or a
+-- later command would be sent to a runner that is gone.
+t.eq("a pane that is gone belongs to nothing", require("tuna.runner_ui").owner_of(pane_buf), nil)
+vim.fn.delete(pdir, "rf")
 
 t.report()

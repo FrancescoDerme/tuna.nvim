@@ -49,7 +49,7 @@ MODE_SET.auto = true
 ---@param add boolean add a fresh testcase instead of editing
 ---@param tcnum integer? testcase number to edit
 function M.edit_testcase(add, tcnum)
-    local bufnr = api.nvim_get_current_buf()
+    local bufnr = M.target_buffer()
     config.load_buffer_config(bufnr) -- refresh: a local config may have changed
     local tctbl = testcases.buf_get_testcases(bufnr)
 
@@ -83,7 +83,7 @@ end
 ---Delete a testcase (picking first if no number is given).
 ---@param tcnum integer?
 function M.delete_testcase(tcnum)
-    local bufnr = api.nvim_get_current_buf()
+    local bufnr = M.target_buffer()
     config.load_buffer_config(bufnr)
     local tctbl = testcases.buf_get_testcases(bufnr)
 
@@ -117,7 +117,7 @@ end
 ---@param tcnum integer? testcase to split
 ---@param sep string? marker character
 function M.split_testcase(tcnum, sep)
-    local bufnr = api.nvim_get_current_buf()
+    local bufnr = M.target_buffer()
     config.load_buffer_config(bufnr)
     local cfg = config.get_buffer_config(bufnr)
     sep = (sep and sep ~= "") and sep or cfg.testcases_split_markers
@@ -160,7 +160,7 @@ function M.convert_testcases(target)
         utils.notify("convert: unknown storage '" .. tostring(target) .. "'. Use files | single_file | directory.")
         return
     end
-    local bufnr = api.nvim_get_current_buf()
+    local bufnr = M.target_buffer()
     config.load_buffer_config(bufnr)
     -- buf_get_testcases auto-detects whichever backend currently holds them.
     local tctbl = testcases.buf_get_testcases(bufnr)
@@ -194,7 +194,7 @@ M.last_mode = {}
 ---`checker.cpp`) to the solution beside it. Notifies and returns nil on failure.
 ---@return integer? bufnr, string? mode label of the resolved buffer's active mode
 function M.solution_bufnr()
-    local bufnr = api.nvim_get_current_buf()
+    local bufnr = M.target_buffer()
     config.load_buffer_config(bufnr)
     local target, note = tools.solution_bufnr(bufnr, config.get_buffer_config(bufnr))
     if not target then
@@ -320,6 +320,19 @@ local function runners_of(bufnr)
         end
     end
     return list
+end
+
+---The buffer a `:Tuna` command is about. Standing in one of tuna's own windows — a results
+---pane, its viewer — that is the solution the pane is showing: a pane is not a file, so a
+---command acting on it would compile nothing, save nothing, and keep the problem's run state
+---under a name that is not a path. Every other buffer is itself, including a helper file,
+---which each run resolves for itself (`tools.solution_bufnr`).
+---@param bufnr integer? defaults to the current buffer
+---@return integer
+function M.target_buffer(bufnr)
+    bufnr = bufnr or api.nvim_get_current_buf()
+    local owner = require("tuna.runner_ui").owner_of(bufnr)
+    return owner and owner.bufnr or bufnr
 end
 
 ---Settle a buffer's results UIs before `proceed` puts one on screen. One results UI per
@@ -545,13 +558,13 @@ function M.download(mode)
     if mode == "sync" then
         -- A download that folds the `:Tuna temp` scratch into the problem it opens:
         -- `temp.sync` arms the merge and starts the download itself.
-        require("tuna.temp").sync(api.nvim_get_current_buf())
+        require("tuna.temp").sync(M.target_buffer())
     elseif mode == "stop" then
         download.stop_downloading()
     elseif mode == "status" then
         download.show_status()
     elseif mode == "testcases" then
-        local bufnr = api.nvim_get_current_buf()
+        local bufnr = M.target_buffer()
         config.load_buffer_config(bufnr)
         local cfg = config.get_buffer_config(bufnr)
         err = download.start_downloading("testcases", cfg.companion_port, cfg.download_print_message, cfg.download_print_message, bufnr, cfg)
@@ -663,7 +676,7 @@ M.subcommands = {
             utils.notify("scaffold: a kind is required (checker | generator | brute | interactor).")
             return
         end
-        require("tuna.scaffold").create(args[1], api.nvim_get_current_buf(), args[2])
+        require("tuna.scaffold").create(args[1], M.target_buffer(), args[2])
     end,
     submit = function(args)
         local bufnr = M.solution_bufnr()
@@ -677,16 +690,16 @@ M.subcommands = {
         end
     end,
     clean = function()
-        require("tuna.clean").clean(api.nvim_get_current_buf())
+        require("tuna.clean").clean(M.target_buffer())
     end,
     -- Contest navigation: step to the sibling problem directory either side of this
     -- one. Deliberately not routed through `solution_bufnr`, since navigating away
     -- from a helper file (say `gen.cpp`) is a perfectly reasonable thing to do.
     next = function()
-        require("tuna.navigate").next(api.nvim_get_current_buf())
+        require("tuna.navigate").next(M.target_buffer())
     end,
     prev = function()
-        require("tuna.navigate").prev(api.nvim_get_current_buf())
+        require("tuna.navigate").prev(M.target_buffer())
     end,
     -- Back to what you were working on, across restarts: the solution itself, or the
     -- contest it belongs to. Both also move Neovim's directory there (`cd_command`),
@@ -704,7 +717,7 @@ M.subcommands = {
     -- remember the file it is in, or you remember the snippet.
     lib = function(args)
         local library = require("tuna.library")
-        local bufnr = api.nvim_get_current_buf()
+        local bufnr = M.target_buffer()
         if args[1] == "snippet" then
             library.pick(bufnr)
         elseif args[1] == "search" then
@@ -716,10 +729,10 @@ M.subcommands = {
     -- The scratch itself. Folding it back into a real problem is a *download*
     -- (`:Tuna download sync`), since that is what it does — it downloads.
     temp = function()
-        require("tuna.temp").start(api.nvim_get_current_buf())
+        require("tuna.temp").start(M.target_buffer())
     end,
     menu = function()
-        require("tuna.menu").open(api.nvim_get_current_buf())
+        require("tuna.menu").open(M.target_buffer())
     end,
 }
 
@@ -761,7 +774,7 @@ function M.complete(arg_lead, cmd_line, cursor_pos)
         -- The numbers that actually exist, so `:Tuna testcase delete <Tab>` never
         -- offers one the next thing it says is "doesn't exist".
         candidates = {}
-        local ok, tctbl = pcall(testcases.buf_get_testcases, api.nvim_get_current_buf())
+        local ok, tctbl = pcall(testcases.buf_get_testcases, M.target_buffer())
         if ok then
             for n in pairs(tctbl) do
                 candidates[#candidates + 1] = tostring(n)

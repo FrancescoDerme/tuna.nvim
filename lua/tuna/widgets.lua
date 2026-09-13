@@ -1635,10 +1635,16 @@ function M.panels(sections, title, on_choice, restore_winid, on_close, header)
             centred[i] = pad .. l
         end
         api.nvim_buf_set_lines(hb, 0, -1, false, centred)
+        -- The letters wear `TunaMenuTitle`, which keeps them out of the window's blending.
+        for i, line in ipairs(centred) do
+            for s, e in line:gmatch("()[^ ]+()") do
+                pcall(api.nvim_buf_set_extmark, hb, panels_ns, i - 1, s - 1, { end_col = e - 1, hl_group = "TunaMenuTitle" })
+            end
+        end
         vim.bo[hb].modifiable = false
         panels.header_buf = hb
-        -- Free-standing: no border and the editor's own background, so the wordmark reads
-        -- as a title over the board rather than as one more box in it.
+        -- Free-standing: no border, and no background either, so the wordmark is its
+        -- letters over whatever is behind the board rather than one more box in it.
         panels.header_win = open_float(hb, false, {
             width = board_w,
             height = head_h,
@@ -1646,8 +1652,10 @@ function M.panels(sections, title, on_choice, restore_winid, on_close, header)
             col = col,
             border = "none",
         })
-        local hl = vim.wo[panels.header_win].winhighlight
-        vim.wo[panels.header_win].winhighlight = (hl ~= "" and hl .. "," or "") .. "NormalFloat:Normal"
+        -- Blended all the way: a float paints its whole rectangle, and a background left
+        -- unpainted is still a background, so only blending lets the editor show between
+        -- the letters. The letters keep their own colour through `TunaMenuTitle`.
+        vim.wo[panels.header_win].winblend = 100
         row = row + head_h + HEAD_GAP
     end
     -- The lists are centred under the banner rather than left-aligned with it.

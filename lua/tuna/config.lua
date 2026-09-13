@@ -532,6 +532,14 @@ M.defaults = {
         },
     },
     runner_ui = {
+        -- The grid drawn while the Compile row is the one on screen. The build step is not a
+        -- testcase — no input, no answer, nothing to compare — so it is shown as the selector
+        -- and the Errors pane, where a compiler's complaint has the room to be read. `false`
+        -- keeps whatever grid the run mode draws for its testcases.
+        compile_layout = {
+            { 3, "tc" },
+            { 8, "se" },
+        },
         interface = "popup", -- "popup" | "split"
         -- The border and title colour of the panes you can *type* into (Input and
         -- Expected Output), so they read as different from the ones you can only read.

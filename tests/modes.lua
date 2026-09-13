@@ -217,5 +217,87 @@ local ssaid, sr = rerun_after_deleting("stress", "brute.py")
 t.ok("a stress restart with its reference gone says so", ssaid ~= nil and ssaid:find("reference") ~= nil, ssaid)
 t.eq("and searches nothing", sr.iter, 0)
 
+-- A sidecar travels with a problem's folder, so a buffer that is not a file gets none:
+-- `:Tuna run all` typed while standing in a results pane would otherwise write a `tuna:/`
+-- tree wherever the editor was started.
+local cwd = vim.fn.getcwd()
+tools.set_mode("tuna://runner/7/tuna", "all")
+t.eq("a buffer that is not a file gets no sidecar", vim.fn.isdirectory(cwd .. "/tuna:"), 0)
+t.eq("and the forcing is still remembered for this session", tools.get_mode("tuna://runner/7/tuna"), "all")
+
+--------------------------------------------------------------------------------
+-- What the "Run" pane says about the settings
+--------------------------------------------------------------------------------
+
+-- Each fact on its own row: the mode alone, and whatever you forced named on a row of its
+-- own, since a word appended to every value is what a narrow pane cuts off first.
+local pdir, psol = problem({ "checker.py" })
+local pbuf = open(psol)
+local pr = require("tuna.runner").new(pbuf)
+local ptcs = { [0] = { input = "1\n", output = "1\n" } }
+pr:run_testcases(ptcs, false)
+settle()
+pr:show_ui()
+local function status()
+    return pr.ui:status_lines()
+end
+t.eq("nothing forced: the mode stands alone, and the row says so", status(), {
+    "mode  : normal",
+    "judge : checker.py",
+    "forced: none",
+    "diff  : off",
+    "help  : ?",
+})
+
+tools.set_mode(psol, "normal")
+pr:run_testcases(ptcs, false)
+settle()
+t.eq("a forced mode is named there, the mode row unchanged", { status()[1], status()[3] }, { "mode  : normal", "forced: mode" })
+
+tools.set_checker(psol, "off")
+pr:run_testcases(ptcs, false)
+settle()
+t.eq("a checker forced off forces the judge, which then reads as the comparison", { status()[2], status()[3] }, { "judge : squish", "forced: mode, judge" })
+
+tools.set_mode(psol, nil)
+tools.set_checker(psol, "auto")
+
+-- The judge is looked up again by every run, the comparison override included, so this
+-- reaches the runner that is already open.
+tools.set_compare(psol, "exact")
+os.remove(pdir .. "/checker.py")
+pr:run_testcases(ptcs, false)
+settle()
+t.eq("an overridden comparison forces the judge on its own", { status()[2], status()[3] }, { "judge : exact", "forced: judge" })
+
+tools.set_compare(psol, nil)
+t.write(pdir, "checker.py", "print()\n")
+pr:run_testcases(ptcs, false)
+settle()
+t.eq("handing it back, with a checker of its own, is no forcing", { status()[2], status()[3] }, { "judge : checker.py", "forced: none" })
+
+-- An override the checker makes no use of is not what the judge row shows, so it forces
+-- nothing: a checker is only ever found.
+tools.set_compare(psol, "exact")
+pr:run_testcases(ptcs, false)
+settle()
+t.eq("an override a checker overrules forces nothing", { status()[2], status()[3] }, { "judge : checker.py", "forced: none" })
+tools.set_compare(psol, nil)
+pr.ui:delete()
+
+-- The interactive source is a setting like the others, so it is named the same way.
+local _, vsol = problem({ "interactor.py" })
+local vbuf = open(vsol)
+tools.set_source(vsol, "live")
+require("tuna.interactive").run(vbuf, {}, { show_only = true })
+local vr = require("tuna.interactive").active[vbuf]
+settle()
+t.eq("the source sits under the judge, and is named on the forced row below it", vim.list_slice(vr.ui:status_lines(), 2, 4), {
+    "judge : squish",
+    "source: live",
+    "forced: source",
+})
+vr:delete_ui()
+
 vim.system = real_system
 t.report()

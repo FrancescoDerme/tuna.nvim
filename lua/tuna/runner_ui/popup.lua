@@ -56,6 +56,61 @@ local function rec_compute_layout(layout, vertical, width, height, col, row, siz
     end
 end
 
+---Put a pane where the layout says, or take its window away when the layout leaves it out.
+---The buffer stays either way: its content is still collected and still reachable in the
+---viewer, drawn or not.
+---@param w table the `windows` entry
+---@param name string pane name
+---@param config table
+---@param s table? the rectangle's size, nil when the layout omits the pane
+---@param p table? its position
+local function draw_pane(w, name, config, s, p)
+    if not (s and p) then
+        if w.winid and api.nvim_win_is_valid(w.winid) then
+            api.nvim_win_close(w.winid, true)
+        end
+        w.winid = nil
+        return
+    end
+    if not api.nvim_buf_is_valid(w.bufnr) then
+        -- Nothing to draw: the buffer was wiped out from under the UI (`:%bwipeout` is a
+        -- thing people type), and a window cannot be opened onto one that is gone.
+        w.winid = nil
+        return
+    end
+    if w.winid and api.nvim_win_is_valid(w.winid) then
+        -- Moved rather than reopened: a window that stays keeps its view and its options.
+        api.nvim_win_set_config(w.winid, {
+            relative = "editor",
+            width = math.max(1, s.width),
+            height = math.max(1, s.height),
+            col = p.col,
+            row = p.row,
+        })
+        return
+    end
+    w.winid = surface.float(w.bufnr, {
+        layer = surface.LAYER.grid,
+        width = s.width,
+        height = s.height,
+        -- A bordered float's row/col anchor its whole footprint: the border is drawn *at*
+        -- that row/col and the content one cell in. The computed rectangles already include
+        -- the border, so they are passed through unshifted — offsetting by +1 pushed the grid
+        -- a row down and a column right, which on a full-height layout means over the
+        -- statusline.
+        col = p.col,
+        row = p.row,
+        border = config.floating_border,
+        border_highlight = config.floating_border_highlight,
+        title = w.title,
+    })
+    local selector = name == "tc"
+    vim.wo[w.winid].number = selector and config.runner_ui.selector_show_nu or config.runner_ui.show_nu
+    vim.wo[w.winid].relativenumber = selector and config.runner_ui.selector_show_rnu or config.runner_ui.show_rnu
+    vim.wo[w.winid].spell = false
+    vim.wo[w.winid].cursorline = selector
+end
+
 ---@param config table
 ---@param status_rows integer content rows of the "Run" pane (border added here)
 ---@param layout table the (validated) layout to lay out
@@ -93,8 +148,9 @@ end
 ---@param config table
 ---@param _init_winid integer? unused (popup anchors to the editor)
 ---@param status_rows integer? content rows of the "Run" pane (default 2)
----@param opts { layout: table?, titles: table<string, string>? }? what the run mode
----changes about the grid: a layout of its own, and titles it gives panes
+---@param opts { layout: table?, layout_name: string?, titles: table<string, string>? }? what
+---the row on screen changes about the grid: a layout of its own (named by `layout_name`, for
+---anything it has to report), and titles it gives panes
 function M.init_ui(windows, config, _init_winid, status_rows, opts)
     opts = opts or {}
     local defaults = require("tuna.config").defaults.popup_ui.layout
@@ -102,7 +158,7 @@ function M.init_ui(windows, config, _init_winid, status_rows, opts)
     -- replaces the configured layout, and is validated the same way.
     local layout = layout_util.resolve(
         opts.layout or config.popup_ui.layout,
-        opts.layout and "run mode layout" or "popup_ui.layout",
+        opts.layout_name or "popup_ui.layout",
         defaults
     )
     local sizes, positions = compute_layout(config, status_rows or 2, layout)
@@ -118,33 +174,35 @@ function M.init_ui(windows, config, _init_winid, status_rows, opts)
 
         -- A pane the layout doesn't place gets a buffer but no window: its content is
         -- still collected (and still openable in the viewer), it just isn't drawn.
-        local win
-        local s, p = sizes[name], positions[name]
-        if s and p then
-            win = surface.float(buf, {
-                layer = surface.LAYER.grid,
-                width = s.width,
-                height = s.height,
-                -- A bordered float's row/col anchor its whole footprint: the border is
-                -- drawn *at* that row/col and the content one cell in. The computed
-                -- rectangles already include the border, so they are passed through
-                -- unshifted — offsetting by +1 pushed the grid a row down and a column
-                -- right, which on a full-height layout means over the statusline.
-                col = p.col,
-                row = p.row,
-                border = config.floating_border,
-                border_highlight = config.floating_border_highlight,
-                title = title,
-            })
-            local selector = name == "tc"
-            vim.wo[win].number = selector and config.runner_ui.selector_show_nu or config.runner_ui.show_nu
-            vim.wo[win].relativenumber = selector and config.runner_ui.selector_show_rnu
-                or config.runner_ui.show_rnu
-            vim.wo[win].spell = false
-            vim.wo[win].cursorline = selector
-        end
-        windows[name] = { bufnr = buf, winid = win, title = title }
+        windows[name] = { bufnr = buf, winid = nil, title = title }
+        draw_pane(windows[name], name, config, sizes[name], positions[name])
     end
 end
+
+---Re-tile the panes for another layout, keeping their buffers and everything held on them —
+---the content, the keymaps, an unwritten edit. The row on screen decides the grid (the build
+---step is shown with Errors and nothing else), so this runs whenever that changes kind, and
+---rebuilding the panes for it would throw away what they hold and race the rows landing in
+---them.
+---@param windows table
+---@param config table
+---@param _init_winid integer? unused (the popup grid is anchored to the editor)
+---@param status_rows integer?
+---@param opts { layout: table?, layout_name: string?, titles: table<string, string>? }?
+function M.relayout(windows, config, _init_winid, status_rows, opts)
+    opts = opts or {}
+    local layout = layout_util.resolve(
+        opts.layout or config.popup_ui.layout,
+        opts.layout_name or "popup_ui.layout",
+        require("tuna.config").defaults.popup_ui.layout
+    )
+    local sizes, positions = compute_layout(config, status_rows or 2, layout)
+    for name, w in pairs(windows) do
+        draw_pane(w, name, config, sizes[name], positions[name])
+    end
+end
+
+-- The pure geometry, for the test suite.
+M._test = { compute_layout = compute_layout }
 
 return M

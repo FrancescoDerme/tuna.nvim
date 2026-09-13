@@ -363,7 +363,7 @@ end
 ---testcase across all compiled solutions through a shared pool of `multiple_testing`
 ---concurrent processes. Header `correct/total`s update live as cases land.
 function MultiRunner:run_all()
-    self:refresh_checker(self.solution)
+    self:refresh_judge(self.solution)
     self.completed = false
     self.stopped = false
 
@@ -542,7 +542,7 @@ function MultiRunner:run_single(idx)
     end) then
         return
     end
-    self:refresh_checker(self.solution)
+    self:refresh_judge(self.solution)
     if tc.kind == "solution" then
         self:rerun_solution(tc.sol)
         return
@@ -722,8 +722,9 @@ function M.run(bufnr, opts)
         end,
     })
 
-    mr:show_ui()
+    -- Rows first, so the UI opens on the row it will actually show (see interactive).
     mr:load_rows()
+    mr:show_ui()
     if opts.show_only then
         -- Listed, not run: the first run key saves and runs the matrix (`built_first`),
         -- `run_all` compiling every solution first.

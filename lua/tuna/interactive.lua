@@ -4,7 +4,7 @@
 -- Tuna offers three *sources* for the other side of that conversation:
 --
 --   * live       — YOU are the other side. The conversation is laid out in three
---                  columns, Errors, Output and Live, each writing on rows the other
+--                  columns, Output, Live and Errors, each writing on rows the other
 --                  two leave blank; you type into Live and <CR> sends the line to the
 --                  solution's stdin. No auto-verdict.
 --   * feed       — a pre-written input plays the other side, one line per turn: each
@@ -166,7 +166,7 @@ end
 ---canonical Input and Expected Output panes, editable as in a normal run: what it replays is
 ---a stored testcase, its input the script and its expected output the verdict. `live` and
 ---`interactor` are a conversation and are laid out as one — the selector, then a column
----each for Errors, Output and Live, every one full height, so a row of one faces the same
+---each for Output, Live and Errors, every one full height, so a row of one faces the same
 ---row of the others. Expected output has no place in it, a sample exchange being one
 ---example of a conversation rather than the only correct one.
 ---@return table?
@@ -174,7 +174,12 @@ function InteractiveRunner:layout()
     if not self:conversational() then
         return nil
     end
-    return { { 3, "tc" }, { 3, "se" }, { 4, "so" }, { 4, "si" } }
+    -- The selector takes the share it has in the configured grid (3 of 11), so it is the
+    -- width it is in every other mode, compile time and all. Output and Live share a ratio,
+    -- which is what makes them the same width: the last column absorbs whatever the grid's
+    -- division leaves over, so Errors goes last, its two lines of tuna's own notes being
+    -- what can spare a cell.
+    return { { 3, "tc" }, { 3, "so" }, { 3, "si" }, { 2, "se" } }
 end
 
 ---`si` is named for what it is in a conversation: the other side of it, not a stored
@@ -195,9 +200,11 @@ function InteractiveRunner:owns_pane(name)
     return name == "si" and self.source == "live"
 end
 
----One extra "Run" pane row: which side is playing the interactor.
+---One extra "Run" pane row, under the judge: which side is playing the interactor. A
+---setting like the mode and the judge, so it sits with them rather than below the run's
+---own rows.
 ---@return string[][]
-function InteractiveRunner:status_tail()
+function InteractiveRunner:status_settings()
     return { { "source", self.source } }
 end
 
@@ -275,7 +282,7 @@ end
 ---@param cont fun()
 function InteractiveRunner:with_helpers(cont)
     local solution = api.nvim_buf_get_name(self.bufnr)
-    self:refresh_checker(solution)
+    self:refresh_judge(solution)
     if self.source ~= "interactor" then
         return cont()
     end
@@ -328,8 +335,25 @@ function InteractiveRunner:on_ui_shown(ui)
     ---Send the line being typed, the Live column's last line, since everything above it is
     ---conversation already. It is cleared at once rather than at the next redraw, so a key
     ---pressed in between is not swallowed with it.
+    ---Nothing is running yet (or the row being shown is not the one that is): there is no
+    ---program to talk to, so a key that means "type here" means "build it and talk to it".
+    ---`type_when_live` is picked up by the render that makes the column typable, which puts
+    ---the cursor at the end of it and starts insert, so the keystroke is not swallowed.
+    local function start_talking()
+        self.type_when_live = true
+        if self.sol_in and self.active_index then
+            -- A session is running on another row: that is where typing works.
+            if self.ui and self.ui.ui_visible then
+                self.ui:goto_row(self.active_index)
+            end
+        else
+            self:run_testcases()
+        end
+    end
+
     local function send()
         if not (self.sol_in and not self.sol_in:is_closing()) then
+            start_talking()
             return
         end
         local n = api.nvim_buf_line_count(buf)
@@ -344,6 +368,19 @@ function InteractiveRunner:on_ui_shown(ui)
     end
     vim.keymap.set("i", "<CR>", send, { buffer = buf })
     vim.keymap.set("n", "<CR>", send, { buffer = buf, nowait = true })
+
+    -- The keys that mean "I am typing here". While the column is typable they are Vim's own;
+    -- before that they would only raise `E21` at someone who is being invited to talk, so
+    -- they start the session instead.
+    for _, key in ipairs({ "i", "I", "a", "A", "o", "O" }) do
+        vim.keymap.set("n", key, function()
+            if vim.bo[buf].modifiable then
+                api.nvim_feedkeys(key, "n", false)
+            else
+                start_talking()
+            end
+        end, { buffer = buf, nowait = true })
+    end
 end
 
 ---Draw the conversation for the row the UI is showing, then follow the latest line. Called
@@ -407,6 +444,22 @@ function InteractiveRunner:on_details_rendered(ui, tc)
             set_column(w.si.bufnr, fresh, false, true)
         end
         self.composing_row = tc
+        -- Asked to type before there was anything to type to: the column is live now, so the
+        -- cursor goes to the end of it and insert starts, which is what the key pressed then
+        -- was for.
+        if self.type_when_live then
+            self.type_when_live = nil
+            local win, sbuf = w.si.winid, w.si.bufnr
+            vim.schedule(function()
+                if not (win and api.nvim_win_is_valid(win) and vim.bo[sbuf].modifiable) then
+                    return
+                end
+                api.nvim_set_current_win(win)
+                local n = api.nvim_buf_line_count(sbuf)
+                pcall(api.nvim_win_set_cursor, win, { n, #(api.nvim_buf_get_lines(sbuf, n - 1, n, false)[1] or "") })
+                vim.cmd("startinsert!")
+            end)
+        end
     else
         self.composing_row = nil
         set_column(w.si.bufnr, cols.si, false, false)
@@ -860,6 +913,13 @@ end
 ---@param idx integer
 ---@param on_done fun()
 function InteractiveRunner:run_one_session(idx, on_done)
+    -- The row being talked to is the row to look at: its columns are where the conversation
+    -- appears, and in live it is the only row whose Live column can be typed into. Every
+    -- other mode's rows can be read at leisure while they run, and the UI opens on whichever
+    -- it opened on; here one row *is* the session, so the session takes the cursor with it.
+    if self.ui then
+        self.ui:follow_row(idx)
+    end
     if self.source == "interactor" then
         self:run_interactor(idx, on_done)
     elseif self.source == "feed" then
@@ -1047,8 +1107,10 @@ function M.run(bufnr, args, opts)
         end,
     })
 
-    ir:show_ui()
+    -- Rows first: the UI lays its grid out for the row it opens on, and an empty list leaves
+    -- it nothing to open on but line 1.
     ir:load_rows()
+    ir:show_ui()
     ir:update_ui(true)
 
     -- Build the solution once (driving the Compile row) and the interactor, if any, then
@@ -1079,6 +1141,9 @@ function M.run(bufnr, args, opts)
         end
         local ce = ir.compile_entry
         ce.status, ce.hlgroup, ce.start_time = "RUNNING", "TunaRunning", vim.uv.now()
+        -- Said the way `execute_process` says it of a testcase row: the UI reads `running` to
+        -- know a build is still in flight, and keeps the cursor on it until it is not.
+        ce.running = true
         ir:update_ui(true)
         utils.ensure_directory(r.compile_directory)
         -- pcall'd: a compiler that is not installed makes `vim.system` itself throw,
@@ -1090,6 +1155,7 @@ function M.run(bufnr, args, opts)
             function(res)
                 vim.schedule(function()
                     ce.time = vim.uv.now() - ce.start_time
+                    ce.running = false
                     ce.stdout, ce.stderr, ce.exit_code = res.stdout or "", res.stderr or "", res.code
                     if res.code ~= 0 then
                         ce.status, ce.hlgroup = "RET " .. tostring(res.code), "TunaWarning"
@@ -1104,7 +1170,7 @@ function M.run(bufnr, args, opts)
             end
         )
         if not ok then
-            ce.status, ce.hlgroup, ce.stderr = "FAILED", "TunaWarning", tostring(err)
+            ce.status, ce.hlgroup, ce.stderr, ce.running = "FAILED", "TunaWarning", tostring(err), false
             ir.completed = true
             ir:update_ui(true)
         end

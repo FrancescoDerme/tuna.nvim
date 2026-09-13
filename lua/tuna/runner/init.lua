@@ -84,7 +84,7 @@ function M.new(bufnr)
         return nil
     end
 
-    -- Every run looks the checker up again (`refresh_checker`); this first answer is what
+    -- Every run looks the judge up again (`refresh_judge`); this first answer is what
     -- the results UI shows before one.
     local path = vim.api.nvim_buf_get_name(bufnr)
     local resolved_checker = tools.resolve_checker(path, cfg)
@@ -197,7 +197,7 @@ function TCRunner:run_testcases(tctbl, do_compile)
     if tctbl or self.preloaded then
         tools.save_sources(self.bufnr, self.config)
     end
-    self:refresh_checker(vim.api.nvim_buf_get_name(self.bufnr))
+    self:refresh_judge(vim.api.nvim_buf_get_name(self.bufnr))
     self.preloaded = false
     if tctbl then
         self:build_rows(tctbl, do_compile)
@@ -306,7 +306,7 @@ function TCRunner:run_single(tcindex)
     -- idle, or the structural edits (`n`/`x`/`c`/`u`) that wait on `idle()` would be
     -- let through mid-flight. `check_complete` flips it back once the row settles.
     self.completed = false
-    self:refresh_checker(vim.api.nvim_buf_get_name(self.bufnr))
+    self:refresh_judge(vim.api.nvim_buf_get_name(self.bufnr))
     -- These rows were only ever *listed* (`:Tuna show_ui` before any run), so nothing has
     -- been built: running one on its own would spawn a binary that does not exist yet and
     -- report `ENOENT` as the testcase's verdict. Compile first, then run the row — the

@@ -410,7 +410,7 @@ function StressRunner:run_single(idx)
     end) then
         return
     end
-    self:refresh_checker(vim.api.nvim_buf_get_name(self.bufnr))
+    self:refresh_judge(vim.api.nvim_buf_get_name(self.bufnr))
     self:execute_entry(idx)
 end
 
@@ -439,7 +439,7 @@ function StressRunner:run_testcases()
         return
     end
     self.gen, self.ref = gen, ref
-    self:refresh_checker(solution)
+    self:refresh_judge(solution)
     self.stopped = false
     self.finished = false
     self.iter = 0
@@ -559,8 +559,8 @@ function M.run(bufnr, count_override, opts)
 
     -- Open the results UI and show the testcase list (incl. the Compile row and any
     -- existing testcases, pending) right away.
-    sr:show_ui()
     sr:load_testcases()
+    sr:show_ui()
     sr:update_ui(true)
 
     -- A gen/ref compile failure is a normal outcome, not an editor error: show the
@@ -621,6 +621,9 @@ function M.run(bufnr, count_override, opts)
         end
         local ce = sr.compile_entry
         ce.status, ce.hlgroup, ce.start_time = "RUNNING", "TunaRunning", vim.uv.now()
+        -- Said the way `execute_process` says it of a testcase row: the UI reads `running` to
+        -- know a build is still in flight, and keeps the cursor on it until it is not.
+        ce.running = true
         sr:update_ui(true)
         utils.ensure_directory(r.compile_directory)
         -- pcall'd: a compiler that is not installed makes `vim.system` itself throw,
@@ -632,6 +635,7 @@ function M.run(bufnr, count_override, opts)
             function(res)
                 vim.schedule(function()
                     ce.time = vim.uv.now() - ce.start_time
+                    ce.running = false
                     ce.stdout, ce.stderr, ce.exit_code = res.stdout or "", res.stderr or "", res.code
                     if res.code ~= 0 then
                         -- Failure stays in the UI (compile row + auto-viewer), no notify.
@@ -647,7 +651,7 @@ function M.run(bufnr, count_override, opts)
             end
         )
         if not ok then
-            ce.status, ce.hlgroup, ce.stderr = "FAILED", "TunaWarning", tostring(err)
+            ce.status, ce.hlgroup, ce.stderr, ce.running = "FAILED", "TunaWarning", tostring(err), false
             sr:update_ui(true)
         end
     end

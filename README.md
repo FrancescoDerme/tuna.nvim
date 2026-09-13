@@ -189,16 +189,20 @@ cores, by default — and opens the results grid:
 
 ```
 ┌ Run ─────────────────────┬ Output ───────────┬ Expected Output ──┐
-│ mode : normal, automatic │ 3                 │ 3                 │
-│ judge: squish            │                   │                   │
-│ diff : off               │                   │                   │
-│ help : ?                 │                   │                   │
+│ mode  : normal           │ 3                 │ 3                 │
+│ judge : squish           │                   │                   │
+│ forced: none             │                   │                   │
+│ diff  : off              │                   │                   │
+│ help  : ?                │                   │                   │
 ├ Testcases ───────────────┼ Errors ───────────┼ Input ────────────┤
 │ Compile  DONE            │                   │ 1 2               │
 │ TC 0  CORRECT            │                   │                   │
 │ TC 1  WRONG              │                   │                   │
 └──────────────────────────┴───────────────────┴───────────────────┘
 ```
+
+A `:Tuna` command typed in one of these panes is about the solution the pane is showing, so
+`:Tuna run all` or `:Tuna submit` from inside the grid does what it would from the file.
 
 Output faces Expected Output across the top, because the comparison is read _across_;
 Errors and Input sit under them, and the two editable panes end up as one column down the
@@ -208,7 +212,14 @@ instead of floats.
 
 Each testcase is a row and the four panes show that run. The compile step is a row too,
 so its warnings are somewhere you can read them, and a compile failure pops its errors up
-by itself.
+by itself. The build has no input, no answer and nothing to compare, so its row is shown
+with the Errors pane alone, where a compiler's complaint has the room to be read — the panes
+of a run come back the moment you move off it (`runner_ui.compile_layout`). Opening the UI
+puts you on the first testcase, and a run starts on the compile step and moves there itself
+as soon as the build ends with nothing to say — a build that failed or printed something
+keeps the cursor, being the row that answers the run. Move the selector yourself and it
+stays where you put it. Every mode works this way, interactive following the row it is
+talking to.
 
 | key                             |                                                                       |
 | ------------------------------- | --------------------------------------------------------------------- |
@@ -266,6 +277,8 @@ that needs a helper you have since deleted, stress without its reference say, ru
 automatic choice instead, says so, and comes back with the helper. Every run looks the
 helpers up again, so adding, deleting or editing one takes effect on the next run, and a
 rerun from an open results UI whose mode has lost its helper says so rather than running.
+The judge is resolved per run the same way, so `:Tuna checker off` and `:Tuna compare` apply
+from the next run on.
 
 `:Tuna scaffold generator|brute|interactor|checker` drops in a dependency-free starter file
 in your language.
@@ -279,11 +292,14 @@ got 3`) shows in the Errors pane of that testcase's row.
 
 **Interactive** lays out the results grid by who plays the other side. With `live` (you)
 and `interactor` (your interactor program) the session reads as a **conversation**: beside
-the testcase list are three columns, Errors, Output and Live, and whatever one side says
+the testcase list are three columns, Output, Live and Errors, and whatever one side says
 goes on a row of its own in its own column, the other two left blank on that row, so every
 reply sits on the line after the message it answers and nothing is repeated between them.
-The columns follow the latest line and scroll together. In `live` you type on the last line
-of the Live column, which wears the accent of a pane you type into, and `<CR>` sends it.
+The columns follow the latest line and scroll together, and the row being talked to is the
+row the UI shows, since that row is the session. In `live` you type on the last line of the
+Live column, which wears the accent of a pane you type into, and `<CR>` sends it. With
+nothing running yet, `i` (or any key that starts typing, `<CR>` included) builds the
+solution, starts the session and leaves you typing in the column.
 `feed` replays a stored testcase line by line instead, so it keeps the ordinary Input and
 Expected Output panes, editable exactly as in a normal run.
 
@@ -679,12 +695,15 @@ the rest. The preset groups keys by subject, so which-key shows a `t` testcases 
 | `runner_ui.mappings`                  | see the key table above                          |                                                                                                                                                              |
 | `runner_ui.viewer`                    | `0.8` × `0.8`                                    | the full-screen pane view; `open_when_compilation_fails` pops it on a build error                                                                            |
 | `runner_ui.editable_border_highlight` | `"TunaEditable"`                                 | the accent on the two editable panes; `false` turns it off                                                                                                   |
+| `runner_ui.compile_layout`            | selector + Errors                                | the grid drawn while the build row is the one on screen; `false` keeps the grid of a run                                                                     |
 | `popup_ui.layout`                     | three columns                                    | a nested `{ weight, pane }` tree over `tc`, `so`, `eo`, `si`, `se`; a pane you leave out is simply not drawn, and stays reachable in the viewer              |
 | `split_ui`                            | `"right"`, `0.3`                                 | position and size when `interface = "split"`                                                                                                                 |
 | `editor_ui`, `picker_ui`              |                                                  | the standalone testcase editor and picker                                                                                                                    |
 
 Highlight groups: `TunaCorrect`, `TunaWrong`, `TunaWarning`, `TunaRunning`, `TunaDone`,
-`TunaEditable`, and `TunaDiffChange` / `TunaDiffText` / `TunaDiffAdd` / `TunaDiffDelete`.
+`TunaEditable`, `TunaMenuTitle` (the menu's banner letters; the banner has no background of
+its own, so what is behind it shows between them), and `TunaDiffChange` / `TunaDiffText` /
+`TunaDiffAdd` / `TunaDiffDelete`.
 Override any of them with `:hi` after startup — they are re-applied on `ColorScheme`, so
 they follow your theme.
 
