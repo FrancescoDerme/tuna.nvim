@@ -189,10 +189,11 @@ function RunnerUI:owns_win(winid)
 end
 
 function RunnerUI:cursor_tc()
-    if not (self.windows.tc and api.nvim_win_is_valid(self.windows.tc.winid)) then
+    local tc = self.windows.tc
+    if not (tc and tc.winid and api.nvim_win_is_valid(tc.winid)) then
         return 1
     end
-    return api.nvim_win_get_cursor(self.windows.tc.winid)[1]
+    return api.nvim_win_get_cursor(tc.winid)[1]
 end
 
 --------------------------------------------------------------------------------
@@ -1962,8 +1963,11 @@ function RunnerUI:set_diff_bind(enable)
             vim.wo[w.winid].cursorbind = enable
         end
     end
-    if enable and self.windows.so and api.nvim_win_is_valid(self.windows.so.winid) then
-        api.nvim_win_call(self.windows.so.winid, function()
+    -- A pane the row's grid leaves out has a buffer but no window (the build step is drawn
+    -- with Errors alone), so `winid` is nil there, and nil is not a window to sync.
+    local so = self.windows.so
+    if enable and so and so.winid and api.nvim_win_is_valid(so.winid) then
+        api.nvim_win_call(so.winid, function()
             vim.cmd("syncbind")
         end)
     end
@@ -2057,11 +2061,13 @@ function RunnerUI:render_diff()
     if not tc then
         return nil
     end
-    if tc.start_time == nil then
-        -- Never run: there is no output to compare an answer against, so every line of
-        -- what you are typing into Expected would be marked as a difference from an
-        -- empty pane. A testcase added with `n` starts here, and it is the one moment
-        -- the marks would be pure noise — wait until the solution has had a go at it.
+    if tc.stdout == nil then
+        -- Nothing has answered on this row yet, so there is no output to compare against:
+        -- every line of what you are typing into Expected would be marked as a difference
+        -- from an empty pane. A testcase added with `n` starts here, and so does one being
+        -- re-run, until its result lands. What decides is the output and not a timestamp,
+        -- because a row can be filled in by something other than a spawn of its own — a
+        -- stress counterexample is written by the search that found it.
         return nil
     end
     local output, expected = self:diff_texts(tc)
@@ -2119,8 +2125,9 @@ function RunnerUI:close_viewer()
         api.nvim_win_close(self.viewer_winid, true)
     end
     self.viewer_winid = nil
-    if self.windows.tc and api.nvim_win_is_valid(self.windows.tc.winid) then
-        api.nvim_set_current_win(self.windows.tc.winid)
+    local tc = self.windows.tc
+    if tc and tc.winid and api.nvim_win_is_valid(tc.winid) then
+        api.nvim_set_current_win(tc.winid)
     end
 end
 

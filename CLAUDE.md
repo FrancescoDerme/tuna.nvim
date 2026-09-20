@@ -424,7 +424,10 @@ as `checker <input> <output> <answer>` (exit 0 means correct) and is compiled vi
   `pane_owner` map filled in `show_ui` and cleared in `delete` (`commands.target_buffer`).
 - `layout.resolve` validates a layout (known names, no duplicates, well-formed pairs, `tc`
   present) and falls back to the default with one WARN. A pane the layout omits still gets a
-  **buffer** (content kept, viewer can open it) but no window.
+  **buffer** (content kept, viewer can open it) but no window, so its `winid` is nil: every
+  window call goes through `w.winid and api.nvim_win_is_valid(w.winid)`, never the second
+  half alone. Which panes are omitted changes with the row on screen, so any pane can be
+  windowless at any moment (the build step is drawn with Errors alone).
 - `init_ui(windows, config, winid, status_rows, opts)`; `opts` comes from
   `RunnerUI:layout_opts(idx?)` (`row_layout` + runner `pane_titles`).
 - **The grid follows the row on screen.** `row_layout` answers the build step with
@@ -569,7 +572,10 @@ as `checker <input> <output> <answer>` (exit 0 means correct) and is compiled vi
   UI's footprint.
 - Diff view paints extmarks in the `tuna_runner_diff` namespace, with `scrollbind`/`cursorbind`
   instead of filler lines. It is cached by texts and row (`diff_cache`) and follows unsaved pane
-  text as you type (debounced). Rows that have never run are not diffed.
+  text as you type (debounced). A row nothing has answered on yet is not diffed, which is
+  decided on the row having `stdout`, not on a timestamp: a stress counterexample is written
+  by the search that found it rather than spawned like a testcase, and gating on the spawn
+  left exactly the rows worth comparing unmarked.
 
 ## Widgets and surfaces
 

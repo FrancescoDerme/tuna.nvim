@@ -907,6 +907,38 @@ do
     t.ok("and leaves nothing running", halted:idle(), halted.rerunning)
     halted.ui:delete()
 
+    -- A counterexample the search wrote is compared like any other row. What decides
+    -- whether a row can be diffed is that something has answered on it, not that it spawned
+    -- a process of its own: the search fills its rows in itself.
+    local ns = vim.api.nvim_create_namespace("tuna_runner_diff")
+    local found = search({ genx = seeded, solx = { stdout = "5\n" }, refx = { stdout = "9\n" } })
+    t.eq("the search saved what it disagreed on", saved_rows(found), { { 0, "WRONG" } })
+    found.ui:toggle_diff_view()
+    found.ui:select_row(2)
+    found.ui.update_windows, found.ui.update_details = true, true
+    found.ui:update_ui()
+    vim.wait(400, function()
+        return false
+    end)
+    t.ok("and it is marked up in both panes", (function()
+        local out = #vim.api.nvim_buf_get_extmarks(found.ui.windows.so.bufnr, ns, 0, -1, {})
+        local exp = #vim.api.nvim_buf_get_extmarks(found.ui.windows.eo.bufnr, ns, 0, -1, {})
+        return out > 0 and exp > 0
+    end)(), found.tcdata[2])
+
+    -- With the comparison on, moving to the build step lays the grid out again without an
+    -- Output pane: it has a buffer, but no window to bind.
+    found.ui:select_row(1)
+    local bound, why = pcall(function()
+        found.ui:redraw_grid()
+    end)
+    t.ok("a grid with no Output pane is not a window to bind", bound, why)
+    t.eq("the pane being one with a buffer and no window", {
+        found.ui.windows.so.winid,
+        vim.api.nvim_buf_is_valid(found.ui.windows.so.bufnr),
+    }, { nil, true })
+    found.ui:delete()
+
     -- Listed and not run, the search row says what it is for: `NOT RUN` is a testcase's word
     -- for having no verdict yet, and the search has no verdict to have.
     for _, f in ipairs(vim.fn.globpath(sdir2, "main_*.txt", false, true)) do

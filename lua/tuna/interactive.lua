@@ -378,7 +378,7 @@ function InteractiveRunner:on_ui_shown(ui)
         vim.bo[buf].modifiable = true
         api.nvim_buf_set_lines(buf, n - 1, n, false, { "" })
         vim.bo[buf].modified = false
-        if api.nvim_win_is_valid(w.winid) then
+        if w.winid and api.nvim_win_is_valid(w.winid) then
             pcall(api.nvim_win_set_cursor, w.winid, { n, 0 })
         end
         self:live_send(line)
