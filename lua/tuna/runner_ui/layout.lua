@@ -61,6 +61,17 @@ local function collect(layout, acc)
     return acc
 end
 
+---The panes a layout places, in order, or an empty list when it doesn't parse. For
+---callers that build a layout out of another one and need to know what is already in it.
+---@param layout any
+---@return string[]
+function M.leaves(layout)
+    if type(layout) ~= "table" then
+        return {}
+    end
+    return (collect(layout, {})) or {}
+end
+
 ---Validate a layout and report which panes it places. A layout that can't be used
 ---is reported once and replaced by the shipped default for that option, so a typo
 ---costs the user their arrangement — not their results UI.

@@ -1,7 +1,7 @@
 -- lua/tuna/tools.lua
 --
 -- "Helper programs" are the sibling source files a problem folder grows around a
--- solution: a generator, a brute/reference, a checker, an interactor. The whole
+-- solution: a generator, a bruteforce, a checker, an interactor. The whole
 -- point of this module is that these are *ordinary source files in the same
 -- language as the solution* (drop a `checker.cpp` next to `sol.cpp`), discovered
 -- by filename convention and compiled/run with the very same config-driven
@@ -28,7 +28,7 @@ local M = {}
 M.DEFAULT_NAMES = {
     checker = { "checker", "check" },
     generator = { "gen", "generator" },
-    reference = { "brute", "reference" },
+    bruteforce = { "brute", "reference" },
     interactor = { "interactor", "interact" },
 }
 
@@ -75,7 +75,7 @@ M.eval_command = eval_command
 ---a `run_command` configured for its filetype — that filters out compiled
 ---artefacts (`checker.o`, `checker` binaries) and editor backups.
 ---@param dir string problem directory to search (non-recursive)
----@param role string "checker" | "generator" | "reference" | "interactor"
+---@param role string "checker" | "generator" | "bruteforce" | "interactor"
 ---@param cfg table buffer configuration
 ---@return string? # absolute path, or nil if none found
 function M.find(dir, role, cfg)
@@ -93,7 +93,7 @@ function M.find(dir, role, cfg)
     return nil
 end
 
----Whether `path` is a helper (checker/generator/reference/interactor) rather than
+---Whether `path` is a helper (checker/generator/bruteforce/interactor) rather than
 ---a solution, matched by base name against `tool_names`.
 ---@param path string
 ---@param cfg table buffer configuration
@@ -246,7 +246,7 @@ local ROLE_ARGS = {
 local ROLE_OPTION = {
     checker = { "checker" },
     generator = { "stress", "generator" },
-    reference = { "stress", "reference" },
+    bruteforce = { "stress", "bruteforce" },
     interactor = { "interactive", "interactor" },
 }
 
@@ -294,10 +294,10 @@ end
 
 ---The helper filling `role` for a solution, as a spec ready to prepare and spawn, or nil
 ---when there is none. One rule for every role: a helper set in the config (`checker`,
----`stress.generator`, `stress.reference`, `interactive.interactor`) is used instead of a
+---`stress.generator`, `stress.bruteforce`, `interactive.interactor`) is used instead of a
 ---sibling file found through `tool_names`. A string there is a path to a helper file, a
 ---table an `{ exec, args }` command. Nothing is cached, so what is on disk now decides.
----@param role "checker"|"generator"|"reference"|"interactor"
+---@param role "checker"|"generator"|"bruteforce"|"interactor"
 ---@param solution string absolute path of the solution
 ---@param cfg table resolved configuration
 ---@return table? spec
@@ -406,7 +406,8 @@ end
 ---re-running recompiles it**. A spec without a `compile` step (interpreted
 ---language, or a prebuilt binary) is ready immediately.
 ---@param spec table
----@param cb fun(ok: boolean, err: string?)
+---@param cb fun(ok: boolean, err: string?, output: string?) `output` is what the compiler
+---said on a build that succeeded, warnings included, for the pane the build step gives it
 function M.prepare(spec, cb)
     -- Flush unsaved edits to the helper source first, so both the rebuild check
     -- and (for interpreted helpers) the run itself see the current code.
@@ -429,7 +430,7 @@ function M.prepare(spec, cb)
     -- Reuse a cached result only if the source hasn't changed since we built it.
     if entry.mtime == mtime and not entry.compiling then
         if entry.compiled then
-            cb(true)
+            cb(true, nil, entry.output)
             return
         elseif entry.error then
             cb(false, entry.error)
@@ -446,16 +447,16 @@ function M.prepare(spec, cb)
 
     utils.ensure_directory(spec.compile_dir)
     local argv = vim.list_extend({ spec.compile.exec }, vim.deepcopy(spec.compile.args or {}))
-    local function settle(compiled, error_msg)
+    local function settle(compiled, error_msg, output)
         entry.compiling = false
         -- Re-read the mtime: capture what we actually compiled (the file may
         -- have changed again while g++ was running).
         entry.mtime = source_mtime(spec.source)
-        entry.compiled, entry.error = compiled, error_msg
+        entry.compiled, entry.error, entry.output = compiled, error_msg, output
         local waiters = entry.waiters
         entry.waiters = nil
         for _, w in ipairs(waiters or {}) do
-            w(compiled, error_msg)
+            w(compiled, error_msg, output)
         end
     end
     -- pcall'd: a compiler that is not installed makes `vim.system` itself throw, and
@@ -464,7 +465,10 @@ function M.prepare(spec, cb)
     local ok, spawn_err = pcall(vim.system, argv, { cwd = spec.compile_dir }, function(res)
         vim.schedule(function()
             if res.code == 0 then
-                settle(true, nil)
+                -- Warnings are kept as well as errors: the build step shows what each
+                -- source's compiler said, and a helper that built with warnings has
+                -- something to say about it.
+                settle(true, nil, res.stderr)
             else
                 settle(false, "compilation failed:\n" .. (res.stderr or ""))
             end
@@ -634,7 +638,7 @@ function M.set_mode(path, mode)
 end
 
 ---The mode a problem's helpers point to: an interactor means interactive, a generator
----and a reference mean stress, anything else normal. Run-all is never chosen for you.
+---and a bruteforce mean stress, anything else normal. Run-all is never chosen for you.
 ---@param solution string absolute path of the solution
 ---@param cfg table
 ---@return string
@@ -642,7 +646,7 @@ function M.detect_mode(solution, cfg)
     if M.helper("interactor", solution, cfg) then
         return "interactive"
     end
-    if M.helper("generator", solution, cfg) and M.helper("reference", solution, cfg) then
+    if M.helper("generator", solution, cfg) and M.helper("bruteforce", solution, cfg) then
         return "stress"
     end
     return "normal"
@@ -650,7 +654,7 @@ end
 
 ---The mode a run without a mode keyword uses: the forced one while it can run, else the
 ---automatic one. Of the modes only stress needs helpers to run (interactive can always
----run live), so a forced stress missing its generator or reference gives way, and
+---run live), so a forced stress missing its generator or bruteforce gives way, and
 ---applies again once both are back.
 ---@param solution string absolute path of the solution
 ---@param cfg table
@@ -659,8 +663,8 @@ end
 function M.resolve_mode(solution, cfg)
     local auto = M.detect_mode(solution, cfg)
     local forced = state_for(solution).mode
-    if forced == "stress" and not (M.helper("generator", solution, cfg) and M.helper("reference", solution, cfg)) then
-        return auto, "stress is forced but needs a generator and a reference, running " .. auto .. " until both are back"
+    if forced == "stress" and not (M.helper("generator", solution, cfg) and M.helper("bruteforce", solution, cfg)) then
+        return auto, "stress is forced but needs a generator and a bruteforce, running " .. auto .. " until both are back"
     end
     return forced or auto, nil
 end

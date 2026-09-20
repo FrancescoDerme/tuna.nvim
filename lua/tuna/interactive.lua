@@ -217,12 +217,25 @@ end
 ---have to be laid out together and the Live column is typed into, where the base render
 ---would replace each pane on its own and overwrite the line being typed. There is no
 ---expected output to show or diff against. In `feed` every pane is the base class's: `si`
----shows the input being fed, and Errors carries a checker's message.
+---shows the input being fed, and Errors carries a checker's message. The build step is
+---nobody's conversation: its panes are the sources being compiled, drawn by the UI as they
+---are in every other mode.
 function InteractiveRunner:pane_content(tc, name)
-    if self:conversational() and (name == "so" or name == "se" or name == "si" or name == "eo") then
+    if
+        tc.tcnum ~= "Compile"
+        and self:conversational()
+        and (name == "so" or name == "se" or name == "si" or name == "eo")
+    then
         return core.SKIP
     end
     return core.RunnerCore.pane_content(self, tc, name)
+end
+
+---Nothing will run, so nothing is in flight either: left `false`, the runner would refuse
+---every edit with "wait for the run to finish".
+function InteractiveRunner:on_build_failed()
+    self.completed = true
+    self:update_ui(true)
 end
 
 ---A single session runs at a time; killing it ends that session.
@@ -289,6 +302,8 @@ function InteractiveRunner:with_helpers(cont)
     local solution = api.nvim_buf_get_name(self.bufnr)
     self:refresh_judge(solution)
     if self.source ~= "interactor" then
+        self:plan_builds({ self.checker })
+        self:build_judge()
         return cont()
     end
     local function stop(title, text)
@@ -305,12 +320,9 @@ function InteractiveRunner:with_helpers(cont)
         return stop(" interactive: no interactor ", (missing or "the interactor is gone") .. ", :Tuna run picks the source again.")
     end
     self.interactor = spec
-    tools.prepare(spec, function(ok, err)
-        if not ok then
-            return stop(" interactive: interactor failed to compile ", err or "")
-        end
-        cont()
-    end)
+    self:plan_builds({ spec, self.checker })
+    self:build_judge()
+    self:build_helpers({ spec }, cont)
 end
 
 ---In a conversation the three columns are scroll-bound and unwrapped, so reading back
@@ -401,7 +413,8 @@ end
 ---@param ui table the RunnerUI
 ---@param tc table the row being shown
 function InteractiveRunner:on_details_rendered(ui, tc)
-    if not self:conversational() then
+    -- The build step is drawn by the UI, one pane per source compiled.
+    if not self:conversational() or tc.tcnum == "Compile" then
         return
     end
     local w = {}
@@ -412,17 +425,7 @@ function InteractiveRunner:on_details_rendered(ui, tc)
         end
     end
 
-    local cols
-    if tc.tcnum == "Compile" then
-        -- The build is not a conversation: it has output and errors, and nobody answers.
-        cols = {
-            so = vim.split(tc.stdout or "", "\n", { plain = true }),
-            se = vim.split(tc.stderr or "", "\n", { plain = true }),
-            si = {},
-        }
-    else
-        cols = conversation(tc.log)
-    end
+    local cols = conversation(tc.log)
 
     local cur = api.nvim_get_current_win()
     local follow, col_of = {}, {}
@@ -435,10 +438,7 @@ function InteractiveRunner:on_details_rendered(ui, tc)
         end
     end
 
-    local composing = self.source == "live"
-        and self.sol_in ~= nil
-        and tc.tcnum ~= "Compile"
-        and tc == self.tcdata[self.active_index]
+    local composing = self.source == "live" and self.sol_in ~= nil and tc == self.tcdata[self.active_index]
     if composing then
         cols.so[#cols.so + 1] = ""
         cols.se[#cols.se + 1] = ""
@@ -1096,9 +1096,7 @@ function M.run(bufnr, args, opts)
         rundir = rundir,
         timeout = timeout,
         mode = "interactive",
-        compile_entry = r.compile
-                and { tcnum = "Compile", stdin = "", expected = nil, status = "", hlgroup = "TunaRunning" }
-            or nil,
+        compile_entry = r.compile and core.compile_row() or nil,
         tcdata = {},
         completed = false,
     }, InteractiveRunner)
@@ -1112,6 +1110,14 @@ function M.run(bufnr, args, opts)
         end,
     })
 
+    -- What this run compiles, declared before the board opens so the build step is laid out
+    -- once: the solution is the Compile row itself, the interactor is one when it plays the
+    -- other side, and the checker is one whenever it is a program of its own.
+    ir:plan_builds({ source == "interactor" and ir.interactor or false, ir.checker })
+    if not opts.show_only then
+        ir:build_judge()
+    end
+
     -- Rows first, and marked before the board opens: the UI lays its grid out for the row it
     -- opens on, which an empty list leaves as line 1, and which is the build step while a run
     -- is building but a testcase when the rows are only being listed.
@@ -1122,76 +1128,16 @@ function M.run(bufnr, args, opts)
     ir:show_ui()
     ir:update_ui(true)
 
-    -- Build the solution once (driving the Compile row) and the interactor, if any, then
-    -- run `cont`.
+    -- The solution and, when it is the one playing the other side, the interactor: two
+    -- programs with two compilers, so they build at once.
     local function build(cont)
-        local function prepare_and_start()
-            if source ~= "interactor" then
-                cont()
-                return
-            end
-            tools.prepare(ir.interactor, function(ok, err)
-                if not ok then
-                    -- Nothing will run, so nothing is in flight either: left `false`, the
-                    -- runner would refuse every edit with "wait for the run to finish".
-                    ir.completed = true
-                    if ir.ui then
-                        ir.ui:show_message(" interactive: interactor failed to compile ", err or "")
-                    end
-                    return
-                end
-                cont()
-            end)
-        end
-
-        if not r.compile then
-            prepare_and_start()
-            return
-        end
-        local ce = ir.compile_entry
-        ce.status, ce.hlgroup, ce.start_time = "RUNNING", "TunaRunning", vim.uv.now()
-        -- Said the way `execute_process` says it of a testcase row: the UI reads `running` to
-        -- know a build is still in flight, and keeps the cursor on it until it is not.
-        ce.running = true
-        ir:update_ui(true)
-        utils.ensure_directory(r.compile_directory)
-        -- pcall'd: a compiler that is not installed makes `vim.system` itself throw,
-        -- and that failure belongs on the Compile row like any other.
-        local ok, err = pcall(
-            vim.system,
-            vim.list_extend({ r.cc.exec }, vim.deepcopy(r.cc.args)),
-            { cwd = r.compile_directory },
-            function(res)
-                vim.schedule(function()
-                    ce.time = vim.uv.now() - ce.start_time
-                    ce.running = false
-                    ce.stdout, ce.stderr, ce.exit_code = res.stdout or "", res.stderr or "", res.code
-                    if res.code ~= 0 then
-                        ce.status, ce.hlgroup = "RET " .. tostring(res.code), "TunaWarning"
-                        ir.completed = true -- nothing will run; see the interactor case above
-                        ir:update_ui(true)
-                        return
-                    end
-                    ce.status, ce.hlgroup = "DONE", "TunaDone"
-                    ir:update_ui(true)
-                    prepare_and_start()
-                end)
-            end
-        )
-        if not ok then
-            ce.status, ce.hlgroup, ce.stderr, ce.running = "FAILED", "TunaWarning", tostring(err), false
-            ir.completed = true
-            ir:update_ui(true)
-        end
+        ir:build_all(source == "interactor" and { ir.interactor } or {}, cont)
     end
 
     if opts.show_only then
         -- Listed, not run: the first run key builds and starts the sessions (`built_first`).
         ir.completed = true
-        ir.build = function(cont)
-            tools.save_sources(bufnr, cfg)
-            build(cont)
-        end
+        ir:defer_build(build)
         ir:update_ui(true)
         return
     end

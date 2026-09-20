@@ -214,11 +214,16 @@ Each testcase is a row and the four panes show that run. The compile step is a r
 so its warnings are somewhere you can read them, and a compile failure pops its errors up
 by itself. The build has no input, no answer and nothing to compare, so its row is shown
 with the Errors pane alone, where a compiler's complaint has the room to be read — the panes
-of a run come back the moment you move off it (`runner_ui.compile_layout`). Opening the UI
+of a run come back the moment you move off it (`runner_ui.compile_layout`). A run that builds
+more than your solution — a generator and a bruteforce, an interactor, a checker — splits that
+pane into one per source, stacked and each named after what it holds (`Errors: gen.cpp`), so
+a warning is read where it belongs and not in one pane's worth of everything. They are built
+at once, so a run waits for the slowest compile rather than for all of them end to end. Opening the UI
 puts you on the first testcase, and a run starts on the compile step and moves there itself
 as soon as the build ends with nothing to say — a build that failed or printed something
-keeps the cursor, being the row that answers the run. Move the selector yourself and it stays
-where you put it, results landing and all, until you ask for another run — that one starts
+keeps the cursor, being the row that answers the run, and it waits for every source it is
+building, not only your solution. Move the selector yourself and it stays where you put it,
+results landing and all, until you ask for another run — that one starts
 over the way the first did. Reopening the UI returns to the row you were last on. Every mode
 works this way, interactive following the row it is talking to.
 
@@ -270,11 +275,11 @@ there is no manifest to maintain:
 
 **Automatic until you force it.** Every helper is found the same way: a file named after it
 beside your solution, or the option pointing at one of your own (`checker`,
-`stress.generator` and `.reference`, `interactive.interactor`), which is used instead. The
+`stress.generator` and `.bruteforce`, `interactive.interactor`), which is used instead. The
 mode, interactive's source and the checker each follow the helpers present until you force
 them: `:Tuna run <mode>` forces a mode, `:Tuna run interactive <source>` a source,
 `:Tuna checker off` plain comparison, and `auto` hands any of them back. A forced choice
-that needs a helper you have since deleted, stress without its reference say, runs the
+that needs a helper you have since deleted, stress without its bruteforce say, runs the
 automatic choice instead, says so, and comes back with the helper. Every run looks the
 helpers up again, so adding, deleting or editing one takes effect on the next run, and a
 rerun from an open results UI whose mode has lost its helper says so rather than running.
@@ -287,9 +292,20 @@ in your language.
 **Run all** is for the shape where you have `main.cpp` and `main2.cpp` and want to know
 which one is right — including when they are in _different languages_, since each is
 compiled and run with its own filetype's commands. **Stress testing** is for the shape
-where you know one is right and slow. **Checkers** are for problems with more than one
-correct answer; whatever the checker prints about a verdict (`wrong answer: expected 5,
-got 3`) shows in the Errors pane of that testcase's row.
+where you know one is right and slow: the hunt is a row of its own, listed with the
+testcases from the moment the board opens, numbered as the counterexample it is looking for
+and showing the input being tried, and a counterexample takes that number when it is found.
+The hunt starts as soon as the generator and the bruteforce are built, beside your existing
+testcases rather than after them. Since every verdict is read off the bruteforce's answer,
+a generator or bruteforce that fails — a crash, or longer than `stress.bruteforce_time` — stops the
+search rather than passing an empty output off as the right answer, and says so where a
+testcase says it: that row takes the verdict, and its Errors pane holds what the program
+said, beside the input it choked on. The bruteforce has a limit of its own because it is
+slow on purpose, and `maximum_time` is the one your *solution* is being held to.
+
+**Checkers** are for problems with more than one correct answer; whatever the checker prints
+about a verdict (`wrong answer: expected 5, got 3`) shows in the Errors pane of that
+testcase's row.
 
 **Interactive** lays out the results grid by who plays the other side (`interactive.layouts`
 gives each source a grid of its own). With `live` (you)
@@ -661,7 +677,8 @@ cursor alone, so one written for C++ is harmless to a Python template.
 | `stress.seed_arg`                 | `true`                                                                             | pass the iteration number to the generator as an argument           |
 | `stress.saves_per_run`            | `1`                                                                                | stop after saving this many counterexamples                         |
 | `stress.max_saved`                | `10`                                                                               | stop once the problem has this many testcases in total              |
-| `stress.generator` / `.reference` | `nil`                                                                              | a path or `{ exec, args }`, used instead of the file `tool_names` finds |
+| `stress.bruteforce_time`          | `20000`                                                                            | the bruteforce's own time limit per input, in ms (`false` for none) |
+| `stress.generator` / `.bruteforce`| `nil`                                                                              | a path or `{ exec, args }`, used instead of the file `tool_names` finds |
 | `interactive.interactor`          | `nil`                                                                              | likewise                                                            |
 | `scaffold.files`                  | `checker`, `gen`, `brute`, `interactor`                                            | basenames `:Tuna scaffold` creates                                  |
 | `scaffold.templates`              | `nil` per kind                                                                     | your own starter files, `{ [ext] = path }`                          |
@@ -697,7 +714,7 @@ the rest. The preset groups keys by subject, so which-key shows a `t` testcases 
 | `runner_ui.mappings`                  | see the key table above                          |                                                                                                                                                              |
 | `runner_ui.viewer`                    | `0.8` × `0.8`                                    | the full-screen pane view; `open_when_compilation_fails` pops it on a build error                                                                            |
 | `runner_ui.editable_border_highlight` | `"TunaEditable"`                                 | the accent on the two editable panes; `false` turns it off                                                                                                   |
-| `runner_ui.compile_layout`            | selector + Errors                                | the grid drawn while the build row is the one on screen; `false` keeps the grid of a run                                                                     |
+| `runner_ui.compile_layout`            | selector + Errors                                | the grid drawn while the build row is the one on screen, split into one Errors pane per source compiled; `false` keeps the grid of a run                     |
 | `interactive.layouts`                 | conversation / run                               | the grid each interactive source draws (`live`, `interactor`, `feed`); `false` for any of them keeps the configured one                                      |
 | `popup_ui.layout`                     | three columns                                    | a nested `{ weight, pane }` tree over `tc`, `so`, `eo`, `si`, `se`; a pane you leave out is simply not drawn, and stays reachable in the viewer              |
 | `split_ui`                            | `"right"`, `0.3`                                 | position and size when `interface = "split"`                                                                                                                 |

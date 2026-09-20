@@ -60,7 +60,7 @@ M.defaults = {
     checker = nil,
     view_output_diff = false,
 
-    -- Helper programs (checker / generator / reference / interactor) for the
+    -- Helper programs (checker / generator / bruteforce / interactor) for the
     -- stress / interactive / special-judge run modes are discovered by convention:
     -- a sibling source file whose *base name* matches one of these (any extension),
     -- compiled and run with the same commands as a solution of that language. This
@@ -68,19 +68,19 @@ M.defaults = {
     tool_names = {
         checker = { "checker", "check" },
         generator = { "gen", "generator" },
-        reference = { "brute", "reference" },
+        bruteforce = { "brute", "reference" },
         interactor = { "interactor", "interact" },
     },
 
     -- stress testing (:Tuna run stress) — hunt for an input where the solution and
-    -- a trusted reference disagree. generator/reference are discovered by
+    -- a trusted bruteforce disagree. generator/bruteforce are discovered by
     -- convention (gen.* / brute.*); set these to use your own instead: a path to
     -- a helper file (compiled and run by its language, or a prebuilt binary), or an
     -- { exec, args } command, expanded with the usual $(FNOEXT)/$(ABSDIR)/… modifiers. The generator gets the iteration number appended as a seed (unless
     -- seed_arg = false) so failures are reproducible.
     stress = {
         generator = nil, -- override discovery, e.g. { exec = "python3", args = { "$(ABSDIR)/gen.py" } }
-        reference = nil, -- override discovery: a correct-but-slow solution
+        bruteforce = nil, -- override discovery: a correct-but-slow solution
         count = 100, -- maximum generator iterations before giving up
         seed_arg = true, -- append the iteration seed as the generator's last argument
         -- How many counterexamples a single `:Tuna run stress` may save before it
@@ -90,6 +90,12 @@ M.defaults = {
         -- regression test). Both are surfaced live in the stress runner UI.
         saves_per_run = 1, -- counterexamples to save per run before stopping
         max_saved = 10, -- never grow the testcase set beyond this many total
+        -- How long the bruteforce may take on one generated input, in milliseconds.
+        -- It has its own budget because a bruteforce is slow on purpose, and every
+        -- verdict is read off its output, so `maximum_time` (what the solution is
+        -- held to) would stop the search on inputs the bruteforce simply needs
+        -- longer for. `false` (or 0) lets it run as long as it likes.
+        bruteforce_time = 20000,
     },
 
     -- interactive problems (:Tuna run interactive [live|feed|interactor]) — the
@@ -547,7 +553,10 @@ M.defaults = {
         -- The grid drawn while the Compile row is the one on screen. The build step is not a
         -- testcase — no input, no answer, nothing to compare — so it is shown as the selector
         -- and the Errors pane, where a compiler's complaint has the room to be read. `false`
-        -- keeps whatever grid the run mode draws for its testcases.
+        -- keeps whatever grid the run mode draws for its testcases. A run that compiles more
+        -- than the solution (a generator and a bruteforce, an interactor, a checker) splits
+        -- the Errors pane into one per source, each named after it, so the grid set here is
+        -- the shape they are stacked in.
         compile_layout = {
             { 3, "tc" },
             { 8, "se" },

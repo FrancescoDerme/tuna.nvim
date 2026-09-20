@@ -125,7 +125,7 @@ function TCRunner:build_rows(tctbl, do_compile)
 
     self.tcdata = {}
     if self.compile then -- compilation is testcase #1
-        table.insert(self.tcdata, { tcnum = "Compile", stdin = "", expected = nil, compile = true })
+        table.insert(self.tcdata, core.compile_row())
     end
     -- Insert testcases in ascending tcnum order for a stable display.
     local nums = vim.tbl_keys(tctbl)
@@ -198,6 +198,10 @@ function TCRunner:run_testcases(tctbl, do_compile)
         tools.save_sources(self.bufnr, self.config)
     end
     self:refresh_judge(vim.api.nvim_buf_get_name(self.bufnr))
+    -- What this run compiles besides the solution: a checker, when it is a program of its
+    -- own. Declared before anything is spawned, so the build step is laid out once.
+    self:plan_builds({ self.checker })
+    self:build_judge()
     self.preloaded = false
     if tctbl then
         self:build_rows(tctbl, do_compile)

@@ -252,11 +252,19 @@ compile step is a row too, so its warnings are readable, and a compile failure
 pops its errors up by itself. The build has no input, no answer and nothing to
 compare, so its row is shown with the Errors pane alone, where a compiler's
 complaint has the room to be read; the panes of a run come back the moment you
-move off it (`runner_ui.compile_layout`). Opening the UI puts you on the first
+move off it (`runner_ui.compile_layout`). A run that builds more than your
+solution, a generator and a bruteforce, an interactor, a checker, splits that
+pane into one per source, stacked and each named after what it holds
+(`Errors: gen.cpp`), so a warning is read where it belongs. They are built at
+once, so a run waits for the slowest compile and not for all of them end to
+end.
+
+Opening the UI puts you on the first
 testcase,
 and a run starts on the compile step and moves there itself as soon as the
 build ends with nothing to say; a build that failed or printed something keeps
-the cursor, being the row that answers the run. Move the selector yourself and
+the cursor, being the row that answers the run, and it waits for every source
+it is building, not only your solution. Move the selector yourself and
 it stays where you put it, results landing and all, until you ask for another
 run, which starts over the way the first did. Reopening the UI returns to the
 row you were last on. Every mode works this way, interactive following the row
@@ -312,10 +320,23 @@ compiled on demand — there is no manifest to maintain.
     (asked for explicitly)      run all, every sibling solution as a matrix
     checker.*                   any of the above, judged by a special judge
 
-Stress testing generates an input, runs your solution and the reference on it,
+Stress testing generates an input, runs your solution and the bruteforce on it,
 compares them, and repeats until they disagree — then saves the counterexample
 as a testcase. It is for the shape where you know one solution is right and
 slow.
+
+The hunt is a row of its own, listed with the testcases from the moment the
+board opens, numbered as the counterexample it is looking for and showing the
+input being tried; a counterexample takes that number when one is found. The
+hunt starts as soon as the generator and the bruteforce are built, beside the
+testcases you already have rather than after them. Every verdict is read off
+the bruteforce's answer, so a generator or bruteforce that fails, a crash or
+longer than `stress.bruteforce_time` on one input, stops the search instead of
+passing an empty output off as the right answer, and says so where a testcase
+says it: that row takes the verdict, and its Errors pane holds what the
+program said, beside the input it choked on. The bruteforce has a time limit
+of its own because it is slow on purpose, while `maximum_time` is the limit
+your solution is held to.
 
 Run all runs every runnable sibling source file against the shared testcases,
 each compiled and run with its own filetype's commands, so a C++ and a Python
@@ -764,8 +785,14 @@ RUN MODES AND HELPERS                                  *tuna-config-run-modes*
 `stress.max_saved`
         Stop once the problem has this many testcases. Default `10`.
 
+`stress.bruteforce_time`
+        How long the bruteforce may take on one generated input, in
+        milliseconds; `false` for no limit. It is not held to
+        `maximum_time`, being slow on purpose, and the search stops if
+        it runs past this. Default `20000`.
+
 `stress.generator`
-`stress.reference`
+`stress.bruteforce`
 `interactive.interactor`
         A path, or `{ exec, args }`, used instead of the file
         `tool_names` finds. A configured helper counts as present just
@@ -836,6 +863,8 @@ APPEARANCE                                            *tuna-config-appearance*
 `runner_ui.compile_layout`
         The grid drawn while the build row is the one on screen. Default:
         the selector and the Errors pane. `false` keeps the grid of a run.
+        A run that compiles helpers too splits the Errors pane into one per
+        source, so this is the shape they are stacked in.
 
 `interactive.layouts`
         The grid each interactive source draws, keyed by source and shaped

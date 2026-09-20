@@ -192,8 +192,8 @@ is relative. Every configured path goes through these: compile/running directori
   `stdpath("state")` (`recent.lua`).
 - **`tools.lua`**:
   - **One rule for every helper and every setting**, kept consistent on purpose.
-    `helper(role, solution, cfg)` finds any role (checker, generator, reference, interactor):
-    the configured option (`checker`, `stress.generator`/`reference`,
+    `helper(role, solution, cfg)` finds any role (checker, generator, bruteforce,
+    interactor): the configured option (`checker`, `stress.generator`/`bruteforce`,
     `interactive.interactor`; a string is a helper file, compiled or a prebuilt binary, a
     table an `{ exec, args }` command whose args expand file modifiers but keep
     `$(INPUT)`/`$(OUTPUT)`/`$(ANSWER)`) wins over a sibling file named by `tool_names`, and a
@@ -208,7 +208,8 @@ is relative. Every configured path goes through these: compile/running directori
     typed now force and run as typed; `auto` clears. Persisted in the sidecar with the compare
     override, loaded lazily, removed when nothing is forced.
   - `prepare` caches builds session-wide, keyed by path + mtime + compile command, and queues
-    concurrent callers.
+    concurrent callers. It reports `(ok, err, output)`: the compiler's words on a build that
+    *succeeded* too, since a helper that only warned still has something to say on its pane.
   - Compare methods are stored **by name** (`{ method = "float", tol }`), because a mixed
     array/hash table does not survive JSON. Every field is validated on read.
   - `solution_bufnr` redirects a run started from a helper file to the sibling solution. Loading
@@ -243,6 +244,30 @@ is relative. Every configured path goes through these: compile/running directori
   - `idle()` reads `completed`, and structural edits wait for it.
   - `save_testcase(tcnum, input, expected, expect_empty_output)` writes, updates every row
     showing that testcase, clears `bare`, and re-runs, unless the runner is `preloaded`.
+- **One build, for every mode.** `build_solution` spawns the compiler for the Compile row
+  through the same `execute_process` the normal runner uses for row 1, so a build reads the
+  same everywhere: the same verdicts, the same timing, the same answer when a helper beside
+  it failed. `build_all` starts it and the mode's helpers (`build_helpers`) **at once**, each
+  being its own program with its own compiler: queued one behind another they are most of
+  what a run waits for, and the cursor is held on the build step until the last of them
+  lands. Its `on_solution` is for what needs only the solution (stress starts the testcases
+  already on disk there). A failure stops at `on_build_failed`, the one thing that differs
+  per mode, since what "nothing will run" means is its own (stress `finish()`es its search,
+  interactive sets `completed`).
+  `defer_build` keeps that build on the runner for a UI opened with its rows only listed, and
+  `M.compile_row()` is the row itself. Every mode had a copy of all of this, which is why a
+  change to how a build is reported had to be made three times.
+- **The build step is every source the run compiles.** The solution is the Compile row
+  itself; each helper the mode needs is a step in `self.builds`, declared up front with
+  `plan_builds` (a pane appearing halfway through would re-tile the row under someone reading
+  it) and compiled through `build_helper`, which puts the compiler's words on it. A spec with
+  nothing to compile (a prebuilt binary, an interpreted helper) has no compiler to quote and
+  gets no step. `build_judge` builds the checker there too, without anything waiting for it,
+  so a checker that failed says so beside the others rather than on the first verdict.
+  `build_sources(tc)` is what the UI draws, in pane order; `build_spoke`/`build_pending`
+  answer whether the step had anything to say and whether it is over, which is what decides
+  if the cursor may be handed to the first testcase. Run-all has no build step: each
+  solution's build is a row of its own.
 - `effective_compare()` returns the per-buffer override, else the config.
 - **Local verdicts**: `save_local_verdict(solution, rows)` writes the sidecar's `results` when
   a run finishes: normal `check_complete`, run-all completion and `settle_single`
@@ -268,7 +293,7 @@ is relative. Every configured path goes through these: compile/running directori
   the one saved for the problem (`tools.resolve_mode`), since after a restart nothing has
   run. Interactive, stress and run-all open the same way when they have no runner yet:
   `M.show(bufnr)` (`M.run(…, { show_only = true })`) lists the rows with
-  `RunnerCore:mark_not_run` and keeps the build step on the runner as `build(cont)`. Their
+  `RunnerCore:mark_not_run` and keeps the build on the runner (`defer_build`). Their
   run keys go through `RunnerCore:built_first`, so the first one builds and then runs, and
   nothing is saved or spawned before it.
 - `run_single` **claims the runner** (`completed = false`) until it settles; otherwise edits
@@ -277,19 +302,55 @@ is relative. Every configured path goes through these: compile/running directori
 **Stress (`stress.lua`)**: `StressRunner`.
 - Helpers come from `stress_helpers` (`tools.helper` for both roles). A restart resolves them
   again: missing ones are shown in a message and nothing runs, since a rerun keeps its mode.
-  `prepare_helpers` compiles them (the cache makes that free), and spawns in the loop are
-  `pcall`ed.
-- The solution's existing testcases re-run while the generator and brute force compile.
+  Every run builds them through `build_helpers` (the cache makes an unchanged one free, an
+  edited one rebuilds, and one whose first compile failed is retried rather than the search
+  spawning a binary that was never produced), and spawns in the loop are `pcall`ed.
+- **Two lanes.** The testcases already on disk re-run through the solution as soon as it is
+  built (`build_all`'s `on_solution`, while the generator and bruteforce are still
+  compiling), and the search starts as soon as all three are built, not when the re-runs end: the hunt is what a stress run is for, and it would otherwise wait on
+  testcases that have nothing to do with it. Only a stop ends the re-run lane (`stopped`, not
+  `aborted`), or a search that found its counterexample on the first seed would leave half of
+  them at no verdict, and `idle()` counts the lane (`rerunning`) as well as the search.
 - A counterexample becomes a saved testcase only if its input is new. The search stops at
-  `saves_per_run` or `max_saved`.
-- `idle()` means the search has stopped. Compile failures show in the UI, not as notifications.
+  `saves_per_run` or `max_saved`, counted over rows that stand for a testcase on disk
+  (`testcase_count`).
+- **The search has a row** (`search_row`), listed by `load_testcases` with the testcases and
+  dropped by `finish`, holding the input being tried and both outputs. It is there from the
+  moment the board opens, not from the moment generation starts: the hunt is what a stress
+  run spends its time on, and it would otherwise appear only as it ended. `mark_not_run`
+  leaves it saying what it is for (`NOT RUN` is a testcase's word for having no verdict yet),
+  and `run_single` on it does nothing, there being no stored testcase behind it. Its `tcnum` is the string
+  `SEARCH`, so it is not editable, not compared against disk, and skipped by the
+  counterexample dedup scan, which would otherwise find the input in it every time. It is
+  kept last, a counterexample is inserted above it, and `row_label` gives it the number
+  that counterexample would take (`next_num`).
+- **The generator and the bruteforce are judged on the signal too** (`failure_reason`), not
+  on the exit code alone: a crash (a sanitizer abort, a segfault) exits 0 and reports the
+  signal, so reading the code passed an empty output off as the bruteforce's answer, and
+  then every input was a counterexample saved with no answer beside it. Either failing
+  stops the search, because every verdict is read off the two of them. `vim.system` marks
+  its own timeout with code 124 and SIGTERM.
+- **A failure is reported where a testcase's is.** `helper_failed` puts the verdict a
+  testcase would wear for the same ending (`failure_reason` gives it) on the search row and
+  what the process said in its Errors pane, and the row then stays (`drop_search_row` keeps
+  one carrying a verdict) holding the seed's input, which is what there is to debug. Nothing
+  in a runner answers a process with a float: a compile failure of a *helper* is the same,
+  said on the Compile row (`refresh_build_row`, FAILED) beside the pane holding what its
+  compiler wrote. The floats that remain are about the mode, not a process: a helper that is
+  gone on a rerun.
+- The bruteforce runs on `stress.bruteforce_time`, not `maximum_time`: it is slow by design,
+  and the solution's limit is not a statement about it.
+- A counterexample whose bruteforce output is empty is saved with `expect_empty_output`, an
+  answer that is empty rather than absent, or the row would come back unjudged.
+- `idle()` means the search has stopped, so every path that ends a run has to `finish()`,
+  a failed build and a helper that didn't compile included.
 
 **Interactive (`interactive.lua`)**: one session at a time; the source is remembered per file.
 - **feed**: the testcase input is sent a line at a time. It keeps the configured grid with the
   canonical Input/Expected Output panes and is the only editable source (`editable_testcases`
   set per instance). Its no-testcase row is `bare`. `run_single` claims the runner, and every
-  path where nothing will run (build failed or didn't start, interactor didn't compile) sets
-  `completed = true`.
+  path where nothing will run settles it: a build that failed through `on_build_failed`, the
+  rest by setting `completed = true`.
 - **live** and **interactor** are a **conversation**. `layout()` returns the grid
   `interactive.layouts[source]` gives and the option's name with it, so a bad one is reported
   as what it is; `false` there (feed's default) means the configured grid. The shipped
@@ -302,7 +363,8 @@ is relative. Every configured path goes through these: compile/running directori
     `log_note` puts tuna's own notes (timeout, exit code, spawn failure) on an Errors row.
     Nothing is echoed between columns, and `tc.stdout` stays the solution's own output.
   - `on_details_rendered` draws the columns with `set_column` (no undo, not modified, skips
-    identical content).
+    identical content). The build step is not a conversation and is left to the UI, which
+    draws it with one pane per source, as in every other mode.
   - Columns are `scrollbind` and `nowrap`. All three follow the latest line unless one is being
     read back (cursor in it, not at the bottom), in which case none move. `scrollbind` is
     re-armed after a scroll made from code, or later manual scrolls drift.
@@ -367,11 +429,20 @@ as `checker <input> <output> <answer>` (exit 0 means correct) and is compiled vi
   `RunnerUI:layout_opts(idx?)` (`row_layout` + runner `pane_titles`).
 - **The grid follows the row on screen.** `row_layout` answers the build step with
   `runner_ui.compile_layout` (selector + Errors, `false` to keep the mode's grid) and every
-  other row with the mode's `layout()` or the configured one. The render tick compares it
+  other row with the mode's `layout()` or the configured one. When the build step has more
+  than one source, `build_assignment` gives each a pane and `stack_into` puts them where the
+  Errors pane was, one above the other: the solution keeps `se`, and each helper takes a pane
+  the grid is not already using (`BUILD_PANES`), so the three answers that have to agree —
+  the grid, the titles (`Errors: gen.cpp`) and what is drawn into each pane — are worked out
+  in one place. A pane is named after its source only when there is more than one, and the
+  build step's panes are filled by the UI rather than by `pane_content`: a build is the same
+  thing in every mode. `compile_base_layout` is the grid before the stacking, which for
+  `compile_layout = false` is the mode's or the interface's own (`configured_layout`). The render tick compares it
   with `drawn_layout` and calls `redraw_grid`, which asks the interface to `relayout`: the
   panes keep their buffers (content, keymaps, unwritten edits) and are only moved, opened or
   closed, because rebuilding them would drop all of that and race the rows landing in them.
-  `resize_ui` is the same call. While it runs, `relayouting` marks the windows closing and
+  `resize_ui` is the same call. Titles are taken again on every relayout, not only when a
+  pane is born, because the row on screen can rename one. While it runs, `relayouting` marks the windows closing and
   opening as the UI's own, so neither `WinClosed` (which means the user closed the UI) nor a
   cursor event (which means a move by hand) is believed; it is cleared a tick later, when
   those events are delivered. `watch_pane_window` re-arms the per-window `WinClosed` after a
@@ -487,7 +558,9 @@ as `checker <input> <output> <answer>` (exit 0 means correct) and is compiled vi
 **Look**
 - Writable panes wear `runner_ui.editable_border_highlight` (default `TunaEditable`, bold
   magenta, the one hue not used for verdicts) on border and title. The title uses the derived
-  `TunaEditableBorder`.
+  `TunaEditableBorder`. `accent_editable_panes` takes the accent off as well as putting it
+  on, because a pane the re-tiling leaves open keeps the colour it had: nothing on the build
+  step is typed into, whatever its panes are on a testcase row.
 - The shipped layouts put `so`/`eo` on one row (the diff reads across) and `eo`/`si` in one
   right-hand column.
 - Float geometry: a bordered float's `row`/`col` is its border cell, and `width`/`height`
@@ -770,8 +843,16 @@ specific Vim error about a buffer the user never opened.
   - `runner.lua`: all four run modes with `vim.system` stubbed, covering what each child is
     handed, bare rows, save/answer semantics, disk drift and restore, path resolution, the
     swapfile contract, interactive grids and the conversation model, and the run gate
-    (`settle_results`), the local verdict a finished normal, run-all and feed run saves, and
-    live's typing keys starting a session, using real UI windows. `testcases.lua` also covers the
+    (`settle_results`), the local verdict a finished normal, run-all and feed run saves,
+    live's typing keys starting a session, the build step showing one named pane per source
+    it compiles (and none for a helper with nothing to compile, nor a name when the solution
+    is alone), panes renamed and un-accented for it and back again for a testcase row, and what the stress search trusts (a bruteforce
+    that crashed or ran past its own budget saving nothing, one that printed nothing
+    saving an empty answer, the row the search is shown on and when it is listed, a helper
+    that failed reported on that row and on the Compile row rather than in a float, the search
+    running beside the testcases on disk rather than after them, a failed build finishing it
+    and spawning nothing behind it, in every mode that builds a solution of its own),
+    using real UI windows. `testcases.lua` also covers the
     `single_file` rewrite keeping untouched testcases.
 - Modules expose file-local helpers to tests through `M._test` (`download`, `submit`, `clean`,
   `interactive`, `temp`, `menu`). They are not public interface.

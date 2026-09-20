@@ -17,9 +17,39 @@ local api = vim.api
 local utils = require("tuna.utils")
 local surface = require("tuna.surface")
 local diff = require("tuna.diff")
+local layout_util = require("tuna.runner_ui.layout")
 local SKIP = require("tuna.runner.core").SKIP
 
 local M = {}
+
+-- The panes the build step's sources are shown in, in the order they are handed out. The
+-- solution keeps the Errors pane it has always had, and every helper the run compiles takes
+-- the next pane the grid is not already using.
+local BUILD_PANES = { "se", "so", "eo", "si" }
+
+---Put `panes` where the Errors pane is, one above the other, leaving the rest of the grid
+---alone. A build step of several sources reads as a column of them, in the cell the
+---compiler's words were already in.
+---@param layout table|string
+---@param panes string[]
+---@return table|string
+local function stack_into(layout, panes)
+    if type(layout) == "string" then
+        if layout ~= "se" then
+            return layout
+        end
+        local stack = {}
+        for _, name in ipairs(panes) do
+            stack[#stack + 1] = { 1, name }
+        end
+        return stack
+    end
+    local out = {}
+    for i, entry in ipairs(layout) do
+        out[i] = { entry[1], stack_into(entry[2], panes) }
+    end
+    return out
+end
 
 -- Which runner each pane buffer belongs to (`M.owner_of`). A `:Tuna` command typed in a pane
 -- is about the solution that pane is showing, and this answers "whose pane is this?" without
@@ -210,23 +240,32 @@ function RunnerUI:accent_editable_panes()
     if not hl then
         return
     end
+    -- Nothing on the build step is typed into, whatever its panes are on a testcase row, so
+    -- the accent is off there — and taken off again, since a pane the re-tiling left open
+    -- keeps the colour it had.
+    local building = self:build_assignment(self:current_row()) ~= nil
     for name, w in pairs(self.windows) do
-        if self:writable_pane(name) and w.winid and api.nvim_win_is_valid(w.winid) then
+        if w.winid and api.nvim_win_is_valid(w.winid) then
             local cfg = api.nvim_win_get_config(w.winid)
             if cfg.border and cfg.border ~= "none" then
-                utils.set_border_highlight(w.winid, hl, "TunaEditableBorder")
-                -- A title given as `{ { text, group } }` chunks carries its own
-                -- highlight, so the name is accented too — the border alone is easy to
-                -- miss on a pane sitting next to another pane's border. It uses the
-                -- *derived* group, not the configured one: the title is painted onto
-                -- the border, and a group with no background of its own falls back to a
-                -- different one there, leaving the name sitting in a patch that doesn't
-                -- match the frame around it. The derived group carries the border's
-                -- background explicitly, so the two are the same colour by construction.
-                pcall(api.nvim_win_set_config, w.winid, {
-                    title = { { w.title, "TunaEditableBorder" } },
-                    title_pos = "center",
-                })
+                if not building and self:writable_pane(name) then
+                    utils.set_border_highlight(w.winid, hl, "TunaEditableBorder")
+                    -- A title given as `{ { text, group } }` chunks carries its own
+                    -- highlight, so the name is accented too — the border alone is easy to
+                    -- miss on a pane sitting next to another pane's border. It uses the
+                    -- *derived* group, not the configured one: the title is painted onto
+                    -- the border, and a group with no background of its own falls back to a
+                    -- different one there, leaving the name sitting in a patch that doesn't
+                    -- match the frame around it. The derived group carries the border's
+                    -- background explicitly, so the two are the same colour by construction.
+                    pcall(api.nvim_win_set_config, w.winid, {
+                        title = { { w.title, "TunaEditableBorder" } },
+                        title_pos = "center",
+                    })
+                else
+                    utils.set_border_highlight(w.winid, self.config.floating_border_highlight)
+                    pcall(api.nvim_win_set_config, w.winid, { title = w.title, title_pos = "center" })
+                end
             end
         end
     end
@@ -1179,10 +1218,14 @@ function RunnerUI:follow_after_compile()
     if not (first and first.tcnum == "Compile" and self.runner.tcdata[2]) then
         return -- no build step, or nothing to move on to
     end
-    if self.update_testcase ~= 1 or first.running or first.judging or first.exit_code == nil then
+    if self.update_testcase ~= 1 or first.judging then
         return
     end
-    if first.exit_code ~= 0 or (first.stdout or "") ~= "" or (first.stderr or "") ~= "" then
+    -- The build step is every source this run compiles, the solution and the helpers its
+    -- mode needs. The cursor waits for all of them, and stays here if any of them had
+    -- something to say, or a warning landing a moment later would arrive on a row nobody
+    -- is looking at any more.
+    if self.runner:build_pending(first) or self.runner:build_spoke(first) then
         return
     end
     self:follow_row(2)
@@ -1201,8 +1244,8 @@ function RunnerUI:initial_row()
     if not first or first.tcnum ~= "Compile" or not self.runner.tcdata[2] then
         return 1
     end
-    -- Worth reading: it printed warnings or errors.
-    if (first.stdout or "") ~= "" or (first.stderr or "") ~= "" then
+    -- Worth reading: one of its sources printed warnings or errors.
+    if self.runner:build_spoke(first) then
         return 1
     end
     if self:building() then
@@ -1260,11 +1303,90 @@ end
 function RunnerUI:layout_opts(idx)
     local r = self.runner
     local layout, name = self:row_layout(idx)
+    local titles = r.pane_titles and r:pane_titles() or nil
+    -- On the build step a pane is named after the source in it, whatever it means elsewhere.
+    local build = self:build_assignment(self.runner.tcdata[idx or self.update_testcase or 1])
+    if build and next(build.titles) then
+        titles = vim.tbl_extend("force", titles or {}, build.titles)
+    end
     return {
         layout = layout,
         layout_name = name,
-        titles = r.pane_titles and r:pane_titles() or nil,
+        titles = titles,
     }
+end
+
+---@private
+---The grid the build step is laid out with before its sources are stacked into it:
+---`runner_ui.compile_layout`, or, when that is `false`, what the row would get anyway —
+---the mode's own grid, else the configured one, which only the interface knows.
+---@return table layout, string name
+function RunnerUI:compile_base_layout()
+    local compile = self.config.runner_ui.compile_layout
+    if compile then
+        return compile, "runner_ui.compile_layout"
+    end
+    if self.runner.layout then
+        local own, own_name = self.runner:layout()
+        if own then
+            return own, own_name or "run mode layout"
+        end
+    end
+    return self.interface.configured_layout(self.config)
+end
+
+---@private
+---How the build step's sources are shown: which pane each is in, what its compiler said and
+---what to call that pane. `nil` on every row but the build step, and on one whose grid has
+---no Errors pane to put them in. The three are answered together because they have to
+---agree: the grid stacks exactly the panes the titles name and the content fills.
+---@param tc table? the row being laid out or drawn
+---@return { panes: string[], text: table<string, string>, titles: table<string, string> }?
+function RunnerUI:build_assignment(tc)
+    if not (tc and tc.tcnum == "Compile" and self.runner.build_sources) then
+        return nil
+    end
+    local placed = {}
+    for _, name in ipairs(layout_util.leaves((self:compile_base_layout()))) do
+        placed[name] = true
+    end
+    if not placed.se then
+        return nil -- a grid with nowhere to show a compiler is a grid that doesn't want to
+    end
+    -- The solution keeps the Errors pane it has always had; each helper takes a pane the
+    -- grid is not already using, so the build step reads as one column of its sources.
+    local free = {}
+    for _, name in ipairs(BUILD_PANES) do
+        if name == "se" or not placed[name] then
+            free[#free + 1] = name
+        end
+    end
+    local sources = self.runner:build_sources(tc)
+    local panes, holds = {}, {}
+    for i, source in ipairs(sources) do
+        -- More sources than panes: the last one carries them rather than leaving one unread.
+        local pane = free[i] or free[#free]
+        if not holds[pane] then
+            panes[#panes + 1] = pane
+            holds[pane] = {}
+        end
+        table.insert(holds[pane], source)
+    end
+    local text, titles = {}, {}
+    for _, pane in ipairs(panes) do
+        local shared, labels, parts = #holds[pane] > 1, {}, {}
+        for _, source in ipairs(holds[pane]) do
+            labels[#labels + 1] = source.label
+            parts[#parts + 1] = shared and (source.label .. ":\n" .. source.output) or source.output
+        end
+        text[pane] = table.concat(parts, "\n")
+        -- Named only when there is more than one source: with a single one, "Errors" is
+        -- already the whole answer to which source it belongs to.
+        if #sources > 1 then
+            titles[pane] = (" Errors: %s "):format(table.concat(labels, ", "))
+        end
+    end
+    return { panes = panes, text = text, titles = titles }
 end
 
 ---@private
@@ -1278,8 +1400,16 @@ end
 function RunnerUI:row_layout(idx)
     local tc = self.runner.tcdata[idx or self.update_testcase or 1]
     local compile = self.config.runner_ui.compile_layout
-    if tc and tc.tcnum == "Compile" and compile then
-        return compile, "runner_ui.compile_layout"
+    if tc and tc.tcnum == "Compile" then
+        -- More than one source to build: the Errors pane becomes a column of them.
+        local build = self:build_assignment(tc)
+        if build and #build.panes > 1 then
+            local layout, name = self:compile_base_layout()
+            return stack_into(layout, build.panes), name
+        end
+        if compile then
+            return compile, "runner_ui.compile_layout"
+        end
     end
     if not self.runner.layout then
         return nil, nil
@@ -2710,6 +2840,10 @@ function RunnerUI:update_ui()
                 -- landing on this row must not overwrite what you are in the middle
                 -- of typing, and coming back to the row must show it again.
                 local pending = editable and self.pending[tc.tcnum] or nil
+                -- On the build step the panes are the sources being compiled, one each,
+                -- whatever they mean on a testcase row, so they are filled from here and
+                -- not from the mode: a build is the same thing in every mode.
+                local build = self:build_assignment(tc)
                 -- Ask the runner what each detail pane should show. A mode can own a
                 -- pane (return SKIP) so we don't clobber it — e.g. interactive's
                 -- editable Input pane while you're typing into it.
@@ -2717,7 +2851,7 @@ function RunnerUI:update_ui()
                     local writable = editable and (name == "si" or name == "eo")
                     -- What is stored, and what to show: the two differ exactly when an
                     -- unwritten edit is being restored into the pane.
-                    local base = self.runner:pane_content(tc, name)
+                    local base = (build and build.text[name]) or self.runner:pane_content(tc, name)
                     local content = base
                     if pending and name == "si" then
                         content = pending.stdin

@@ -30,11 +30,11 @@ local widgets = require("tuna.widgets")
 local M = {}
 
 -- Scaffolding role -> the scaffold "kind" whose template it is created from. The
--- `reference` tool role is scaffolded as `brute` (see scaffold.lua).
+-- `bruteforce` tool role is scaffolded as `brute` (see scaffold.lua).
 local ROLE_TO_KIND = {
     checker = "checker",
     generator = "generator",
-    reference = "brute",
+    bruteforce = "brute",
     interactor = "interactor",
 }
 

@@ -147,6 +147,14 @@ end
 ---@param windows table
 ---@param config table
 ---@param _init_winid integer? unused (popup anchors to the editor)
+---The grid a row gets when nothing else decides it, which only the interface knows: the
+---caller needs it to lay a row out from the configured arrangement rather than replace it.
+---@param config table
+---@return table layout, string name
+function M.configured_layout(config)
+    return config.popup_ui.layout, "popup_ui.layout"
+end
+
 ---@param status_rows integer? content rows of the "Run" pane (default 2)
 ---@param opts { layout: table?, layout_name: string?, titles: table<string, string>? }? what
 ---the row on screen changes about the grid: a layout of its own (named by `layout_name`, for
@@ -198,6 +206,14 @@ function M.relayout(windows, config, _init_winid, status_rows, opts)
     )
     local sizes, positions = compute_layout(config, status_rows or 2, layout)
     for name, w in pairs(windows) do
+        -- The row on screen can rename a pane — the build step names each of them after the
+        -- source it holds — so the title is taken again here, not only when the pane is born:
+        -- a window that stays open would otherwise keep the name it was opened with.
+        local title = (opts.titles and opts.titles[name]) or titles[name]
+        if w.title ~= title and w.winid and api.nvim_win_is_valid(w.winid) then
+            pcall(api.nvim_win_set_config, w.winid, { title = title, title_pos = "center" })
+        end
+        w.title = title
         draw_pane(w, name, config, sizes[name], positions[name])
     end
 end

@@ -653,7 +653,7 @@ do
     t.eq("a bare newline is an empty line of its own", conv.conversation(blank.log).so, { "" })
 end
 
--- Stress needs a generator and a reference beside the solution to start at all.
+-- Stress needs a generator and a bruteforce beside the solution to start at all.
 t.write(dir, "gen.cpp", "int main(){}\n")
 t.write(dir, "brute.cpp", "int main(){}\n")
 stub_system()
@@ -669,6 +669,535 @@ vim.system = real_system
 t.ok("stress built rows", sr ~= nil and #sr.tcdata > 0, sr and sr.tcdata)
 for _, row in ipairs(sr and sr.tcdata or {}) do
     t.eq("a stress row has a string stdin", type(row.stdin), "string")
+end
+
+--------------------------------------------------------------------------------
+-- The stress search: what it trusts, and what it shows while it looks
+--------------------------------------------------------------------------------
+
+-- Every stress verdict is read off the bruteforce's output, so a bruteforce that did not
+-- finish has to stop the search rather than feed it: a process killed by a signal (a
+-- sanitizer abort, a segfault) exits with code 0, so reading the code alone passes its
+-- empty output off as the correct answer, and then every input looks like a
+-- counterexample and is saved with no answer beside it. The bruteforce also gets a
+-- budget of its own, being slow on purpose. And while the search runs it has a row,
+-- numbered as the counterexample it is hunting for, which is where a generator or
+-- bruteforce that failed is reported: the row that was doing the work takes the verdict and
+-- the Errors pane takes what the process said, as a testcase's own failure is reported.
+do
+    local sdir2 = t.tempdir()
+    t.write(sdir2, "main.cpp", "int main(){}\n")
+    vim.cmd("edit " .. sdir2 .. "/main.cpp")
+    vim.bo.filetype = "cpp"
+    local sbuf = vim.api.nvim_get_current_buf()
+    -- Real files, because a configured helper that cannot be run is reported instead of
+    -- being spawned. Nothing runs them: `vim.system` is scripted below.
+    local function program(name)
+        t.write(sdir2, name, "#!/bin/sh\n")
+        vim.fn.setfperm(sdir2 .. "/" .. name, "rwxr-xr-x")
+        return sdir2 .. "/" .. name
+    end
+    local ccx, solx, genx, refx = program("ccx"), program("solx"), program("genx"), program("refx")
+    require("tuna.config").setup({
+        compile_command = { cpp = { exec = ccx, args = { "$(FNAME)" } } },
+        run_command = { cpp = { exec = solx } },
+        maximum_time = 1234,
+        stress = {
+            generator = { exec = genx, args = {} },
+            bruteforce = { exec = refx, args = {} },
+            count = 3,
+            bruteforce_time = 9876,
+        },
+    })
+
+    -- One scripted answer per program, by name. A "hold" answer is kept until the test
+    -- releases it, which is how the search is caught in the middle of an iteration.
+    local script, budgets, held, calls = {}, {}, nil, {}
+    vim.system = function(argv, opts, on_exit)
+        local name = vim.fn.fnamemodify(argv[1], ":t")
+        local res = script[name]
+        calls[#calls + 1] = name
+        budgets[name] = opts and opts.timeout
+        res = type(res) == "function" and res(argv) or res
+        local function answer(r)
+            on_exit(vim.tbl_extend("keep", type(r) == "table" and r or {}, {
+                code = 0,
+                signal = 0,
+                stdout = "",
+                stderr = "",
+            }))
+        end
+        if on_exit then
+            if res == "hold" then
+                held = answer -- released by the test, with the result it wants
+            else
+                vim.schedule(function()
+                    answer(res)
+                end)
+            end
+        end
+        return { kill = function() end, wait = function() return { code = 0 } end, pid = 0 }
+    end
+
+    local stress = require("tuna.stress")
+    local function seeded(argv)
+        return { stdout = "in " .. argv[#argv] .. "\n" }
+    end
+    ---Every row as it reads in the selector.
+    local function listing(sr2)
+        return vim.tbl_map(function(tc)
+            return { sr2:row_label(tc), tc.status }
+        end, sr2.tcdata)
+    end
+    local opening
+    ---Start a search over `spec` and wait for it to stop (unless it is held). Each one
+    ---starts from a solution with no testcases beside it, so the row a search is caught
+    ---on can only be its own.
+    local function search(spec)
+        for _, f in ipairs(vim.fn.globpath(sdir2, "main_*.txt", false, true)) do
+            vim.fn.delete(f)
+        end
+        script, held = spec, nil
+        stress.run(sbuf, 3)
+        local sr2 = stress.active[sbuf]
+        -- Nothing has been answered yet: the stub replies on the next tick, so this is the
+        -- board as it opens.
+        opening = listing(sr2)
+        vim.wait(5000, function()
+            return sr2 and (sr2.finished or held ~= nil)
+        end, 10)
+        return sr2
+    end
+    ---The rows standing for a testcase on disk, as { number, status } pairs.
+    local function saved_rows(sr2)
+        local out = {}
+        for _, tc in ipairs(sr2.tcdata) do
+            if type(tc.tcnum) == "number" then
+                out[#out + 1] = { tc.tcnum, tc.status }
+            end
+        end
+        return out
+    end
+    local function testcase_files()
+        local names = vim.tbl_map(function(f)
+            return vim.fn.fnamemodify(f, ":t")
+        end, vim.fn.globpath(sdir2, "main_*.txt", false, true))
+        table.sort(names)
+        return names
+    end
+
+    -- A bruteforce killed by a signal.
+    local crashed = search({ genx = seeded, solx = { stdout = "5\n" }, refx = { code = 0, signal = 6 } })
+    t.eq("the search is listed with the other rows the moment the board opens", opening, {
+        { "Compile", "RUNNING" },
+        { "TC 0", "STRESS" },
+    })
+    t.eq("a bruteforce killed by a signal is a failure, not an empty answer", saved_rows(crashed), {})
+    t.eq("so nothing is written beside the solution", testcase_files(), {})
+    t.eq("and the search stops on the seed it happened on", crashed.iter, 1)
+    t.ok("finished, so the rows can be edited again", crashed:idle(), crashed.finished)
+    local hunt = crashed.tcdata[#crashed.tcdata]
+    t.eq("the row that was doing the work takes the verdict", {
+        crashed:row_label(hunt),
+        hunt.status,
+        hunt.hlgroup,
+    }, { "TC 0", "SIG 6", "TunaWarning" })
+    t.has("and its Errors pane says which program failed, and on which seed", crashed:pane_content(hunt, "se"), "bruteforce was killed by signal 6 (seed 1)")
+
+    -- A bruteforce that ran out of its budget.
+    local slow = search({ genx = seeded, solx = { stdout = "5\n" }, refx = { code = 124, signal = 15 } })
+    t.eq("a bruteforce that timed out saves nothing either", saved_rows(slow), {})
+    t.eq("the bruteforce is held to its own budget", budgets.refx, 9876)
+    t.eq("while the generator and the solution keep maximum_time", { budgets.genx, budgets.solx }, { 1234, 1234 })
+    local waited = slow.tcdata[#slow.tcdata]
+    t.eq("a timeout reads as one, in the word a testcase would use", { waited.status, waited.hlgroup }, { "TIMEOUT", "TunaWrong" })
+    t.has("with the budget that ran out named", slow:pane_content(waited, "se"), "stress.bruteforce_time")
+
+    -- A bruteforce that finished and printed nothing: that is its answer.
+    local empty = search({ genx = seeded, solx = { stdout = "5\n" }, refx = { stdout = "" } })
+    t.eq("a bruteforce that printed nothing still answers for the input", saved_rows(empty), { { 0, "WRONG" } })
+    t.eq("saved as an answer that is empty, not an answer that is missing", testcase_files(), {
+        "main_input0.txt",
+        "main_output0.txt",
+    })
+    t.eq("which is what the row is judged against on a re-run", empty.tcdata[#empty.tcdata].expected, "")
+
+    -- The row the search is shown on, caught mid-iteration.
+    local looking = search({ genx = seeded, solx = "hold", refx = { stdout = "5\n" } })
+    local row = looking.search_entry
+    t.ok("the search has a row of its own before it finds anything", row ~= nil, looking.tcdata)
+    t.eq("numbered as the counterexample it is hunting for", { looking:row_label(row), row.status }, { "TC 0", "STRESS" })
+    t.eq("holding the input being tried", row.stdin, "in 1\n")
+    t.eq("last in the list, so a counterexample lands above it", looking.tcdata[#looking.tcdata], row)
+    t.ok("and is no testcase, nothing on disk answers for it", not looking:row_editable(row), row)
+    script.solx = { stdout = "5\n" }
+    held(script.solx)
+    vim.wait(5000, function()
+        return looking.finished
+    end, 10)
+    t.eq("once the search stops, the row goes with it", looking.search_entry, nil)
+    t.eq("leaving nothing behind, the two agreed on every input", saved_rows(looking), {})
+
+    -- The search and the testcases already on disk are two lanes. The search starts as soon
+    -- as the helpers are built, rather than waiting for testcases that have nothing to do
+    -- with it, and a search that stops first must not abandon them half-run.
+    for _, f in ipairs(vim.fn.globpath(sdir2, "main_*.txt", false, true)) do
+        vim.fn.delete(f)
+    end
+    for n = 0, 1 do
+        t.write(sdir2, "main_input" .. n .. ".txt", n .. "\n")
+        t.write(sdir2, "main_output" .. n .. ".txt", "5\n")
+    end
+    local first_run = true
+    calls, held = {}, nil
+    script = {
+        genx = seeded,
+        refx = { stdout = "9\n" }, -- disagrees at once, so the search stops on the first seed
+        solx = function()
+            if first_run then
+                first_run = false
+                return "hold" -- the first testcase from disk, left in flight
+            end
+            return { stdout = "5\n" }
+        end,
+    }
+    stress.run(sbuf, 3)
+    local both = stress.active[sbuf]
+    vim.wait(5000, function()
+        return both.finished
+    end, 10)
+    t.ok("the search runs without waiting for the testcases on disk", vim.tbl_contains(calls, "genx"), calls)
+    t.eq("and can stop while one of them is still going", {
+        both.finished,
+        both.tcdata[2].running,
+        both.tcdata[3].status,
+    }, { true, true, "" })
+    t.ok("which is not idle, whatever the search is doing", not both:idle())
+    t.eq("with the counterexample it found already saved", saved_rows(both)[3], { 2, "WRONG" })
+    held({ stdout = "5\n" })
+    vim.wait(5000, function()
+        return both.tcdata[3].status ~= ""
+    end, 10)
+    t.eq("the testcases still get their verdicts, the one running and the one after it", {
+        both.tcdata[2].status,
+        both.tcdata[3].status,
+    }, { "CORRECT", "CORRECT" })
+    t.ok("and only then is the run idle", both:idle())
+    both.ui:delete()
+
+    -- Stopping is what ends that lane, and it ends it where it is: the testcases behind the
+    -- one in flight are not run afterwards.
+    first_run = true
+    held = nil
+    stress.run(sbuf, 3)
+    local halted = stress.active[sbuf]
+    vim.wait(5000, function()
+        return held ~= nil
+    end, 10)
+    halted:kill_all_processes()
+    held({ stdout = "5\n" })
+    vim.wait(400, function()
+        return false
+    end)
+    t.eq("a stop ends the re-runs where they are", {
+        halted.tcdata[2].status,
+        halted.tcdata[3].status,
+        halted.tcdata[4].status,
+    }, { "KILLED", "", "" })
+    t.ok("and leaves nothing running", halted:idle(), halted.rerunning)
+    halted.ui:delete()
+
+    -- Listed and not run, the search row says what it is for: `NOT RUN` is a testcase's word
+    -- for having no verdict yet, and the search has no verdict to have.
+    for _, f in ipairs(vim.fn.globpath(sdir2, "main_*.txt", false, true)) do
+        vim.fn.delete(f)
+    end
+    script = {}
+    stress.show(sbuf)
+    local listed = stress.active[sbuf]
+    t.eq("and is listed when the rows are only listed", listing(listed), {
+        { "Compile", "NOT RUN" },
+        { "TC 0", "STRESS" },
+    })
+    t.ok("with nothing running, so the rows can be edited", listed:idle(), listed.finished)
+    listed.ui:delete()
+
+    -- A solution that never compiled searches for nothing.
+    local broken = search({ ccx = { code = 1 }, genx = seeded, solx = { stdout = "5\n" }, refx = { stdout = "5\n" } })
+    t.eq("a failed build leaves the compile row saying so", broken.tcdata[1].status, "RET 1")
+    t.ok("and finishes the search, which is what lets the rows be edited", broken:idle(), broken.finished)
+
+    if stress.active[sbuf] then
+        stress.active[sbuf]:delete_ui()
+    end
+    vim.system = real_system
+    require("tuna.config").setup({})
+end
+
+--------------------------------------------------------------------------------
+-- The build step: one pane per source the run compiles
+--------------------------------------------------------------------------------
+
+-- A run compiles more than the solution — a generator and a bruteforce, an interactor, a
+-- checker — and each of them has a compiler with something to say. The build step shows
+-- them one above the other, each pane named after its source, so a warning is read where
+-- it belongs instead of in the one Errors pane the solution used to have to itself.
+do
+    local bdir = t.tempdir()
+    for _, name in ipairs({ "main.cpp", "gen.cpp", "brute.cpp", "checker.cpp" }) do
+        t.write(bdir, name, "int main(){}\n")
+    end
+    -- Real files: a compile command is looked up before it is run, and nothing here runs.
+    for _, name in ipairs({ "ccx", "solx" }) do
+        t.write(bdir, name, "#!/bin/sh\n")
+        vim.fn.setfperm(bdir .. "/" .. name, "rwxr-xr-x")
+    end
+    vim.cmd("edit " .. bdir .. "/main.cpp")
+    vim.bo.filetype = "cpp"
+    local bbuf = vim.api.nvim_get_current_buf()
+    require("tuna.config").setup({
+        compile_command = { cpp = { exec = bdir .. "/ccx", args = { "$(FNAME)" } } },
+        run_command = { cpp = { exec = bdir .. "/solx" } },
+    })
+
+    -- The generator and the checker compile with a warning, the solution and the bruteforce
+    -- quietly, so each pane can be told apart by what is in it and the build step is one
+    -- that only its helpers had anything to say about.
+    local warns = { ["gen.cpp"] = true, ["checker.cpp"] = true }
+    vim.system = function(argv, _, on_exit)
+        local said = ""
+        for _, a in ipairs(argv) do
+            if warns[a] then
+                said = a .. " warns\n"
+            end
+        end
+        if on_exit then
+            vim.schedule(function()
+                on_exit({ code = 0, signal = 0, stdout = "", stderr = said })
+            end)
+        end
+        return { kill = function() end, wait = function() return { code = 0 } end, pid = 0 }
+    end
+
+    require("tuna.stress").run(bbuf, 1)
+    local br = require("tuna.stress").active[bbuf]
+    vim.wait(5000, function()
+        return br and br.tcdata[1] and not br:build_pending(br.tcdata[1])
+    end, 10)
+    local bui, first = br.ui, br.tcdata[1]
+
+    t.eq("the build step stacks one pane per source it compiles", (bui:row_layout(1)), {
+        { 3, "tc" },
+        { 8, { { 1, "se" }, { 1, "so" }, { 1, "eo" }, { 1, "si" } } },
+    })
+    local assigned = bui:build_assignment(first)
+    t.eq("the solution first, then the helpers the mode needs", assigned.titles, {
+        se = " Errors: main.cpp ",
+        so = " Errors: gen.cpp ",
+        eo = " Errors: brute.cpp ",
+        si = " Errors: checker.cpp ",
+    })
+    t.eq("each holding what its own compiler said, and nothing when it said nothing", assigned.text, {
+        se = "",
+        so = "gen.cpp warns\n",
+        eo = "",
+        si = "checker.cpp warns\n",
+    })
+    t.eq("a testcase row keeps the grid of the run", (bui:row_layout(2)), nil)
+    t.ok("a row that is not the build step has no sources", bui:build_assignment(br.tcdata[2]) == nil)
+    t.ok("a helper that warned keeps the cursor on the build step", br:build_spoke(first), assigned.text)
+    t.eq("though the solution itself built quietly", { first.stderr, first.exit_code }, { "", 0 })
+
+    -- What the panes are actually drawn with, and that they are named back again: a pane
+    -- that stays open through a re-tiling would otherwise keep the name it was opened with.
+    bui:select_row(1)
+    bui.update_windows, bui.update_details = true, true
+    bui:update_ui()
+    vim.wait(400, function()
+        return false
+    end)
+    ---Whether a pane wears the accent that says it is typed into.
+    local function accented(name)
+        local w = bui.windows[name]
+        return w.winid
+            and vim.api.nvim_win_is_valid(w.winid)
+            and vim.wo[w.winid].winhighlight:find("TunaEditableBorder", 1, true) ~= nil
+    end
+    ---What a pane's border actually says, which is what a rename has to reach.
+    local function drawn_title(name)
+        local w = bui.windows[name]
+        local cfg = w.winid and vim.api.nvim_win_is_valid(w.winid) and vim.api.nvim_win_get_config(w.winid)
+        return cfg and cfg.title and cfg.title[1][1] or nil
+    end
+    t.eq("the panes are drawn under the names of their sources", {
+        drawn_title("se"),
+        drawn_title("so"),
+        vim.api.nvim_buf_get_lines(bui.windows.so.bufnr, 0, 1, false)[1],
+    }, { " Errors: main.cpp ", " Errors: gen.cpp ", "gen.cpp warns" })
+    t.ok("and wear no accent, nothing on the build step is typed into", not accented("eo"), "eo")
+    bui:select_row(2)
+    bui.update_windows, bui.update_details = true, true
+    bui:update_ui()
+    vim.wait(400, function()
+        return false
+    end)
+    t.eq("and named back for a testcase row", { drawn_title("so"), drawn_title("se") }, { " Output ", " Errors " })
+    t.ok("which is where the accent comes back", accented("eo"), "eo")
+    -- And goes again: a pane the re-tiling leaves open keeps the colour it had, so the
+    -- accent has to be taken off as well as put on.
+    bui:select_row(1)
+    bui.update_windows, bui.update_details = true, true
+    bui:update_ui()
+    vim.wait(400, function()
+        return false
+    end)
+    t.ok("and goes again on the way back to the build step", not accented("eo"), "eo")
+
+    br:kill_all_processes()
+    bui:delete()
+
+    -- A helper that is a command rather than a source has no compiler to quote, so it takes
+    -- no pane: the build step is what this run builds, not what it runs.
+    require("tuna.config").setup({
+        compile_command = { cpp = { exec = bdir .. "/ccx", args = { "$(FNAME)" } } },
+        run_command = { cpp = { exec = bdir .. "/solx" } },
+        stress = { generator = { exec = bdir .. "/solx", args = {} } },
+    })
+    require("tuna.stress").run(bbuf, 1)
+    local cr = require("tuna.stress").active[bbuf]
+    vim.wait(5000, function()
+        return cr and cr.tcdata[1] and not cr:build_pending(cr.tcdata[1])
+    end, 10)
+    t.eq("a helper with nothing to compile takes no pane", cr.ui:build_assignment(cr.tcdata[1]).titles, {
+        se = " Errors: main.cpp ",
+        so = " Errors: brute.cpp ",
+        eo = " Errors: checker.cpp ",
+    })
+    cr:kill_all_processes()
+    cr.ui:delete()
+
+    -- A helper that failed to compile is a failed build: the Compile row says so, beside the
+    -- pane holding what its compiler wrote, rather than over the board in a float.
+    require("tuna.config").setup({
+        -- A different compile command, so the build cache answers this run afresh.
+        compile_command = { cpp = { exec = ccx, args = { "$(FNAME)", "-again" } } },
+        run_command = { cpp = { exec = solx } },
+    })
+    vim.system = function(argv, _, on_exit)
+        local broke = vim.tbl_contains(argv, "gen.cpp")
+        if on_exit then
+            vim.schedule(function()
+                on_exit({
+                    code = broke and 1 or 0,
+                    signal = 0,
+                    stdout = "",
+                    stderr = broke and "gen.cpp:1: error\n" or "",
+                })
+            end)
+        end
+        return { kill = function() end, wait = function() return { code = 0 } end, pid = 0 }
+    end
+    require("tuna.stress").run(bbuf, 1)
+    local broke = require("tuna.stress").active[bbuf]
+    vim.wait(5000, function()
+        return broke.tcdata[1].exit_code ~= nil and not broke:build_pending(broke.tcdata[1])
+    end, 10)
+    t.eq("a helper that failed to compile is a failed build", {
+        broke.tcdata[1].status,
+        broke.tcdata[1].hlgroup,
+        broke.tcdata[1].exit_code,
+    }, { "FAILED", "TunaWarning", 0 })
+    t.has(
+        "with what its compiler said in that source's pane",
+        broke.ui:build_assignment(broke.tcdata[1]).text.so,
+        "gen.cpp:1: error"
+    )
+    t.ok("and nothing searching, the run being over", broke:idle(), broke.finished)
+    t.eq("the search never started on a helper that is not there", broke.iter, 0)
+    broke:kill_all_processes()
+    broke.ui:delete()
+
+    -- Everything a run compiles goes at once: four programs with four compilers, and
+    -- queueing them behind one another is most of what a run waits for. Nothing here ever
+    -- answers, so what is in flight is what was started before anything finished.
+    require("tuna.config").setup({
+        compile_command = { cpp = { exec = ccx, args = { "$(FNAME)", "-at-once" } } },
+        run_command = { cpp = { exec = solx } },
+    })
+    local inflight = {}
+    vim.system = function(argv, _, _)
+        for _, a in ipairs(argv) do
+            if a:match("%.cpp$") then
+                inflight[a] = true
+            end
+        end
+        return { kill = function() end, wait = function() return { code = 0 } end, pid = 0 }
+    end
+    require("tuna.stress").run(bbuf, 1)
+    local at_once = require("tuna.stress").active[bbuf]
+    t.eq("every source a run compiles is building at once", inflight, {
+        ["main.cpp"] = true,
+        ["gen.cpp"] = true,
+        ["brute.cpp"] = true,
+        ["checker.cpp"] = true,
+    })
+    at_once:kill_all_processes()
+    at_once.ui:delete()
+
+    -- The other order: a helper that failed while the solution was still compiling. The
+    -- solution's own clean exit must not write the failure off the row.
+    require("tuna.config").setup({
+        compile_command = { cpp = { exec = ccx, args = { "$(FNAME)", "-once-more" } } },
+        run_command = { cpp = { exec = solx } },
+    })
+    local release
+    vim.system = function(argv, _, on_exit)
+        local function answer(code, said)
+            on_exit({ code = code, signal = 0, stdout = "", stderr = said or "" })
+        end
+        if vim.tbl_contains(argv, "main.cpp") then
+            release = function()
+                answer(0) -- the solution builds cleanly, but only once the test says so
+            end
+        elseif on_exit then
+            vim.schedule(function()
+                answer(vim.tbl_contains(argv, "checker.cpp") and 1 or 0, "checker.cpp:1: error\n")
+            end)
+        end
+        return { kill = function() end, wait = function() return { code = 0 } end, pid = 0 }
+    end
+    local late = require("tuna.runner").new(bbuf)
+    late:show_ui()
+    late:run_testcases({ [0] = { input = "1\n" } }, true)
+    vim.wait(5000, function()
+        return release ~= nil and (late.builds[1] or {}).output ~= nil
+    end, 10)
+    t.ok("the checker failed while the solution was still building", late.builds[1].failed, late.builds)
+    release()
+    settled(late)
+    t.eq("and the solution's own clean build does not write that off the row", late.tcdata[1].status, "FAILED")
+    late.ui:delete()
+
+    -- With only the solution to build there is nothing to tell apart: the Errors pane keeps
+    -- its name and the grid is the one that was configured for the build step.
+    local odir = t.tempdir()
+    t.write(odir, "main.cpp", "int main(){}\n")
+    vim.cmd("edit " .. odir .. "/main.cpp")
+    vim.bo.filetype = "cpp"
+    local obuf = vim.api.nvim_get_current_buf()
+    local onl = require("tuna.runner").new(obuf)
+    onl:show_ui()
+    onl:run_testcases({ [0] = { input = "1\n" } }, true)
+    settled(onl)
+    t.eq("one source alone keeps the build step's configured grid", (onl.ui:row_layout(1)), {
+        { 3, "tc" },
+        { 8, "se" },
+    })
+    t.eq("and the Errors pane its own name", onl.ui:build_assignment(onl.tcdata[1]).titles, {})
+    onl.ui:delete()
+
+    vim.system = real_system
+    require("tuna.config").setup({})
 end
 
 --------------------------------------------------------------------------------
@@ -1334,6 +1863,47 @@ for _, board in ipairs(boards) do
     vim.system = real_system
 end
 
+-- A build that failed reads the same in every mode that has a Compile row: it is one piece of
+-- code (`build_solution`), so the row wears the verdict the compiler gave it, and the runner
+-- settles instead of holding the board open for a run that never started.
+local built = 0
+for _, board in ipairs(boards) do
+    spawns = {}
+    vim.system = function(argv, _, on_exit)
+        spawns[#spawns + 1] = { argv = argv }
+        local broke = argv[1] == "g++"
+        if on_exit then
+            vim.schedule(function()
+                on_exit({ code = broke and 1 or 0, signal = 0, stdout = "", stderr = "" })
+            end)
+        end
+        return { kill = function() end, wait = function() return { code = 0 } end, pid = 0 }
+    end
+    local r = board.run()
+    vim.wait(3000, function()
+        return r.tcdata[1] ~= nil and r.tcdata[1].exit_code ~= nil and r:idle()
+    end, 20)
+    if r.tcdata[1] and r.tcdata[1].tcnum == "Compile" then
+        built = built + 1
+        t.eq(board.name .. ": a build that failed says so on its row", {
+            r.tcdata[1].status,
+            r.tcdata[1].hlgroup,
+        }, { "RET 1", "TunaWarning" })
+        t.ok(board.name .. ": and the run settles, nothing having started", r:idle(), r.tcdata[1])
+        local ran = 0
+        for _, spawn in ipairs(spawns) do
+            if spawn.argv[1] ~= "g++" then
+                ran = ran + 1
+            end
+        end
+        t.eq(board.name .. ": with nothing spawned behind it", ran, 0)
+    end
+    r:kill_all_processes()
+    r:delete_ui()
+    vim.system = real_system
+end
+t.ok("which is every mode that builds a solution of its own", built >= 3, built)
+
 -- The board's own choice is not a move by hand: while it opens, the row it is about to choose
 -- and the line the cursor is on have to agree, or the first cursor event the editor sends
 -- reads as the user taking over and the board never chooses again.
@@ -1508,7 +2078,7 @@ vim.system = real_system
 stub_system()
 vim.api.nvim_set_current_buf(wbuf)
 local C3 = require("tuna.commands")
--- The generator and reference beside this solution would make `:Tuna run` a stress run.
+-- The generator and bruteforce beside this solution would make `:Tuna run` a stress run.
 require("tuna.tools").set_mode(wdir .. "/sol.cpp", "normal")
 C3.execute({ "run" })
 local chosen = C3.runners[wbuf]

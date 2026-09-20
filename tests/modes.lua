@@ -1,7 +1,7 @@
 -- tests/modes.lua
 --
 -- How a problem is run, as one rule for every helper and every setting. A helper
--- (checker, generator, reference, interactor) is available when it is configured or a
+-- (checker, generator, bruteforce, interactor) is available when it is configured or a
 -- sibling file names it. Each run setting (mode, interactive source, checker) is automatic
 -- until forced, and a forced setting that needs a missing helper gives way to the
 -- automatic choice until the helper is back. Every run looks its helpers up again.
@@ -28,7 +28,7 @@ end
 --------------------------------------------------------------------------------
 
 local _, all = problem({ "checker.py", "gen.py", "brute.py", "interactor.py" })
-for _, role in ipairs({ "checker", "generator", "reference", "interactor" }) do
+for _, role in ipairs({ "checker", "generator", "bruteforce", "interactor" }) do
     t.ok("a sibling file is the " .. role, tools.helper(role, all, cfg) ~= nil)
 end
 local _, bare = problem()
@@ -61,12 +61,12 @@ end
 local helpers = t.tempdir()
 t.write(helpers, "g.py", "print(1)\n")
 t.write(helpers, "b.py", "print(1)\n")
-local configured_stress = { stress = { generator = helpers .. "/g.py", reference = helpers .. "/b.py" } }
+local configured_stress = { stress = { generator = helpers .. "/g.py", bruteforce = helpers .. "/b.py" } }
 
 t.eq("nothing: normal", mode_of({}), "normal")
 t.eq("a checker alone changes no mode", mode_of({ "checker.py" }), "normal")
 t.eq("a generator alone changes no mode", mode_of({ "gen.py" }), "normal")
-t.eq("a generator and a reference: stress", mode_of({ "gen.py", "brute.py" }), "stress")
+t.eq("a generator and a bruteforce: stress", mode_of({ "gen.py", "brute.py" }), "stress")
 t.eq("an interactor: interactive, ahead of stress", mode_of({ "gen.py", "brute.py", "interactor.py" }), "interactive")
 t.eq("configured helpers count the same as files", mode_of({}, configured_stress), "stress")
 
@@ -89,10 +89,10 @@ local sdir, ssol = problem({ "gen.py", "brute.py" })
 tools.set_mode(ssol, "stress")
 os.remove(sdir .. "/brute.py")
 local m, mnote = tools.resolve_mode(ssol, cfg)
-t.eq("a forced stress without its reference gives way to the automatic mode", m, "normal")
+t.eq("a forced stress without its bruteforce gives way to the automatic mode", m, "normal")
 t.ok("and says so", mnote ~= nil)
 t.write(sdir, "brute.py", "print()\n")
-t.eq("it applies again once the reference is back", { tools.resolve_mode(ssol, cfg) }, { "stress" })
+t.eq("it applies again once the bruteforce is back", { tools.resolve_mode(ssol, cfg) }, { "stress" })
 local _, csol = problem()
 tools.set_mode(csol, "stress")
 t.eq("a forced stress with configured helpers runs", (tools.resolve_mode(csol, with(configured_stress))), "stress")
@@ -214,7 +214,7 @@ local said, ir = rerun_after_deleting("interactive", "interactor.py")
 t.ok("an interactor rerun with the interactor gone says so", said ~= nil and said:find("no interactor") ~= nil, said)
 t.eq("and runs no session", ir.sol_handle, nil)
 local ssaid, sr = rerun_after_deleting("stress", "brute.py")
-t.ok("a stress restart with its reference gone says so", ssaid ~= nil and ssaid:find("reference") ~= nil, ssaid)
+t.ok("a stress restart with its bruteforce gone says so", ssaid ~= nil and ssaid:find("bruteforce") ~= nil, ssaid)
 t.eq("and searches nothing", sr.iter, 0)
 
 -- A sidecar travels with a problem's folder, so a buffer that is not a file gets none:

@@ -184,6 +184,109 @@ function RunnerCore:built_first(cont)
     return true
 end
 
+---The build step's row, which every mode that compiles has as row 1 and `build_solution`
+---drives. `compile` marks it as standing for no testcase, which is what keeps a checker from
+---being asked to judge it.
+---@return table
+function M.compile_row()
+    return { tcnum = "Compile", stdin = "", expected = nil, compile = true, status = "", hlgroup = "TunaRunning" }
+end
+
+---What a mode does when the build failed and nothing will run. The base class has nothing to
+---settle; a mode whose "is anything in flight?" answer is its own has to give it here, or
+---every later edit is refused for a run that never started.
+function RunnerCore:on_build_failed() end
+
+---Build the solution, driving the Compile row, and then `cont`. A run that has nothing to
+---compile goes straight on. The modes that own their Compile row (stress, interactive) spawn
+---the compiler through the same `execute_process` the normal runner uses for row 1, so a
+---build reads the same everywhere: the same verdicts, the same timing, and the same answer
+---when a helper beside it failed (`refresh_build_row`).
+---@param cont fun() run only when the build succeeded
+function RunnerCore:build_solution(cont)
+    local tc = self.compile_entry
+    if not (tc and self.r and self.r.compile and self.tcdata[1] == tc) then
+        cont()
+        return
+    end
+    self:reset_row(tc)
+    self:execute_process(1, self.r.cc, self.r.compile_directory, { judge = false }, function()
+        if tc.exit_code == 0 then
+            cont()
+        else
+            self:on_build_failed()
+        end
+    end)
+end
+
+---Build every helper this run needs, all at once, and then `cont`. They are separate
+---programs with separate compilers, so they are not queued behind one another: waiting for
+---them is most of what a run waits for. The first failure stops there and is the mode's to
+---settle (`on_build_failed`): the build step already shows which source it was and what its
+---compiler said.
+---@param specs table[]
+---@param cont fun() once every one of them is built
+function RunnerCore:build_helpers(specs, cont)
+    local pending = #specs
+    if pending == 0 then
+        cont()
+        return
+    end
+    local stopped = false
+    for _, spec in ipairs(specs) do
+        self:build_helper(spec, function(ok)
+            if stopped then
+                return
+            end
+            if not ok then
+                stopped = true
+                self:on_build_failed()
+                return
+            end
+            pending = pending - 1
+            if pending == 0 then
+                cont()
+            end
+        end)
+    end
+end
+
+---Build everything this run compiles, at once: the solution, which is the Compile row, and
+---the helpers its mode needs. `on_solution` runs as soon as the solution alone is built, for
+---what does not need the rest (stress puts the testcases already on disk through it there),
+---and `cont` once the last of them lands. A failure anywhere settles at `on_build_failed`,
+---and `cont` is never reached.
+---@param specs table[] helper specs
+---@param cont fun() once everything is built
+---@param on_solution fun()? once the solution alone is built
+function RunnerCore:build_all(specs, cont, on_solution)
+    local pending = 2
+    local function landed()
+        pending = pending - 1
+        if pending == 0 then
+            cont()
+        end
+    end
+    self:build_solution(function()
+        if on_solution then
+            on_solution()
+        end
+        landed()
+    end)
+    self:build_helpers(specs, landed)
+end
+
+---Keep this run's build on the runner instead of running it: a UI opened with its rows only
+---listed has built nothing, so the first run key saves the sources and builds before anything
+---runs (`built_first`).
+---@param build fun(cont: fun()) what this run builds
+function RunnerCore:defer_build(build)
+    self.build = function(cont)
+        require("tuna.tools").save_sources(self.bufnr, self.config)
+        build(cont)
+    end
+end
+
 ---The effective output-compare method: a per-buffer runtime override
 ---(`:Tuna compare …`, carried on the runner as `compare_method`) if set, else the
 ---configured `output_compare_method`.
@@ -244,6 +347,168 @@ function RunnerCore:pane_content(tc, name)
         return tc.stderr
     end
     return ""
+end
+
+--------------------------------------------------------------------------------
+-- The build step: one source per pane
+--------------------------------------------------------------------------------
+
+---What a compiler said, in one piece: its complaints first, then anything it wrote to
+---stdout, which is nearly always empty but is the only place some compilers talk.
+---@param stderr string?
+---@param stdout string?
+---@return string
+local function compiler_text(stderr, stdout)
+    local parts = {}
+    for _, s in ipairs({ stderr, stdout }) do
+        if s and s ~= "" then
+            parts[#parts + 1] = s
+        end
+    end
+    return table.concat(parts, "\n")
+end
+
+---What a source is called on its pane: the file being compiled, else the command running
+---in its place.
+---@param spec table
+---@return string
+function M.build_label(spec)
+    return vim.fn.fnamemodify(tostring(spec.source or spec.exec), ":t")
+end
+
+---The build step for `label`, created on first use. Steps are keyed by their label, so a
+---helper prepared twice in one run (a rerun answered from the compile cache) redraws the
+---pane it already has instead of taking another.
+---@param label string
+---@return table
+function RunnerCore:build_step(label)
+    self.builds = self.builds or {}
+    for _, step in ipairs(self.builds) do
+        if step.label == label then
+            return step
+        end
+    end
+    local step = { label = label }
+    self.builds[#self.builds + 1] = step
+    return step
+end
+
+---Declare the sources this run compiles besides the solution, before anything is spawned.
+---Declaring them up front is what keeps the build step's grid still: a pane appearing
+---halfway through would re-tile the row under someone reading it. A spec with nothing to
+---compile (a prebuilt binary, an interpreted helper) has no compiler to quote and gets no
+---pane.
+---@param specs table[] helper specs, anything that is not one is skipped
+function RunnerCore:plan_builds(specs)
+    self.builds = {}
+    for _, spec in ipairs(specs) do
+        if type(spec) == "table" and spec.compile then
+            self:build_step(M.build_label(spec))
+        end
+    end
+end
+
+---Compile one helper as part of the build step: the compiler's words land in the pane that
+---helper was given, whether it failed or merely warned.
+---@param spec table helper spec from `tools.helper`
+---@param cb fun(ok: boolean, err: string?)
+function RunnerCore:build_helper(spec, cb)
+    if not (type(spec) == "table" and spec.compile) then
+        require("tuna.tools").prepare(spec, cb)
+        return
+    end
+    local step = self:build_step(M.build_label(spec))
+    step.failed, step.output = false, nil -- building: no output is what "not done yet" is
+    self:update_ui(true)
+    require("tuna.tools").prepare(spec, function(ok, err, output)
+        step.failed = not ok
+        step.output = ok and (output or "") or (err or "")
+        self:refresh_build_row()
+        self:update_ui(true)
+        cb(ok, err)
+    end)
+end
+
+---Compile this run's checker as part of the build step, when it is a program of its own.
+---Nothing waits for it: the testcases do not need it until there is a verdict to reach, and
+---`tools.prepare` hands that caller the same build. It is built here so a checker that
+---failed or warned says so on the build step, beside every other source, rather than on the
+---first verdict, where the only place left to say it is a notification.
+function RunnerCore:build_judge()
+    if type(self.checker) == "table" and self.checker.compile then
+        self:build_helper(self.checker, function() end)
+    end
+end
+
+---The Compile row answers for the whole build step, not only the solution: a helper that
+---failed to compile is a failed build, said where every build is said, beside the pane
+---holding what its compiler wrote. Only a build that came back clean is downgraded — the
+---solution's own failure is the more specific answer, and keeps its exit code.
+function RunnerCore:refresh_build_row()
+    local tc = self.tcdata[1]
+    if not (tc and tc.tcnum == "Compile" and tc.status == "DONE") then
+        return
+    end
+    for _, step in ipairs(self.builds or {}) do
+        if step.failed then
+            tc.status, tc.hlgroup = "FAILED", "TunaWarning"
+            return
+        end
+    end
+end
+
+---What the build step shows, source by source, in the order their panes are handed out:
+---the solution first, whose compile *is* the Compile row, then every helper this run
+---builds.
+---@param tc table the Compile row
+---@return { label: string, output: string, failed: boolean, done: boolean }[]
+function RunnerCore:build_sources(tc)
+    local name = api.nvim_buf_is_valid(self.bufnr) and api.nvim_buf_get_name(self.bufnr) or ""
+    local sources = {
+        {
+            label = name ~= "" and vim.fn.fnamemodify(name, ":t") or "solution",
+            output = compiler_text(tc.stderr, tc.stdout),
+            failed = tc.exit_code ~= nil and tc.exit_code ~= 0,
+            done = tc.exit_code ~= nil,
+        },
+    }
+    for _, step in ipairs(self.builds or {}) do
+        sources[#sources + 1] = {
+            label = step.label,
+            output = step.output or "",
+            failed = step.failed == true,
+            done = step.output ~= nil,
+        }
+    end
+    return sources
+end
+
+---Whether any source of the build step said something: a failure, or a warning. The row
+---worth reading is the one that has something on it, so this is what keeps the UI on the
+---build step instead of handing the cursor to the first testcase.
+---@param tc table the Compile row
+---@return boolean
+function RunnerCore:build_spoke(tc)
+    for _, source in ipairs(self:build_sources(tc)) do
+        if source.failed or source.output ~= "" then
+            return true
+        end
+    end
+    return false
+end
+
+---Whether the build step is still going. A helper compiling beside the solution is part of
+---the same step, so the cursor waits for it too, or a warning landing a moment later would
+---arrive on a row nobody is looking at any more.
+---@param tc table the Compile row
+---@return boolean
+function RunnerCore:build_pending(tc)
+    for _, source in ipairs(self:build_sources(tc)) do
+        if not source.done then
+            return true
+        end
+    end
+    return false
 end
 
 --------------------------------------------------------------------------------
@@ -417,6 +682,7 @@ function RunnerCore:finish_process(tc, run_id, timer, res, opts, on_done)
         -- The Compile row (or any non-judged step): a clean exit is just DONE, but
         -- its stdout/stderr (compiler warnings) stay viewable in the detail panes.
         tc.status, tc.hlgroup = "DONE", "TunaDone"
+        self:refresh_build_row() -- a helper may have failed while this one was building
         finalize()
     else
         -- Derive the verdict via the checker (nil expected → DONE). External
