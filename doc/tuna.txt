@@ -257,8 +257,10 @@ testcase,
 and a run starts on the compile step and moves there itself as soon as the
 build ends with nothing to say; a build that failed or printed something keeps
 the cursor, being the row that answers the run. Move the selector yourself and
-it stays where you put it. Every mode works this way, interactive following
-the row it is talking to. A `:Tuna` command typed in one of these panes is
+it stays where you put it, results landing and all, until you ask for another
+run, which starts over the way the first did. Reopening the UI returns to the
+row you were last on. Every mode works this way, interactive following the row
+it is talking to. A `:Tuna` command typed in one of these panes is
 about the solution the pane is showing, so `:Tuna run all` or `:Tuna submit`
 from inside the grid does what it would from the file.
 

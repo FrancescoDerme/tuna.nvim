@@ -217,9 +217,10 @@ with the Errors pane alone, where a compiler's complaint has the room to be read
 of a run come back the moment you move off it (`runner_ui.compile_layout`). Opening the UI
 puts you on the first testcase, and a run starts on the compile step and moves there itself
 as soon as the build ends with nothing to say — a build that failed or printed something
-keeps the cursor, being the row that answers the run. Move the selector yourself and it
-stays where you put it. Every mode works this way, interactive following the row it is
-talking to.
+keeps the cursor, being the row that answers the run. Move the selector yourself and it stays
+where you put it, results landing and all, until you ask for another run — that one starts
+over the way the first did. Reopening the UI returns to the row you were last on. Every mode
+works this way, interactive following the row it is talking to.
 
 | key                             |                                                                       |
 | ------------------------------- | --------------------------------------------------------------------- |

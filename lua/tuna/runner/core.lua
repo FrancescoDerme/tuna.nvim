@@ -677,6 +677,14 @@ function RunnerCore:sync_rows(numbers, tctbl)
 end
 
 ---@private
+---A run of the whole set has been asked for: the board chooses the row again
+---(`RunnerUI:choose_row_again`).
+function RunnerCore:choose_row_again()
+    if self.ui then
+        self.ui:choose_row_again()
+    end
+end
+
 ---Run the rows a split produced. Splitting exists to get a verdict per case, so the
 ---cases run without being asked for a second time.
 ---@param rows integer[]

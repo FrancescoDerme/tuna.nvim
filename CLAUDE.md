@@ -393,6 +393,11 @@ as `checker <input> <output> <answer>` (exit 0 means correct) and is compiled vi
   cursor event reads as a move by hand: `show_ui` leaves `update_testcase` on line 1 until the
   tick chooses, and `render_selector` puts the cursor back on the chosen row after a rebuild
   that would otherwise clamp it onto another one.
+  The choice comes back to the UI in two places, both through `choose_row_again` (`user_moved`
+  off, `opening` on): a run of the whole set that was *asked for* — `commands.run_testcases`
+  and the UI's `run_all_again`, not the `built_first` paths a single row's re-run takes — so
+  every run starts the way the first did; and `show_ui`, since what opening chooses is
+  `last_row_id`, the row the user was on, kept on the runner.
 - `opening_row()`: a run whose build has not finished opens on it (`building`), whatever was
   last looked at, so every run starts the same way; otherwise the runner's `last_row_id`
   (matched by `row_id`), else `initial_row()` — the first testcase, or Compile when it printed

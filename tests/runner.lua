@@ -1503,28 +1503,51 @@ t.eq("a build that printed something keeps the row, so it can be read", noisy.ui
 noisy:delete_ui()
 vim.system = real_system
 
--- And a selector moved by hand is never moved again: the row is the user's choice now.
+-- A selector moved by hand holds its row while the run it is watching lands, the next run
+-- asked for hands the choice back, and reopening the board returns to the row last looked at.
 stub_system()
-local chosen = require("tuna.runner").new(wbuf)
-chosen:show_ui()
-chosen:load_testcases(wtcs)
-vim.wait(1000, function()
-    return chosen.ui.update_testcase == 2
-end, 20)
-local tcwin = chosen.ui.windows.tc
-vim.api.nvim_win_set_cursor(tcwin.winid, { 3, 0 })
-vim.api.nvim_exec_autocmds("CursorMoved", { buffer = tcwin.bufnr })
-t.eq("moving the selector by hand selects that row", { chosen.ui.update_testcase, chosen.ui.user_moved }, { 3, true })
-chosen:run_testcases(wtcs, true)
-vim.wait(2000, function()
-    return chosen.completed
+vim.api.nvim_set_current_buf(wbuf)
+local C3 = require("tuna.commands")
+-- The generator and reference beside this solution would make `:Tuna run` a stress run.
+require("tuna.tools").set_mode(wdir .. "/sol.cpp", "normal")
+C3.execute({ "run" })
+local chosen = C3.runners[wbuf]
+vim.wait(3000, function()
+    return chosen ~= nil and chosen.ui ~= nil and chosen.ui.ui_visible and chosen.completed
 end, 20)
 vim.wait(200, function()
     return false
 end)
-t.eq("and a run started from there leaves it alone", chosen.ui.update_testcase, 3)
+local function move_to(row)
+    local w = chosen.ui.windows.tc
+    vim.api.nvim_win_set_cursor(w.winid, { row, 0 })
+    vim.api.nvim_exec_autocmds("CursorMoved", { buffer = w.bufnr })
+end
+move_to(3)
+t.eq("moving the selector by hand selects that row", { chosen.ui.update_testcase, chosen.ui.user_moved }, { 3, true })
+chosen:update_ui(true)
+vim.wait(300, function()
+    return false
+end)
+t.eq("and results landing leave it where it was put", chosen.ui.update_testcase, 3)
+
+C3.execute({ "run" })
+vim.wait(3000, function()
+    return chosen.completed and chosen.ui.update_testcase == 2
+end, 20)
+t.eq("a run asked for hands the choice back", { chosen.ui.update_testcase, chosen.ui.user_moved }, { 2, false })
+
+move_to(3)
+chosen.ui:delete()
+C3.show_results_ui(wbuf)
+vim.wait(2000, function()
+    return chosen.ui.ui_visible and chosen.ui.update_testcase == 3
+end, 20)
+t.eq("and reopening the board returns to the row last looked at", chosen.ui.update_testcase, 3)
 chosen:kill_all_processes()
 chosen:delete_ui()
+C3.runners[wbuf] = nil
+require("tuna.tools").set_mode(wdir .. "/sol.cpp", nil)
 vim.system = real_system
 vim.fn.delete(wdir, "rf")
 

@@ -1148,6 +1148,15 @@ function RunnerUI:goto_row(idx)
     self:update_ui()
 end
 
+---Take the choice of row back from a selector moved by hand, and make it again: a run of the
+---whole set starts the way the first one did, on the build and then the first testcase it has
+---nothing to say about. A single row's re-run does not come through here — that row is the one
+---being re-run, and it is where the cursor belongs.
+function RunnerUI:choose_row_again()
+    self.user_moved = false
+    self.opening = true
+end
+
 ---@private
 ---Move to `idx` while the row on screen is still the UI's own choice. Everything that picks
 ---a row *for* the user goes through this: opening the board, a build that turned out to have
@@ -1626,6 +1635,7 @@ function RunnerUI:show_ui()
         self:with_pending_settled(nil, "re-run all", function()
             self:with_disk_settled(nil, "re-run all", function()
                 self.runner:kill_all_processes()
+                self:choose_row_again()
                 vim.schedule(function()
                     self.runner:run_testcases()
                 end)
@@ -1789,7 +1799,10 @@ function RunnerUI:show_ui()
     -- made: the first render makes it, by which time the rows exist (interactive and run-all
     -- open their UI and *then* build them).
     self.update_testcase = 1
+    -- Opening is the board choosing again, and what it chooses is the row last looked at
+    -- (`opening_row`) — which is the user's own choice, kept on the runner rather than here.
     self.opening = true
+    self.user_moved = false
     self:update_ui()
 
     -- A rebuilt UI (after a resize) keeps the diff it had. Only the binding is

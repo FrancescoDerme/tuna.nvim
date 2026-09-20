@@ -279,6 +279,7 @@ function M.run_testcases(bufnr, list, compile, only_show)
         end
     else
         r:kill_all_processes()
+        r:choose_row_again()
         r:run_testcases(tctbl, compile)
     end
     r:show_ui()
