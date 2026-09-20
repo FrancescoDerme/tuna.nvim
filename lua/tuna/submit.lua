@@ -836,6 +836,26 @@ function M.verdict_for(path)
     return { state = entry.state, text = entry.text }
 end
 
+---Whether a verdict for `path` could ever reach tuna. Not how the submission is made — that
+---is a browser tab either way, for most judges — but whether anything reports the outcome
+---back: the `browser` provider watches nothing, a command run in a terminal (`watch = false`)
+---is not read, and one declared not to say (`expects_verdict = false`) is not parsed. Nothing
+---will come back from those, so nothing may be counted as though it might.
+---@param path string absolute solution path
+---@return boolean
+function M.reports_verdict(path)
+    if type(path) ~= "string" or path == "" then
+        return false
+    end
+    local cfg = config.current_setup
+    local store = M.read_task_store(vim.fn.fnamemodify(path, ":h"), cfg)
+    local scfg = judge_scfg(cfg.submit or {}, store and store.url)
+    if (scfg.provider or "command") ~= "command" then
+        return false
+    end
+    return scfg.watch ~= false and scfg.expects_verdict ~= false
+end
+
 function M.restore(bufnr)
     local path = buf_path(bufnr)
     if path == "" or M.state[path] then

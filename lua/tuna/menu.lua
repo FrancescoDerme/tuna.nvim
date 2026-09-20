@@ -88,10 +88,29 @@ local function entry_status(path)
     return {}
 end
 
+---How many of a contest's problems pass locally, for a judge whose verdicts never reach
+---tuna: the same word and the same shape as a problem's own status, since that is what it is
+---counting.
+---@param files string[]
+---@return { [1]: string, [2]: string? }[]
+local function local_status(files)
+    local passed = 0
+    for _, file in ipairs(files) do
+        local ran, total = require("tuna.runner.core").local_verdict(file)
+        if ran and ran == total then
+            passed = passed + 1
+        end
+    end
+    return { { passed .. "/" .. #files .. " " }, { "PASSED", passed > 0 and "TunaCorrect" or "TunaDone" } }
+end
+
 ---How a contest is going, over every problem in it, as `{ text, highlight? }` segments: how
 ---many the judge accepted out of all of them, then how many it rejected or accepted in part,
 ---e.g. `2/5 ACCEPTED, 1 REJECTED`. Only judge verdicts count, a local verdict existing only
 ---for problems that were run. A count is never coloured, and a word is dimmed at zero.
+---Where no verdict can reach tuna at all — nothing reports one back for this judge
+---(`submit.reports_verdict`) — it counts what passed locally instead: `0/7 ACCEPTED` would be
+---a claim about an answer nobody can hear, and would stay at zero forever.
 ---@param contest tuna.RecentContest?
 ---@return { [1]: string, [2]: string? }[]
 local function contest_status(contest)
@@ -103,12 +122,18 @@ local function contest_status(contest)
     if #files == 0 then
         return {}
     end
+    local submit = require("tuna.submit")
     local counts = { accepted = 0, rejected = 0, partial = 0 }
+    local answerable = false
     for _, file in ipairs(files) do
-        local verdict = require("tuna.submit").verdict_for(file)
+        answerable = answerable or submit.reports_verdict(file)
+        local verdict = submit.verdict_for(file)
         if verdict and counts[verdict.state] then
             counts[verdict.state] = counts[verdict.state] + 1
         end
+    end
+    if not answerable then
+        return local_status(files)
     end
     local segments = {}
     local function add(count, label, word)

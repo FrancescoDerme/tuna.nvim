@@ -59,6 +59,55 @@ solution(flat, "b.cpp", nil)
 t.write(flat, "gen.cpp", "int main() {}\n")
 t.eq("plain files are problems too, helpers aside", menu.contest_status({ dir = flat, name = "f" }), { { "1/2 " }, { "ACCEPTED", "TunaCorrect" } })
 
+--------------------------------------------------------------------------------
+-- A judge that cannot answer
+--------------------------------------------------------------------------------
+
+-- Whether a verdict reaches tuna is not about how the submission is made, which is a browser
+-- tab for most judges: it is about whether anything reports the outcome back. Nothing does
+-- for the `browser` provider, for a command run in a terminal, or for one told it will not
+-- say. Counting how many of those a judge accepted would be a claim about an answer nobody
+-- can hear, stuck at zero forever, so the contest counts what passed locally instead, in the
+-- word a problem's own status uses.
+local blind = t.tempdir()
+for _, name in ipairs({ "A", "B", "C" }) do
+    vim.fn.mkdir(blind .. "/" .. name, "p")
+    solution(blind .. "/" .. name, "main.cpp")
+    t.write(
+        blind .. "/" .. name,
+        ".tuna.json",
+        vim.json.encode({ url = "https://atcoder.jp/contests/abc1/tasks/abc1_" .. name:lower() })
+    )
+end
+core.save_local_verdict(blind .. "/A/main.cpp", { { tcnum = 0, status = "CORRECT" } })
+core.save_local_verdict(blind .. "/B/main.cpp", { { tcnum = 0, status = "WRONG" } })
+
+local submit = require("tuna.submit")
+local blind_a = blind .. "/A/main.cpp"
+t.ok("a submit tool whose output is watched reports a verdict", submit.reports_verdict(blind_a))
+for what, judge in pairs({
+    ["opens a page"] = { provider = "browser" },
+    ["runs in a terminal"] = { watch = false },
+    ["is told it will not say"] = { expects_verdict = false },
+}) do
+    require("tuna").setup({ submit = { judges = { atcoder = judge } } })
+    t.ok("one that " .. what .. " does not", not submit.reports_verdict(blind_a), judge)
+end
+
+require("tuna").setup({ submit = { judges = { atcoder = { provider = "browser" } } } })
+t.eq("so the contest counts what passed locally, in that word", menu.contest_status({ dir = blind, name = "abc1" }), {
+    { "1/3 " },
+    { "PASSED", "TunaCorrect" },
+})
+t.eq("a problem says what it always said", menu.entry_status(blind_a), { { "1/1 " }, { "PASSED", "TunaCorrect" } })
+
+require("tuna").setup({})
+t.eq(
+    "and a judge that can answer is still counted as the judge",
+    vim.list_slice(menu.contest_status({ dir = blind, name = "abc1" }), 1, 2),
+    { { "0/3 " }, { "ACCEPTED", "TunaDone" } }
+)
+
 t.eq("a contest with no problems says nothing", menu.contest_status({ dir = t.tempdir(), name = "e" }), {})
 t.eq("and neither does one whose directory is gone", menu.contest_status({ dir = "/nonexistent/tuna/contest", name = "g" }), {})
 

@@ -780,7 +780,13 @@ specific Vim error about a buffer the user never opened.
     it is current, else `core.local_verdict`, else nothing: the judge's answer settles a
     problem, so it always wins. A contest's (`contest_status`) counts current judge verdicts
     over `recent.contest_problems`, like `2/5 ACCEPTED, 1 REJECTED`. Local verdicts don't
-    count there, because they exist only for problems that were run.
+    count there, because they exist only for problems that were run — unless no verdict can
+    reach the contest at all, where it counts what passes locally and says `PASSED`. That is
+    `submit.reports_verdict`, which is about whether anything reports the outcome *back* (the
+    `browser` provider watches nothing, `watch = false` is not read, `expects_verdict = false`
+    is not parsed), not about how the submission is made, which is a browser tab for most
+    judges. `0/7 ACCEPTED` would be a claim about an answer nobody can hear, and would sit at
+    zero for the life of the contest.
   - Statuses are `{ text, highlight? }` segments in the results grid's words and colours
     (`ACCEPTED`/`TunaCorrect`, `REJECTED`/`TunaWrong`, `PARTIAL`/`TunaWarning`, `PASSED` green
     only when all pass). Counts are their own uncoloured segments, and a zero `ACCEPTED` is

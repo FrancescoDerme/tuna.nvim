@@ -483,6 +483,11 @@ describes the source. Otherwise it is how the last finished run went, like
 source is the one that ran. Only testcases with a verdict count: one with no
 expected output, stopped, or unable to start is left out.
 
+A contest counts how many of its problems the judge accepted. Where no
+verdict reaches tuna at all, because nothing reports one back for that judge,
+it counts how many pass locally instead and says so: a judge tuna cannot hear
+must not be shown answering `0/7 ACCEPTED`.
+
 `:Tuna temp` opens a scratch solution for the minutes before a contest starts,
 when there is no problem to download yet. It asks which template to start
 from, per-judge templates included, and the scratch is that template minus

@@ -417,7 +417,8 @@ opens the same catalogue in telescope.
 - `:Tuna last problem` / `:Tuna last contest` go back to what you were working on, across
   restarts, and move Neovim's directory there with you. The menu lists your recent
   contests and problems, and `<CR>` on one goes there. A contest shows its judge and how
-  many of its problems the judge accepted. A problem shows its verdict, or while the judge
+  many of its problems the judge accepted, or, when nothing reports a verdict back for that
+  judge, how many pass locally instead. A problem shows its verdict, or while the judge
   hasn't judged the source as it is now, how its last finished run went (`3/4 PASSED`),
   which is saved beside it and forgotten when you edit. Names too long for the screen are
   shortened, never the verdicts.
