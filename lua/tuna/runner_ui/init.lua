@@ -84,9 +84,7 @@ local detail_windows = { "so", "eo", "si", "se" }
 ---@field diff_view boolean
 ---@field viewer_winid integer?
 ---@field viewer_content string? which detail window the viewer is showing
----@field make_viewer_visible boolean open the viewer on the next update
 ---@field restore_winid integer?
----@field latest_compile_token integer? start time of the last auto-shown compile failure
 local RunnerUI = {}
 RunnerUI.__index = RunnerUI
 
@@ -121,7 +119,6 @@ function M.new(runner)
         diff_view = false,
         viewer_winid = nil,
         viewer_content = nil,
-        make_viewer_visible = false,
         restore_winid = nil,
         -- Testcase edits typed into the Input/Expected panes but not yet written,
         -- keyed by testcase number so they survive moving to another row (and, in
@@ -2730,21 +2727,6 @@ function RunnerUI:render_selector()
             status, hlgroup = "EDITED", "TunaDone"
         end
         entries[i] = { header = header, status = status, time = timestr, hlgroup = hlgroup }
-
-        -- Auto-pop the viewer onto a fresh compilation failure's stderr.
-        if
-            tc.tcnum == "Compile"
-            and self.config.runner_ui.viewer.open_when_compilation_fails
-            and not tc.killed
-            and tc.exit_code
-            and tc.exit_code ~= 0
-            and tc.start_time ~= self.latest_compile_token
-        then
-            self.latest_compile_token = tc.start_time
-            self.update_testcase = i
-            self.viewer_content = "se"
-            self.make_viewer_visible = true
-        end
     end
 
     local head_col, st_col, with_time = selector_columns(entries, self:selector_width())
@@ -2906,11 +2888,6 @@ function RunnerUI:update_ui()
         -- announce an edit nobody had made.
         if rendered_details then
             self:update_status_line()
-        end
-
-        if self.make_viewer_visible then
-            self.make_viewer_visible = false
-            self:show_viewer()
         end
     end)
 end

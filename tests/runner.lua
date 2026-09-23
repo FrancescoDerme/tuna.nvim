@@ -1922,6 +1922,15 @@ for _, board in ipairs(boards) do
             r.tcdata[1].hlgroup,
         }, { "RET 1", "TunaWarning" })
         t.ok(board.name .. ": and the run settles, nothing having started", r:idle(), r.tcdata[1])
+        -- The build step's own grid has an Errors pane whatever the configured one lacks,
+        -- so the failure is read where the run left the cursor, with nothing opened over it.
+        vim.wait(300, function()
+            return false
+        end)
+        t.eq(board.name .. ": read on the build step itself, nothing opened over the board", {
+            r.ui.update_testcase,
+            r.ui.viewer_winid,
+        }, { 1, nil })
         local ran = 0
         for _, spawn in ipairs(spawns) do
             if spawn.argv[1] ~= "g++" then

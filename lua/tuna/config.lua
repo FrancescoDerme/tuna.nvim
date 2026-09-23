@@ -625,7 +625,6 @@ M.defaults = {
             height = 0.8,
             show_nu = true,
             show_rnu = false,
-            open_when_compilation_fails = true,
         },
     },
     popup_ui = {

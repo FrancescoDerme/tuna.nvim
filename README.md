@@ -211,8 +211,8 @@ you want it arranged differently — or `runner_ui.interface = "split"` for real
 instead of floats.
 
 Each testcase is a row and the four panes show that run. The compile step is a row too,
-so its warnings are somewhere you can read them, and a compile failure pops its errors up
-by itself. The build has no input, no answer and nothing to compare, so its row is shown
+so its warnings and errors are somewhere you can read them, whatever your own grid leaves
+out. The build has no input, no answer and nothing to compare, so its row is shown
 with the Errors pane alone, where a compiler's complaint has the room to be read — the panes
 of a run come back the moment you move off it (`runner_ui.compile_layout`). A run that builds
 more than your solution — a generator and a bruteforce, an interactor, a checker — splits that
@@ -713,7 +713,7 @@ the rest. The preset groups keys by subject, so which-key shows a `t` testcases 
 | `cancel_keys`                         | `{ normal = { "<Esc>", "<C-c>" }, insert = {} }` | how every widget is dismissed; `<Esc>` in insert mode leaves insert by default, so dismissing something you are typing into takes a second, deliberate press |
 | `runner_ui.interface`                 | `"popup"`                                        | `"popup"` for floats, `"split"` for real windows                                                                                                             |
 | `runner_ui.mappings`                  | see the key table above                          |                                                                                                                                                              |
-| `runner_ui.viewer`                    | `0.8` × `0.8`                                    | the full-screen pane view; `open_when_compilation_fails` pops it on a build error                                                                            |
+| `runner_ui.viewer`                    | `0.8` × `0.8`                                    | the full-screen pane view                                                                                                                                    |
 | `runner_ui.editable_border_highlight` | `"TunaEditable"`                                 | the accent on the two editable panes; `false` turns it off                                                                                                   |
 | `runner_ui.compile_layout`            | selector + Errors                                | the grid drawn while the build row is the one on screen, split into one Errors pane per source compiled; `false` keeps the grid of a run                     |
 | `interactive.layouts`                 | conversation / run                               | the grid each interactive source draws (`live`, `interactor`, `feed`); `false` for any of them keeps the configured one                                      |

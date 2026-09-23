@@ -248,8 +248,8 @@ RUNNING AND THE RESULTS UI                                   *tuna-results-ui*
 have cores, by default — and opens the results grid. Each testcase is a row
 and four panes show that run: Output faces Expected Output across the top,
 because the comparison is read across; Errors and Input sit under them. The
-compile step is a row too, so its warnings are readable, and a compile failure
-pops its errors up by itself. The build has no input, no answer and nothing to
+compile step is a row too, so its warnings and errors are readable whatever
+your own grid leaves out. The build has no input, no answer and nothing to
 compare, so its row is shown with the Errors pane alone, where a compiler's
 complaint has the room to be read; the panes of a run come back the moment you
 move off it (`runner_ui.compile_layout`). A run that builds more than your
@@ -858,8 +858,7 @@ APPEARANCE                                            *tuna-config-appearance*
         The results-UI keys; see |tuna-results-ui|.
 
 `runner_ui.viewer`
-        The full-screen pane view, `0.8` by `0.8`. Its
-        `open_when_compilation_fails` pops it on a build error.
+        The full-screen pane view, `0.8` by `0.8`.
 
 `runner_ui.editable_border_highlight`
         The accent on the two editable panes. Default

@@ -569,7 +569,9 @@ as `checker <input> <output> <answer>` (exit 0 means correct) and is compiled vi
 - Float geometry: a bordered float's `row`/`col` is its border cell, and `width`/`height`
   exclude the border. Centre on `size + 2` (`overlay_geometry`, `ui_bounds`).
 - The viewer and message floats are sized by `runner_ui.viewer`. The legend is sized to the
-  UI's footprint.
+  UI's footprint. The viewer opens only when asked (`view_*`): a failed build is read on the
+  build step, whose own grid always has an Errors pane, so opening the viewer over it would
+  cover the same text and take the row away from someone who had moved off it.
 - Diff view paints extmarks in the `tuna_runner_diff` namespace, with `scrollbind`/`cursorbind`
   instead of filler lines. It is cached by texts and row (`diff_cache`) and follows unsaved pane
   text as you type (debounced). A row nothing has answered on yet is not diffed, which is
