@@ -22,21 +22,41 @@ local SKIP = require("tuna.runner.core").SKIP
 
 local M = {}
 
--- The panes the build step's sources are shown in, in the order they are handed out. The
--- solution keeps the Errors pane it has always had, and every helper the run compiles takes
--- the next pane the grid is not already using.
+-- The buffers behind the build step's panes, in the order its sources take them. They are
+-- the detail panes' own: the build step shows no stdout, answer or input, so they are free
+-- there, and borrowing them means the build step never makes a buffer of its own. Nothing a
+-- user reads or writes names them on that row: the grid places a `build` cell, the titles
+-- name the source, and the view keys open what is actually there (`view_pane`).
 local BUILD_PANES = { "se", "so", "eo", "si" }
 
----Put `panes` where the Errors pane is, one above the other, leaving the rest of the grid
----alone. A build step of several sources reads as a column of them, in the cell the
----compiler's words were already in.
+-- The action that opens each detail pane full-screen. The keys are bound from it and, with
+-- `runner_ui.title_keys`, the titles name its key from it, so the two cannot disagree.
+local VIEW_ACTIONS = { so = "view_stdout", eo = "view_expected", si = "view_input", se = "view_stderr" }
+
+-- On the build step each source is opened by the key of the pane its program is about when a
+-- testcase runs: the solution by its errors, the generator and the interactor by the input
+-- (they are what writes it), the bruteforce by the answer (it writes that), the checker by the
+-- output (it judges it). No run holds two sources on one key, so every pane there has its own.
+local BUILD_ACTIONS = {
+    solution = "view_stderr",
+    generator = "view_input",
+    interactor = "view_input",
+    bruteforce = "view_expected",
+    checker = "view_stdout",
+}
+
+---Split the grid's `build` cell into `panes`, one above the other, leaving the rest of the
+---grid alone. A single pane takes the cell whole.
 ---@param layout table|string
 ---@param panes string[]
 ---@return table|string
 local function stack_into(layout, panes)
     if type(layout) == "string" then
-        if layout ~= "se" then
+        if layout ~= "build" then
             return layout
+        end
+        if #panes == 1 then
+            return panes[1]
         end
         local stack = {}
         for _, name in ipairs(panes) do
@@ -212,6 +232,20 @@ function RunnerUI:current_row()
 end
 
 ---@private
+---The pane a `view_*` key opens on the row on screen. On a testcase row it is the pane the key
+---names. On the build step every pane holds a compiler's words, and each key opens the source
+---whose role it stands for (`BUILD_ACTIONS`), or nothing when this run compiles no such source.
+---@param name string the pane the key names
+---@return string?
+function RunnerUI:view_pane(name)
+    local build = self:build_assignment(self:current_row())
+    if not build then
+        return name
+    end
+    return build.opens[VIEW_ACTIONS[name]]
+end
+
+---@private
 ---Whether a pane is one the user types into — either an editable testcase pane or
 ---one the mode owns (interactive's live Input). Such a pane keeps its letters:
 ---the plain-key mappings (close, and the selector's actions) are not bound on it.
@@ -315,7 +349,7 @@ function RunnerUI:legend_sections()
         { "everything else", "Vim's own, d deletes, r replaces, u undoes" },
     })
 
-    local readonly = align({
+    local rows = {
         { "run again", keys("run_again") },
         { "run all again", keys("run_all_again") },
         -- Re-running uses the build and the file already on disk; `:Tuna run` is what
@@ -327,8 +361,12 @@ function RunnerUI:legend_sections()
         { "stop", keys("stop") },
         { "stop all", keys("stop_all") },
         { "toggle diff", keys("toggle_diff") },
-        { "view output / expected", keys("view_stdout") .. "  " .. keys("view_output") },
+        { "view output / expected", keys("view_stdout") .. "  " .. keys("view_expected") },
         { "view input / errors", keys("view_input") .. "  " .. keys("view_stderr") },
+    }
+    -- The build row's view keys follow its sources, so they are spelt out under the others.
+    rows[#rows + 1] = self:legend_build_row(m)
+    vim.list_extend(rows, {
         { "", "" },
         { "new testcase", keys("add_testcase") },
         { "delete testcase", keys("delete_testcase") },
@@ -339,7 +377,39 @@ function RunnerUI:legend_sections()
         { "close", keys("close") },
         { "this legend", keys("help") },
     })
+    local readonly = align(rows)
+    -- What the mode adds: how its own rows and keys behave, in a section of its own.
+    local mode = self.runner.legend_rows and self.runner:legend_rows()
+    if mode then
+        vim.list_extend(readonly, { "", mode.title })
+        vim.list_extend(readonly, align(mode.rows))
+    end
     return align(editable), readonly
+end
+
+---@private
+---The legend's line for the build row's keys, when it has more than one source: each opens
+---with the key of the pane its program is about (`BUILD_ACTIONS`), which is not what the key
+---says on a testcase row, so it is spelt out.
+---@param m table the configured mappings
+---@return string[]?
+function RunnerUI:legend_build_row(m)
+    local compile = self.runner.tcdata[1]
+    local sources = compile
+        and compile.tcnum == "Compile"
+        and self.runner.build_sources
+        and self.runner:build_sources(compile)
+    if not (sources and #sources > 1) then
+        return nil
+    end
+    local parts = {}
+    for _, source in ipairs(sources) do
+        local key = as_list(m[BUILD_ACTIONS[source.role]])[1]
+        if key then
+            parts[#parts + 1] = key .. " " .. source.label
+        end
+    end
+    return { "view on the build row", table.concat(parts, "  ") }
 end
 
 ---@private
@@ -1307,6 +1377,9 @@ function RunnerUI:layout_opts(idx)
     if build and next(build.titles) then
         titles = vim.tbl_extend("force", titles or {}, build.titles)
     end
+    if self.config.runner_ui.title_keys then
+        titles = self:titled_with_keys(titles or {}, build)
+    end
     return {
         layout = layout,
         layout_name = name,
@@ -1315,60 +1388,75 @@ function RunnerUI:layout_opts(idx)
 end
 
 ---@private
----The grid the build step is laid out with before its sources are stacked into it:
----`runner_ui.compile_layout`, or, when that is `false`, what the row would get anyway —
----the mode's own grid, else the configured one, which only the interface knows.
----@return table layout, string name
-function RunnerUI:compile_base_layout()
-    local compile = self.config.runner_ui.compile_layout
-    if compile then
-        return compile, "runner_ui.compile_layout"
-    end
-    if self.runner.layout then
-        local own, own_name = self.runner:layout()
-        if own then
-            return own, own_name or "run mode layout"
+---`titles` with the key that opens each pane full-screen at the end (` Errors (e) `). On the
+---build step the keys follow the sources' roles rather than the panes' names, so each is
+---written on the pane it actually opens.
+---@param titles table<string, string>
+---@param build table? the build step's assignment, when the row is the build step
+---@return table<string, string>
+function RunnerUI:titled_with_keys(titles, build)
+    local out = vim.deepcopy(titles)
+    local function write(pane, action)
+        local key = as_list(self.config.runner_ui.mappings[action])[1]
+        if key then
+            local base = out[pane] or layout_util.titles[pane]
+            out[pane] = ("%s (%s) "):format(base:gsub("%s+$", ""), key)
         end
     end
-    return self.interface.configured_layout(self.config)
+    if build then
+        for action, pane in pairs(build.opens) do
+            write(pane, action)
+        end
+    else
+        for pane, action in pairs(VIEW_ACTIONS) do
+            write(pane, action)
+        end
+    end
+    return out
 end
 
 ---@private
----How the build step's sources are shown: which pane each is in, what its compiler said and
----what to call that pane. `nil` on every row but the build step, and on one whose grid has
----no Errors pane to put them in. The three are answered together because they have to
----agree: the grid stacks exactly the panes the titles name and the content fills.
+---The build step's grid before its `build` cell is split: `runner_ui.compile_layout`,
+---validated once, since it is asked for on every render and a bad one is reported once.
+---@return table
+function RunnerUI:compile_grid()
+    if not self.build_grid then
+        self.build_grid = layout_util.resolve(
+            self.config.runner_ui.compile_layout,
+            "runner_ui.compile_layout",
+            require("tuna.config").defaults.runner_ui.compile_layout,
+            "build"
+        )
+    end
+    return self.build_grid
+end
+
+---@private
+---How the build step's sources are shown: which pane each is in, what its compiler said,
+---what to call that pane, and which key opens it (`opens`, view action to pane, from the
+---source's role). `nil` on every row but the build step. These are answered together because
+---they have to agree: the grid stacks exactly the panes the titles name, the content fills and
+---the keys open.
 ---@param tc table? the row being laid out or drawn
----@return { panes: string[], text: table<string, string>, titles: table<string, string> }?
+---@return { panes: string[], text: table<string, string>, titles: table<string, string>, opens: table<string, string> }?
 function RunnerUI:build_assignment(tc)
     if not (tc and tc.tcnum == "Compile" and self.runner.build_sources) then
         return nil
     end
-    local placed = {}
-    for _, name in ipairs(layout_util.leaves((self:compile_base_layout()))) do
-        placed[name] = true
-    end
-    if not placed.se then
-        return nil -- a grid with nowhere to show a compiler is a grid that doesn't want to
-    end
-    -- The solution keeps the Errors pane it has always had; each helper takes a pane the
-    -- grid is not already using, so the build step reads as one column of its sources.
-    local free = {}
-    for _, name in ipairs(BUILD_PANES) do
-        if name == "se" or not placed[name] then
-            free[#free + 1] = name
-        end
-    end
     local sources = self.runner:build_sources(tc)
-    local panes, holds = {}, {}
+    local panes, holds, opens = {}, {}, {}
     for i, source in ipairs(sources) do
         -- More sources than panes: the last one carries them rather than leaving one unread.
-        local pane = free[i] or free[#free]
+        local pane = BUILD_PANES[i] or BUILD_PANES[#BUILD_PANES]
         if not holds[pane] then
             panes[#panes + 1] = pane
             holds[pane] = {}
         end
         table.insert(holds[pane], source)
+        local action = BUILD_ACTIONS[source.role]
+        if action and not opens[action] then
+            opens[action] = pane
+        end
     end
     local text, titles = {}, {}
     for _, pane in ipairs(panes) do
@@ -1384,30 +1472,22 @@ function RunnerUI:build_assignment(tc)
             titles[pane] = (" Errors: %s "):format(table.concat(labels, ", "))
         end
     end
-    return { panes = panes, text = text, titles = titles }
+    return { panes = panes, text = text, titles = titles, opens = opens }
 end
 
 ---@private
 ---The grid the row on screen wants, and what to call it when it doesn't validate. The build
 ---step is not a testcase: it has no input, no answer and no output to compare, so the four
 ---panes of a run would face someone reading a compiler's complaint with three empty frames.
----It gets the selector and Errors (`runner_ui.compile_layout`, `false` to keep the grid the
----mode draws). Every other row is the mode's own layout, or the configured one (nil).
+---It gets `runner_ui.compile_layout`, the selector and a `build` cell split into one pane per
+---source it compiles. Every other row is the mode's own layout, or the configured one (nil).
 ---@param idx integer? the row to lay out for (default: the row on screen)
 ---@return table? layout, string? name
 function RunnerUI:row_layout(idx)
     local tc = self.runner.tcdata[idx or self.update_testcase or 1]
-    local compile = self.config.runner_ui.compile_layout
-    if tc and tc.tcnum == "Compile" then
-        -- More than one source to build: the Errors pane becomes a column of them.
-        local build = self:build_assignment(tc)
-        if build and #build.panes > 1 then
-            local layout, name = self:compile_base_layout()
-            return stack_into(layout, build.panes), name
-        end
-        if compile then
-            return compile, "runner_ui.compile_layout"
-        end
+    local build = self:build_assignment(tc)
+    if build then
+        return stack_into(self:compile_grid(), build.panes), "runner_ui.compile_layout"
     end
     if not self.runner.layout then
         return nil, nil
@@ -1773,18 +1853,14 @@ function RunnerUI:show_ui()
     map_tc("toggle_diff", function()
         self:toggle_diff_view()
     end)
-    map_tc("view_stdout", function()
-        self:show_viewer("so")
-    end)
-    map_tc("view_output", function()
-        self:show_viewer("eo")
-    end)
-    map_tc("view_input", function()
-        self:show_viewer("si")
-    end)
-    map_tc("view_stderr", function()
-        self:show_viewer("se")
-    end)
+    for pane, action in pairs(VIEW_ACTIONS) do
+        map_tc(action, function()
+            local shown = self:view_pane(pane)
+            if shown then
+                self:show_viewer(shown)
+            end
+        end)
+    end
     -- Bound in every mode, and silent where testcases can't be edited: each one checks
     -- for itself. Left unbound, `n`/`N` would fall through to Vim's search.
     map_tc("add_testcase", function()
@@ -2798,9 +2874,9 @@ function RunnerUI:update_ui()
                 self.update_testcase = self:opening_row()
             end
         end
-        -- The row on screen decides the grid (the build step gets Errors and nothing else),
-        -- so a row of another kind means the panes are rebuilt before anything is drawn into
-        -- them. The redraw renders on its own tick.
+        -- The row on screen decides the grid (the build step gets its sources and nothing
+        -- else), so a row of another kind means the panes are laid out again before anything
+        -- is drawn into them. The redraw renders on its own tick.
         if not vim.deep_equal((self:row_layout()), self.drawn_layout) then
             self:redraw_grid()
             return

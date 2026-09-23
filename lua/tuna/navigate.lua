@@ -77,7 +77,7 @@ function M.go(offset, bufnr)
     bufnr = bufnr or vim.api.nvim_get_current_buf()
     local path = vim.api.nvim_buf_get_name(bufnr)
     if path == "" then
-        utils.notify("navigate: this buffer has no file, so there is no contest to walk.", "WARN")
+        utils.notify("this buffer has no file, so there is no contest to walk.", "WARN")
         return
     end
     path = vim.fs.normalize(vim.fn.fnamemodify(path, ":p"))
@@ -87,28 +87,22 @@ function M.go(offset, bufnr)
     local dir = vim.fs.dirname(path)
     local names, index = siblings(dir)
     if not index then
-        utils.notify("navigate: '" .. vim.fn.fnamemodify(dir, ":t") .. "' is not inside a contest directory.", "WARN")
+        utils.notify("'" .. vim.fn.fnamemodify(dir, ":t") .. "' is not inside a contest directory.", "WARN")
         return
     end
 
     local target_idx = index + offset
     local target = names[target_idx]
     if not target then
-        utils.notify(
-            ("navigate: already at the %s problem (%d of %d)."):format(
-                offset < 0 and "first" or "last",
-                index,
-                #names
-            ),
-            "WARN"
-        )
+        -- Said the way arriving at a problem is ("problem 3/7: C"), from the one you are on.
+        utils.notify(("problem %d/%d is the %s one."):format(index, #names, offset < 0 and "first" or "last"), "WARN")
         return
     end
 
     local target_dir = vim.fs.dirname(dir) .. "/" .. target
     local file = M.solution_in(target_dir, path, cfg)
     if not file then
-        utils.notify("navigate: no solution file in '" .. target .. "'.", "WARN")
+        utils.notify("no solution file in '" .. target .. "'.", "WARN")
         return
     end
 

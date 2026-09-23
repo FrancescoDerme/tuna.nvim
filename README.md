@@ -213,11 +213,15 @@ instead of floats.
 Each testcase is a row and the four panes show that run. The compile step is a row too,
 so its warnings and errors are somewhere you can read them, whatever your own grid leaves
 out. The build has no input, no answer and nothing to compare, so its row is shown
-with the Errors pane alone, where a compiler's complaint has the room to be read — the panes
-of a run come back the moment you move off it (`runner_ui.compile_layout`). A run that builds
-more than your solution — a generator and a bruteforce, an interactor, a checker — splits that
-pane into one per source, stacked and each named after what it holds (`Errors: gen.cpp`), so
-a warning is read where it belongs and not in one pane's worth of everything. They are built
+with a pane for each source it compiles and nothing else, where a compiler's complaint has
+the room to be read — the panes of a run come back the moment you move off it
+(`runner_ui.compile_layout`). A run that builds more than your solution — a generator and a
+bruteforce, an interactor, a checker — stacks one pane per source, each named after what it
+holds (`Errors: gen.cpp`), so a warning is read where it belongs and not in one pane's worth
+of everything. Each of those panes opens full-screen with the key of the pane its program is
+about when a testcase runs, and every title says which: `e` for your solution (its errors),
+`i` for the generator or the interactor (they write the input), `a` for the bruteforce (it
+writes the answer), `o` for the checker (it judges the output). They are built
 at once, so a run waits for the slowest compile rather than for all of them end to end. Opening the UI
 puts you on the first testcase, and a run starts on the compile step and moves there itself
 as soon as the build ends with nothing to say — a build that failed or printed something
@@ -233,12 +237,12 @@ works this way, interactive following the row it is talking to.
 | `r` / `<C-r>`                   | re-run this one / all of them                                         |
 | `s` / `<C-s>`                   | stop this one / all of them                                           |
 | `d`                             | toggle the diff                                                       |
-| `i` `a` `o` `e`                 | open input / expected / stdout / stderr full-screen                   |
+| `i` `a` `o` `e`                 | open input / expected / stdout / stderr full-screen, each title says its key |
 | `n` `x` `u`                     | add a testcase, delete one, undo that                                 |
 | `c`                             | split this testcase on its marker lines                               |
 | `<C-h>` `<C-j>` `<C-k>` `<C-l>` | move between panes                                                    |
 | `q`                             | close                                                                 |
-| `?`                             | the full legend, which is the authority — these are just the defaults |
+| `?`                             | the full legend, which is the authority — these are just the defaults, and stress and interactive add what is theirs |
 
 **The Input and Expected Output panes are editable.** They are ordinary buffers with an
 accent on their border, so there is no key to learn: move in, type, and `:w`. That writes
@@ -715,7 +719,8 @@ the rest. The preset groups keys by subject, so which-key shows a `t` testcases 
 | `runner_ui.mappings`                  | see the key table above                          |                                                                                                                                                              |
 | `runner_ui.viewer`                    | `0.8` × `0.8`                                    | the full-screen pane view                                                                                                                                    |
 | `runner_ui.editable_border_highlight` | `"TunaEditable"`                                 | the accent on the two editable panes; `false` turns it off                                                                                                   |
-| `runner_ui.compile_layout`            | selector + Errors                                | the grid drawn while the build row is the one on screen, split into one Errors pane per source compiled; `false` keeps the grid of a run                     |
+| `runner_ui.title_keys`                | `true`                                           | end each pane's title with the key that opens it full-screen, `Errors (e)`                                                                                  |
+| `runner_ui.compile_layout`            | selector + build                                 | the grid drawn while the build row is the one on screen: `tc` and a `build` cell, split into one pane per source compiled                                     |
 | `interactive.layouts`                 | conversation / run                               | the grid each interactive source draws (`live`, `interactor`, `feed`); `false` for any of them keeps the configured one                                      |
 | `popup_ui.layout`                     | three columns                                    | a nested `{ weight, pane }` tree over `tc`, `so`, `eo`, `si`, `se`; a pane you leave out is simply not drawn, and stays reachable in the viewer              |
 | `split_ui`                            | `"right"`, `0.3`                                 | position and size when `interface = "split"`                                                                                                                 |

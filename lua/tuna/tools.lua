@@ -289,6 +289,7 @@ local function spec_for_file(role, path, cfg)
         spec = { exec = path, args = {}, cwd = vim.fn.fnamemodify(path, ":p:h") }
     end
     spec.args = vim.list_extend(spec.args, vim.deepcopy(ROLE_ARGS[role] or {}))
+    spec.role = role
     return spec
 end
 
@@ -296,7 +297,8 @@ end
 ---when there is none. One rule for every role: a helper set in the config (`checker`,
 ---`stress.generator`, `stress.bruteforce`, `interactive.interactor`) is used instead of a
 ---sibling file found through `tool_names`. A string there is a path to a helper file, a
----table an `{ exec, args }` command. Nothing is cached, so what is on disk now decides.
+---table an `{ exec, args }` command. Nothing is cached, so what is on disk now decides. The
+---spec carries its `role`, which is what the results UI keys its build pane by.
 ---@param role "checker"|"generator"|"bruteforce"|"interactor"
 ---@param solution string absolute path of the solution
 ---@param cfg table resolved configuration
@@ -327,7 +329,7 @@ function M.helper(role, solution, cfg)
                 return nil, ("the configured %s command has a malformed argument '%s'"):format(role, a)
             end
         end
-        return { exec = exec, args = args, cwd = dir }
+        return { exec = exec, args = args, cwd = dir, role = role }
     elseif set ~= nil then
         return nil, ("the configured %s is neither a path nor an { exec, args } command"):format(role)
     end

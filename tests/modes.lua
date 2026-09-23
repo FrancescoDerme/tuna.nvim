@@ -300,4 +300,31 @@ t.eq("the source sits under the judge, and is named on the forced row below it",
 vr:delete_ui()
 
 vim.system = real_system
+--------------------------------------------------------------------------------
+-- A per-directory .tuna.lua that cannot be used
+--------------------------------------------------------------------------------
+
+-- A `.tuna.lua` that fails is ignored and said so, with the reason: one with an error in it
+-- reports the error, which is the thing to go and fix, rather than being folded in with one
+-- that merely returned something other than a table.
+do
+    local config = require("tuna.config")
+    local said = {}
+    local notify_before = vim.notify
+    vim.notify = function(msg)
+        said[#said + 1] = tostring(msg)
+    end
+    local broken = t.tempdir()
+    t.write(broken, ".tuna.lua", "return { oops = \n")
+    t.eq("a .tuna.lua with an error in it is ignored", config.load_local_config(broken), nil)
+    t.has("and its error is what is said", said[1], "has an error, so it is ignored:")
+    t.ok("with the error itself, file and line", (said[1] or ""):find("%.tuna%.lua:%d+:") ~= nil, said)
+    said = {}
+    local odd = t.tempdir()
+    t.write(odd, ".tuna.lua", "return 42\n")
+    t.eq("one that returns something else is ignored too", config.load_local_config(odd), nil)
+    t.has("and says so", said[1], "did not return a table, so it is ignored.")
+    vim.notify = notify_before
+end
+
 t.report()

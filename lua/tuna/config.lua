@@ -551,16 +551,17 @@ M.defaults = {
     },
     runner_ui = {
         -- The grid drawn while the Compile row is the one on screen. The build step is not a
-        -- testcase — no input, no answer, nothing to compare — so it is shown as the selector
-        -- and the Errors pane, where a compiler's complaint has the room to be read. `false`
-        -- keeps whatever grid the run mode draws for its testcases. A run that compiles more
-        -- than the solution (a generator and a bruteforce, an interactor, a checker) splits
-        -- the Errors pane into one per source, each named after it, so the grid set here is
-        -- the shape they are stacked in.
+        -- testcase — no input, no answer, nothing to compare — so its grid places only the
+        -- selector (`tc`) and one `build` cell, split into a pane per source the run compiles
+        -- (your solution, and a generator and a bruteforce, an interactor or a checker), each
+        -- named after it. This is the shape they are stacked in.
         compile_layout = {
             { 3, "tc" },
-            { 8, "se" },
+            { 8, "build" },
         },
+        -- Write the key that opens each pane full-screen at the end of its title, e.g.
+        -- ` Errors (e) `. On the build row each source's pane shows its own key.
+        title_keys = true,
         interface = "popup", -- "popup" | "split"
         -- The border and title colour of the panes you can *type* into (Input and
         -- Expected Output), so they read as different from the ones you can only read.
@@ -593,7 +594,7 @@ M.defaults = {
             stop = { "s", "S" },
             stop_all = "<C-s>",
             view_input = { "i", "I" },
-            view_output = { "a", "A" },
+            view_expected = { "a", "A" },
             view_stdout = { "o", "O" },
             view_stderr = { "e", "E" },
             toggle_diff = { "d", "D" },
@@ -724,8 +725,12 @@ function M.load_local_config(directory)
     end
 
     local ok, local_config = pcall(dofile, found[1])
-    if not ok or type(local_config) ~= "table" then
-        utils.notify("load_local_config: '" .. found[1] .. "' did not return a table.")
+    if not ok then
+        utils.notify("'" .. found[1] .. "' has an error, so it is ignored:\n" .. tostring(local_config))
+        return nil
+    end
+    if type(local_config) ~= "table" then
+        utils.notify("'" .. found[1] .. "' did not return a table, so it is ignored.")
         return nil
     end
     return local_config

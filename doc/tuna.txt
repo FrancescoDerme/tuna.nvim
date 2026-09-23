@@ -250,12 +250,17 @@ and four panes show that run: Output faces Expected Output across the top,
 because the comparison is read across; Errors and Input sit under them. The
 compile step is a row too, so its warnings and errors are readable whatever
 your own grid leaves out. The build has no input, no answer and nothing to
-compare, so its row is shown with the Errors pane alone, where a compiler's
-complaint has the room to be read; the panes of a run come back the moment you
-move off it (`runner_ui.compile_layout`). A run that builds more than your
-solution, a generator and a bruteforce, an interactor, a checker, splits that
-pane into one per source, stacked and each named after what it holds
-(`Errors: gen.cpp`), so a warning is read where it belongs. They are built at
+compare, so its row is shown with a pane for each source it compiles and
+nothing else, where a compiler's complaint has the room to be read; the panes
+of a run come back the moment you move off it (`runner_ui.compile_layout`). A
+run that builds more than your solution, a generator and a bruteforce, an
+interactor, a checker, stacks one pane per source, each named after what it
+holds (`Errors: gen.cpp`), so a warning is read where it belongs. Each opens
+full-screen with the key of the pane its program is about when a testcase
+runs, and every title says which: `e` for your solution (its errors), `i` for
+the generator or the interactor (they write the input), `a` for the
+bruteforce (it writes the answer), `o` for the checker (it judges the
+output). They are built at
 once, so a run waits for the slowest compile and not for all of them end to
 end.
 
@@ -276,12 +281,14 @@ from inside the grid does what it would from the file.
     r  <C-r>                re-run this one / all of them
     s  <C-s>                stop this one / all of them
     d                       toggle the diff
-    i a o e                 open input / expected / stdout / stderr
+    i a o e                 open input / expected / stdout / stderr, each
+                            pane's title says its key
     n x u                   add a testcase, delete one, undo that
     c                       split this testcase on its marker lines
     <C-h> <C-j> <C-k> <C-l> move between panes
     q                       close
-    ?                       the full legend, which is the authority
+    ?                       the full legend, which is the authority, and
+                            stress and interactive add what is theirs
 
 The Input and Expected Output panes are editable. They are ordinary buffers
 with an accent on their border, so there is no key to learn: move in, type,
@@ -860,15 +867,19 @@ APPEARANCE                                            *tuna-config-appearance*
 `runner_ui.viewer`
         The full-screen pane view, `0.8` by `0.8`.
 
+`runner_ui.title_keys`
+        End each pane's title with the key that opens it full-screen, like
+        `Errors (e)`. Default `true`.
+
 `runner_ui.editable_border_highlight`
         The accent on the two editable panes. Default
         `"TunaEditable"`; `false` turns it off.
 
 `runner_ui.compile_layout`
-        The grid drawn while the build row is the one on screen. Default:
-        the selector and the Errors pane. `false` keeps the grid of a run.
-        A run that compiles helpers too splits the Errors pane into one per
-        source, so this is the shape they are stacked in.
+        The grid drawn while the build row is the one on screen. It places
+        `tc` and a `build` cell, which is split into one pane per source
+        the run compiles, so this is the shape they are stacked in. Default:
+        `{ { 3, "tc" }, { 8, "build" } }`.
 
 `interactive.layouts`
         The grid each interactive source draws, keyed by source and shaped

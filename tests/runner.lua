@@ -25,6 +25,17 @@ require("tuna").setup({})
 
 local tcs = require("tuna.testcases")
 
+---The line of a board's `?` legend (its read-only column) that contains `text`, if any.
+---@return string?
+local function legend_line(ui, text)
+    local _, readonly = ui:legend_sections()
+    for _, line in ipairs(readonly) do
+        if line:find(text, 1, true) then
+            return line
+        end
+    end
+end
+
 --------------------------------------------------------------------------------
 -- The stub: record every spawn, answer it successfully.
 --------------------------------------------------------------------------------
@@ -240,10 +251,14 @@ if iui then
     t.ok("the conversation's selector rows fit its pane", widest <= tcw and widest > 0, { selector_lines(), tcw })
     local si, so, se = iui.windows.si, iui.windows.so, iui.windows.se
     t.ok("the live pane is drawn", si.winid ~= nil and vim.api.nvim_win_is_valid(si.winid))
-    t.eq("and is titled Live", si.title, " Live ")
+    t.eq("and is titled Live, with the key that opens it", si.title, " Live (i) ")
     local sc = vim.api.nvim_win_get_config(si.winid)
-    t.eq("with that title on its border", sc.title and sc.title[1][1], " Live ")
+    t.eq("with that title on its border", sc.title and sc.title[1][1], " Live (i) ")
     t.eq("in the accent, since live mode is typed into", sc.title and sc.title[1][2], "TunaEditableBorder")
+    -- The legend says how this source is played: the mode adds a section of its own.
+    t.ok("the legend has a section for the source being played", legend_line(iui, "INTERACTIVE, LIVE") ~= nil)
+    t.has("saying how a line is sent", legend_line(iui, "send a line"), "<CR>")
+    t.has("and how to reach the other sources", legend_line(iui, "other sources"), ":Tuna run interactive feed or interactor")
     -- A mode that can't edit testcases still binds the keys that would, silently: left
     -- unbound, `n`/`N` fall through to Vim's search and raise "Pattern not found".
     local bound = {}
@@ -414,7 +429,7 @@ if fui then
             accents[#accents + 1] = c.title and c.title[1][2]
         end
     end
-    t.eq("with their canonical titles", titles, { " Input ", " Expected Output " })
+    t.eq("with their canonical titles", titles, { " Input (i) ", " Expected Output (a) " })
     t.eq("both in the accent", accents, { "TunaEditableBorder", "TunaEditableBorder" })
     -- Editable means `idle()` gates the structural edits, so a single re-run has to claim
     -- the runner for as long as its session runs, and give it back when it settles.
@@ -598,7 +613,7 @@ if xui then
     t.eq("interactor does not edit testcases", xr.editable_testcases, false)
     t.eq("interactor draws no expected output", xui.windows.eo.winid, nil)
     local xc = vim.api.nvim_win_get_config(xui.windows.si.winid)
-    t.eq("its conversation pane is titled Live", xc.title and xc.title[1][1], " Live ")
+    t.eq("its conversation pane is titled Live", xc.title and xc.title[1][1], " Live (i) ")
     t.ok("and wears no accent, since nothing is typed into it", not (xc.title and xc.title[1][2] == "TunaEditableBorder"), xc.title)
     xui:delete()
 end
@@ -952,6 +967,24 @@ do
         { "TC 0", "STRESS" },
     })
     t.ok("with nothing running, so the rows can be edited", listed:idle(), listed.finished)
+
+    -- Editing them keeps the search row last and honest. A testcase added, restored or split
+    -- off goes above it, and the number it wears moves past the one just taken, or the board
+    -- would show two rows reading the same number until the next run rebuilt it.
+    local labels = function()
+        return vim.tbl_map(function(row)
+            return row[1]
+        end, listing(listed))
+    end
+    local quiet = vim.notify
+    vim.notify = function() end
+    listed.ui:add_testcase()
+    t.eq("a testcase added goes above the search row, which moves on", labels(), { "Compile", "TC 0", "TC 1" })
+    listed.ui:delete_testcase(0)
+    listed.ui:undo_delete()
+    vim.notify = quiet
+    t.eq("and so does one restored", labels(), { "Compile", "TC 0", "TC 1" })
+    t.eq("the search row last throughout", listed.tcdata[#listed.tcdata], listed.search_entry)
     listed.ui:delete()
 
     -- A solution that never compiled searches for nothing.
@@ -1065,15 +1098,41 @@ do
         drawn_title("se"),
         drawn_title("so"),
         vim.api.nvim_buf_get_lines(bui.windows.so.bufnr, 0, 1, false)[1],
-    }, { " Errors: main.cpp ", " Errors: gen.cpp ", "gen.cpp warns" })
+    }, { " Errors: main.cpp (e) ", " Errors: gen.cpp (i) ", "gen.cpp warns" })
     t.ok("and wear no accent, nothing on the build step is typed into", not accented("eo"), "eo")
+    t.eq("four sources, and still the six panes every board has, not one buffer more", vim.tbl_count(bui.windows), 6)
+    t.ok("the legend has a section for the search", legend_line(bui, "STRESS") ~= nil)
+    t.has("saying what the search row is", legend_line(bui, "the search row"), "the input being tried")
+    t.has(
+        "and spells out the build row's keys, which follow its sources",
+        legend_line(bui, "view on the build row"),
+        "e main.cpp  i gen.cpp  a brute.cpp  o checker.cpp"
+    )
+
+    -- Every pane on the build step opens with a key of its own: the key of the pane its
+    -- program is about when a testcase runs. The solution by its errors, the generator by the
+    -- input it writes, the bruteforce by the answer it writes, the checker by the output it
+    -- judges.
+    vim.api.nvim_set_current_win(bui.windows.tc.winid)
+    local opened = {}
+    for _, key in ipairs({ "e", "i", "a", "o" }) do
+        vim.api.nvim_feedkeys(key, "xt", false)
+        opened[key] = bui.viewer_winid and vim.api.nvim_win_get_config(bui.viewer_winid).title[1][1]
+        bui:close_viewer()
+    end
+    t.eq("every source on the build step opens with its own key", opened, {
+        e = " Errors: main.cpp (e) ",
+        i = " Errors: gen.cpp (i) ",
+        a = " Errors: brute.cpp (a) ",
+        o = " Errors: checker.cpp (o) ",
+    })
     bui:select_row(2)
     bui.update_windows, bui.update_details = true, true
     bui:update_ui()
     vim.wait(400, function()
         return false
     end)
-    t.eq("and named back for a testcase row", { drawn_title("so"), drawn_title("se") }, { " Output ", " Errors " })
+    t.eq("and named back for a testcase row", { drawn_title("so"), drawn_title("se") }, { " Output (o) ", " Errors (e) " })
     t.ok("which is where the accent comes back", accented("eo"), "eo")
     -- And goes again: a pane the re-tiling leaves open keeps the colour it had, so the
     -- accent has to be taken off as well as put on.
@@ -1084,6 +1143,39 @@ do
         return false
     end)
     t.ok("and goes again on the way back to the build step", not accented("eo"), "eo")
+
+    -- `title_keys` (on by default) writes the key that opens each pane full-screen at the end
+    -- of its title, and on the build step that is each source's own key.
+    local function render()
+        bui.update_windows, bui.update_details = true, true
+        bui:update_ui()
+        vim.wait(400, function()
+            return false
+        end)
+    end
+    local function titles_of(...)
+        return vim.tbl_map(drawn_title, { ... })
+    end
+    t.eq("each source's pane is named with the key that opens it", titles_of("se", "so", "eo", "si"), {
+        " Errors: main.cpp (e) ",
+        " Errors: gen.cpp (i) ",
+        " Errors: brute.cpp (a) ",
+        " Errors: checker.cpp (o) ",
+    })
+    bui:select_row(2)
+    render()
+    t.eq("while a testcase row names every pane's key", titles_of("so", "eo", "si", "se"), {
+        " Output (o) ",
+        " Expected Output (a) ",
+        " Input (i) ",
+        " Errors (e) ",
+    })
+    bui.config = vim.tbl_deep_extend("force", bui.config, { runner_ui = { title_keys = false } })
+    bui:select_row(1)
+    render()
+    bui:select_row(2)
+    render()
+    t.eq("and turned off, the titles are the panes' names alone", titles_of("so", "se"), { " Output ", " Errors " })
 
     br:kill_all_processes()
     bui:delete()
@@ -1226,6 +1318,26 @@ do
         { 8, "se" },
     })
     t.eq("and the Errors pane its own name", onl.ui:build_assignment(onl.tcdata[1]).titles, {})
+    -- One source is one key: the others have no source of their own to open here.
+    onl.ui:select_row(1)
+    onl.ui.update_windows, onl.ui.update_details = true, true
+    onl.ui:update_ui()
+    vim.wait(300, function()
+        return false
+    end)
+    vim.api.nvim_set_current_win(onl.ui.windows.tc.winid)
+    local lone = {}
+    for _, key in ipairs({ "i", "a", "o", "e" }) do
+        vim.api.nvim_feedkeys(key, "xt", false)
+        lone[key] = onl.ui.viewer_winid and vim.api.nvim_win_get_config(onl.ui.viewer_winid).title[1][1] or false
+        onl.ui:close_viewer()
+    end
+    t.eq("with the solution alone, only its key opens anything", lone, { i = false, a = false, o = false, e = " Errors (e) " })
+    t.eq("and a plain run's legend adds no section and no build row line", {
+        legend_line(onl.ui, "view on the build row"),
+        legend_line(onl.ui, "STRESS"),
+        legend_line(onl.ui, "INTERACTIVE"),
+    }, {})
     onl.ui:delete()
 
     vim.system = real_system
@@ -2285,20 +2397,32 @@ t.eq("until one is configured for it", drawn_panes(fed.ui), { "si", "st", "tc" }
 fed:kill_all_processes()
 fed:delete_ui()
 
--- `runner_ui.compile_layout = false` keeps whatever grid the mode draws.
-local kept_grid = require("tuna.runner").new(wbuf)
-kept_grid.config = vim.tbl_deep_extend("force", kept_grid.config, { runner_ui = { compile_layout = false } })
-kept_grid:load_testcases(wtcs)
-kept_grid:show_ui()
-vim.wait(1000, function()
-    return kept_grid.ui.update_testcase == 2
-end, 20)
-kept_grid.ui:goto_row(1)
-vim.wait(500, function()
-    return false
-end)
-t.eq("turned off, the build step keeps the grid of a run", drawn_panes(kept_grid.ui), FULL_GRID)
-kept_grid:delete_ui()
+-- The build step's grid is written in its own vocabulary: the selector and one `build` cell,
+-- split into a pane per source. The detail panes' names say what they show on a testcase row,
+-- a stdout or a stdin, and none of that is on the build step, so a grid naming them there is
+-- refused, as is one with nowhere to put the build. The two vocabularies do not mix.
+local layout_util = require("tuna.runner_ui.layout")
+local build_default = require("tuna.config").defaults.runner_ui.compile_layout
+local warned = {}
+local notify_before = vim.notify
+vim.notify = function(msg)
+    warned[#warned + 1] = tostring(msg)
+end
+for what, bad in pairs({
+    ["a pane that shows a run"] = { { 3, "tc" }, { 4, "build" }, { 4, "so" } },
+    ["no build cell"] = { { 1, "tc" } },
+    ["no grid at all"] = false,
+}) do
+    warned = {}
+    t.eq("a build grid with " .. what .. " gives way to the default", (layout_util.resolve(bad, "runner_ui.compile_layout", build_default, "build")), build_default)
+    t.has("and says which option it was", warned[1], "runner_ui.compile_layout")
+end
+warned = {}
+t.eq("the selector and a build cell are all it needs", (layout_util.resolve({ { 1, "tc" }, { 1, "build" } }, "x", build_default, "build")), { { 1, "tc" }, { 1, "build" } })
+t.eq("and nothing warned about it", warned, {})
+local run_default = require("tuna.config").defaults.popup_ui.layout
+t.eq("while a testcase row's grid may not place a build cell", (layout_util.resolve({ { 1, "tc" }, { 1, "build" } }, "popup_ui.layout", run_default)), run_default)
+vim.notify = notify_before
 vim.system = real_system
 
 --------------------------------------------------------------------------------

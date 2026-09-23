@@ -376,19 +376,20 @@ function M.build_label(spec)
     return vim.fn.fnamemodify(tostring(spec.source or spec.exec), ":t")
 end
 
----The build step for `label`, created on first use. Steps are keyed by their label, so a
+---The build step for `spec`, created on first use. Steps are keyed by their label, so a
 ---helper prepared twice in one run (a rerun answered from the compile cache) redraws the
 ---pane it already has instead of taking another.
----@param label string
+---@param spec table helper spec (`tools.helper`)
 ---@return table
-function RunnerCore:build_step(label)
+function RunnerCore:build_step(spec)
+    local label = M.build_label(spec)
     self.builds = self.builds or {}
     for _, step in ipairs(self.builds) do
         if step.label == label then
             return step
         end
     end
-    local step = { label = label }
+    local step = { label = label, role = spec.role }
     self.builds[#self.builds + 1] = step
     return step
 end
@@ -403,7 +404,7 @@ function RunnerCore:plan_builds(specs)
     self.builds = {}
     for _, spec in ipairs(specs) do
         if type(spec) == "table" and spec.compile then
-            self:build_step(M.build_label(spec))
+            self:build_step(spec)
         end
     end
 end
@@ -417,7 +418,7 @@ function RunnerCore:build_helper(spec, cb)
         require("tuna.tools").prepare(spec, cb)
         return
     end
-    local step = self:build_step(M.build_label(spec))
+    local step = self:build_step(spec)
     step.failed, step.output = false, nil -- building: no output is what "not done yet" is
     self:update_ui(true)
     require("tuna.tools").prepare(spec, function(ok, err, output)
@@ -461,12 +462,13 @@ end
 ---the solution first, whose compile *is* the Compile row, then every helper this run
 ---builds.
 ---@param tc table the Compile row
----@return { label: string, output: string, failed: boolean, done: boolean }[]
+---@return { label: string, role: string, output: string, failed: boolean, done: boolean }[]
 function RunnerCore:build_sources(tc)
     local name = api.nvim_buf_is_valid(self.bufnr) and api.nvim_buf_get_name(self.bufnr) or ""
     local sources = {
         {
             label = name ~= "" and vim.fn.fnamemodify(name, ":t") or "solution",
+            role = "solution",
             output = compiler_text(tc.stderr, tc.stdout),
             failed = tc.exit_code ~= nil and tc.exit_code ~= 0,
             done = tc.exit_code ~= nil,
@@ -475,6 +477,7 @@ function RunnerCore:build_sources(tc)
     for _, step in ipairs(self.builds or {}) do
         sources[#sources + 1] = {
             label = step.label,
+            role = step.role,
             output = step.output or "",
             failed = step.failed == true,
             done = step.output ~= nil,

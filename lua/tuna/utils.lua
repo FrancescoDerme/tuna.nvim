@@ -82,7 +82,7 @@ function M.format_modifiers(str, modifiers, argument)
             if c == "(" then
                 mod_start = i
             else
-                M.notify("format_modifiers: '$' not followed by '(' in:\n" .. str)
+                M.notify("a '$' not followed by '(' in:\n" .. str)
                 return nil
             end
         elseif mod_start == 0 then
@@ -99,7 +99,7 @@ function M.format_modifiers(str, modifiers, argument)
             elseif type(replacement) == "function" then
                 table.insert(out, replacement(argument))
             else
-                M.notify("format_modifiers: unrecognized modifier $(" .. name .. ")")
+                M.notify("unknown modifier $(" .. name .. ") in:\n" .. str)
                 return nil
             end
             mod_start = 0
@@ -110,7 +110,7 @@ function M.format_modifiers(str, modifiers, argument)
     -- A `$` or `$(` the string ended inside: the tail was never a modifier, and
     -- returning what was collected so far would silently drop it.
     if mod_start ~= 0 then
-        M.notify("format_modifiers: unterminated modifier in:\n" .. str)
+        M.notify("a modifier with no closing ')' in:\n" .. str)
         return nil
     end
 

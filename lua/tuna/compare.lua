@@ -107,7 +107,7 @@ function M.compare_output(output, expected, method)
     -- scheduled because comparison may run inside a libuv callback, where direct
     -- calls into the Neovim API (vim.notify) are not allowed
     vim.schedule(function()
-        utils.notify("compare_output: unrecognized method '" .. vim.inspect(method) .. "'")
+        utils.notify("unknown compare method " .. vim.inspect(method) .. ", so outputs are not judged.")
     end)
     return nil
 end

@@ -107,6 +107,22 @@ local function failure_reason(res, timeout)
     end
 end
 
+---What the `?` legend adds for a stress run: the row the search is shown on, and what the
+---keys that act on a whole run do to the search.
+---@return { title: string, rows: string[][] }
+function StressRunner:legend_rows()
+    return {
+        title = "STRESS",
+        rows = {
+            { "the search row", "the last one, the input being tried and both outputs," },
+            { " ", "numbered as the counterexample it is looking for" },
+            { "run again on it", "does nothing, it is not a testcase" },
+            { "stop", "ends the search and the testcases re-running beside it" },
+            { "run all again", "searches again, from seed 1" },
+        },
+    }
+end
+
 ---Extra "Run" pane rows below mode/judge: the live stress counters, as
 ---{ label, value } pairs (the UI aligns the colons), one per line.
 ---@return string[][]
@@ -127,6 +143,25 @@ function StressRunner:row_label(tc)
         return "TC " .. self.next_num
     end
     return type(tc.tcnum) == "number" and ("TC " .. tc.tcnum) or tostring(tc.tcnum)
+end
+
+---A testcase added, restored or split off while the board is idle goes above the search row,
+---which stays last, and moves the number the search would save under past it: the search row
+---wears that number, and would otherwise read the same as the row just added. Every search
+---rebuilds its rows from disk first, so this is what keeps the board honest in between.
+---@param tcnum integer
+function StressRunner:add_testcase_row(tcnum)
+    core.RunnerCore.add_testcase_row(self, tcnum)
+    if self.search_entry then
+        local row = table.remove(self.tcdata)
+        for i, tc in ipairs(self.tcdata) do
+            if tc == self.search_entry then
+                table.insert(self.tcdata, i, row)
+                break
+            end
+        end
+    end
+    self.next_num = math.max(self.next_num, tcnum + 1)
 end
 
 ---How many rows stand for a testcase on disk: neither the Compile row nor the search

@@ -235,7 +235,10 @@ is relative. Every configured path goes through these: compile/running directori
   - `layout()` supplies a mode-specific grid that replaces the configured one;
   - `pane_titles()`;
   - `on_details_rendered(ui, tc)` runs after the detail panes are drawn, for panes the mode
-    draws itself.
+    draws itself;
+  - `legend_rows()` returns `{ title, rows }`, a section of the `?` legend of the mode's own
+    (stress: the search row and what the run keys do to the search; interactive: the source
+    playing the other side and what decides the verdict).
 - **Editing contract**:
   - `editable_testcases` is a class flag. `row_editable(tc)` is true only for numeric `tcnum`,
     which excludes Compile and run-all headers.
@@ -264,7 +267,9 @@ is relative. Every configured path goes through these: compile/running directori
   nothing to compile (a prebuilt binary, an interpreted helper) has no compiler to quote and
   gets no step. `build_judge` builds the checker there too, without anything waiting for it,
   so a checker that failed says so beside the others rather than on the first verdict.
-  `build_sources(tc)` is what the UI draws, in pane order; `build_spoke`/`build_pending`
+  `build_sources(tc)` is what the UI draws, in pane order, each with the `role` its spec
+  carries (`tools.helper` stamps it, the solution is `solution`), which is what keys its pane;
+  `build_spoke`/`build_pending`
   answer whether the step had anything to say and whether it is over, which is what decides
   if the cursor may be handed to the first testcase. Run-all has no build step: each
   solution's build is a row of its own.
@@ -323,7 +328,11 @@ is relative. Every configured path goes through these: compile/running directori
   `SEARCH`, so it is not editable, not compared against disk, and skipped by the
   counterexample dedup scan, which would otherwise find the input in it every time. It is
   kept last, a counterexample is inserted above it, and `row_label` gives it the number
-  that counterexample would take (`next_num`).
+  that counterexample would take (`next_num`). Every search rebuilds its rows from disk
+  first (`load_testcases`), but the row also exists while the board is idle (listed only, or
+  left carrying a helper's failure), where add, undo and split can put rows beside it: the
+  `add_testcase_row` override puts them above it and moves `next_num` past the number taken,
+  or the board would read one number twice until the next run.
 - **The generator and the bruteforce are judged on the signal too** (`failure_reason`), not
   on the exit code alone: a crash (a sanitizer abort, a segfault) exits 0 and reports the
   signal, so reading the code passed an empty output off as the bruteforce's answer, and
@@ -417,30 +426,40 @@ as `checker <input> <output> <answer>` (exit 0 means correct) and is compiled vi
 ## Results UI (`runner_ui/`)
 
 **Structure**
-- Panes: `st` (the "Run" status, carved from `tc`'s rectangle), `tc` (selector), `so`, `eo`,
-  `si`, `se`. `popup.lua` tiles floats and `split.lua` builds native splits, from the same
+- Panes: `st` (the "Run" status, carved from `tc`'s rectangle), `tc` (selector), and the
+  detail panes, each named for the content it shows on a testcase row (competitest's
+  vocabulary): `si` standard input, `so` standard output, `se` standard error, `eo` expected
+  output. `popup.lua` tiles floats and `split.lua` builds native splits, from the same
   recursive `{ ratio, child }` layout; levels alternate between columns and rows.
+- **Six pane buffers, never more.** A board is these six and makes no other: a buffer
+  nothing shows is a cost with nothing bought. The build step, which has no input, answer or
+  output, borrows the four detail buffers for its sources (`BUILD_PANES`) instead of having
+  its own, and keeps their names out of everything a user reads or writes on that row (see
+  the grid and the view keys below).
 - `M.owner_of(bufnr)` answers which runner a pane buffer belongs to, from the module-level
   `pane_owner` map filled in `show_ui` and cleared in `delete` (`commands.target_buffer`).
-- `layout.resolve` validates a layout (known names, no duplicates, well-formed pairs, `tc`
-  present) and falls back to the default with one WARN. A pane the layout omits still gets a
+- `layout.resolve` validates a layout (known names, no duplicates, well-formed pairs, the
+  names its kind requires) and falls back to the default with one WARN. Two kinds, two
+  vocabularies that do not mix (`layout.kinds`): a testcase row's grid (`run`) places `tc` and
+  the detail panes; the build step's (`build`) places `tc` and one `build` cell, and nothing
+  else, since the detail panes' names would say stdout or stdin there. A pane the layout omits still gets a
   **buffer** (content kept, viewer can open it) but no window, so its `winid` is nil: every
   window call goes through `w.winid and api.nvim_win_is_valid(w.winid)`, never the second
   half alone. Which panes are omitted changes with the row on screen, so any pane can be
-  windowless at any moment (the build step is drawn with Errors alone).
+  windowless at any moment (the build step draws only its own sources).
 - `init_ui(windows, config, winid, status_rows, opts)`; `opts` comes from
   `RunnerUI:layout_opts(idx?)` (`row_layout` + runner `pane_titles`).
 - **The grid follows the row on screen.** `row_layout` answers the build step with
-  `runner_ui.compile_layout` (selector + Errors, `false` to keep the mode's grid) and every
-  other row with the mode's `layout()` or the configured one. When the build step has more
-  than one source, `build_assignment` gives each a pane and `stack_into` puts them where the
-  Errors pane was, one above the other: the solution keeps `se`, and each helper takes a pane
-  the grid is not already using (`BUILD_PANES`), so the three answers that have to agree —
-  the grid, the titles (`Errors: gen.cpp`) and what is drawn into each pane — are worked out
-  in one place. A pane is named after its source only when there is more than one, and the
+  `runner_ui.compile_layout` (`compile_grid`, validated once as a `build` grid) and every
+  other row with the mode's `layout()` or the configured one. `build_assignment` gives each
+  source of the build step one of the `BUILD_PANES` buffers, in order, and `stack_into`
+  splits the grid's `build` cell into them, one above the other (one source takes the cell
+  whole), so the answers that have to agree — the grid, the titles (`Errors: gen.cpp`), what
+  is drawn into each pane and which key opens it (`opens`) — are worked out in one place. A pane is named after its source only when there is more than one, and the
   build step's panes are filled by the UI rather than by `pane_content`: a build is the same
-  thing in every mode. `compile_base_layout` is the grid before the stacking, which for
-  `compile_layout = false` is the mode's or the interface's own (`configured_layout`). The render tick compares it
+  thing in every mode. There is no "keep the testcase grid" setting for the build row: that
+  grid has no `build` cell, so it would bring back a detail pane's name meaning two things.
+  The render tick compares it
   with `drawn_layout` and calls `redraw_grid`, which asks the interface to `relayout`: the
   panes keep their buffers (content, keymaps, unwritten edits) and are only moved, opened or
   closed, because rebuilding them would drop all of that and race the rows landing in them.
@@ -557,6 +576,20 @@ as `checker <input> <output> <answer>` (exit 0 means correct) and is compiled vi
   in insert mode and move by window geometry; `st` is never a focus target.
 - `RunnerUI:writable_pane` decides which panes are typed into. The legend (`?`, `show_help`)
   and messages render keys from the config.
+- The `view_*` keys (`view_input`, `view_expected`, `view_stdout`, `view_stderr`) are bound
+  from `VIEW_ACTIONS`, pane to action, and `runner_ui.title_keys` (on by default) names them
+  in the titles from the same maps (`titled_with_keys`), so the two cannot disagree. They open
+  what the row actually holds, through `view_pane`: on a testcase row the pane they name; on
+  the build step the source whose role the key stands for (`BUILD_ACTIONS`), which is the pane
+  that source's program is about when a testcase runs: the solution by errors, the generator
+  and the interactor by input (they write it), the bruteforce by the answer, the checker by
+  output (it judges it). No run compiles two sources that share a key (the generator and the
+  interactor never meet), so every build pane has a key of its own, and a key with no such
+  source in this run opens nothing. No new
+  letters: every free one is a motion a list needs (`gg`, `w`, `b`, `v`, `y`). The panes are
+  the detail buffers underneath, so mapping the keys by buffer would have `o` open a
+  generator's compiler errors. The legend spells the build row's keys out when it has more
+  than one source (`legend_build_row`), since there they do not mean what they say.
 
 **Look**
 - Writable panes wear `runner_ui.editable_border_highlight` (default `TunaEditable`, bold
@@ -860,9 +893,13 @@ specific Vim error about a buffer the user never opened.
     (`settle_results`), the local verdict a finished normal, run-all and feed run saves,
     live's typing keys starting a session, the build step showing one named pane per source
     it compiles (and none for a helper with nothing to compile, nor a name when the solution
-    is alone), panes renamed and un-accented for it and back again for a testcase row, and what the stress search trusts (a bruteforce
+    is alone) without a buffer more than a board's six, its grid's own vocabulary, a key for
+    every source by its role and titles naming it, the legend's sections for stress and live
+    interactive and its build-row line (and none of that for a plain run), panes renamed and un-accented for it and back again for a
+    testcase row, and what the stress search trusts (a bruteforce
     that crashed or ran past its own budget saving nothing, one that printed nothing
-    saving an empty answer, the row the search is shown on and when it is listed, a helper
+    saving an empty answer, the row the search is shown on, when it is listed and that it
+    stays last and numbered past every testcase while the board is edited, a helper
     that failed reported on that row and on the Compile row rather than in a float, the search
     running beside the testcases on disk rather than after them, a failed build finishing it
     and spawning nothing behind it, in every mode that builds a solution of its own),

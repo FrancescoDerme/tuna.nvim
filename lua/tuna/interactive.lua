@@ -205,6 +205,39 @@ function InteractiveRunner:owns_pane(name)
     return name == "si" and self.source == "live"
 end
 
+-- What each source adds to the `?` legend: who plays the other side and how, and what decides
+-- the verdict. The other sources are named last, since switching is a command, not a key.
+local LEGEND = {
+    live = {
+        { "you", "play the other side, in the Live column" },
+        { "start typing", "i, a, o or <CR> in the Live column" },
+        { "send a line", "<CR>" },
+        { "the verdict", "none, you are the judge" },
+    },
+    feed = {
+        { "the input", "is sent to the solution a line at a time" },
+        { "the verdict", "its output against the expected output" },
+    },
+    interactor = {
+        { "the interactor", "plays the other side, in the Live column" },
+        { "the verdict", "the interactor's exit code, 0 is correct" },
+    },
+}
+
+---What the `?` legend adds for an interactive run: the source playing the other side.
+---@return { title: string, rows: string[][] }
+function InteractiveRunner:legend_rows()
+    local rows = vim.deepcopy(LEGEND[self.source] or {})
+    local others = {}
+    for _, source in ipairs({ "live", "feed", "interactor" }) do
+        if source ~= self.source then
+            others[#others + 1] = source
+        end
+    end
+    rows[#rows + 1] = { "other sources", ":Tuna run interactive " .. table.concat(others, " or ") }
+    return { title = "INTERACTIVE, " .. self.source:upper(), rows = rows }
+end
+
 ---One extra "Run" pane row, under the judge: which side is playing the interactor. A
 ---setting like the mode and the judge, so it sits with them rather than below the run's
 ---own rows.

@@ -27,17 +27,32 @@ M.titles = {
     se = " Errors ",
 }
 
----The panes a layout may place. `st` is derived from `tc`, so it isn't one of them.
-M.placeable = { tc = true, so = true, eo = true, si = true, se = true }
+---What a grid may place, by what it is for. A testcase row's grid is written in the panes'
+---own names, each naming the content it shows. The build step's is written as `tc` and one
+---`build` cell, which the UI splits into a pane per source it compiles: those are the detail
+---panes' buffers underneath, but what they hold there is a compiler's output rather than a
+---stdout or a stdin, so the names that say those things have no place in its grid. `st` is
+---derived from `tc`, so it is never placed.
+M.kinds = {
+    run = { placeable = { tc = true, so = true, eo = true, si = true, se = true }, required = { "tc" } },
+    build = { placeable = { tc = true, build = true }, required = { "tc", "build" } },
+}
+
+-- Why a grid without one of the names it needs is refused.
+local MISSING = {
+    tc = "no 'tc' pane, the testcase selector cannot be left out",
+    build = "no 'build' cell, the build step would have nowhere to show what its compilers said",
+}
 
 ---@private
 ---Collect a layout's leaf names in order, or report the first structural problem.
 ---@param layout any
 ---@param acc string[]
+---@param placeable table<string, boolean> the names this kind of grid may place
 ---@return string[]? leaves, string? err
-local function collect(layout, acc)
+local function collect(layout, acc, placeable)
     if type(layout) == "string" then
-        if not M.placeable[layout] then
+        if not placeable[layout] then
             return nil, ("unknown pane '%s'"):format(layout)
         end
         if vim.tbl_contains(acc, layout) then
@@ -53,23 +68,12 @@ local function collect(layout, acc)
         if type(entry) ~= "table" or type(entry[1]) ~= "number" or entry[2] == nil then
             return nil, "expected a list of { ratio, pane-or-layout } pairs"
         end
-        local ok, err = collect(entry[2], acc)
+        local ok, err = collect(entry[2], acc, placeable)
         if not ok then
             return nil, err
         end
     end
     return acc
-end
-
----The panes a layout places, in order, or an empty list when it doesn't parse. For
----callers that build a layout out of another one and need to know what is already in it.
----@param layout any
----@return string[]
-function M.leaves(layout)
-    if type(layout) ~= "table" then
-        return {}
-    end
-    return (collect(layout, {})) or {}
 end
 
 ---Validate a layout and report which panes it places. A layout that can't be used
@@ -78,9 +82,11 @@ end
 ---@param layout table the configured layout
 ---@param option string the option's name, for the warning (e.g. "popup_ui.layout")
 ---@param fallback table the default layout for that option
+---@param kind "run"|"build"? what the grid is for (default a testcase row's, `run`)
 ---@return table layout the layout to lay out
 ---@return table<string, boolean> placed the panes it places
-function M.resolve(layout, option, fallback)
+function M.resolve(layout, option, fallback, kind)
+    local spec = M.kinds[kind or "run"]
     -- The top level is always a list, even for a single pane (`{ { 1, "tc" } }`):
     -- the split interface descends by index, so a bare name there has nothing to
     -- descend into.
@@ -88,14 +94,17 @@ function M.resolve(layout, option, fallback)
     if type(layout) ~= "table" then
         err = "expected a list of { ratio, pane-or-layout } pairs"
     else
-        leaves, err = collect(layout, {})
+        leaves, err = collect(layout, {}, spec.placeable)
     end
-    if leaves and not vim.tbl_contains(leaves, "tc") then
-        err = "no 'tc' pane, the testcase selector cannot be left out"
+    for _, name in ipairs(leaves and spec.required or {}) do
+        if not vim.tbl_contains(leaves, name) then
+            err = MISSING[name]
+            break
+        end
     end
     if err then
         utils.notify(("%s: %s, using the default layout."):format(option, err), "WARN")
-        leaves = collect(fallback, {}) or {}
+        leaves = collect(fallback, {}, spec.placeable) or {}
         layout = fallback
     end
 
