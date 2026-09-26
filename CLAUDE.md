@@ -90,10 +90,11 @@ lua/tuna/
   navigate.lua      :Tuna next / prev
   recent.lua        :Tuna last problem / contest, cwd changes
   temp.lua          scratch solution, folded into a download by `download sync`
-  scaffold.lua      helper-file starters (checker/gen/brute/interactor)
+  scaffold.lua      helper-file starters (checker/generator/bruteforce/interactor)
   menu.lua          bare :Tuna menu
   keymaps.lua       opt-in keymaps and preset
   health.lua        :checkhealth tuna
+scaffolds/          the shipped helper starters, `<role>.<ext>`
 doc/tuna.txt        vimdoc
 tests/              test suite (`tests/run.sh`)
 tuna.nvim.json      package metadata
@@ -848,8 +849,21 @@ specific Vim error about a buffer the user never opened.
   re-run (it tracks `applied_global` and clears the augroup). `preset` expands under a prefix
   with which-key groups (`tt`, `td`, `tg`); a key keeps its short label only while it stays in
   its group. `clean` is not in the preset.
-- **`scaffold.lua`**: starter helper files per language, with overridable file names and
-  templates. `template_for` is used by `clean`.
+- **`scaffold.lua`**: starter helper files. Templates are **plain files** named `<role>.<ext>`
+  (the role words of `tools.ROLES`, the same as everywhere), looked up in
+  `scaffold.directory` (default under `stdpath("config")`) and then in the `scaffolds/` folder
+  shipped at the plugin root, each role and language on its own, so replacing a starter or
+  adding a language is a file, not configuration, and no one path stands for every language.
+  The shipped folder is found from `scaffold.lua`'s own location (`SHIPPED`), not the
+  runtimepath, where another plugin's `scaffolds/` would mix in. The file written is named
+  after the role's first `tool_names`, the name discovery looks for first: a separate list of
+  scaffold names could and did disagree with it, writing helpers the run then did not find.
+  The language is the one asked for, else `scaffold.language`, else the solution's; one the
+  role has no template in offers the languages it has (a helper is compiled and run in its
+  own language, whatever the solution's). Templates are written verbatim, with no `$(…)`
+  expansion: `$(` is command substitution in a shell. `languages` feeds the completion of
+  `:Tuna scaffold <role> <Tab>`, and `template_for` lets `clean` recognise an untouched
+  scaffold.
 - **`health.lua`**: read-only checks for Neovim version, setup, the executables named by
   compile/run commands, Competitive Companion, submit providers and optional plugins.
 - **`init.lua`** also wires `recent.setup()`, `submit.restore` on `BufReadPost`, and a
@@ -883,6 +897,11 @@ specific Vim error about a buffer the user never opened.
     giving way and coming back, old sidecar entries, runners refreshing the checker per run,
     run-all honouring `checker off`, the Run pane's settings rows and which of them read as
     forced, and stress/interactor reruns reporting a missing helper;
+  - `scaffold.lua`: the shipped starters, names from `tool_names` (and found by discovery),
+    the user's folder over the shipped one for its own language only, adding a language by
+    adding a file, `scaffold.language` and a language asked for by name over it, the
+    languages offered when one has no starter, an existing file asked about, `clean`
+    recognising an untouched scaffold, and completion of roles and languages;
   - `temp.lua`: the templates a scratch can start from, when a scratch is resumed, the
     resume/restart and template menus, and absorbing keeping the header of the template actually used;
   - `testcases.lua`, `compare.lua`, `judges.lua`, `download.lua`, `clean.lua`, `submit.lua`:

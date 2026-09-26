@@ -126,15 +126,15 @@ M.defaults = {
         },
     },
 
-    -- scaffolding (:Tuna scaffold <checker|generator|brute|interactor> [ext]) — drop
-    -- a starter helper into the problem directory, in the solution's language by
-    -- default. `files` are base names (extension chosen from the target language).
-    -- `templates[kind]` overrides the built-in stub: a template-file path string,
-    -- or a per-language { [ext] = path } table (like `template_file`). Built-in
-    -- stubs exist for cpp and py.
+    -- scaffolding (:Tuna scaffold <checker|generator|bruteforce|interactor> [ext]) — drop a
+    -- starter helper beside the solution, named after the role's first `tool_names`.
+    -- Templates are plain files named `<role>.<ext>` (`generator.cpp`), looked up in
+    -- `directory` first and in the ones tuna ships (its `scaffolds/` folder) second: put a
+    -- file there to replace one of those, or to add a language. `language` writes every
+    -- scaffold in one language (an extension, "cpp") instead of the solution's.
     scaffold = {
-        files = { checker = "checker", generator = "gen", brute = "brute", interactor = "interactor" },
-        templates = { checker = nil, generator = nil, brute = nil, interactor = nil },
+        directory = vim.fn.stdpath("config") .. "/tuna/scaffolds",
+        language = nil,
     },
 
     -- clean (:Tuna clean) — remove created-but-unused files. All of a run's per-file

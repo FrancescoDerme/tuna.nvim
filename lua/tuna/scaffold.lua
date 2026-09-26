@@ -1,272 +1,170 @@
 -- lua/tuna/scaffold.lua
 --
--- Drop a starter helper for the stress/checker/interactive run modes into the
--- problem directory (`:Tuna scaffold <checker|generator|brute|interactor> [ext]`),
--- then open it. The helper is created in the *solution's* language by default (the
--- current buffer's extension), or in an explicit language when an extension is
--- given. Built-in, dependency-free templates ship for C++ and Python; users can
--- override the template per kind and per language via `config.scaffold.templates`
--- (a path string, or a `{ [ext] = path }` table — like `template_file`).
+-- Drop a starter helper for the stress, checker and interactive run modes beside the
+-- solution (`:Tuna scaffold <checker|generator|bruteforce|interactor> [ext]`), then open it.
+--
+-- Templates are plain files named `<role>.<ext>` (`generator.cpp`), looked up in
+-- `scaffold.directory` first and in the `scaffolds/` folder shipped with the plugin second.
+-- Overriding one, adding a language and reading the defaults are all a matter of files, and
+-- each role and language is looked up on its own, so a template stands for exactly one of
+-- each. The file written is named after the first of the role's `tool_names`, the name
+-- discovery looks for first, so a scaffold is always found by the run it was made for.
+--
+-- The language is the one asked for, else `scaffold.language`, else the solution's. A role
+-- with no template in it but one in other languages offers those instead of stopping.
 
 local config = require("tuna.config")
+local tools = require("tuna.tools")
 local utils = require("tuna.utils")
 local widgets = require("tuna.widgets")
 
 local M = {}
 
----Default base names per kind (extension is chosen from the target language).
-local DEFAULT_FILES = {
-    checker = "checker",
-    generator = "gen",
-    brute = "brute",
-    interactor = "interactor",
-}
+-- The templates shipped with the plugin, found from this file's own location: through the
+-- runtimepath another plugin's `scaffolds/` folder would be mixed in with them.
+local SHIPPED = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h:h:h") .. "/scaffolds"
 
----Built-in, dependency-free templates, keyed by kind then by extension.
-local DEFAULT_TEMPLATES = {
-    checker = {
-        cpp = [[// Checker (special judge). Invoked as: checker <input> <output> <answer>
-//   argv[1] = test input        argv[2] = participant output
-//   argv[3] = jury answer
-// Exit 0 = accepted, non-zero = wrong answer. Put a short reason on stderr.
-// Use this when a problem has several correct answers.
-#include <bits/stdc++.h>
-using namespace std;
-
-int main(int argc, char** argv) {
-    if (argc < 4) { cerr << "usage: checker <input> <output> <answer>\n"; return 2; }
-    ifstream inf(argv[1]), ouf(argv[2]), ansf(argv[3]);
-
-    // TODO: validate `ouf` against `inf`/`ansf`. Default: token-by-token equality.
-    string a, b;
-    while (ansf >> b) {
-        if (!(ouf >> a) || a != b) { cerr << "wrong answer\n"; return 1; }
-    }
-    if (ouf >> a) { cerr << "trailing output\n"; return 1; }
-
-    cerr << "ok\n";
-    return 0;
-}
-]],
-        py = [[# Checker (special judge). Invoked as: checker <input> <output> <answer>
-#   argv[1] = test input   argv[2] = participant output   argv[3] = jury answer
-# Exit 0 = accepted, non-zero = wrong answer. Put a short reason on stderr.
-import sys
-
-_inf = open(sys.argv[1]).read()
-ouf = open(sys.argv[2]).read()
-ans = open(sys.argv[3]).read()
-
-# TODO: validate `ouf` against `_inf`/`ans`. Default: token-by-token equality.
-if ouf.split() != ans.split():
-    print("wrong answer", file=sys.stderr)
-    sys.exit(1)
-print("ok", file=sys.stderr)
-]],
-    },
-    generator = {
-        cpp = [[// Generator. Invoked as: gen <seed>
-// Print one random test to stdout. Seed the RNG from argv[1] so tuna's stress
-// testing can reproduce a failing case.
-#include <bits/stdc++.h>
-using namespace std;
-
-int main(int argc, char** argv) {
-    unsigned long long seed = argc > 1 ? strtoull(argv[1], nullptr, 10) : 0ULL;
-    mt19937_64 rng(seed);
-    auto rnd = [&](long long lo, long long hi) { return lo + (long long)(rng() % (hi - lo + 1)); };
-
-    // TODO: emit a valid random test.
-    long long a = rnd(1, 100), b = rnd(1, 100);
-    cout << a << ' ' << b << '\n';
-    return 0;
-}
-]],
-        py = [[# Generator. Invoked as: gen <seed>
-# Print one random test to stdout. Seed the RNG from argv[1] so tuna's stress
-# testing can reproduce a failing case.
-import random, sys
-
-random.seed(int(sys.argv[1]) if len(sys.argv) > 1 else 0)
-
-# TODO: emit a valid random test.
-a, b = random.randint(1, 100), random.randint(1, 100)
-print(a, b)
-]],
-    },
-    brute = {
-        cpp = [[// Reference / brute force. Read from stdin, write the correct answer to stdout.
-// Correctness matters, speed does not — this is the oracle tuna compares against.
-#include <bits/stdc++.h>
-using namespace std;
-
-int main() {
-    ios::sync_with_stdio(false);
-    cin.tie(nullptr);
-
-    // TODO: solve correctly (a slow but obviously-right approach is ideal).
-    return 0;
-}
-]],
-        py = [[# Reference / brute force. Read from stdin, write the correct answer to stdout.
-# Correctness matters, speed does not — this is the oracle tuna compares against.
-import sys
-
-data = sys.stdin.read().split()
-
-# TODO: solve correctly (a slow but obviously-right approach is ideal).
-]],
-    },
-    interactor = {
-        cpp = [[// Interactor for an interactive problem. Invoked as: interactor <input> <answer>
-//   argv[1] = test input (the hidden data)   argv[2] = jury answer (may be empty)
-// Talk to the solution over stdio: read its queries on stdin, print responses on
-// stdout — FLUSH after every line (endl). Exit 0 to accept, non-zero to reject;
-// put a short reason on stderr.
-#include <bits/stdc++.h>
-using namespace std;
-
-int main(int argc, char** argv) {
-    if (argc < 2) { cerr << "usage: interactor <input> [answer]\n"; return 2; }
-    ifstream inf(argv[1]);
-
-    // TODO: read the hidden data from `inf`, then interact over cin/cout.
-    // Example (guess-the-number):
-    //   long long secret; inf >> secret;
-    //   for (int q = 0; q < 40; q++) {
-    //       long long g; if (!(cin >> g)) return 1;
-    //       if (g == secret) { cout << "correct" << endl; return 0; }
-    //       cout << (g < secret ? "higher" : "lower") << endl;
-    //   }
-    //   cerr << "query budget exceeded\n"; return 1;
-    return 0;
-}
-]],
-        py = [[# Interactor for an interactive problem. Invoked as: interactor <input> <answer>
-#   argv[1] = test input (hidden data)   argv[2] = jury answer (may be empty)
-# Talk to the solution over stdio: read queries with sys.stdin.readline(), print
-# responses with print(..., flush=True). Exit 0 to accept, non-zero to reject.
-import sys
-
-data = open(sys.argv[1]).read().split()
-
-# TODO: read the hidden data, then interact. Example (guess-the-number):
-#   secret = int(data[0])
-#   for _ in range(40):
-#       line = sys.stdin.readline()
-#       if not line:
-#           sys.exit(1)
-#       g = int(line)
-#       if g == secret:
-#           print("correct", flush=True); sys.exit(0)
-#       print("higher" if g < secret else "lower", flush=True)
-#   sys.exit(1)
-]],
-    },
-}
-
----Resolve the template content for a kind + extension: a user override (a path
----string, or a `{ [ext] = path }` table) wins; otherwise the built-in for `ext`.
----@param override string|table|nil `config.scaffold.templates[kind]`
----@param ext string target extension (e.g. "cpp", "py")
----@param builtins table<string, string> built-in templates for the kind, by ext
----@param quiet boolean? suppress the "template not found" warning (for classification)
----@return string? # template content, or nil if no template exists for `ext`
-local function resolve_template(override, ext, builtins, quiet)
-    if type(override) == "table" then
-        override = override[ext]
-    end
-    if type(override) == "string" then
-        override = utils.expand_home(override)
-        local c = utils.read_file(override)
-        if c then
-            return c
-        end
-        if not quiet then
-            utils.notify("scaffold: template '" .. override .. "' not found, using the built-in.", "WARN")
-        end
-    end
-    return builtins[ext]
-end
-
----Resolve the template content a scaffold of `kind` + `ext` would be created with,
----honouring `config.scaffold.templates`. Exposed (quietly — no warning on a missing
----override) so `clean.lua` can recognise an untouched scaffold by its template.
----@param kind string "checker" | "generator" | "brute" | "interactor"
----@param ext string target extension
+---The folders templates are looked up in, in order: the user's, then the shipped one.
 ---@param cfg table resolved buffer config
----@return string? # template content, or nil if none exists for `ext`
-function M.template_for(kind, ext, cfg)
-    if not DEFAULT_TEMPLATES[kind] then
-        return nil
+---@param dir string the solution's directory, what a relative `scaffold.directory` is read from
+---@return string[]
+local function folders(cfg, dir)
+    local own = cfg.scaffold and cfg.scaffold.directory
+    if type(own) == "string" and own ~= "" then
+        return { utils.normalize_path(utils.expand_home(own), dir), SHIPPED }
     end
-    local scfg = (cfg and cfg.scaffold) or {}
-    return resolve_template(scfg.templates and scfg.templates[kind], ext, DEFAULT_TEMPLATES[kind], true)
+    return { SHIPPED }
 end
 
----Create (or open) the scaffold file for `kind` in the current problem directory.
----@param kind string "checker" | "generator" | "brute" | "interactor"
----@param bufnr integer? defaults to the current buffer
----@param ext string? target language extension; defaults to the buffer's extension
-function M.create(kind, bufnr, ext)
-    bufnr = bufnr or vim.api.nvim_get_current_buf()
-    if not kind or not DEFAULT_TEMPLATES[kind] then
-        utils.notify("scaffold: kind must be one of checker | generator | brute | interactor.")
-        return
+---The template for `role` in `ext`: the first folder's `<role>.<ext>`.
+---@param role string
+---@param ext string
+---@param dirs string[]
+---@return string? path
+local function template_path(role, ext, dirs)
+    for _, d in ipairs(dirs) do
+        local path = d .. "/" .. role .. "." .. ext
+        if utils.file_exists(path) then
+            return path
+        end
     end
-    config.load_buffer_config(bufnr)
+end
+
+---Every language `role` has a template in, across the folders, sorted.
+---@param role string
+---@param dirs string[]
+---@return string[]
+local function languages_in(role, dirs)
+    local seen, out = {}, {}
+    for _, d in ipairs(dirs) do
+        if vim.fn.isdirectory(d) == 1 then
+            for name, kind in vim.fs.dir(d) do
+                local base, ext = name:match("^(.+)%.([^.]+)$")
+                if base == role and kind ~= "directory" and not seen[ext] then
+                    seen[ext] = true
+                    out[#out + 1] = ext
+                end
+            end
+        end
+    end
+    table.sort(out)
+    return out
+end
+
+---The languages `role` can be scaffolded in for the solution in `bufnr`.
+---@param role string
+---@param bufnr integer
+---@return string[]
+function M.languages(role, bufnr)
     local cfg = config.get_buffer_config(bufnr)
-    local scfg = cfg.scaffold or {}
+    return languages_in(role, folders(cfg, vim.fn.fnamemodify(vim.api.nvim_buf_get_name(bufnr), ":p:h")))
+end
 
-    local bufname = vim.api.nvim_buf_get_name(bufnr)
-    ext = ext or vim.fn.fnamemodify(bufname, ":e")
-    if ext == "" then
-        utils.notify("scaffold: no language to target, open a solution file or pass an extension.")
-        return
-    end
+---The content a scaffold of `role` in `ext` would be written with, or nil when there is no
+---such template. `clean` reads it to tell an untouched scaffold from one that was written in.
+---@param role string
+---@param ext string
+---@param cfg table resolved buffer config
+---@param dir string the directory the scaffold sits in
+---@return string?
+function M.template_for(role, ext, cfg, dir)
+    local path = template_path(role, ext, folders(cfg, dir))
+    return path and utils.read_file(path) or nil
+end
 
-    local base = (scfg.files and scfg.files[kind]) or DEFAULT_FILES[kind]
-    local fname = base .. "." .. ext
-    local content = resolve_template(scfg.templates and scfg.templates[kind], ext, DEFAULT_TEMPLATES[kind])
-    if not content then
-        utils.notify(
-            "scaffold: no built-in "
-                .. kind
-                .. " template for '."
-                .. ext
-                .. "', "
-                .. "set config.scaffold.templates."
-                .. kind
-                .. " for this language."
-        )
-        return
-    end
-
-    local dir = vim.fn.fnamemodify(bufname, ":p:h")
+---Write the scaffold of `role` in `ext` beside the solution and open it, asking first when a
+---file of that name is already there.
+---@param role string
+---@param ext string
+---@param cfg table
+---@param dir string the solution's directory
+---@param dirs string[] the template folders
+local function write(role, ext, cfg, dir, dirs)
+    local names = (cfg.tool_names and cfg.tool_names[role]) or tools.DEFAULT_NAMES[role] or {}
+    local fname = (names[1] or role) .. "." .. ext
     local path = dir .. "/" .. fname
-
     local function create()
-        utils.write_file(path, content)
+        utils.write_file(path, utils.read_file(template_path(role, ext, dirs)) or "")
         vim.cmd.edit(vim.fn.fnameescape(path))
         utils.notify("scaffold: created " .. fname .. ".", "INFO")
     end
-
     if not utils.file_exists(path) then
         create()
         return
     end
-
-    -- The file already exists: ask via the plugin's floating chooser (same UI as
-    -- the `:Tuna` menu) rather than a plain `confirm` command-line prompt.
-    local restore_winid = vim.api.nvim_get_current_win()
-    widgets.menu({ "Open it", "Overwrite", "Cancel" }, '"' .. fname .. '" already exists', function(idx)
+    widgets.menu({ "Open it", "Overwrite", "Stop" }, '"' .. fname .. '" already exists', function(idx)
         if idx == 1 then
             vim.cmd.edit(vim.fn.fnameescape(path))
         elseif idx == 2 then
             create()
         end
-        -- idx 3 (Cancel) or dismissed (nil): do nothing.
-    end, restore_winid)
+    end, vim.api.nvim_get_current_win())
+end
+
+---Create (or open) the scaffold of `role` beside the solution in `bufnr`.
+---@param role string one of `tools.ROLES`
+---@param bufnr integer? defaults to the current buffer
+---@param ext string? the language to write it in; else `scaffold.language`, else the solution's
+function M.create(role, bufnr, ext)
+    bufnr = bufnr or vim.api.nvim_get_current_buf()
+    if not vim.tbl_contains(tools.ROLES, role) then
+        utils.notify("scaffold: the role is one of " .. table.concat(tools.ROLES, ", ") .. ".")
+        return
+    end
+    config.load_buffer_config(bufnr)
+    local cfg = config.get_buffer_config(bufnr)
+    local solution = vim.api.nvim_buf_get_name(bufnr)
+    local dir = vim.fn.fnamemodify(solution, ":p:h")
+    ext = ext or (cfg.scaffold and cfg.scaffold.language) or vim.fn.fnamemodify(solution, ":e")
+    if ext == "" then
+        utils.notify("scaffold: no language to write it in, open a solution file or pass an extension.")
+        return
+    end
+
+    local dirs = folders(cfg, dir)
+    if template_path(role, ext, dirs) then
+        write(role, ext, cfg, dir, dirs)
+        return
+    end
+    -- Not in this language. One it does have is still a working helper, since helpers are
+    -- compiled and run by their own language, so those are offered rather than refused.
+    local others = languages_in(role, dirs)
+    if #others == 0 then
+        local where = #dirs > 1 and ("add a " .. role .. "." .. ext .. " to " .. dirs[1])
+            or "set scaffold.directory and add one there"
+        utils.notify(("scaffold: no %s template in any language, %s."):format(role, where), "WARN")
+        return
+    end
+    local items = {}
+    for i, other in ipairs(others) do
+        items[i] = "Write it in ." .. other
+    end
+    items[#items + 1] = "Stop"
+    widgets.menu(items, ("No %s template for .%s"):format(role, ext), function(idx)
+        if idx and others[idx] then
+            write(role, others[idx], cfg, dir, dirs)
+        end
+    end, vim.api.nvim_get_current_win())
 end
 
 return M

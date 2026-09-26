@@ -164,9 +164,10 @@ lowercase `:tuna` expands to it.
 :Tuna download {mode}   One of `testcases`, `problem`, `contest`, `sync`,
                         `persistently`, `status`, `stop`; see |tuna-download|.
 
-:Tuna scaffold {kind} [ext]
-                        Create a starter `checker`, `generator`, `brute` or
-                        `interactor` beside the solution.
+:Tuna scaffold {role} [ext]
+                        Create a starter `checker`, `generator`,
+                        `bruteforce` or `interactor` beside the solution.
+                        See |tuna-scaffold|.
 
 :Tuna submit [clear]    Submit the solution. `clear` dismisses the verdict and
                         cancels a submission still being watched.
@@ -385,7 +386,16 @@ open results UI whose mode has lost its helper says so rather than running.
 The judge is resolved per run the same way, so `:Tuna checker off` and `:Tuna
 compare` apply from the next run on.
 
-`:Tuna scaffold` drops in a dependency-free starter for any of them.
+                                                              *tuna-scaffold*
+`:Tuna scaffold` drops in a dependency-free starter for any of them, named as
+`tool_names` says so the run finds it (`gen.cpp`), in your solution's
+language, or in `scaffold.language` when you want every helper in one. The
+starters are plain files called `<role>.<ext>`: tuna ships `cpp` and `py` ones
+in its `scaffolds/` folder, and a file of the same name in your
+`scaffold.directory` is used instead, so replacing a starter or adding a
+language is dropping a file there. Ask for a language a role has no starter in
+and tuna offers the ones it has, since a helper is compiled and run in its own
+language whatever the solution is written in.
 
 ------------------------------------------------------------------------------
 DOWNLOADING                                                    *tuna-download*
@@ -614,7 +624,7 @@ Download modifiers, additionally available in the `downloaded_*` paths and in
     $(GROUP)                the raw, unparsed group
     $(URL)                  the problem's address
     $(TIMELIM) $(MEMLIM)    the judge's limits, in ms and MB
-    $(JAVA_MAIN_CLASS)      for Java scaffolding
+    $(JAVA_MAIN_CLASS)      for Java solution templates
     $(JAVA_TASK_CLASS)
     $(DATE)                 now, formatted with `date_format`
 
@@ -810,12 +820,15 @@ RUN MODES AND HELPERS                                  *tuna-config-run-modes*
         `tool_names` finds. A configured helper counts as present just
         as the file does.
 
-`scaffold.files`
-        The basenames `:Tuna scaffold` creates.
+`scaffold.directory`
+        Your starters, files named `<role>.<ext>`, used before the ones
+        shipped in tuna's `scaffolds/` folder. Default
+        `stdpath("config") .. "/tuna/scaffolds"`.
 
-`scaffold.templates`
-        Your own starter files, a table of extension to path, per
-        kind.
+`scaffold.language`
+        An extension (`"cpp"`) every scaffold is written in, instead of the
+        solution's language. A language asked for by name still wins.
+        Default `nil`.
 ------------------------------------------------------------------------------
 KEYMAPS                                                  *tuna-config-keymaps*
 

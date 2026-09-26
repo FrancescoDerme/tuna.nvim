@@ -110,7 +110,7 @@ Every command is a subcommand of `:Tuna` with tab-completion.
   <td>download from Competitive companion</td>
 </tr>
 <tr>
-  <td><code>:Tuna scaffold &lt;checker|generator|brute|interactor&gt; [ext]</code></td>
+  <td><code>:Tuna scaffold &lt;checker|generator|bruteforce|interactor&gt; [ext]</code></td>
   <td>drop in a starter file</td>
 </tr>
 <tr>
@@ -290,8 +290,14 @@ rerun from an open results UI whose mode has lost its helper says so rather than
 The judge is resolved per run the same way, so `:Tuna checker off` and `:Tuna compare` apply
 from the next run on.
 
-`:Tuna scaffold generator|brute|interactor|checker` drops in a dependency-free starter file
-in your language.
+`:Tuna scaffold checker|generator|bruteforce|interactor` drops in a dependency-free starter
+file, named as `tool_names` says so the run finds it (`gen.cpp`), in your solution's language,
+or in `scaffold.language` when you want every helper in one. The starters are plain files
+called `<role>.<ext>`: tuna ships `cpp` and `py` ones in its `scaffolds/` folder, and a file of
+the same name in your `scaffold.directory` (by default `tuna/scaffolds` in your Neovim config)
+is used instead, so replacing a starter or adding a language is dropping a file there. Ask for
+a language a role has no starter in and tuna offers the ones it has, a helper being compiled
+and run in its own language whatever the solution is written in.
 
 **Run all** is for the shape where you have `main.cpp` and `main2.cpp` and want to know
 which one is right — including when they are in _different languages_, since each is
@@ -590,7 +596,7 @@ sets, and which one applies depends on whether a downloaded problem is involved.
 </tr>
 <tr>
   <td><code>$(JAVA_MAIN_CLASS)</code>, <code>$(JAVA_TASK_CLASS)</code></td>
-  <td>for Java scaffolding</td>
+  <td>for Java solution templates</td>
 </tr>
 <tr>
   <td><code>$(DATE)</code></td>
@@ -685,8 +691,8 @@ cursor alone, so one written for C++ is harmless to a Python template.
 | `stress.bruteforce_time`          | `20000`                                                                            | the bruteforce's own time limit per input, in ms (`false` for none) |
 | `stress.generator` / `.bruteforce`| `nil`                                                                              | a path or `{ exec, args }`, used instead of the file `tool_names` finds |
 | `interactive.interactor`          | `nil`                                                                              | likewise                                                            |
-| `scaffold.files`                  | `checker`, `gen`, `brute`, `interactor`                                            | basenames `:Tuna scaffold` creates                                  |
-| `scaffold.templates`              | `nil` per kind                                                                     | your own starter files, `{ [ext] = path }`                          |
+| `scaffold.directory`              | `stdpath("config")/tuna/scaffolds`                                                 | your starters, `<role>.<ext>`, used before the shipped ones         |
+| `scaffold.language`               | `nil`                                                                              | write every scaffold in this language (`"cpp"`), not the solution's |
 
 ### Keymaps
 

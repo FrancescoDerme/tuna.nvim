@@ -29,15 +29,6 @@ local widgets = require("tuna.widgets")
 
 local M = {}
 
--- Scaffolding role -> the scaffold "kind" whose template it is created from. The
--- `bruteforce` tool role is scaffolded as `brute` (see scaffold.lua).
-local ROLE_TO_KIND = {
-    checker = "checker",
-    generator = "generator",
-    bruteforce = "brute",
-    interactor = "interactor",
-}
-
 -- Config language name -> the file extension solutions of that language use, so a
 -- directory scan only reads files that could plausibly be a solution/scaffold.
 local LANG_EXT = { c = "c", cpp = "cpp", python = "py", java = "java", rust = "rs" }
@@ -143,19 +134,16 @@ end
 -- Classification
 --------------------------------------------------------------------------------
 
----Map a base filename (no extension) to the scaffold kind it names, from the
----configured `tool_names` and `scaffold.files`.
+---Map a base filename (no extension) to the helper role it names, from `tool_names`: the
+---names discovery finds a helper by are the names a scaffold is written under.
 ---@param cfg table
 ---@return table<string, string>
-local function tool_kinds(cfg)
+local function tool_roles(cfg)
     local map = {}
-    for role, kind in pairs(ROLE_TO_KIND) do
-        for _, name in ipairs((cfg.tool_names or {})[role] or {}) do
-            map[name] = kind
+    for role, names in pairs(cfg.tool_names or require("tuna.tools").DEFAULT_NAMES) do
+        for _, name in ipairs(names) do
+            map[name] = role
         end
-    end
-    for kind, base in pairs((cfg.scaffold and cfg.scaffold.files) or {}) do
-        map[base] = kind
     end
     return map
 end
@@ -254,24 +242,26 @@ end
 ---@param full string
 ---@param ext string
 ---@param base string basename without extension
----@param kinds table<string, string>
+---@param roles table<string, string> helper role by base name (`tool_roles`)
 ---@param cfg table
 ---@param threshold number similarity in [0,1] at/above which a file counts as unused
----@param cache table<string, any> per-scan memo (templates, keyed by path/kind)
+---@param cache table<string, any> per-scan memo (templates, keyed by path/role)
 ---@return string? reason, number? similarity the score the reason quotes, for ranking
-local function classify(full, ext, base, kinds, cfg, threshold, cache)
+local function classify(full, ext, base, roles, cfg, threshold, cache)
     -- A file generated from a template is small. Anything enormous is certainly not
     -- one, and reading it is exactly the cost worth avoiding on a big scan.
     local stat = vim.uv.fs_stat(full)
     if stat and stat.size > 1048576 then
         return nil
     end
-    local kind = kinds[base]
+    local role = roles[base]
     local tmpls
-    if kind then
-        local key = "\0kind:" .. kind .. ":" .. ext
+    if role then
+        -- Keyed by directory too: a relative `scaffold.directory` is read from it.
+        local dir = vim.fs.dirname(full)
+        local key = "\0role:" .. role .. ":" .. ext .. ":" .. dir
         if cache[key] == nil then
-            cache[key] = require("tuna.scaffold").template_for(kind, ext, cfg) or false
+            cache[key] = require("tuna.scaffold").template_for(role, ext, cfg, dir) or false
         end
         tmpls = cache[key] and { cache[key] } or {}
     else
@@ -294,7 +284,7 @@ local function classify(full, ext, base, kinds, cfg, threshold, cache)
             end
         end
         if best >= threshold then
-            local what = kind and (kind .. " scaffold") or "solution template"
+            local what = role and (role .. " scaffold") or "solution template"
             return ("%d%% match to %s"):format(math.floor(best * 100 + 0.5), what), best
         end
         return nil
@@ -407,7 +397,7 @@ end
 ---@return { path: string, rel: string, reason: string, sim: number }[] files, boolean truncated
 local function scan(dir, cfg, depth, threshold)
     local exts = source_exts(cfg)
-    local kinds = tool_kinds(cfg)
+    local roles = tool_roles(cfg)
     local skips = skip_set(cfg)
     local budget = entry_budget(cfg)
     local cache = {}
@@ -425,9 +415,9 @@ local function scan(dir, cfg, depth, threshold)
             if typ == "file" and not name:match("^%.") and not name:match("/%.") then
                 local ext = name:match("%.([^./]+)$") or ""
                 local base = (name:match("[^/]+$") or name):gsub("%.[^.]*$", "")
-                if exts[ext] or kinds[base] then
+                if exts[ext] or roles[base] then
                     local full = dir .. "/" .. name
-                    local reason, sim = classify(full, ext, base, kinds, cfg, threshold, cache)
+                    local reason, sim = classify(full, ext, base, roles, cfg, threshold, cache)
                     if reason then
                         out[#out + 1] = { path = full, rel = name, reason = reason, sim = sim or 0 }
                     end

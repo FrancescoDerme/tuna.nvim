@@ -312,9 +312,9 @@ local function command_entries(sol, cur)
         add("Compare: " .. cmp_label, function()
             commands.cycle_compare(sol)
         end)
-        for _, kind in ipairs({ "checker", "generator", "brute", "interactor" }) do
-            add("Scaffold " .. kind, function()
-                require("tuna.scaffold").create(kind, cur)
+        for _, role in ipairs(require("tuna.tools").ROLES) do
+            add("Scaffold " .. role, function()
+                require("tuna.scaffold").create(role, cur)
             end)
         end
         add("Next problem", function()

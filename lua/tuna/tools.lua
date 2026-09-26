@@ -23,8 +23,12 @@ local utils = require("tuna.utils")
 
 local M = {}
 
+---The roles a helper can fill, in the order they are offered (completion, the menu).
+M.ROLES = { "checker", "generator", "bruteforce", "interactor" }
+
 -- Conventional base names per role (extension-agnostic). Overridable via
--- `config.tool_names`. Earlier names win when several match.
+-- `config.tool_names`. Earlier names win when several match, and the first is also what
+-- `:Tuna scaffold` names a new helper, so a scaffold is found by the first look.
 M.DEFAULT_NAMES = {
     checker = { "checker", "check" },
     generator = { "gen", "generator" },
