@@ -141,8 +141,10 @@ lowercase `:tuna` expands to it.
                         instead, so it doubles as a viewer.
 
 :Tuna testcase [add/edit/delete] [n]
-                        Manage testcases. Bare `:Tuna testcase` opens the
-                        picker; a bare number edits that testcase.
+                        Manage testcases. Without `n`, editing, deleting
+                        and splitting act on the only testcase, and ask
+                        which when there are several; a bare number edits
+                        that testcase.
 
 :Tuna testcase split [n] [marker]
                         Lift the cases a testcase's paired marker lines

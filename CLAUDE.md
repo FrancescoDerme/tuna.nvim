@@ -169,6 +169,9 @@ is relative. Every configured path goes through these: compile/running directori
   without a per-problem modifier (decided by modifier name, `has_scoping_modifier`) warns once
   per session, because every problem would overwrite the others. The warning is skipped when
   the value comes from a `.tuna.lua`.
+- `:Tuna testcase edit`/`delete`/`split` without a number go through `commands.choose_testcase`:
+  the only testcase when there is one, a picker when there are several, a message when there are
+  none. Delete still confirms.
 - **Split** (`split_testcase`, `buf_split_testcase`): marker lines come in **pairs**, and what a
   pair brackets becomes a testcase. Everything outside the pairs stays in testcase `n`; new
   cases take the lowest free numbers, and no other testcase is renumbered. The split is

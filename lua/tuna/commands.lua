@@ -44,8 +44,26 @@ MODE_SET.auto = true
 -- Testcase editing
 --------------------------------------------------------------------------------
 
----Add a new testcase, or edit an existing one (via the editor, picking first if
----no number is given).
+---The testcase a command acts on when none was named: with one there is nothing to choose
+---between, so it is that one; with several, the one picked; with none, it says so.
+---@param bufnr integer
+---@param tctbl table<integer, table>
+---@param verb string what the command does to it ("edit"), for the title and the message
+---@param cb fun(n: integer)
+local function choose_testcase(bufnr, tctbl, verb, cb)
+    local nums = vim.tbl_keys(tctbl)
+    if #nums == 0 then
+        utils.notify(("testcase %s: there are no testcases to %s."):format(verb, verb))
+    elseif #nums == 1 then
+        cb(nums[1])
+    else
+        local title = verb:sub(1, 1):upper() .. verb:sub(2) .. " a Testcase"
+        require("tuna.widgets").picker(bufnr, tctbl, title, cb, api.nvim_get_current_win())
+    end
+end
+
+---Add a new testcase, or edit an existing one (via the editor, choosing first if no
+---number is given and there is more than one).
 ---@param add boolean add a fresh testcase instead of editing
 ---@param tcnum integer? testcase number to edit
 function M.edit_testcase(add, tcnum)
@@ -76,11 +94,11 @@ function M.edit_testcase(add, tcnum)
     if tcnum then
         start_editor(tcnum)
     else
-        require("tuna.widgets").picker(bufnr, tctbl, "Edit a Testcase", start_editor, api.nvim_get_current_win())
+        choose_testcase(bufnr, tctbl, "edit", start_editor)
     end
 end
 
----Delete a testcase (picking first if no number is given).
+---Delete a testcase (choosing first if no number is given and there is more than one).
 ---@param tcnum integer?
 function M.delete_testcase(tcnum)
     local bufnr = M.target_buffer()
@@ -105,7 +123,7 @@ function M.delete_testcase(tcnum)
     if tcnum then
         delete(tcnum)
     else
-        require("tuna.widgets").picker(bufnr, tctbl, "Delete a Testcase", delete, api.nvim_get_current_win())
+        choose_testcase(bufnr, tctbl, "delete", delete)
     end
 end
 
@@ -122,22 +140,10 @@ function M.split_testcase(tcnum, sep)
     local cfg = config.get_buffer_config(bufnr)
     sep = (sep and sep ~= "") and sep or cfg.testcases_split_markers
 
-    -- With one testcase there is nothing to choose between, so `:Tuna testcase split`
-    -- means that one. With several, ask the way `edit`/`delete` ask.
     if not tcnum then
-        local tctbl = testcases.buf_get_testcases(bufnr)
-        local nums = vim.tbl_keys(tctbl)
-        if #nums == 0 then
-            utils.notify("testcase split: there are no testcases to split.")
-            return
-        end
-        if #nums > 1 then
-            require("tuna.widgets").picker(bufnr, tctbl, "Split a Testcase", function(n)
-                M.split_testcase(n, sep)
-            end, api.nvim_get_current_win())
-            return
-        end
-        tcnum = nums[1]
+        return choose_testcase(bufnr, testcases.buf_get_testcases(bufnr), "split", function(n)
+            M.split_testcase(n, sep)
+        end)
     end
 
     -- Read before the split, since the split rewrites it: whether the count offer is

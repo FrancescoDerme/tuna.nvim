@@ -288,4 +288,54 @@ tc.buf_delete_testcase(sfbuf, 1)
 t.eq("and so does deleting one", sf_stored(), before)
 vim.cmd("bwipeout!")
 vim.fn.delete(sfdir, "rf")
+--------------------------------------------------------------------------------
+-- A testcase command given no number asks which only when there is a choice
+--------------------------------------------------------------------------------
+
+do
+    local dir = t.tempdir()
+    t.write(dir, "one.cpp", "int main(){}\n")
+    t.write(dir, "one_input0.txt", "1\n")
+    vim.cmd("edit " .. dir .. "/one.cpp")
+    local widgets = require("tuna.widgets")
+    local C = require("tuna.commands")
+    local real = { picker = widgets.picker, editor = widgets.editor, menu = widgets.menu }
+    local picked, edited, asked
+    widgets.picker = function(_, _, title)
+        picked = title
+    end
+    widgets.editor = function(_, n)
+        edited = n
+    end
+    widgets.menu = function(_, title)
+        asked = title
+    end
+
+    C.edit_testcase(false)
+    t.eq("with one testcase, edit opens it without asking which", { picked, edited }, { nil, 0 })
+    C.delete_testcase()
+    t.eq("and delete goes straight to confirming it", { picked, asked }, { nil, "delete testcase 0?" })
+
+    t.write(dir, "one_input1.txt", "2\n")
+    edited = nil
+    C.edit_testcase(false)
+    t.eq("with several, edit asks which", { picked, edited }, { "Edit a Testcase", nil })
+    picked = nil
+    C.split_testcase()
+    t.eq("and split asks the same way", picked, "Split a Testcase")
+
+    os.remove(dir .. "/one_input0.txt")
+    os.remove(dir .. "/one_input1.txt")
+    picked, edited = nil, nil
+    local quiet = vim.notify
+    local said = t.capture_notifications()
+    C.edit_testcase(false)
+    vim.notify = quiet
+    t.eq("with none, nothing opens", { picked, edited }, { nil, nil })
+    t.has("and it says so", said[1], "there are no testcases to edit")
+    for k, f in pairs(real) do
+        widgets[k] = f
+    end
+end
+
 t.report()
