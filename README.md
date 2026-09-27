@@ -4,16 +4,9 @@
 ![Lua](https://img.shields.io/badge/Lua-%232C2D72.svg?style=for-the-badge&logo=lua)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)
 
-<pre>
-  ██████████  ███    ███  ███     ███     ██████   
-  ██████████  ███    ███  ████    ███    ███  ███  
-    ███      ███    ███  ███ ██  ███   ███    ███  
-    ███      ███    ███  ███  ██ ███  ████████████ 
-   ███      ██████████  ███   █████  ███      ███  
-   ███       ████████   ███     ███  ███      ███  
-</pre>
-
 </div>
+
+https://github.com/user-attachments/assets/14cecff6-e4a2-41e1-a114-45db3fc671f5
 
 `tuna.nvim` is a competitive programming plugin that handles testcase management,
 intregrates with [Competitive companion](https://github.com/jmerle/competitive-companion) to download contests,
