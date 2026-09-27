@@ -623,7 +623,7 @@ becomes part of a path.
 | `multiple_testing`      | `-1`                             | testcases at once: `-1` your core count, `0` all of them, `n` exactly n                                           |
 | `maximum_time`          | `5000`                           | per-process limit in ms; past it the process is killed and the row reads `TIMEOUT`                                |
 | `output_compare_method` | `"squish"`                       | `"exact"`, `"squish"`, `{ "float", tol = 1e-6 }`, or `function(output, expected) -> boolean`                      |
-| `checker`               | `nil`                            | a path to a testlib-style checker or `{ exec, args }`, used instead of a `checker.*` file                         |
+| `checker`               | `nil`                            | a path to a testlib-style checker or `{ exec, args }`, used instead of a `checker.*` file; with no `args` it is handed `$(INPUT) $(OUTPUT) $(ANSWER)` |
 | `save_current_file`     | `true`                           | write the buffer before running                                                                                   |
 | `save_all_files`        | `false`                          | write every buffer before running                                                                                 |
 
@@ -695,7 +695,7 @@ cursor alone, so one written for C++ is harmless to a Python template.
 | `stress.max_saved`                | `10`                                                                               | stop once the problem has this many testcases in total              |
 | `stress.bruteforce_time`          | `20000`                                                                            | the bruteforce's own time limit per input, in ms (`false` for none) |
 | `stress.generator` / `.bruteforce`| `nil`                                                                              | a path or `{ exec, args }`, used instead of the file `tool_names` finds |
-| `interactive.interactor`          | `nil`                                                                              | likewise                                                            |
+| `interactive.interactor`          | `nil`                                                                              | likewise; with no `args` it is handed `$(INPUT) $(ANSWER)`          |
 | `scaffold.directory`              | `stdpath("config")/tuna/scaffolds`                                                 | your starters, `<role>.<ext>`, used before the shipped ones         |
 | `scaffold.language`               | `nil`                                                                              | write every scaffold in this language (`"cpp"`), not the solution's |
 

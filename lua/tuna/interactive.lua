@@ -39,8 +39,6 @@ local M = {}
 ---@type table<integer, table>
 M.active = {}
 
-local DEFAULT_ARGS = { "$(INPUT)", "$(ANSWER)" }
-
 ---A pipe for one side of a session.
 ---@return uv.uv_pipe_t
 local function pipe()
@@ -53,15 +51,6 @@ local function kill(handle)
     if handle and handle:is_active() then
         pcall(handle.kill, handle, "sigkill")
     end
-end
-
----Write `content` to a fresh temp file and return its path.
----@param content string?
----@return string
-local function temp_with(content)
-    local path = vim.fn.tempname()
-    utils.write_file(path, content or "")
-    return path
 end
 
 --------------------------------------------------------------------------------
@@ -795,16 +784,12 @@ function InteractiveRunner:run_interactor(idx, on_done)
     tc.stdout, tc.stderr, tc.log = "", "", {}
     self:update_ui(true)
 
-    local input_file = temp_with(tc.stdin or "")
-    local answer_file = temp_with(tc.expected or "")
-    local files = { INPUT = input_file, OUTPUT = "/dev/null", ANSWER = answer_file }
-    local raw = (#self.interactor.args > 0) and self.interactor.args or DEFAULT_ARGS
-    local int_args = {}
-    for i, a in ipairs(raw) do
-        int_args[i] = a:gsub("%$%((%u+)%)", function(name)
-            return files[name]
-        end)
-    end
+    local input_file = utils.temp_file(tc.stdin)
+    local answer_file = utils.temp_file(tc.expected)
+    local int_args = tools.expand_args(
+        self.interactor.args,
+        { INPUT = input_file, OUTPUT = "/dev/null", ANSWER = answer_file }
+    )
 
     local sol_in, sol_out = pipe(), pipe()
     local int_in, int_out, int_err = pipe(), pipe(), pipe()

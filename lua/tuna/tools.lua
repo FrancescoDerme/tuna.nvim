@@ -1,23 +1,18 @@
 -- lua/tuna/tools.lua
 --
--- "Helper programs" are the sibling source files a problem folder grows around a
--- solution: a generator, a bruteforce, a checker, an interactor. The whole
--- point of this module is that these are *ordinary source files in the same
--- language as the solution* (drop a `checker.cpp` next to `sol.cpp`), discovered
--- by filename convention and compiled/run with the very same config-driven
--- commands as a solution. That is what lets you stress-test / special-judge /
--- run interactively with **no `.tuna.lua`** — you switch behaviour by which files
--- exist and which run *mode* the buffer is in.
+-- Helper programs, the sibling files a problem folder grows around a solution (a checker, a
+-- generator, a bruteforce, an interactor), and how each problem is run.
 --
--- Three concerns live here:
---   * discovery   — `find()` locates a helper by role (checker/generator/…)
---   * resolution  — `program()` turns a path into a runnable spec, `helper()` finds a role's helper
---                   ({ exec, args, compile?, cwd }) using the buffer config
---   * compilation — `prepare()` compiles a spec once and caches the result, so a
---                   dozen parallel `checker.judge` calls don't recompile (or race)
+-- Helpers are *ordinary source files*, in any language, found by name beside the solution
+-- (`tool_names`) or set in the config, and compiled and run with the same config-driven
+-- commands as a solution. So stress testing, special judging and interactive runs need no
+-- `.tuna.lua`: what a problem does follows from the files it has and the mode it is run in.
 --
--- It also holds the tiny per-buffer *run state* (active mode + checker toggle),
--- keyed by file path so it survives a buffer being unloaded and reopened.
+--   * finding     — `helper(role, solution, cfg)`, the one rule for every role
+--   * compiling   — `prepare(spec, cb)`, cached per source, mtime and command, with
+--                   concurrent callers queued behind one compile
+--   * run state   — each problem's mode, interactive source, checker and compare override,
+--                   automatic until forced, kept in its sidecar
 
 local utils = require("tuna.utils")
 
@@ -26,18 +21,15 @@ local M = {}
 ---The roles a helper can fill, in the order they are offered (completion, the menu).
 M.ROLES = { "checker", "generator", "bruteforce", "interactor" }
 
--- Conventional base names per role (extension-agnostic). Overridable via
--- `config.tool_names`. Earlier names win when several match, and the first is also what
--- `:Tuna scaffold` names a new helper, so a scaffold is found by the first look.
-M.DEFAULT_NAMES = {
-    checker = { "checker", "check" },
-    generator = { "gen", "generator" },
-    bruteforce = { "brute", "reference" },
-    interactor = { "interactor", "interact" },
-}
-
--- Testlib-style checker argument order: <input> <participant output> <jury answer>.
-local CHECKER_ARGS = { "$(INPUT)", "$(OUTPUT)", "$(ANSWER)" }
+---A helper ready to prepare and spawn.
+---@class tuna.HelperSpec
+---@field exec string
+---@field args string[] run arguments, the role's `$(INPUT)`/`$(OUTPUT)`/`$(ANSWER)` among them
+---@field cwd string the directory it runs in
+---@field role string what it is (`M.ROLES`), which keys its build pane
+---@field source string? the file it is built from
+---@field compile { exec: string, args: string[] }? its compile command, nil when there is none
+---@field compile_dir string?
 
 ---Neovim's filetype for a path, from its name alone (no buffer needed).
 ---@param path string
@@ -45,30 +37,6 @@ local CHECKER_ARGS = { "$(INPUT)", "$(OUTPUT)", "$(ANSWER)" }
 local function filetype_of(path)
     return vim.filetype.match({ filename = path }) or ""
 end
-
----Expand `$(FNAME)/$(FNOEXT)/...` in a command's exec and args against a path.
----Mirrors `runner`'s `eval_command`, but keyed off a concrete file path rather
----than a buffer (so it works for helpers that have no open buffer).
----@param path string
----@param command { exec: string, args: string[]? }
----@return { exec: string, args: string[] }?
-local function eval_command(path, command)
-    local exec = utils.eval_string(path, command.exec)
-    if not exec then
-        return nil
-    end
-    local args = {}
-    for i, a in ipairs(command.args or {}) do
-        args[i] = utils.eval_string(path, a)
-        if not args[i] then
-            return nil
-        end
-    end
-    return { exec = exec, args = args }
-end
-
-M.filetype_of = filetype_of
-M.eval_command = eval_command
 
 --------------------------------------------------------------------------------
 -- Discovery
@@ -83,8 +51,7 @@ M.eval_command = eval_command
 ---@param cfg table buffer configuration
 ---@return string? # absolute path, or nil if none found
 function M.find(dir, role, cfg)
-    local names = (cfg.tool_names and cfg.tool_names[role]) or M.DEFAULT_NAMES[role] or {}
-    for _, base in ipairs(names) do
+    for _, base in ipairs(cfg.tool_names[role] or {}) do
         local hits = vim.fn.globpath(dir, base .. ".*", false, true)
         table.sort(hits)
         for _, path in ipairs(hits) do
@@ -104,8 +71,7 @@ end
 ---@return boolean
 function M.is_helper(path, cfg)
     local base = vim.fn.fnamemodify(path, ":t:r")
-    local names = cfg.tool_names or M.DEFAULT_NAMES
-    for _, list in pairs(names) do
+    for _, list in pairs(cfg.tool_names) do
         for _, n in ipairs(list) do
             if base == n then
                 return true
@@ -181,7 +147,7 @@ function M.solution_bufnr(bufnr, cfg)
         -- the option back on creates the swap there and then. Read with `vim.go`, not
         -- `vim.o`: for a buffer-local option `vim.o` reports the *current* buffer's
         -- value, which inside this callback is the buffer whose flag was just turned
-        -- off, so it would restore false onto itself and do nothing (it did).
+        -- off, so it would restore false onto itself and do nothing.
         vim.api.nvim_create_autocmd("BufWinEnter", {
             buffer = sb,
             once = true,
@@ -212,15 +178,15 @@ end
 ---`cwd` is the problem directory, so a relative run exec like `./gen` resolves.
 ---@param path string
 ---@param cfg table buffer configuration
----@return { exec: string, args: string[], compile: { exec: string, args: string[] }?, compile_dir: string?, cwd: string }?
+---@return { exec: string, args: string[], compile: { exec: string, args: string[] }?, compile_dir: string?, cwd: string, source: string }?
 ---@return string? # error message when resolution fails
-function M.program(path, cfg)
+local function program(path, cfg)
     local ft = filetype_of(path)
     local run_cmd = ft ~= "" and cfg.run_command[ft]
     if not run_cmd then
         return nil, "no run command for filetype '" .. ft .. "' (" .. vim.fn.fnamemodify(path, ":t") .. ")"
     end
-    local run = eval_command(path, run_cmd)
+    local run = utils.eval_command(path, run_cmd)
     if not run then
         return nil, "run command for '" .. ft .. "' is malformed"
     end
@@ -229,7 +195,7 @@ function M.program(path, cfg)
     local spec = { exec = run.exec, args = run.args, cwd = dir, source = vim.fn.fnamemodify(path, ":p") }
 
     if cfg.compile_command[ft] then
-        local compile = eval_command(path, cfg.compile_command[ft])
+        local compile = utils.eval_command(path, cfg.compile_command[ft])
         if not compile then
             return nil, "compile command for '" .. ft .. "' is malformed"
         end
@@ -240,9 +206,10 @@ function M.program(path, cfg)
 end
 
 -- The arguments a role's program is handed after its own run arguments: a testlib checker
--- reads `<input> <output> <answer>`, an interactor `<input> <answer>`.
+-- reads `<input> <output> <answer>`, an interactor `<input> <answer>`. A configured command
+-- given no arguments gets these too; one given some has placed them itself.
 local ROLE_ARGS = {
-    checker = CHECKER_ARGS,
+    checker = { "$(INPUT)", "$(OUTPUT)", "$(ANSWER)" },
     interactor = { "$(INPUT)", "$(ANSWER)" },
 }
 
@@ -277,9 +244,9 @@ end
 ---@param role string
 ---@param path string
 ---@param cfg table
----@return table
+---@return tuna.HelperSpec
 local function spec_for_file(role, path, cfg)
-    local spec, err = M.program(path, cfg)
+    local spec, err = program(path, cfg)
     if not spec then
         -- An unknown language is the normal shape of a prebuilt binary. Any other failure
         -- is a known language with a malformed command, which running the file as a
@@ -293,8 +260,22 @@ local function spec_for_file(role, path, cfg)
         spec = { exec = path, args = {}, cwd = vim.fn.fnamemodify(path, ":p:h") }
     end
     spec.args = vim.list_extend(spec.args, vim.deepcopy(ROLE_ARGS[role] or {}))
+    ---@cast spec tuna.HelperSpec
     spec.role = role
     return spec
+end
+
+---A spawn's arguments with the per-run placeholders (`$(INPUT)`, `$(OUTPUT)`, `$(ANSWER)`)
+---filled in from `files`, name to path. Anything else is left as it is.
+---@param args string[]
+---@param files table<string, string>
+---@return string[]
+function M.expand_args(args, files)
+    return vim.tbl_map(function(arg)
+        return (arg:gsub("%$%((%u+)%)", function(name)
+            return files[name]
+        end))
+    end, args)
 end
 
 ---The helper filling `role` for a solution, as a spec ready to prepare and spawn, or nil
@@ -306,10 +287,10 @@ end
 ---@param role "checker"|"generator"|"bruteforce"|"interactor"
 ---@param solution string absolute path of the solution
 ---@param cfg table resolved configuration
----@return table? spec
+---@return tuna.HelperSpec? spec
 ---@return string? note why a configured helper can't be used, when it can't
 function M.helper(role, solution, cfg)
-    local set = cfg
+    local set = cfg ---@type any
     for _, key in ipairs(ROLE_OPTION[role]) do
         set = type(set) == "table" and set[key] or nil
     end
@@ -332,6 +313,9 @@ function M.helper(role, solution, cfg)
             if not args[i] then
                 return nil, ("the configured %s command has a malformed argument '%s'"):format(role, a)
             end
+        end
+        if #args == 0 then
+            args = vim.deepcopy(ROLE_ARGS[role] or {})
         end
         return { exec = exec, args = args, cwd = dir, role = role }
     elseif set ~= nil then
@@ -359,11 +343,11 @@ local function source_mtime(path)
     return st.mtime.sec + (st.mtime.nsec or 0) / 1e9
 end
 
----If `path` is open in a modified buffer, write it to disk. Running a helper must
----pick up unsaved edits — otherwise the rebuild check below sees the stale on-disk
----file and skips the recompile. Must run on the main loop.
+---If `path` is open in a modified buffer, write it to disk. Running a helper must pick up
+---unsaved edits, or the rebuild check below sees the stale file and skips the recompile, and
+---run-all saves every solution it runs the same way. Must run on the main loop.
 ---@param path string?
-local function flush_source_buffer(path)
+function M.flush_buffer(path)
     if not path then
         return
     end
@@ -381,20 +365,13 @@ local function flush_source_buffer(path)
     end
 end
 
----Public wrapper: flush an unsaved edit to `path` (used by `run_all` to save
----every candidate solution version before running them).
----@param path string?
-function M.flush_buffer(path)
-    flush_source_buffer(path)
-end
-
 ---Persistent compile cache, keyed by absolute source path, so a *fresh* spec for
 ---the same unchanged source (e.g. `gen.cpp`/`brute.cpp` on a repeated `:Tuna run
 ---stress`) reuses the previous build instead of recompiling. Invalidated when the
 ---source's mtime or the exact compile command changes, so editing the source (or
 ---the compile flags) still rebuilds. This is what keeps the iterate-and-re-run
 ---loop fast when only the solution changed.
----@type table<string, { mtime: number?, cmdkey: string, compiled: boolean?, error: string?, compiling: boolean?, waiters: (fun(ok: boolean, err: string?))[]? }>
+---@type table<string, { mtime: number?, cmdkey: string, compiled: boolean?, error: string?, output: string?, compiling: boolean?, waiters: (fun(ok: boolean, err: string?, output: string?))[]? }>
 local compile_cache = {}
 
 ---A stable key for a compile command (exec + args), so a flag change invalidates.
@@ -417,7 +394,7 @@ end
 function M.prepare(spec, cb)
     -- Flush unsaved edits to the helper source first, so both the rebuild check
     -- and (for interpreted helpers) the run itself see the current code.
-    flush_source_buffer(spec.source)
+    M.flush_buffer(spec.source)
 
     if not spec.compile then
         cb(true)
@@ -587,15 +564,14 @@ local function state_for(path)
             if stored then
                 -- Validated on the way in: the sidecar is a plain file a user may edit
                 -- (or copy between problems), and a nonsense mode would send a bare
-                -- `:Tuna run` somewhere impossible. An entry carrying `explicit = false`
-                -- forces no mode, and `checker = false` is the checker forced off.
-                if vim.tbl_contains(M.MODES, stored.mode) and stored.explicit ~= false then
+                -- `:Tuna run` somewhere impossible.
+                if vim.tbl_contains(M.MODES, stored.mode) then
                     s.mode = stored.mode
                 end
                 if vim.tbl_contains(M.SOURCES, stored.source) then
                     s.source = stored.source
                 end
-                if stored.checker == "off" or stored.checker == false then
+                if stored.checker == "off" then
                     s.checker = "off"
                 end
                 s.compare = decode_compare(stored.compare)

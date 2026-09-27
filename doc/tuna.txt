@@ -675,7 +675,8 @@ COMPILING AND RUNNING                                    *tuna-config-compile*
 `checker`
         A path to a testlib-style checker, or `{ exec, args }`, used
         instead of a `checker.*` file beside the solution. Default: none,
-        so that file judges when there is one.
+        so that file judges when there is one. A command with no `args` is
+        handed `$(INPUT) $(OUTPUT) $(ANSWER)`, the order testlib reads.
 
 `save_current_file`
         Write the buffer before running. Default `true`.
@@ -827,7 +828,8 @@ RUN MODES AND HELPERS                                  *tuna-config-run-modes*
 `interactive.interactor`
         A path, or `{ exec, args }`, used instead of the file
         `tool_names` finds. A configured helper counts as present just
-        as the file does.
+        as the file does. A command with no `args` is handed
+        `$(INPUT) $(ANSWER)`.
 
 `scaffold.directory`
         Your starters, files named `<role>.<ext>`, used before the ones

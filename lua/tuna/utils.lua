@@ -258,6 +258,15 @@ end
 
 ---------------- FILESYSTEM ----------------
 
+---A fresh temporary file holding `content`, for a program that reads its input from a path.
+---@param content string?
+---@return string path
+function M.temp_file(content)
+    local path = vim.fn.tempname()
+    M.write_file(path, content or "")
+    return path
+end
+
 ---@param path string
 ---@return boolean
 function M.file_exists(path)

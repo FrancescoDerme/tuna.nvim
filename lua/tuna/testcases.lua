@@ -22,6 +22,13 @@ local M = {
     directory = {},
 }
 
+---One testcase as stored. `keep_empty` rides along on a write only: which empty halves are to
+---be written as empty files rather than removed (see `write_or_delete`).
+---@class tuna.StoredTestcase
+---@field input string?
+---@field output string?
+---@field keep_empty { input: boolean?, output: boolean? }?
+
 ---------------- SHARED HELPERS ----------------
 
 ---Split a format on the literal `$(TCNUM)` marker and evaluate the file-format
@@ -149,8 +156,8 @@ end
 ---print nothing. Only file *presence* can carry that, which is why an empty answer is
 ---never written by accident — `write_or_delete` removes it unless `keep_empty` says the
 ---user asked for one — and why what is there must be loaded as it is.
----@param tctbl table<integer, { input: string?, output: string? }>
----@return table<integer, { input: string?, output: string? }>
+---@param tctbl table<integer, tuna.StoredTestcase>
+---@return table<integer, tuna.StoredTestcase>
 local function as_stored(tctbl)
     for _, tc in pairs(tctbl) do
         if tc.input == "" then
@@ -162,14 +169,21 @@ end
 
 ---------------- FILES BACKEND (one input/output file per testcase) ----------------
 
----@param directory string testcase directory (with trailing slash)
----@param filepath string source file path
----@param input_format string
----@param output_format string
----@return table<integer, { input: string?, output: string? }>
----@param input_format string|string[] one format, or an ordered list; the first
----  format that discovers any testcase wins (see config docs for the rationale).
----@param output_format string|string[] paired with `input_format` by index
+---The names of the files in `directory`, read once for everything a load decides.
+---@param directory string
+---@return string[]
+local function files_in(directory)
+    local names = {}
+    if utils.directory_exists(directory) then
+        for name, type_ in vim.fs.dir(directory) do
+            if type_ == "file" then
+                names[#names + 1] = name
+            end
+        end
+    end
+    return names
+end
+
 ---Which of the configured format pairs this directory is *actually* using: the first
 ---one that matches a file already there, else the first configured (canonical) pair.
 ---
@@ -180,21 +194,15 @@ end
 ---on load, would have hidden every testcase already there.
 ---@param directory string
 ---@param filepath string
----@param input_format string|string[]
----@param output_format string|string[]
+---@param input_format string|string[] one format, or an ordered list; the first format
+---  that discovers any testcase wins
+---@param output_format string|string[] paired with `input_format` by index
+---@param entries string[]? the directory's files, when the caller has read them already
 ---@return string[]? in_parts, string[]? out_parts
-function M.files.active_parts(directory, filepath, input_format, output_format)
+function M.files.active_parts(directory, filepath, input_format, output_format, entries)
     local in_formats = normalize_formats(input_format)
     local out_formats = normalize_formats(output_format)
-
-    local entries = {}
-    if utils.directory_exists(directory) then
-        for name, type_ in vim.fs.dir(directory) do
-            if type_ == "file" then
-                entries[#entries + 1] = name
-            end
-        end
-    end
+    entries = entries or files_in(directory)
 
     local first_in, first_out
     for i, in_fmt in ipairs(in_formats) do
@@ -215,11 +223,17 @@ function M.files.active_parts(directory, filepath, input_format, output_format)
     return first_in, first_out
 end
 
+---@param directory string testcase directory (with trailing slash)
+---@param filepath string source file path
+---@param input_format string|string[]
+---@param output_format string|string[]
+---@return table<integer, tuna.StoredTestcase>
 function M.files.load(directory, filepath, input_format, output_format)
-    if not utils.directory_exists(directory) then
+    local entries = files_in(directory)
+    if #entries == 0 then
         return {}
     end
-    local in_parts, out_parts = M.files.active_parts(directory, filepath, input_format, output_format)
+    local in_parts, out_parts = M.files.active_parts(directory, filepath, input_format, output_format, entries)
     if not (in_parts and out_parts) then
         return {}
     end
@@ -227,20 +241,18 @@ function M.files.load(directory, filepath, input_format, output_format)
     local match_in = make_matcher(in_parts)
     local match_out = make_matcher(out_parts)
     local tctbl = {}
-    for name, type_ in vim.fs.dir(directory) do
-        if type_ == "file" then
-            -- A testcase may have only an input or only an output (an output with no
-            -- matching input still runs — the solution is fed empty stdin).
-            local tcnum = match_in(name)
+    for _, name in ipairs(entries) do
+        -- A testcase may have only an input or only an output (an output with no
+        -- matching input still runs — the solution is fed empty stdin).
+        local tcnum = match_in(name)
+        if tcnum then
+            tctbl[tcnum] = tctbl[tcnum] or {}
+            tctbl[tcnum].input = utils.read_file(directory .. name)
+        else
+            tcnum = match_out(name)
             if tcnum then
                 tctbl[tcnum] = tctbl[tcnum] or {}
-                tctbl[tcnum].input = utils.read_file(directory .. name)
-            else
-                tcnum = match_out(name)
-                if tcnum then
-                    tctbl[tcnum] = tctbl[tcnum] or {}
-                    tctbl[tcnum].output = utils.read_file(directory .. name)
-                end
+                tctbl[tcnum].output = utils.read_file(directory .. name)
             end
         end
     end
@@ -248,10 +260,10 @@ function M.files.load(directory, filepath, input_format, output_format)
 end
 
 ---@param directory string testcase directory (with trailing slash)
----@param tctbl table<integer, { input: string?, output: string? }>
+---@param tctbl table<integer, tuna.StoredTestcase>
 ---@param filepath string source file path
----@param input_format string
----@param output_format string
+---@param input_format string|string[]
+---@param output_format string|string[]
 function M.files.write(directory, tctbl, filepath, input_format, output_format)
     -- Write with the format this directory already uses (the canonical first one when
     -- it holds no testcases yet), so a new testcase joins the set that is there rather
@@ -285,7 +297,7 @@ function M.single_file.load(path)
 end
 
 ---@param path string single file path
----@param tctbl table<integer, { input: string?, output: string? }>
+---@param tctbl table<integer, tuna.StoredTestcase>
 function M.single_file.write(path, tctbl)
     -- drop empty inputs/outputs, then drop testcases that became empty
     for tcnum, tc in pairs(tctbl) do
@@ -375,7 +387,7 @@ function M.directory.load(base_dir, filepath, dir_format, input_name, output_nam
 end
 
 ---@param base_dir string testcase base directory (with trailing slash)
----@param tctbl table<integer, { input: string?, output: string? }>
+---@param tctbl table<integer, tuna.StoredTestcase>
 ---@param filepath string source file path
 ---@param dir_format string
 ---@param input_name string
@@ -412,13 +424,6 @@ end
 local warned_shared = {}
 
 ---@private
----An absolute `testcases_directory` carrying no modifier is the *same* directory for
----every problem, and every storage backend names its files after the source
----(`$(FNOEXT)_input0.txt`, `tests/0`, …) — so two problems silently overwrite each
----other's testcases there. Say so once, with the fix, rather than letting the data
----go. A value coming from a directory's own `.tuna.lua` already scopes itself to that
----tree, so only a globally configured one is worth flagging.
----@private
 ---Whether the configured value carries a modifier that varies per problem. `$(HOME)`
 ---and the `$()` escape do not — `"$(HOME)/cp/testcases"` is the same directory for
 ---every problem exactly as `"~/cp/testcases"` is, and the two spellings must be
@@ -435,6 +440,13 @@ local function has_scoping_modifier(raw)
     return false
 end
 
+---@private
+---An absolute `testcases_directory` carrying no modifier is the *same* directory for
+---every problem, and every storage backend names its files after the source
+---(`$(FNOEXT)_input0.txt`, `tests/0`, …) — so two problems silently overwrite each
+---other's testcases there. Say so once, with the fix, rather than letting the data
+---go. A value coming from a directory's own `.tuna.lua` already scopes itself to that
+---tree, so only a globally configured one is worth flagging.
 ---@param raw string the configured value
 ---@param expanded string the same value after modifier/`~` expansion
 local function warn_if_shared(raw, expanded)
@@ -472,7 +484,7 @@ function M.tc_directory(source_dir, filepath, cfg)
         utils.notify("testcases_directory: could not evaluate '" .. raw .. "'.", vim.log.levels.WARN)
         expanded = raw
     end
-    expanded = vim.fs.normalize(expanded) -- expands a leading `~`
+    expanded = utils.expand_home(expanded)
     warn_if_shared(raw, expanded)
     return (utils.normalize_path(expanded, source_dir):gsub("/*$", "")) .. "/"
 end
@@ -564,16 +576,6 @@ function M.directory.buf_write(bufnr, tctbl)
     )
 end
 
----Remove every testcase a backend stores for a buffer.
----@param backend { buf_load: fun(b: integer): table, buf_write: fun(b: integer, t: table) }
----@param bufnr integer
-local function buf_clear_backend(backend, bufnr)
-    local tctbl = backend.buf_load(bufnr)
-    for tcnum in pairs(tctbl) do
-        tctbl[tcnum] = {} -- empty input/output → deleted on write
-    end
-    backend.buf_write(bufnr, tctbl)
-end
 
 function M.files.buf_clear(bufnr)
     -- Delete every file matching any configured input/output format — not just the
@@ -610,7 +612,11 @@ function M.single_file.buf_clear(bufnr)
     M.single_file.buf_write(bufnr, {})
 end
 function M.directory.buf_clear(bufnr)
-    buf_clear_backend(M.directory, bufnr)
+    local tctbl = M.directory.buf_load(bufnr)
+    for tcnum in pairs(tctbl) do
+        tctbl[tcnum] = {} -- empty input/output → deleted on write
+    end
+    M.directory.buf_write(bufnr, tctbl)
 end
 
 ---------------- DISPATCHER ----------------
@@ -1040,7 +1046,7 @@ function M.offer_case_counts(bufnr, numbers, original_input, on_settled)
         if accepted then
             M.apply_case_counts(bufnr, numbers, remaining)
             utils.notify(
-                ("testcase %d now starts with %d, and each lifted case starts with 1"):format(numbers[1], remaining),
+                ("testcase %d now starts with %d, and each lifted case starts with 1."):format(numbers[1], remaining),
                 "INFO"
             )
         end

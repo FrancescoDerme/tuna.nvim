@@ -7,11 +7,11 @@
 --     default.
 --   * external   — a testlib-style checker program, invoked as
 --     `checker <input> <output> <answer>` (jury input, participant output, jury
---     answer). Exit code 0 means correct; any other code means wrong, and the
---     checker's stderr/stdout becomes the verdict message. The checker is usually
---     an ordinary source file in the solution's language (e.g. `checker.cpp`); it
---     is compiled once, on first use, via `tools.prepare` (a prebuilt binary or a
---     shell script works too — it just skips the compile step).
+--     answer), the arguments `tools.helper` gave its spec. Exit code 0 means correct; any
+--     other code means wrong, and the checker's stderr/stdout becomes the verdict message.
+--     It is compiled once, through `tools.prepare`, which the build step has already done:
+--     a checker that did not build, or cannot start, says so on the row it could not judge
+--     and nowhere else, since the build step shows why beside the other sources.
 --
 -- `judge` is asynchronous (it may spawn a process), so it reports the verdict
 -- through a callback. The builtin path calls back synchronously.
@@ -22,35 +22,9 @@ local tools = require("tuna.tools")
 
 local M = {}
 
--- Default testlib argument order: <input> <participant output> <jury answer>.
-local DEFAULT_ARGS = { "$(INPUT)", "$(OUTPUT)", "$(ANSWER)" }
-
----Write `content` to a fresh temp file and return its path.
----@param content string?
----@return string path
-local function temp_with(content)
-    local path = vim.fn.tempname()
-    utils.write_file(path, content or "")
-    return path
-end
-
----Substitute the per-testcase file placeholders in a checker argument.
----Uses gsub's function form so paths containing `%` are not misinterpreted.
----@param arg string
----@param files table<string, string> { INPUT=…, OUTPUT=…, ANSWER=… }
----@return string
-local function expand_placeholders(arg, files)
-    for name, path in pairs(files) do
-        arg = arg:gsub("%$%(" .. name .. "%)", function()
-            return path
-        end)
-    end
-    return arg
-end
-
 ---Judge a finished testcase.
 ---@param tc table testcase data; reads `.stdin`, `.stdout`, `.expected`
----@param checker "builtin"|{ exec: string, args: string[]? } resolved checker spec
+---@param checker "builtin"|tuna.HelperSpec resolved checker spec
 ---@param compare_method tuna.CompareSpec builtin compare method
 ---@param callback fun(correct: boolean?, message: string?) verdict (`nil` => uncheckable/DONE)
 function M.judge(tc, checker, compare_method, callback)
@@ -60,6 +34,7 @@ function M.judge(tc, checker, compare_method, callback)
         callback(compare.compare_output(tc.stdout or "", tc.expected, compare_method))
         return
     end
+    ---@cast checker tuna.HelperSpec
 
     -- The compile pseudo-testcase has no output to judge — report uncheckable.
     -- (A *real* testcase with no expected output is still judged: a checker often
@@ -72,28 +47,18 @@ function M.judge(tc, checker, compare_method, callback)
 
     -- Compile the checker if it is a source file (cached across testcases), then run
     -- it against this testcase's three temp files.
-    tools.prepare(checker, function(ready, cerr)
+    tools.prepare(checker, function(ready)
         if not ready then
-            vim.schedule(function()
-                utils.notify("checker " .. cerr)
-            end)
             callback(nil, "checker did not compile")
             return
         end
 
         local files = {
-            INPUT = temp_with(tc.stdin),
-            OUTPUT = temp_with(tc.stdout),
-            ANSWER = temp_with(tc.expected),
+            INPUT = utils.temp_file(tc.stdin),
+            OUTPUT = utils.temp_file(tc.stdout),
+            ANSWER = utils.temp_file(tc.expected),
         }
-
-        local raw_args = (checker.args and #checker.args > 0) and checker.args or DEFAULT_ARGS
-        local args = {}
-        for i, a in ipairs(raw_args) do
-            args[i] = expand_placeholders(a, files)
-        end
-
-        local argv = vim.list_extend({ checker.exec }, args)
+        local argv = vim.list_extend({ checker.exec }, tools.expand_args(checker.args, files))
         local ok, err = pcall(vim.system, argv, { text = true, cwd = checker.cwd }, function(res)
             vim.schedule(function()
                 for _, path in pairs(files) do
@@ -109,10 +74,7 @@ function M.judge(tc, checker, compare_method, callback)
             for _, path in pairs(files) do
                 utils.delete_file(path)
             end
-            vim.schedule(function()
-                utils.notify("checker '" .. tostring(checker.exec) .. "' failed to start: " .. tostring(err))
-            end)
-            callback(nil, "checker failed to start")
+            callback(nil, "checker could not start: " .. tostring(err))
         end
     end)
 end

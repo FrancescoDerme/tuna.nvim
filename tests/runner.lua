@@ -1132,6 +1132,59 @@ do
     t.eq("the search row last throughout", listed.tcdata[#listed.tcdata], listed.search_entry)
     listed.ui:delete()
 
+    -- The search judges every input with the checker, so one that did not build stops it
+    -- before any input is tried, said on the build step and nowhere else: searching on would
+    -- end in "no counterexample found", which would not be true.
+    t.write(sdir2, "checker.cpp", "int main(){}\n")
+    local quiet = vim.notify
+    local said = t.capture_notifications()
+    local unjudged = search({
+        ccx = function(argv)
+            return argv[#argv]:match("checker") and { code = 1, stderr = "checker.cpp: error\n" } or {}
+        end,
+        genx = seeded,
+        solx = { stdout = "5\n" },
+        refx = { stdout = "6\n" },
+    })
+    vim.notify = quiet
+    t.eq("a checker that did not build stops the search before any input", unjudged.iter, 0)
+    t.eq("its build says so on the Compile row", unjudged.tcdata[1].status, "FAILED")
+    t.eq("and nothing is notified, input by input or otherwise", said, {})
+
+    -- One that built but gives no verdict (it cannot start) stops the search on the input it
+    -- had, for the same reason, reported on the search row. (Written again, so the failed
+    -- build above is not what the compile cache answers with.)
+    t.write(sdir2, "checker.cpp", "int main() { return 0; }\n")
+    local silent = search({
+        ccx = {},
+        genx = seeded,
+        refx = { stdout = "6\n" },
+        solx = function(argv)
+            if #argv > 1 then -- the checker, handed its three files: it cannot start
+                error("no such file")
+            end
+            return { stdout = "5\n" }
+        end,
+    })
+    local row = silent.tcdata[#silent.tcdata]
+    t.eq("a checker that gives no verdict stops the search on that input", { silent.iter, row.status }, { 1, "FAILED" })
+    t.has("saying so on the search row", row.stderr or "", "checker gave no verdict (seed 1)")
+
+    -- A restart judges with the checker as it is now, like every run.
+    local judged = search({ ccx = {}, genx = seeded, solx = { stdout = "5\n" }, refx = { stdout = "6\n" } })
+    t.eq("a checker that accepts every output saves nothing, having judged every input", { saved_rows(judged), judged.iter }, { {}, 3 })
+    require("tuna.tools").set_checker(sdir2 .. "/main.cpp", "off")
+    judged:run_testcases()
+    vim.wait(5000, function()
+        return judged.finished
+    end, 10)
+    t.eq("switched off, a restart judges by plain comparison and finds the difference", #saved_rows(judged), 1)
+    require("tuna.tools").set_checker(sdir2 .. "/main.cpp", "auto")
+    vim.fn.delete(sdir2 .. "/checker.cpp")
+    for _, f in ipairs(vim.fn.globpath(sdir2, "main_*.txt", false, true)) do
+        vim.fn.delete(f)
+    end
+
     -- A solution that never compiled searches for nothing.
     local broken = search({ ccx = { code = 1 }, genx = seeded, solx = { stdout = "5\n" }, refx = { stdout = "5\n" } })
     t.eq("a failed build leaves the compile row saying so", broken.tcdata[1].status, "RET 1")

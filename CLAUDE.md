@@ -187,8 +187,8 @@ is relative. Every configured path goes through these: compile/running directori
 - **`sidecar.lua`**: `problem_store_file` (`.tuna.json`) beside the source. Keys:
   - `url`/`name`/`group`/`mirror`/`mirror_at`, the downloaded task;
   - `submit = { [basename] = { state, text, url, hash } }`;
-  - `run = { [basename] = { mode, source, checker, compare } }`, holding only what was forced
-    (older entries' `explicit = false` and `checker = false` still read);
+  - `run = { [basename] = { mode, source, checker, compare } }`, holding only what was forced,
+    each value validated on read;
   - `results = { [basename] = { passed, total, hash } }`, the local verdict (see Runners).
 
   Entries are keyed by **basename** because one folder can hold several problems or several
@@ -203,10 +203,15 @@ is relative. Every configured path goes through these: compile/running directori
     table an `{ exec, args }` command whose args expand file modifiers but keep
     `$(INPUT)`/`$(OUTPUT)`/`$(ANSWER)`) wins over a sibling file named by `tool_names`, and a
     configured one that doesn't exist returns a note. Nothing is cached: disk decides now.
+    A spec carries its role's run arguments (`ROLE_ARGS`: a checker's
+    `$(INPUT) $(OUTPUT) $(ANSWER)`, an interactor's `$(INPUT) $(ANSWER)`), a configured
+    command given no `args` included, so no caller keeps a default of its own;
+    `expand_args(args, files)` fills them per spawn. The role names live only in the
+    config's `tool_names`.
   - The run settings, mode, interactive source and checker, are each **automatic until
     forced** (`get_mode`/`set_mode`, `get_source`/`set_source`, `checker_setting`/
     `set_checker`, nil or `"auto"` being automatic; the checker can only be forced `"off"`).
-    Automatic: `detect_mode` (interactor, then generator + reference, else normal),
+    Automatic: `detect_mode` (interactor, then generator + bruteforce, else normal),
     interactor-else-live, the checker when there is one. `resolve_mode`/`resolve_source`/
     `resolve_checker` return the forced choice while what it needs is available, else the
     automatic one plus a note (only stress and the interactor source need helpers). Keywords
@@ -448,15 +453,22 @@ is relative. Every configured path goes through these: compile/running directori
 checker) delegates to `compare.lua`. An external checker runs
 as `checker <input> <output> <answer>` (exit 0 means correct) and is compiled via
 `tools.prepare`. Its message (`tc.checker_message`) is appended to the Errors pane by the base
-`pane_content`, and `reset_row` clears it.
+`pane_content`, and `reset_row` clears it. A checker that did not build or cannot start gives
+no verdict, and says so on the row alone, never in a notification: the build step already
+shows why, beside the other sources, and a notification per testcase would repeat it. Stress
+builds the checker with its generator and bruteforce (`search_helpers`) and stops on an input
+the checker gives no verdict on, since searching on would end in "no counterexample found".
 
 **Compare / diff**
 - `compare_output` returns `true`, `false`, or `nil` when there is no answer. `float` is
-  `{ "float", tol }`, token-wise, absolute or relative tolerance.
+  `{ "float", tol }`, token-wise, absolute or relative tolerance (`float_equal`, which the
+  diff uses too). An unknown method judges nothing and is reported once per session.
 - `diff.compute` is **positional**: line *i* against line *i*, token against token, never
   re-aligned, because CP output is positional and an edit-script diff pairs the wrong lines.
   Granularity follows the compare method (characters for `exact`, tokens otherwise, `float`
-  tolerance applied), so the marks never contradict the verdict. `TunaDiffText` is a red tint
+  tolerance applied), so the marks never contradict the verdict, and texts the method judges
+  equal get no marks at all: `squish` and `float` read one stream of tokens, where line
+  breaks elsewhere are no difference, while the diff walks lines. `TunaDiffText` is a red tint
   blended into `Normal`'s background, re-derived on `ColorScheme`.
 
 ## Results UI (`runner_ui/`)
@@ -949,7 +961,8 @@ specific Vim error about a buffer the user never opened.
     paths and commands, missing ones), automatic choices, forcing and `auto`, forced settings
     giving way and coming back, old sidecar entries, runners refreshing the checker per run,
     run-all honouring `checker off`, the Run pane's settings rows and which of them read as
-    forced, and stress/interactor reruns offering the starter of a helper gone (Stop writing
+    forced, old or nonsense sidecar values reading as automatic, a configured command with no
+    arguments getting its role's, and stress/interactor reruns offering the starter of a helper gone (Stop writing
     nothing, Create putting the board away and opening it in the editor);
   - `scaffold.lua`: the shipped starters, names from `tool_names` (and found by discovery),
     the user's folder over the shipped one for its own language only, adding a language by
@@ -961,7 +974,9 @@ specific Vim error about a buffer the user never opened.
   - `temp.lua`: the templates a scratch can start from, when a scratch is resumed, the
     resume/restart and template menus, and absorbing keeping the header of the template actually used;
   - `testcases.lua`, `compare.lua`, `judges.lua`, `download.lua`, `clean.lua`, `submit.lua`:
-    unit tests of pure rules;
+    unit tests of pure rules (`compare.lua` also: an unknown method reported once, diff marks
+    following the verdict, a checker that did not build giving no verdict and no
+    notification);
   - `runner.lua`: all four run modes with `vim.system` stubbed, covering what each child is
     handed, bare rows, save/answer semantics, disk drift and restore, path resolution, the
     swapfile contract, interactive grids and the conversation model, and the run gate
@@ -976,7 +991,9 @@ specific Vim error about a buffer the user never opened.
     saving an empty answer, the row the search is shown on, when it is listed and that it
     stays last and numbered past every testcase while the board is edited, a helper
     that failed reported on that row and on the Compile row rather than in a float, the search
-    running beside the testcases on disk rather than after them, a failed build finishing it
+    running beside the testcases on disk rather than after them, a checker that did not build
+    or gives no verdict stopping it and a restart judging with the checker as it is now, a
+    failed build finishing it
     and spawning nothing behind it, in every mode that builds a solution of its own), a stop
     in every mode (nothing started after it, the rows it had not reached `NOT RUN`, a stopped
     session `KILLED`, the board idle), `<C-r>` building the solution again and running after

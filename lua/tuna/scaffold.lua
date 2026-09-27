@@ -99,7 +99,7 @@ end
 ---@param cfg table
 ---@return string
 local function file_name(role, ext, cfg)
-    local names = (cfg.tool_names and cfg.tool_names[role]) or tools.DEFAULT_NAMES[role] or {}
+    local names = cfg.tool_names[role] or {}
     return (names[1] or role) .. "." .. ext
 end
 

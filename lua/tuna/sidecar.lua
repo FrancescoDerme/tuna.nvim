@@ -51,24 +51,8 @@ function M.path(dir, cfg)
     return vim.fs.normalize(dir) .. "/" .. store_file(cfg)
 end
 
----Read a directory's sidecar as a table (empty when absent or unreadable), so a
----writer can merge its own field without clobbering the others.
----@param dir string
----@param cfg table?
----@return table
-function M.read(dir, cfg)
-    local content = utils.read_file(M.path(dir, cfg))
-    if content then
-        local ok, decoded = pcall(vim.json.decode, content)
-        if ok and type(decoded) == "table" then
-            return decoded
-        end
-    end
-    return {}
-end
-
----Read a directory's sidecar, or `nil` when there is none — for callers that need to
----tell "no sidecar" from "an empty one".
+---Read a directory's sidecar, or `nil` when there is none or it is not a JSON object, for
+---callers that need to tell "no sidecar" from "an empty one".
 ---@param dir string
 ---@param cfg table?
 ---@return table?
@@ -79,6 +63,15 @@ function M.read_or_nil(dir, cfg)
     end
     local ok, decoded = pcall(vim.json.decode, content)
     return (ok and type(decoded) == "table") and decoded or nil
+end
+
+---Read a directory's sidecar as a table (empty when absent or unreadable), so a
+---writer can merge its own field without clobbering the others.
+---@param dir string
+---@param cfg table?
+---@return table
+function M.read(dir, cfg)
+    return M.read_or_nil(dir, cfg) or {}
 end
 
 ---Write a sidecar table back to disk. A sidecar travels with a problem's folder, so there is

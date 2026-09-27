@@ -47,6 +47,12 @@ t.eq(
     cmd and cmd.args,
     { vim.fn.fnamemodify(bare, ":p:h") .. "/i.py", "$(INPUT)" }
 )
+-- A command given no arguments is handed its role's, as a helper file is; one given some has
+-- placed them itself.
+local plain = tools.helper("checker", bare, with({ checker = { exec = "python3" } }))
+t.eq("a configured checker command with no arguments gets the testlib ones", plain and plain.args, { "$(INPUT)", "$(OUTPUT)", "$(ANSWER)" })
+local plain_gen = tools.helper("generator", bare, with({ stress = { generator = { exec = "python3" } } }))
+t.eq("and a role that takes none gets none", plain_gen and plain_gen.args, {})
 local _, cannot = tools.helper("generator", bare, with({ stress = { generator = { exec = "no-such-program-tuna" } } }))
 t.ok("a configured command that can't run says so", cannot ~= nil and cannot:find("can't be run") ~= nil, cannot)
 
@@ -120,12 +126,13 @@ t.eq("automatic with none: plain comparison", tools.resolve_checker(chsol, cfg),
 -- What an existing sidecar says
 --------------------------------------------------------------------------------
 
+-- Read back, and validated on the way in: the file is a user's to edit.
 local ldir, lsol = problem()
-t.write(ldir, ".tuna.json", vim.json.encode({ run = { ["sol.py"] = { mode = "interactive", explicit = true, checker = false, source = "feed" } } }))
+t.write(ldir, ".tuna.json", vim.json.encode({ run = { ["sol.py"] = { mode = "interactive", checker = "off", source = "feed" } } }))
 t.eq("a stored forced mode, source and checker read back", { tools.get_mode(lsol), tools.get_source(lsol), tools.checker_setting(lsol) }, { "interactive", "feed", "off" })
 local l2dir, l2sol = problem()
-t.write(l2dir, ".tuna.json", vim.json.encode({ run = { ["sol.py"] = { mode = "normal", explicit = false, checker = true } } }))
-t.eq("an entry that forced nothing reads as automatic", { tools.get_mode(l2sol), tools.checker_setting(l2sol) }, { nil, "auto" })
+t.write(l2dir, ".tuna.json", vim.json.encode({ run = { ["sol.py"] = { mode = "sideways", source = "nobody", checker = true } } }))
+t.eq("a setting that means nothing reads as automatic", { tools.get_mode(l2sol), tools.get_source(l2sol), tools.checker_setting(l2sol) }, { nil, nil, "auto" })
 
 --------------------------------------------------------------------------------
 -- Every run looks its helpers up again

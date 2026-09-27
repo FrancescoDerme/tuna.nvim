@@ -26,8 +26,13 @@
 --
 -- What counts as "disagree" follows the compare method actually in effect, so the
 -- highlighting can never contradict the verdict: under `squish` whitespace is not a
--- difference, under `{ "float", tol }` a value within tolerance is not a difference,
--- and only under `exact` does the comparison descend to characters.
+-- difference, under `{ "float", tol }` a value within tolerance is not a difference
+-- (`compare.float_equal`, the verdict's own rule), and only under `exact` does the
+-- comparison descend to characters. Two texts the method judges equal get no marks at all:
+-- `squish` and `float` read the output as one stream of tokens, so line breaks in other
+-- places are no difference to them, while this walks line by line.
+
+local compare = require("tuna.compare")
 
 local M = {}
 
@@ -36,8 +41,6 @@ M.CHANGE = "TunaDiffChange" -- a line whose counterpart disagrees
 M.TEXT = "TunaDiffText" -- the token/characters that actually disagree
 M.ADD = "TunaDiffAdd" -- a line yours has and the expected output does not
 M.DELETE = "TunaDiffDelete" -- a line the expected output has and yours does not
-
-local DEFAULT_FLOAT_TOL = 1e-6
 
 ---@class tuna.DiffMark
 ---@field hl string line highlight (`CHANGE`/`ADD`/`DELETE`)
@@ -61,7 +64,7 @@ local function granularity(method)
     if name == "exact" then
         return "chars"
     elseif name == "float" then
-        return "tokens", (type(method) == "table" and method.tol) or DEFAULT_FLOAT_TOL
+        return "tokens", (type(method) == "table" and method.tol) or compare.DEFAULT_FLOAT_TOL
     end
     return "tokens"
 end
@@ -106,7 +109,7 @@ end
 ---@private
 ---The whitespace-separated tokens of a line, with their byte positions.
 ---@param line string
----@return { text: string, s: integer, e: integer }[] tokens, `[s, e)` 0-based
+---@return { text: string, s: integer, e: integer }[] # tokens, `[s, e)` 0-based
 local function tokens_of(line)
     local out, init = {}, 1
     while true do
@@ -126,18 +129,10 @@ end
 ---@param tol number?
 ---@return boolean
 local function tokens_equal(a, b, tol)
-    if a == b then
-        return true
+    if tol then
+        return compare.float_equal(a, b, tol)
     end
-    if not tol then
-        return false
-    end
-    local x, y = tonumber(a), tonumber(b)
-    if not (x and y) then
-        return false
-    end
-    local d = math.abs(x - y)
-    return d <= tol or d <= tol * math.abs(y)
+    return a == b
 end
 
 ---@private
@@ -196,6 +191,11 @@ end
 ---@param method tuna.CompareSpec the compare method in effect for this runner
 ---@return tuna.DiffResult
 function M.compute(output, expected, method)
+    ---@type tuna.DiffResult
+    local res = { out = {}, exp = {}, first = nil }
+    if expected and compare.compare_output(output or "", expected, method) then
+        return res
+    end
     local mode, tol = granularity(method)
     local ol = vim.split(output or "", "\n", { plain = true })
     local el = vim.split(expected or "", "\n", { plain = true })
@@ -204,13 +204,11 @@ function M.compute(output, expected, method)
         trim_trailing_blanks(el)
     end
 
-    ---@type tuna.DiffResult
-    local res = { out = {}, exp = {}, first = nil }
     for i = 1, math.max(#ol, #el) do
         local a, b = ol[i], el[i]
         if a and b then
             local sa, sb = line_spans(a, b, mode, tol)
-            if sa then
+            if sa and sb then
                 res.out[i] = { hl = M.CHANGE, spans = sa }
                 res.exp[i] = { hl = M.CHANGE, spans = sb }
             end

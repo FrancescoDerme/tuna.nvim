@@ -14,7 +14,30 @@ local M = {}
 ---builtin's options (e.g. `{ "float", tol = 1e-6 }`), or a custom function.
 ---@alias tuna.CompareSpec tuna.CompareBuiltin | tuna.CompareMethod | table
 
-local DEFAULT_FLOAT_TOL = 1e-6
+---The tolerance `float` uses when none is given.
+M.DEFAULT_FLOAT_TOL = 1e-6
+
+---Whether two tokens agree under `float`: equal as text, or both numbers within `tol`,
+---absolute or relative. The diff marks tokens by this same rule, so they never contradict
+---the verdict.
+---@param a string
+---@param b string
+---@param tol number
+---@return boolean
+function M.float_equal(a, b, tol)
+    if a == b then
+        return true
+    end
+    local x, y = tonumber(a), tonumber(b)
+    if not (x and y) then
+        return false
+    end
+    local d = math.abs(x - y)
+    return d <= tol or d <= tol * math.abs(y)
+end
+
+-- Unknown methods already reported, so a run of many testcases says so once.
+local warned = {}
 
 ---Split a string into whitespace-separated tokens (empties dropped).
 ---@param s string
@@ -49,19 +72,13 @@ M.methods = {
     -- token (or a numeric-vs-text mismatch) must be exactly equal. Token counts
     -- must agree. `tol` defaults to 1e-6.
     float = function(output, expected, opts)
-        local tol = (opts and opts.tol) or DEFAULT_FLOAT_TOL
+        local tol = (opts and opts.tol) or M.DEFAULT_FLOAT_TOL
         local ot, et = tokens(output), tokens(expected)
         if #ot ~= #et then
             return false
         end
         for i = 1, #et do
-            local a, b = tonumber(ot[i]), tonumber(et[i])
-            if a and b then
-                local diff = math.abs(a - b)
-                if diff > tol and diff > tol * math.abs(b) then
-                    return false
-                end
-            elseif ot[i] ~= et[i] then
+            if not M.float_equal(ot[i], et[i], tol) then
                 return false
             end
         end
@@ -78,7 +95,7 @@ function M.method_name(method)
     elseif type(method) == "table" then
         local name = method[1] or "?"
         if name == "float" then
-            return ("float, tol=%g"):format(method.tol or DEFAULT_FLOAT_TOL)
+            return ("float, tol=%g"):format(method.tol or M.DEFAULT_FLOAT_TOL)
         end
         return tostring(name)
     end
@@ -104,11 +121,15 @@ function M.compare_output(output, expected, method)
         return M.methods[method[1]](output, expected, method)
     end
 
-    -- scheduled because comparison may run inside a libuv callback, where direct
-    -- calls into the Neovim API (vim.notify) are not allowed
-    vim.schedule(function()
-        utils.notify("unknown compare method " .. vim.inspect(method) .. ", so outputs are not judged.")
-    end)
+    -- Said once per method, not once per testcase. Scheduled because comparison may run
+    -- inside a libuv callback, where the Neovim API cannot be called.
+    local key = vim.inspect(method)
+    if not warned[key] then
+        warned[key] = true
+        vim.schedule(function()
+            utils.notify("unknown compare method " .. key .. ", so outputs are not judged.")
+        end)
+    end
     return nil
 end
 

@@ -430,9 +430,14 @@ function StressRunner:generation(i)
                     return self:record_counterexample(i, input, expected, sol_out, sol_err, ended, ended_hl)
                 end
                 local tc = { stdin = input, stdout = sol_out, expected = expected }
-                checker.judge(tc, self.r.checker, self:effective_compare(), function(correct)
+                checker.judge(tc, self.checker, self:effective_compare(), function(correct, message)
                     if self:aborted() then
                         return
+                    end
+                    -- A checker that gives no verdict judges nothing, so searching on would
+                    -- only end in "no counterexample found", which would not be true.
+                    if correct == nil then
+                        return self:helper_failed("checker", i, message, "gave no verdict")
                     end
                     if correct == false then
                         self:record_counterexample(i, input, expected, sol_out, "", "WRONG", "TunaWrong")
@@ -443,6 +448,17 @@ function StressRunner:generation(i)
             end)
         end)
     end)
+end
+
+---The helpers the search cannot run without, built before it starts: the generator, the
+---bruteforce, and the checker when it is a program of its own.
+---@return tuna.HelperSpec[]
+function StressRunner:search_helpers()
+    local specs = { self.gen, self.ref }
+    if type(self.checker) == "table" then
+        specs[#specs + 1] = self.checker
+    end
+    return specs
 end
 
 ---One step of the search: spawn `argv` in the running directory, and hand its result to `cb`
@@ -567,7 +583,9 @@ function StressRunner:run_testcases()
     self.gen, self.ref = gen, ref
     self:refresh_judge(solution)
     self:plan_builds({ gen, ref, self.checker })
-    self:build_judge()
+    -- The checker is built with the generator and the bruteforce, and waited for like them:
+    -- the search judges every input with it, so one that did not build stops it before any
+    -- input is tried.
     self.stopped = false
     self.finished = false
     self.iter = 0
@@ -579,7 +597,7 @@ function StressRunner:run_testcases()
     -- starts when the last of the three lands: the hunt is what the run is for. The helpers'
     -- compile cache makes an unchanged one free, an edited one rebuilds, and one whose first
     -- compile failed is retried instead of the search spawning a binary never produced.
-    self:build_all({ self.gen, self.ref }, function()
+    self:build_all(self:search_helpers(), function()
         if not self:aborted() then
             self:generation(1)
         end
@@ -689,7 +707,7 @@ function M.run(bufnr, count_override, opts)
         -- Listed, not run: a row's run key builds and runs that row (`built_first`); a run of
         -- the whole set builds anyway.
         sr:defer_build(function(cont)
-            sr:build_all({ sr.gen, sr.ref }, cont)
+            sr:build_all(sr:search_helpers(), cont)
         end)
         return
     end

@@ -71,4 +71,58 @@ t.eq("exact names itself", compare.method_name("exact"), "exact")
 t.has("float carries its tolerance", compare.method_name(float), "tol")
 t.eq("a function is 'custom'", compare.method_name(function() end), "custom")
 
+-- An unknown method judges nothing, and says so once rather than once per testcase.
+do
+    local quiet = vim.notify
+    local said = t.capture_notifications()
+    for _ = 1, 3 do
+        t.eq("an unknown method judges nothing", compare.compare_output("1", "1", "sideways"), nil)
+    end
+    vim.wait(50, function()
+        return false
+    end)
+    vim.notify = quiet
+    t.eq("and is said once", #said, 1)
+end
+
+-- The diff draws what the verdict says: two texts the method judges equal get no marks,
+-- though `squish` and `float` read the output as one stream of tokens and the diff walks it
+-- line by line.
+local diff = require("tuna.diff")
+for _, method in ipairs({ "squish", { "float", tol = 1e-6 } }) do
+    local name = compare.method_name(method)
+    t.eq(name .. ": texts judged equal get no marks", diff.compute("1 2\n", "1\n2\n", method).first, nil)
+    t.eq(name .. ": texts judged different are still marked", diff.compute("1 3\n", "1\n2\n", method).first, 1)
+end
+t.eq("float: a value within tolerance is no difference", diff.compute("0.3000001\n", "0.3\n", { "float", tol = 1e-6 }).first, nil)
+local within = diff.compute("0.3000001 5\n", "0.3 6\n", { "float", tol = 1e-6 })
+t.eq("and on a line that is wrong, only the value that differs is marked", within.out[1] and within.out[1].spans, { { 10, 11 } })
+
+-- A checker that did not build judges nothing and says so on the row it could not judge, and
+-- nowhere else: the build step shows why, beside the other sources.
+do
+    local quiet = vim.notify
+    local said = t.capture_notifications()
+    local got
+    require("tuna.checker").judge({ stdin = "1", stdout = "1", expected = "1" }, {
+        exec = "x",
+        args = {},
+        cwd = vim.fn.getcwd(),
+        role = "checker",
+        compile = { exec = "/nonexistent/compiler", args = {} },
+        compile_dir = vim.fn.tempname(),
+    }, "exact", function(correct, message)
+        got = { correct, message }
+    end)
+    vim.wait(200, function()
+        return got ~= nil
+    end)
+    vim.wait(50, function()
+        return false
+    end)
+    vim.notify = quiet
+    t.eq("a checker that did not build gives no verdict, and says why", got, { nil, "checker did not compile" })
+    t.eq("without a notification", said, {})
+end
+
 t.report()

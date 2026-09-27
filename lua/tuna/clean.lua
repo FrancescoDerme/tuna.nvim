@@ -140,7 +140,7 @@ end
 ---@return table<string, string>
 local function tool_roles(cfg)
     local map = {}
-    for role, names in pairs(cfg.tool_names or require("tuna.tools").DEFAULT_NAMES) do
+    for role, names in pairs(cfg.tool_names) do
         for _, name in ipairs(names) do
             map[name] = role
         end
