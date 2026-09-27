@@ -39,8 +39,21 @@ local M = {}
 ---@type table<integer, table>
 M.active = {}
 
-local SOURCES = { live = true, feed = true, interactor = true }
 local DEFAULT_ARGS = { "$(INPUT)", "$(ANSWER)" }
+
+---A pipe for one side of a session.
+---@return uv.uv_pipe_t
+local function pipe()
+    return assert(uv.new_pipe(false))
+end
+
+---Kill a process handle that may have exited already.
+---@param handle uv.uv_process_t?
+local function kill(handle)
+    if handle and handle:is_active() then
+        pcall(handle.kill, handle, "sigkill")
+    end
+end
 
 ---Write `content` to a fresh temp file and return its path.
 ---@param content string?
@@ -162,16 +175,13 @@ function InteractiveRunner:conversational()
     return self.source ~= "feed"
 end
 
----The grid follows the source. `feed` keeps whatever layout is configured, with the
----canonical Input and Expected Output panes, editable as in a normal run: what it replays is
----a stored testcase, its input the script and its expected output the verdict. `live` and
----`interactor` are a conversation and are laid out as one — the selector, then a column
----each for Output, Live and Errors, every one full height, so a row of one faces the same
----row of the others. Expected output has no place in it, a sample exchange being one
----example of a conversation rather than the only correct one.
----@return table?
 ---The grid this source draws, from `interactive.layouts` (`false` there means the configured
----one), and the name to report it by when it does not validate.
+---one), and the name to report it by when it does not validate. `feed` keeps the configured
+---grid, with the canonical Input and Expected Output panes, editable as in a normal run: what
+---it replays is a stored testcase. `live` and `interactor` are a conversation and are laid out
+---as one, the selector, then a column each for Output, Live and Errors, every one full height,
+---so a row of one faces the same row of the others. Expected output has no place in it, a
+---sample exchange being one example of a conversation rather than the only correct one.
 ---
 ---The shipped conversation grid gives the selector the share it has in the configured one
 ---(3 of 11), so it is the width it is in every other mode, compile time and all. Output and
@@ -271,22 +281,21 @@ function InteractiveRunner:on_build_failed()
     self:update_ui(true)
 end
 
----A single session runs at a time; killing it ends that session.
-function InteractiveRunner:kill_all_processes()
-    if self.sol_handle and self.sol_handle:is_active() then
-        pcall(function()
-            self.sol_handle:kill("sigkill")
-        end)
+---End the session running now, and only it: its row reads `KILLED`, as a testcase stopped in
+---any mode does, and the run goes on to the next one.
+function InteractiveRunner:kill_process()
+    local tc = self.active_index and self.tcdata[self.active_index]
+    if tc and (self.sol_handle or self.int_handle) then
+        tc.killed = true
     end
-    if self.int_handle and self.int_handle:is_active() then
-        pcall(function()
-            self.int_handle:kill("sigkill")
-        end)
-    end
+    kill(self.sol_handle)
+    kill(self.int_handle)
 end
 
-function InteractiveRunner:kill_process()
-    self:kill_all_processes()
+---Stop the run: the session running now ends, and none starts after it.
+function InteractiveRunner:kill_all_processes()
+    self.stopped = true
+    self:kill_process()
 end
 
 ---Re-running one row restarts its session. It claims the runner while the session runs,
@@ -300,6 +309,7 @@ function InteractiveRunner:run_single(idx)
         return
     end
     self.completed = false
+    self.stopped = false
     if self:built_first(function()
         self:run_single(idx)
     end) then
@@ -314,30 +324,30 @@ function InteractiveRunner:run_single(idx)
     end)
 end
 
----Restart every session from the top (the UI's "run all again").
+---Run every session from the top: the first run, and the UI's "run all again". Like a run
+---of the whole set in every mode, it builds the solution first.
 function InteractiveRunner:run_testcases()
-    if self:built_first(function()
-        self:run_testcases()
-    end) then
-        return
-    end
+    self:claim_listed()
+    self.completed = false
     self:with_helpers(function()
         self:run_sessions()
-    end)
+    end, true)
 end
 
----Look this run's helpers up again before a rerun, as every run does: the checker, and for
----the interactor source the interactor, prepared again so an edited one rebuilds. A rerun
----keeps its source, so an interactor that is gone is reported and nothing runs: `:Tuna run`
----picks the source again.
+---Look this run's helpers up again before a run, as every run does: the checker, and for the
+---interactor source the interactor, prepared again so an edited one rebuilds. A rerun keeps
+---its source, so an interactor that is gone is reported and nothing runs: `:Tuna run` picks
+---the source again.
 ---@param cont fun()
-function InteractiveRunner:with_helpers(cont)
+---@param whole boolean? a run of the whole set, which builds the solution too
+function InteractiveRunner:with_helpers(cont, whole)
     local solution = api.nvim_buf_get_name(self.bufnr)
+    local build = whole and self.build_all or self.build_helpers
     self:refresh_judge(solution)
     if self.source ~= "interactor" then
         self:plan_builds({ self.checker })
         self:build_judge()
-        return cont()
+        return build(self, {}, cont)
     end
     local function stop(title, text)
         self.completed = true
@@ -355,7 +365,7 @@ function InteractiveRunner:with_helpers(cont)
     self.interactor = spec
     self:plan_builds({ spec, self.checker })
     self:build_judge()
-    self:build_helpers({ spec }, cont)
+    build(self, { spec }, cont)
 end
 
 ---In a conversation the three columns are scroll-bound and unwrapped, so reading back
@@ -554,7 +564,7 @@ end
 ---optional on_timeout() when `cbs.timed` and `self.timeout` are set.
 ---@param cbs table
 function InteractiveRunner:spawn_solution(cbs)
-    local sol_in, sol_out, sol_err = uv.new_pipe(false), uv.new_pipe(false), uv.new_pipe(false)
+    local sol_in, sol_out, sol_err = pipe(), pipe(), pipe()
     self.sol_in = sol_in
     local timer
     local done = false
@@ -619,15 +629,11 @@ function InteractiveRunner:spawn_solution(cbs)
     end)
 
     if self.timeout and cbs.timed then
-        timer = uv.new_timer()
+        timer = assert(uv.new_timer())
         timer:start(self.timeout, 0, function()
             if not done then
                 vim.schedule(cbs.on_timeout)
-                if handle:is_active() then
-                    pcall(function()
-                        handle:kill("sigkill")
-                    end)
-                end
+                kill(handle)
             end
         end)
     end
@@ -661,8 +667,11 @@ function InteractiveRunner:run_live(idx, on_done)
             self:update_ui(true)
             on_done()
         end,
-        on_exit = function()
-            tc.status, tc.hlgroup = "DONE", "TunaDone"
+        on_exit = function(code, signal)
+            -- You are the judge, so a session that ended on its own is DONE; one stopped or
+            -- crashed ends the way a testcase would.
+            local ended, hl = core.ending({ code = code, signal = signal, killed = tc.killed })
+            tc.status, tc.hlgroup = ended or "DONE", hl or "TunaDone"
             self.sol_in = nil
             self:update_ui(true)
             on_done()
@@ -726,16 +735,9 @@ function InteractiveRunner:run_feed(idx, on_done)
         end,
         on_exit = function(code, signal)
             self.sol_in = nil
-            if timed_out then
-                tc.status, tc.hlgroup = "TIMEOUT", "TunaWrong"
-                self:update_ui(true)
-                return on_done()
-            elseif signal and signal ~= 0 then
-                tc.status, tc.hlgroup = "SIG " .. signal, "TunaWarning"
-                self:update_ui(true)
-                return on_done()
-            elseif code ~= 0 then
-                tc.status, tc.hlgroup = "RET " .. code, "TunaWarning"
+            local ended, hl = core.ending({ code = code, signal = signal, timed_out = timed_out, killed = tc.killed })
+            if ended then
+                tc.status, tc.hlgroup = ended, hl
                 self:update_ui(true)
                 return on_done()
             elseif tc.expected ~= nil then
@@ -787,8 +789,8 @@ function InteractiveRunner:run_interactor(idx, on_done)
         end)
     end
 
-    local sol_in, sol_out = uv.new_pipe(false), uv.new_pipe(false)
-    local int_in, int_out, int_err = uv.new_pipe(false), uv.new_pipe(false), uv.new_pipe(false)
+    local sol_in, sol_out = pipe(), pipe()
+    local int_in, int_out, int_err = pipe(), pipe(), pipe()
     local sol_handle, int_handle, timer
     local done, verdict, int_exited, failed = false, nil, false, false
 
@@ -797,7 +799,11 @@ function InteractiveRunner:run_interactor(idx, on_done)
             h:close()
         end
     end
-    local function finish()
+    ---End the session. `status` is how it ended when that was not the interactor's verdict:
+    ---the solution crashing, or the time running out.
+    ---@param status string?
+    ---@param hl string?
+    local function finish(status, hl)
         if done then
             return
         end
@@ -806,16 +812,8 @@ function InteractiveRunner:run_interactor(idx, on_done)
             timer:stop()
             safe_close(timer)
         end
-        if sol_handle and sol_handle:is_active() then
-            pcall(function()
-                sol_handle:kill("sigkill")
-            end)
-        end
-        if int_handle and int_handle:is_active() then
-            pcall(function()
-                int_handle:kill("sigkill")
-            end)
-        end
+        kill(sol_handle)
+        kill(int_handle)
         for _, p in ipairs({ sol_in, sol_out, int_in, int_out, int_err }) do
             safe_close(p)
         end
@@ -827,6 +825,10 @@ function InteractiveRunner:run_interactor(idx, on_done)
                 -- The session never happened (the interactor would not start): that is
                 -- not a DONE, which reads as a session that ran and was not judged.
                 tc.status, tc.hlgroup = "FAILED", "TunaWarning"
+            elseif tc.killed then
+                tc.status, tc.hlgroup = "KILLED", "TunaWarning"
+            elseif status then
+                tc.status, tc.hlgroup = status, hl
             elseif verdict == true then
                 tc.status, tc.hlgroup = "CORRECT", "TunaCorrect"
             elseif verdict == false then
@@ -846,11 +848,12 @@ function InteractiveRunner:run_interactor(idx, on_done)
     }, function(code, signal)
         safe_close(sol_handle)
         sol_handle = nil
-        if not int_exited and not done and (code ~= 0 or (signal and signal ~= 0)) then
-            verdict = false
-            tc.stderr = (tc.stderr or "") .. "\n[solution exited with code " .. tostring(code) .. "]"
-            log_note(tc, "[solution exited with code " .. tostring(code) .. "]")
-            finish()
+        local ended, hl, words = core.ending({ code = code, signal = signal })
+        if ended and not int_exited and not done then
+            local note = "[solution " .. words .. "]"
+            tc.stderr = (tc.stderr or "") .. "\n" .. note
+            log_note(tc, note)
+            finish(ended, hl)
         end
     end)
     if not sol_handle then
@@ -935,13 +938,13 @@ function InteractiveRunner:run_interactor(idx, on_done)
     end)
 
     if self.timeout then
-        timer = uv.new_timer()
+        timer = assert(uv.new_timer())
         timer:start(self.timeout, 0, function()
             if not done then
-                verdict = false
-                tc.stderr = (tc.stderr or "") .. "\n[timed out after " .. self.timeout .. "ms]"
-                log_note(tc, "[timed out after " .. self.timeout .. "ms]")
-                finish()
+                local ended, hl, words = core.ending({ timed_out = true }, self.timeout)
+                tc.stderr = (tc.stderr or "") .. "\n[" .. words .. "]"
+                log_note(tc, "[" .. words .. "]")
+                finish(ended, hl)
             end
         end)
     end
@@ -958,6 +961,7 @@ function InteractiveRunner:run_one_session(idx, on_done)
     if self.ui then
         self.ui:follow_row(idx)
     end
+    self:reset_row(self.tcdata[idx])
     if self.source == "interactor" then
         self:run_interactor(idx, on_done)
     elseif self.source == "feed" then
@@ -977,10 +981,14 @@ function InteractiveRunner:run_sessions()
         end
     end
     self.completed = false
+    self.stopped = false
     local k = 0
     local function step()
         k = k + 1
-        if k > #order then
+        if k > #order or self.stopped then
+            for j = k, #order do -- stopped: the sessions after this one never started
+                self.tcdata[order[j]].status, self.tcdata[order[j]].hlgroup = "NOT RUN", "TunaDone"
+            end
             self.completed = true
             core.save_buffer_verdict(self.bufnr, self.tcdata)
             self:update_ui(true)
@@ -1042,13 +1050,6 @@ end
 -- Helpers + entry point
 --------------------------------------------------------------------------------
 
----Rebuild any open interactive UIs after a `VimResized`.
-function M.resize_all()
-    for _, ir in pairs(M.active) do
-        ir:resize_ui()
-    end
-end
-
 ---Run interactive judging for a buffer's solution.
 ---@param bufnr integer? defaults to the current buffer
 ---@param args string[]? a leading source keyword (live|feed|interactor) then testcase numbers
@@ -1063,7 +1064,6 @@ function M.run(bufnr, args, opts)
         return
     end
     local cfg = r.config
-    local dir = vim.fn.fnamemodify(api.nvim_buf_get_name(bufnr), ":p:h")
     local path = api.nvim_buf_get_name(bufnr)
     if not opts.show_only then
         tools.save_sources(bufnr, cfg) -- save the solution (interactor saved in tools.prepare)
@@ -1073,7 +1073,7 @@ function M.run(bufnr, args, opts)
     -- source typed now is forced and runs as typed, `auto` makes it automatic again.
     local list = args and vim.deepcopy(args) or nil
     local typed
-    if list and list[1] and (SOURCES[list[1]] or list[1] == "auto") then
+    if list and list[1] and (vim.tbl_contains(tools.SOURCES, list[1]) or list[1] == "auto") then
         typed = table.remove(list, 1)
         tools.set_source(path, typed ~= "auto" and typed or nil)
     end
@@ -1125,7 +1125,6 @@ function M.run(bufnr, args, opts)
         editable_testcases = source == "feed",
         interactor = interactor,
         list = list,
-        dir = dir,
         rundir = rundir,
         timeout = timeout,
         mode = "interactive",
@@ -1147,9 +1146,6 @@ function M.run(bufnr, args, opts)
     -- once: the solution is the Compile row itself, the interactor is one when it plays the
     -- other side, and the checker is one whenever it is a program of its own.
     ir:plan_builds({ source == "interactor" and ir.interactor or false, ir.checker })
-    if not opts.show_only then
-        ir:build_judge()
-    end
 
     -- Rows first, and marked before the board opens: the UI lays its grid out for the row it
     -- opens on, which an empty list leaves as line 1, and which is the build step while a run
@@ -1161,22 +1157,16 @@ function M.run(bufnr, args, opts)
     ir:show_ui()
     ir:update_ui(true)
 
-    -- The solution and, when it is the one playing the other side, the interactor: two
-    -- programs with two compilers, so they build at once.
-    local function build(cont)
-        ir:build_all(source == "interactor" and { ir.interactor } or {}, cont)
-    end
-
     if opts.show_only then
-        -- Listed, not run: the first run key builds and starts the sessions (`built_first`).
+        -- Listed, not run: a row's run key builds the solution and, when it plays the other
+        -- side, the interactor, then runs (`built_first`); a run of the whole set builds anyway.
         ir.completed = true
-        ir:defer_build(build)
-        ir:update_ui(true)
+        ir:defer_build(function(cont)
+            ir:build_all(source == "interactor" and { ir.interactor } or {}, cont)
+        end)
         return
     end
-    build(function()
-        ir:run_sessions()
-    end)
+    ir:run_testcases()
 end
 
 ---Open the interactive UI for a buffer with its rows listed and nothing run.

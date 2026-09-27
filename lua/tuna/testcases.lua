@@ -486,15 +486,26 @@ local function buf_tc_directory(bufnr)
     return M.tc_directory(vim.fn.fnamemodify(filepath, ":p:h"), filepath, cfg)
 end
 
+---The testcases directory of the solution at `filepath`, with no buffer needed.
+---@param filepath string
+---@param cfg table
+---@return string
+local function path_tc_directory(filepath, cfg)
+    return M.tc_directory(vim.fn.fnamemodify(filepath, ":p:h"), filepath, cfg)
+end
+
 -- files
-function M.files.buf_load(bufnr)
-    local cfg = config.get_buffer_config(bufnr)
+function M.files.path_load(filepath, cfg)
     return M.files.load(
-        buf_tc_directory(bufnr),
-        vim.api.nvim_buf_get_name(bufnr),
+        path_tc_directory(filepath, cfg),
+        filepath,
         cfg.testcases_input_file_format,
         cfg.testcases_output_file_format
     )
+end
+
+function M.files.buf_load(bufnr)
+    return M.files.path_load(vim.api.nvim_buf_get_name(bufnr), config.get_buffer_config(bufnr))
 end
 
 function M.files.buf_write(bufnr, tctbl)
@@ -514,8 +525,12 @@ local function buf_single_file_path(bufnr)
     return buf_tc_directory(bufnr) .. utils.buf_eval_string(bufnr, cfg.testcases_single_file_format)
 end
 
+function M.single_file.path_load(filepath, cfg)
+    return M.single_file.load(path_tc_directory(filepath, cfg) .. utils.eval_string(filepath, cfg.testcases_single_file_format))
+end
+
 function M.single_file.buf_load(bufnr)
-    return M.single_file.load(buf_single_file_path(bufnr))
+    return M.single_file.path_load(vim.api.nvim_buf_get_name(bufnr), config.get_buffer_config(bufnr))
 end
 
 function M.single_file.buf_write(bufnr, tctbl)
@@ -523,15 +538,18 @@ function M.single_file.buf_write(bufnr, tctbl)
 end
 
 -- directory
-function M.directory.buf_load(bufnr)
-    local cfg = config.get_buffer_config(bufnr)
+function M.directory.path_load(filepath, cfg)
     return M.directory.load(
-        buf_tc_directory(bufnr),
-        vim.api.nvim_buf_get_name(bufnr),
+        path_tc_directory(filepath, cfg),
+        filepath,
         cfg.testcases_directory_format,
         cfg.testcases_directory_input,
         cfg.testcases_directory_output
     )
+end
+
+function M.directory.buf_load(bufnr)
+    return M.directory.path_load(vim.api.nvim_buf_get_name(bufnr), config.get_buffer_config(bufnr))
 end
 
 function M.directory.buf_write(bufnr, tctbl)
@@ -597,7 +615,7 @@ end
 
 ---------------- DISPATCHER ----------------
 
----@type table<string, { buf_load: fun(b: integer): table, buf_write: fun(b: integer, t: table), buf_clear: fun(b: integer) }>
+---@type table<string, { path_load: fun(p: string, c: table): table, buf_load: fun(b: integer): table, buf_write: fun(b: integer, t: table), buf_clear: fun(b: integer) }>
 M.backends = {
     files = M.files,
     single_file = M.single_file,
@@ -621,15 +639,22 @@ end
 ---@param bufnr integer
 ---@return table<integer, { input: string?, output: string? }>
 function M.buf_get_testcases(bufnr)
-    local cfg = config.get_buffer_config(bufnr)
-    local primary = M.backend(cfg.testcases_storage)
-    local tctbl = primary.buf_load(bufnr)
+    return M.get_testcases(vim.api.nvim_buf_get_name(bufnr), config.get_buffer_config(bufnr))
+end
 
+---The testcases of the solution at `filepath`, with no buffer needed (run-all launched from a
+---buffer that is not a solution): the configured backend, else the others in a fixed order.
+---@param filepath string
+---@param cfg table resolved config
+---@return table<integer, { input: string?, output: string? }>
+function M.get_testcases(filepath, cfg)
+    local primary = M.backend(cfg.testcases_storage)
+    local tctbl = primary.path_load(filepath, cfg)
     if next(tctbl) == nil and cfg.testcases_auto_detect then
         for _, name in ipairs(M.BACKEND_ORDER) do
             local backend = M.backends[name]
             if backend ~= primary then
-                tctbl = backend.buf_load(bufnr)
+                tctbl = backend.path_load(filepath, cfg)
                 if next(tctbl) ~= nil then
                     break
                 end

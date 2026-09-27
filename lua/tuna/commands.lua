@@ -305,20 +305,38 @@ function M.dispatch_mode(mode, args, compile, bufnr)
     end)
 end
 
----Every runner a buffer has, whichever run mode built it. A mode module is only looked
----at when it is already loaded: a mode that never ran has no runner.
+---The tables every mode keeps its runners in, by buffer. Only the mode modules already
+---loaded are asked: a mode never used has no runners, and loading it to find none costs a
+---require.
+---@return table<integer, tuna.RunnerCore>[]
+local function runner_tables()
+    local tables = { M.runners }
+    for _, mod in ipairs({ "tuna.interactive", "tuna.stress", "tuna.multi" }) do
+        local m = package.loaded[mod]
+        if m then
+            tables[#tables + 1] = m.active
+        end
+    end
+    return tables
+end
+
+---Every runner a buffer has, whichever run mode built it.
 ---@param bufnr integer
 ---@return table[]
 local function runners_of(bufnr)
     local list = {}
-    if M.runners[bufnr] then
-        list[#list + 1] = M.runners[bufnr]
+    for _, runners in ipairs(runner_tables()) do
+        list[#list + 1] = runners[bufnr]
     end
-    for _, mod in ipairs({ "tuna.interactive", "tuna.stress", "tuna.multi" }) do
-        local m = package.loaded[mod]
-        if m and m.active and m.active[bufnr] then
-            list[#list + 1] = m.active[bufnr]
-        end
+    return list
+end
+
+---Every live runner, of every buffer and mode.
+---@return tuna.RunnerCore[]
+function M.all_runners()
+    local list = {}
+    for _, runners in ipairs(runner_tables()) do
+        vim.list_extend(list, vim.tbl_values(runners))
     end
     return list
 end

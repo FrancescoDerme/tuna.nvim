@@ -2263,6 +2263,173 @@ for _, board in ipairs(boards) do
 end
 t.ok("which is every mode that builds a solution of its own", built >= 3, built)
 
+-- How a process ended reads the same in every mode, for a testcase, a session or a stress
+-- helper alike.
+do
+    local ending = core.ending
+    t.eq("a timeout", { ending({ timed_out = true }, 1500) }, { "TIMEOUT", "TunaWrong", "timed out after 1.5 s" })
+    t.eq("vim.system's own timeout kill is one too", (ending({ code = 124, signal = 15 })), "TIMEOUT")
+    t.eq("a stop", { ending({ killed = true, signal = 9 }) }, { "KILLED", "TunaWarning", "was stopped" })
+    t.eq("a signal", { ending({ code = 0, signal = 6 }) }, { "SIG 6", "TunaWarning", "was killed by signal 6" })
+    t.eq("an exit code", { ending({ code = 3, signal = 0 }) }, { "RET 3", "TunaWarning", "exited with code 3" })
+    t.eq("and a clean exit is no ending at all", ending({ code = 0, signal = 0 }), nil)
+end
+
+-- A run of the whole set builds the solution first, in every mode: "run all again" after an
+-- edit runs the program as it now is, not the one built last time.
+local function compiled_solution()
+    for _, s in ipairs(spawns) do
+        if s.argv[1] == "g++" then
+            for _, arg in ipairs(s.argv) do
+                if arg:match("sol%.cpp$") then
+                    return true
+                end
+            end
+        end
+    end
+    return false
+end
+for _, board in ipairs(boards) do
+    stub_system()
+    local r = board.run()
+    vim.wait(3000, function()
+        return r:idle()
+    end, 20)
+    -- As the UI's key does it: whatever runs is stopped, then the run starts over.
+    r:kill_all_processes()
+    spawns = {}
+    r:run_testcases()
+    vim.wait(3000, function()
+        return #spawns > 0 and r:idle()
+    end, 20)
+    t.ok(board.name .. ": run all again builds the solution again", compiled_solution(), spawns)
+    local ran = 0
+    for _, tc in ipairs(r.tcdata) do
+        if type(tc.tcnum) == "number" and tc.status ~= "NOT RUN" and tc.status ~= "" then
+            ran = ran + 1
+        end
+    end
+    t.ok(board.name .. ": and runs the testcases, the stop before it forgotten", ran > 0, r.tcdata)
+    r:kill_all_processes()
+    r:delete_ui()
+    vim.system = real_system
+end
+
+-- Stopping a run stops it, in every mode: what runs is killed, nothing queued starts, the rows
+-- that never ran say so, and the board is idle again, so it can be edited.
+local function hanging_system()
+    spawns = {}
+    vim.system = function(argv, _, on_exit)
+        spawns[#spawns + 1] = { argv = argv }
+        if argv[1] == "g++" then -- a build finishes at once, a solution runs until stopped
+            vim.schedule(function()
+                on_exit({ code = 0, signal = 0, stdout = "", stderr = "" })
+            end)
+        end
+        return {
+            pid = 0,
+            wait = function()
+                return { code = 0 }
+            end,
+            kill = function()
+                vim.schedule(function()
+                    on_exit({ code = 0, signal = 9, stdout = "", stderr = "" })
+                end)
+            end,
+        }
+    end
+end
+require("tuna.config").setup({ multiple_testing = 1 })
+for _, board in ipairs(boards) do
+    if board.name == "a normal run" or board.name == "run-all" then
+        hanging_system()
+        local r = board.run()
+        vim.wait(3000, function()
+            for _, tc in ipairs(r.tcdata) do
+                if tc.status == "RUNNING" and tc.tcnum ~= "Compile" then
+                    return true
+                end
+            end
+            return false
+        end, 20)
+        r:kill_all_processes()
+        local spawned = #spawns
+        vim.wait(300, function()
+            return false
+        end)
+        local cases = {}
+        for _, tc in ipairs(r.tcdata) do
+            if type(tc.tcnum) == "number" then
+                cases[#cases + 1] = tc.status
+            end
+        end
+        t.eq(board.name .. ": a stopped run kills what runs, and nothing it queued starts", cases, { "KILLED", "NOT RUN" })
+        t.eq(board.name .. ": nothing is spawned after the stop", #spawns, spawned)
+        t.eq(board.name .. ": and the board is idle again", r:idle(), true)
+        if board.name == "run-all" then
+            local header = r.tcdata[1]
+            t.eq("run-all: its header counts no stopped row as a failure", { header.status, header.hlgroup }, { "0/0", "TunaDone" })
+        end
+        r:delete_ui()
+        vim.system = real_system
+    end
+end
+require("tuna.config").setup({})
+
+-- Interactive holds one session at a time: a stop ends the one running and starts no other,
+-- and the row it was on reads KILLED, as a stopped testcase does everywhere.
+do
+    stub_system()
+    local ir = boards[4].run()
+    vim.wait(3000, function()
+        return ir:idle()
+    end, 20)
+    local held, sessions = nil, 0
+    ir.run_one_session = function(_, idx, on_done)
+        sessions = sessions + 1
+        ir.active_index, held = idx, on_done
+    end
+    ir:run_testcases()
+    vim.wait(3000, function()
+        return held ~= nil
+    end, 20)
+    ir.sol_handle = {
+        is_active = function()
+            return true
+        end,
+        kill = function() end,
+    }
+    ir:kill_all_processes()
+    ir.sol_handle = nil
+    t.eq("interactive: the session being stopped is marked killed", ir.tcdata[ir.active_index].killed, true)
+    held()
+    local last = ir.tcdata[#ir.tcdata]
+    t.eq("interactive: no session starts after a stop", sessions, 1)
+    t.eq("interactive: the one that never started says so", { last.status, ir:idle() }, { "NOT RUN", true })
+    ir:delete_ui()
+    vim.system = real_system
+end
+
+-- A run-all board only listed has judged nothing, so adding a testcase to it leaves every
+-- header saying so rather than counting the rows as failures.
+do
+    local mr2 = boards[2].show()
+    mr2:add_testcase_row(7)
+    t.eq("run-all: a listed board's header counts nothing", { mr2.tcdata[1].status, mr2.tcdata[1].hlgroup }, { "0/0", "TunaDone" })
+    mr2:delete_ui()
+end
+
+-- Leaving a stress board that was only listed says nothing about stopping: nothing ran.
+do
+    local sr3 = boards[3].show()
+    local quiet = vim.notify
+    local said = t.capture_notifications()
+    sr3:kill_all_processes()
+    vim.notify = quiet
+    t.eq("stress: a listed board stops without a word", said, {})
+    sr3:delete_ui()
+end
+
 -- The board's own choice is not a move by hand: while it opens, the row it is about to choose
 -- and the line the cursor is on have to agree, or the first cursor event the editor sends
 -- reads as the user taking over and the board never chooses again.

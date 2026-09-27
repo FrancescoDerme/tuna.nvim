@@ -30,76 +30,6 @@ local M = {}
 ---@type table<integer, table>
 M.active = {}
 
----Expand $(FNOEXT)/… in a command against a concrete file path.
----@param filepath string
----@param command { exec: string, args: string[]? }
----@return { exec: string, args: string[] }?
-local function eval_command(filepath, command)
-    local exec = utils.eval_string(filepath, command.exec)
-    if not exec then
-        return nil
-    end
-    local args = {}
-    for i, a in ipairs(command.args or {}) do
-        args[i] = utils.eval_string(filepath, a)
-        if not args[i] then
-            return nil
-        end
-    end
-    return { exec = exec, args = args }
-end
-
----Load testcases from a directory without a buffer, mirroring
----`testcases.buf_get_testcases` (configured storage + auto-detect fallback). Used
----when `run all` is invoked from a buffer that isn't itself a solution file (e.g. an
----unnamed buffer), so testcases are still found via a discovered solution as anchor.
----@param source_dir string directory the solutions live in
----@param anchor string a real solution path, for `$(FNOEXT)`-style format modifiers
----@param cfg table resolved buffer config
----@return table<integer, { input: string?, output: string? }>
-local function load_dir_testcases(source_dir, anchor, cfg)
-    local tcdir = testcases.tc_directory(source_dir, anchor, cfg)
-    local loaders = {
-        files = function()
-            return testcases.files.load(
-                tcdir,
-                anchor,
-                cfg.testcases_input_file_format,
-                cfg.testcases_output_file_format
-            )
-        end,
-        single_file = function()
-            return testcases.single_file.load(
-                tcdir .. utils.eval_string(anchor, cfg.testcases_single_file_format)
-            )
-        end,
-        directory = function()
-            return testcases.directory.load(
-                tcdir,
-                anchor,
-                cfg.testcases_directory_format,
-                cfg.testcases_directory_input,
-                cfg.testcases_directory_output
-            )
-        end,
-    }
-    local primary = loaders[cfg.testcases_storage]
-    local tctbl = primary and primary() or {}
-    if next(tctbl) == nil and cfg.testcases_auto_detect then
-        -- The same fixed fallback order the buffer path uses, for the same reason:
-        -- which backend answers must not depend on table hash order.
-        for _, name in ipairs(testcases.BACKEND_ORDER) do
-            if name ~= cfg.testcases_storage then
-                tctbl = loaders[name]()
-                if next(tctbl) ~= nil then
-                    break
-                end
-            end
-        end
-    end
-    return tctbl
-end
-
 --------------------------------------------------------------------------------
 -- MultiRunner (a RunnerCore subclass the runner UI drives)
 --------------------------------------------------------------------------------
@@ -288,24 +218,28 @@ end
 ---@param sol table
 function MultiRunner:recompute_header(sol)
     local hrow = self.tcdata[sol.header_idx]
-    local correct, total = 0, 0
+    -- Over the judged rows only, the rule a local verdict counts by: a testcase with no answer,
+    -- one stopped or never run, says nothing about whether the solution is right.
+    local correct, total, pending = 0, 0, false
     for _, ci in ipairs(sol.case_idxs) do
         local c = self.tcdata[ci]
-        if c.status ~= "" and c.status ~= "RUNNING" then
+        if core.judged(c.status) then
             total = total + 1
             if c.status == "CORRECT" then
                 correct = correct + 1
             end
+        elseif c.status == "" or c.status == "RUNNING" or c.judging then
+            pending = true
         end
     end
     hrow.correct, hrow.total = correct, total
     hrow.status = correct .. "/" .. total
-    if total > 0 and correct == total then
-        hrow.hlgroup = "TunaCorrect"
-    elseif total == #sol.case_idxs then
+    if correct < total then
         hrow.hlgroup = "TunaWrong"
-    else
+    elseif pending then
         hrow.hlgroup = "TunaRunning"
+    else
+        hrow.hlgroup = total > 0 and "TunaCorrect" or "TunaDone"
     end
 end
 
@@ -411,24 +345,19 @@ function MultiRunner:run_cases_parallel()
             end
         end
     end
-    self.qpos = 0
+    self.qpos = self.stopped and #self.queue or 0 -- stopped while it compiled: nothing starts
     self.running_cases = 0
-    if #self.queue == 0 then
-        self.completed = true
-        self:update_ui(true)
-        return
-    end
-
     for _ = 1, core.parallelism(self.config, #self.queue) do
         self:next_case_lane()
     end
+    self:settle()
 end
 
 ---@private
 ---Start the next queued case in a lane; on finish it recomputes its solution's
 ---header, pulls the next case, and checks for overall completion.
 function MultiRunner:next_case_lane()
-    if self.stopped then
+    if self.stopped or self.qpos >= #self.queue then
         return
     end
     self.qpos = self.qpos + 1
@@ -444,25 +373,21 @@ function MultiRunner:next_case_lane()
         self:recompute_header(tc.sol)
         self:update_ui(true)
         self:next_case_lane()
-        if self.qpos >= #self.queue and self.running_cases == 0 and not self.completed then
-            self.completed = true
-            self:save_local_verdicts()
-            self:update_ui(true)
-        end
+        self:settle()
     end)
 end
 
----Stop the batch: kill running case processes and stop pulling new ones.
+---Stop the matrix: what runs is killed, nothing queued starts, and the run settles once the
+---killed cases are in.
 function MultiRunner:kill_all_processes()
-    self.stopped = true
-    for _, tc in ipairs(self.tcdata) do
-        if tc.running and tc.handle then
-            tc.killed = true
-            pcall(function()
-                tc.handle:kill("sigkill")
-            end)
+    core.RunnerCore.kill_all_processes(self)
+    self.qpos = #(self.queue or {})
+    for _, sol in ipairs(self.files) do
+        if not sol.skip and sol.header_idx then
+            self:recompute_header(sol)
         end
     end
+    self:settle()
 end
 
 ---@private
@@ -472,19 +397,20 @@ end
 function MultiRunner:rerun_solution(sol)
     sol.skip = false
     -- A re-run is a run: `idle()` must say so while it is in flight, so the
-    -- structural edits that wait on it do (see `settle_single`).
+    -- structural edits that wait on it do (see `settle`).
     self.completed = false
+    self.stopped = false
     self:compile_solution(sol, function(ok)
         if not ok then
-            self:settle_single()
+            self:settle()
             return
         end
         local ci = 0
         local function step()
             ci = ci + 1
-            if ci > #sol.case_idxs then
+            if ci > #sol.case_idxs or self.stopped then
                 self:recompute_header(sol)
-                self:settle_single()
+                self:settle()
                 self:update_ui(true)
                 return
             end
@@ -501,13 +427,15 @@ function MultiRunner:rerun_solution(sol)
 end
 
 ---@private
----Mark a single/solution re-run finished — unless the shared pool is still draining,
----in which case its own completion check owns the flag.
-function MultiRunner:settle_single()
-    if (self.running_cases or 0) == 0 and (self.qpos or 0) >= #(self.queue or {}) then
-        self.completed = true
-        self:save_local_verdicts()
+---Mark the run finished once nothing is running or queued: the shared pool, a single
+---row's re-run and a solution's all end here, and a stop drains the queue first.
+function MultiRunner:settle()
+    if self.completed or (self.running_cases or 0) > 0 or (self.qpos or 0) < #(self.queue or {}) then
+        return
     end
+    self.completed = true
+    self:save_local_verdicts()
+    self:update_ui(true)
 end
 
 ---Save each solution's local verdict over its own testcase rows (`core.save_local_verdict`).
@@ -541,10 +469,11 @@ function MultiRunner:run_single(idx)
         return
     end
     self.completed = false
+    self.stopped = false
     self:reset_row(tc)
     self:execute_process(idx, tc.sol.rc, self.rundir, { timelimit = self.timeout }, function()
         self:recompute_header(tc.sol)
-        self:settle_single()
+        self:settle()
         self:update_ui(true)
     end)
 end
@@ -568,13 +497,6 @@ end
 --------------------------------------------------------------------------------
 -- Entry point
 --------------------------------------------------------------------------------
-
----Rebuild any open run-all UIs after a `VimResized`.
-function M.resize_all()
-    for _, mr in pairs(M.active) do
-        mr:resize_ui()
-    end
-end
 
 ---Run every sibling solution version against the testcases, in a matrix UI.
 ---@param bufnr integer? defaults to the current buffer
@@ -653,8 +575,7 @@ function M.run(bufnr, opts)
 
     -- With a real solution buffer, use its testcases directly. Otherwise anchor on a
     -- discovered solution so shared testcases (e.g. `input0.txt`) are still found.
-    local tctbl = curpath and testcases.buf_get_testcases(bufnr)
-        or load_dir_testcases(dir, paths[1].path, cfg)
+    local tctbl = curpath and testcases.buf_get_testcases(bufnr) or testcases.get_testcases(paths[1].path, cfg)
     local nums = vim.tbl_keys(tctbl)
     table.sort(nums)
     if #nums == 0 then
@@ -671,8 +592,8 @@ function M.run(bufnr, opts)
             si = i,
             name = vim.fn.fnamemodify(f, ":t"),
             path = f,
-            rc = cfg.run_command[ft] and eval_command(f, cfg.run_command[ft]) or nil,
-            cc = cfg.compile_command[ft] and eval_command(f, cfg.compile_command[ft]) or nil,
+            rc = cfg.run_command[ft] and utils.eval_command(f, cfg.run_command[ft]) or nil,
+            cc = cfg.compile_command[ft] and utils.eval_command(f, cfg.compile_command[ft]) or nil,
         }
     end
 
@@ -694,7 +615,6 @@ function M.run(bufnr, opts)
         files = files,
         nums = nums,
         tctbl = tctbl,
-        dir = dir,
         -- Testcase edits from the UI are resolved against a real solution: the
         -- invoking buffer may be a scratch one that owns no testcases of its own.
         edit_anchor = not curpath and paths[1].path or nil,

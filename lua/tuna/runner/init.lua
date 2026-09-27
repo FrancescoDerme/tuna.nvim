@@ -38,28 +38,13 @@ M.TCRunner = TCRunner
 function M.new(bufnr)
     bufnr = bufnr or vim.api.nvim_get_current_buf()
     local filetype = vim.bo[bufnr].filetype or ""
-    local filedir = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(bufnr), ":p:h")
+    local path = vim.api.nvim_buf_get_name(bufnr)
+    local filedir = vim.fn.fnamemodify(path, ":p:h")
     local cfg = config.get_buffer_config(bufnr)
-
-    -- Expand $(FNAME)/$(FNOEXT)/... in a command's exec and every arg.
-    local function eval_command(command)
-        local exec = utils.buf_eval_string(bufnr, command.exec)
-        if not exec then
-            return nil
-        end
-        local args = {}
-        for i, arg in ipairs(command.args or {}) do
-            args[i] = utils.buf_eval_string(bufnr, arg)
-            if not args[i] then
-                return nil
-            end
-        end
-        return { exec = exec, args = args }
-    end
 
     local compile_command
     if cfg.compile_command[filetype] then
-        compile_command = eval_command(cfg.compile_command[filetype])
+        compile_command = utils.eval_command(path, cfg.compile_command[filetype])
         if not compile_command then
             utils.notify("compile command for '" .. filetype .. "' is malformed, cannot run.")
             return nil
@@ -69,7 +54,7 @@ function M.new(bufnr)
         utils.notify("no run command configured for filetype '" .. filetype .. "', cannot run.")
         return nil
     end
-    local run_command = eval_command(cfg.run_command[filetype])
+    local run_command = utils.eval_command(path, cfg.run_command[filetype])
     if not run_command then
         utils.notify("run command for '" .. filetype .. "' is malformed, cannot run.")
         return nil
@@ -77,7 +62,6 @@ function M.new(bufnr)
 
     -- Every run looks the judge up again (`refresh_judge`); this first answer is what
     -- the results UI shows before one.
-    local path = vim.api.nvim_buf_get_name(bufnr)
     local resolved_checker = tools.resolve_checker(path, cfg)
 
     return setmetatable({
@@ -184,14 +168,13 @@ end
 ---@param tctbl table<integer, { input: string, output: string? }>? testcases, or nil to re-run
 ---@param do_compile boolean? whether to compile first (defaults to true)
 function TCRunner:run_testcases(tctbl, do_compile)
-    -- A re-run keeps the rows it already has, but a *preloaded* runner has never run at
-    -- all — its source has not been through `save_sources` once, so this is that source's
-    -- first run and it has to be on disk before the compiler is pointed at it. The build a
-    -- listed runner kept is this run's own, so it is dropped rather than run twice.
-    if tctbl or self.preloaded then
+    -- A fresh run saves its source; a re-run keeps the rows it has, and the file on disk,
+    -- unless the rows were only listed and nothing has saved it yet.
+    if tctbl then
         tools.save_sources(self.bufnr, self.config)
     end
-    self.preloaded, self.build = false, nil
+    self:claim_listed()
+    self.stopped = false
     self:refresh_judge(vim.api.nvim_buf_get_name(self.bufnr))
     -- What this run compiles besides the solution: a checker, when it is a program of its
     -- own. Declared before anything is spawned, so the build step is laid out once.
@@ -218,6 +201,7 @@ function TCRunner:run_testcases(tctbl, do_compile)
         for _ = 1, core.parallelism(self.config, self.tc_size) do
             self:run_next_testcase()
         end
+        self:check_complete() -- a run stopped while it built starts nothing, and is over
     end)
 end
 
@@ -229,8 +213,11 @@ end
 
 ---@private
 ---Run the next unstarted testcase, if any; each, on finishing, pulls the next one, so
----starting it `parallel` times keeps that many lanes busy.
+---starting it `parallel` times keeps that many lanes busy. A stopped run starts nothing.
 function TCRunner:run_next_testcase()
+    if self.stopped then
+        self.next_tc = self.tc_size + 1
+    end
     if self.next_tc > self.tc_size then
         return
     end
@@ -272,6 +259,7 @@ function TCRunner:run_single(tcindex)
     -- idle, or the structural edits (`n`/`x`/`c`/`u`) that wait on `idle()` would be
     -- let through mid-flight. `check_complete` flips it back once the row settles.
     self.completed = false
+    self.stopped = false
     local function settle()
         self:check_complete()
     end

@@ -126,7 +126,7 @@ tuna.nvim.json      package metadata
 
 **Modifiers.** There are two sets. The *file* set (`$(FNAME)`, `$(FNOEXT)`, `$(FEXT)`,
 `$(FABSPATH)`, `$(ABSDIR)`, `$(DIRNAME)`, `$(HOME)`, `$(CWD)`) resolves from a path via
-`utils.eval_string`/`buf_eval_string`. The *download* set (`$(JUDGE)`, `$(CONTEST)`,
+`utils.eval_string`/`buf_eval_string`, and a whole command through `utils.eval_command`. The *download* set (`$(JUDGE)`, `$(CONTEST)`,
 `$(PROBLEM)`, `$(URL)`…) exists only while a task is being written, in `download.lua`.
 `utils.only_file_modifiers(str)` tells them apart; `temp` and `clean` read `template_file`
 without a task and need it.
@@ -143,7 +143,8 @@ is relative. Every configured path goes through these: compile/running directori
 
 - One 0-based table shape, `{ [n] = { input, output } }`, shared by three backends: `files`,
   `single_file` and `directory`. The `buf_*` functions dispatch to the configured backend and
-  fall back to auto-detection.
+  fall back to auto-detection; `get_testcases(filepath, cfg)` is the same by path, for a
+  run started from a buffer that is not a solution (run-all), and `buf_get_testcases` is it.
 - **`files` formats** may each be a list. On load the first format that matches anything wins;
   formats are never merged, so two problems sharing a folder don't mix. `active_parts` picks
   the pair a directory already uses, and both load and write go through it, so a new testcase
@@ -276,10 +277,25 @@ is relative. Every configured path goes through these: compile/running directori
 - `effective_compare()` returns the per-buffer override, else the config.
 - `M.time_limit(cfg)` and `M.parallelism(cfg, jobs)` are how every mode reads `maximum_time`
   and `multiple_testing`.
+- **One vocabulary for an ending**: `M.ending(how, timeout)` gives the status, colour and
+  words for a process that did not exit cleanly (`TIMEOUT`, `KILLED`, `SIG n`, `RET n`,
+  `vim.system`'s own timeout kill, code 124 and SIGTERM, reading as a timeout), for a testcase
+  (`finish_process`), an interactive session and a stress helper alike.
+- **Stopping**: `kill_process(idx)` ends one row and the run goes on; `kill_all_processes`
+  stops the run, in every mode: it sets `stopped`, which every mode's lanes read before
+  starting anything, kills what runs, marks the rows still waiting (`status == ""`)
+  `NOT RUN`, and the run then settles as idle. Every start of a run clears `stopped`: the
+  UI's `<C-r>` and `:Tuna run` stop first and then run.
+- **A run of the whole set builds**, in every mode, the solution included: `run_testcases` is
+  the first run and `<C-r>` alike (the stress and interactive `M.run` end in it). A listed
+  runner's first such run goes through `claim_listed`, which saves the sources and drops the
+  build it kept, since the run builds anyway; a single row's run key goes through
+  `built_first`, which builds first.
 - **Local verdicts**: `save_local_verdict(solution, rows)` writes the sidecar's `results` when
-  a run finishes: normal `check_complete`, run-all completion and `settle_single`
+  a run finishes: normal `check_complete`, run-all's `settle`
   (`save_local_verdicts`, each solution over its own case rows), and interactive session ends
   (`save_buffer_verdict` skips a wiped buffer). Stress saves none. Only judged rows count
+  (`M.judged`, which run-all's header counts use too)
   (CORRECT passes; WRONG, TIMEOUT, RET, SIG fail), so a run that judged nothing leaves the
   entry alone. The source hash is recorded, and `local_verdict` answers only while it matches.
 
@@ -295,7 +311,7 @@ is relative. Every configured path goes through these: compile/running directori
   instead of falling through to a bare run.
 - `load_testcases` builds the same rows as `NOT RUN` with `preloaded = true` (`:Tuna show_ui`
   before any run) and keeps the build (`defer_build`), so `run_single` builds first through
-  `built_first` as in every mode, and `run_testcases(nil)` saves sources first. The Compile
+  `built_first` as in every mode, and `run_testcases(nil)` claims it (`claim_listed`). The Compile
   row's own run key is the build.
 - `:Tuna show_ui` (`commands.show_results_ui`) opens the mode last run in this session, else
   the one saved for the problem (`tools.resolve_mode`), since after a restart nothing has
@@ -312,7 +328,9 @@ is relative. Every configured path goes through these: compile/running directori
   again: missing ones are shown in a message and nothing runs, since a rerun keeps its mode.
   Every run builds them through `build_helpers` (the cache makes an unchanged one free, an
   edited one rebuilds, and one whose first compile failed is retried rather than the search
-  spawning a binary that was never produced), and spawns in the loop are `pcall`ed.
+  spawning a binary that was never produced). Each step of the search goes through `spawn`,
+  which `pcall`s `vim.system` (a missing binary makes it throw), reports a failed start as that
+  step's failure, and drops a result that lands after a stop.
 - **Two lanes.** The testcases already on disk re-run through the solution as soon as it is
   built (`build_all`'s `on_solution`, while the generator and bruteforce are still
   compiling), and the search starts as soon as all three are built, not when the re-runs end: the hunt is what a stress run is for, and it would otherwise wait on
@@ -327,8 +345,8 @@ is relative. Every configured path goes through these: compile/running directori
   moment the board opens, not from the moment generation starts: the hunt is what a stress
   run spends its time on, and it would otherwise appear only as it ended. `mark_not_run`
   leaves it saying what it is for (`NOT RUN` is a testcase's word for having no verdict yet),
-  and `run_single` on it does nothing, there being no stored testcase behind it. Its `tcnum` is the string
-  `SEARCH`, so it is not editable, not compared against disk, and skipped by the
+  and `run_single` on it does nothing, there being no stored testcase behind it. Its `tcnum` is a
+  string (`SEARCH`), so it is not editable, not compared against disk, and skipped by the
   counterexample dedup scan, which would otherwise find the input in it every time. It is
   kept last, a counterexample is inserted above it, and `row_label` gives it the number
   that counterexample would take (`next_num`). Every search rebuilds its rows from disk
@@ -336,14 +354,14 @@ is relative. Every configured path goes through these: compile/running directori
   left carrying a helper's failure), where add, undo and split can put rows beside it: the
   `add_testcase_row` override puts them above it and moves `next_num` past the number taken,
   or the board would read one number twice until the next run.
-- **The generator and the bruteforce are judged on the signal too** (`failure_reason`), not
+- **The generator and the bruteforce are judged on the signal too** (`core.ending`), not
   on the exit code alone: a crash (a sanitizer abort, a segfault) exits 0 and reports the
   signal, so reading the code passed an empty output off as the bruteforce's answer, and
   then every input was a counterexample saved with no answer beside it. Either failing
-  stops the search, because every verdict is read off the two of them. `vim.system` marks
-  its own timeout with code 124 and SIGTERM.
+  stops the search, because every verdict is read off the two of them. A solution that
+  crashes or times out on a generated input is a counterexample wearing the same words.
 - **A failure is reported where a testcase's is.** `helper_failed` puts the verdict a
-  testcase would wear for the same ending (`failure_reason` gives it) on the search row and
+  testcase would wear for the same ending (`core.ending` gives it) on the search row and
   what the process said in its Errors pane, and the row then stays (`drop_search_row` keeps
   one carrying a verdict) holding the seed's input, which is what there is to debug. Nothing
   in a runner answers a process with a float: a compile failure of a *helper* is the same,
@@ -395,9 +413,14 @@ is relative. Every configured path goes through these: compile/running directori
     unmodifiable, and insert mode is left.
   - Only live's Live pane wears the editable accent.
 - interactor: `vim.uv.spawn` pipes cross-wire the solution and the interactor; the verdict is
-  the interactor's exit code, and it gets `$(INPUT)`/`$(ANSWER)`. Reruns go through
-  `with_helpers`, which refreshes the checker and, for the interactor source, resolves and
-  prepares the interactor again, reporting a missing one instead of running.
+  the interactor's exit code, and it gets `$(INPUT)`/`$(ANSWER)`. The solution crashing and
+  the time running out end the session with `core.ending`'s status instead. Every run goes
+  through `with_helpers(cont, whole)`, which refreshes the checker and, for the interactor
+  source, resolves and prepares the interactor again, reporting a missing one instead of
+  running; `whole` (a run of every session) builds the solution too.
+- Sessions run one at a time (`run_sessions`). `kill_process` ends the one running, marking
+  its row `killed` so every source's exit path reads `KILLED`; `kill_all_processes` also sets
+  `stopped`, and no session starts after it.
 - `M._test` exposes `log_append` and `conversation`.
 
 **Run-all (`multi.lua`)**
@@ -407,7 +430,12 @@ is relative. Every configured path goes through these: compile/running directori
   above indented testcase rows.
 - All solutions compile first, then everything runs in one shared pool of `multiple_testing`.
   A compile failure is a `CE` row.
-- `run_single`/`rerun_solution` settle through `settle_single`. Its `save_testcase` override
+- The pool, `run_single` and `rerun_solution` all settle through `settle`, once nothing runs
+  and nothing is queued; a stop empties the queue (`qpos`), so a stopped matrix settles as
+  soon as its killed cases are in. A header's `correct/total` counts judged rows only
+  (`core.judged`), so a row with no answer, stopped or never run is not a failure. A board
+  launched from a buffer that is not a solution reads its testcases through
+  `testcases.get_testcases`, by path. Its `save_testcase` override
   keeps the shared `tctbl` in step. The checker comes from `tools.resolve_checker` against
   `solution` (the buffer's file, else the first solution), so `:Tuna checker off` applies.
 
@@ -551,7 +579,8 @@ as `checker <input> <output> <answer>` (exit 0 means correct) and is compiled vi
   stress and run-all replace the whole runner, `pending` with it), then stops every run of
   the buffer: a live session would wait on its input forever, and stress rebuilds the binary
   the new run executes. Every UI but `keep` is then hidden with `RunnerUI:delete`, which
-  keeps `pending` on its runner. `runners_of` only looks in mode modules already loaded.
+  keeps `pending` on its runner. `runners_of` and `all_runners` (every live runner, what a
+  resize redraws) only look in mode modules already loaded.
   The mode modules also stop the runner they replace, for callers that bypass `commands`.
 - `with_answer_settled`: `:w` asks only when a **real answer would become empty**:
   `Don't specify output` / `Expect empty output` / `Keep editing`. It asks nothing about empty
@@ -930,7 +959,10 @@ specific Vim error about a buffer the user never opened.
     stays last and numbered past every testcase while the board is edited, a helper
     that failed reported on that row and on the Compile row rather than in a float, the search
     running beside the testcases on disk rather than after them, a failed build finishing it
-    and spawning nothing behind it, in every mode that builds a solution of its own),
+    and spawning nothing behind it, in every mode that builds a solution of its own), a stop
+    in every mode (nothing started after it, the rows it had not reached `NOT RUN`, a stopped
+    session `KILLED`, the board idle), `<C-r>` building the solution again and running after
+    a stop, the ending vocabulary, and run-all's headers counting judged rows only,
     using real UI windows, in both interfaces where the grid changes (focus, the selector's
     row, titles and a bad grid said once as the board re-tiles, and `:w` from a read-only
     pane). `testcases.lua` also covers the

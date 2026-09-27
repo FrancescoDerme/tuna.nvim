@@ -244,6 +244,9 @@ works this way, interactive following the row it is talking to.
 | `q`                             | close                                                                 |
 | `?`                             | the full legend, which is the authority — these are just the defaults, and stress and interactive add what is theirs |
 
+Stopping all of them ends the run, in every mode: what was running reads `KILLED` and what it had
+not reached yet `NOT RUN`. `<C-r>` builds your solution again before it runs them, from the file on disk.
+
 **The Input and Expected Output panes are editable.** They are ordinary buffers with an
 accent on their border, so there is no key to learn: move in, type, and `:w`. That writes
 the testcase and re-runs it. Nothing reaches disk before `:w`, unwritten edits survive

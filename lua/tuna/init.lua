@@ -80,12 +80,9 @@ end
 function M.resize_ui()
     vim.schedule(function()
         require("tuna.widgets").resize_widgets()
-        for _, r in pairs(require("tuna.commands").runners) do
+        for _, r in ipairs(require("tuna.commands").all_runners()) do
             r:resize_ui()
         end
-        require("tuna.stress").resize_all()
-        require("tuna.interactive").resize_all()
-        require("tuna.multi").resize_all()
     end)
 end
 

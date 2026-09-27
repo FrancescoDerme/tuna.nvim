@@ -41,6 +41,7 @@ M.SKIP = setmetatable({}, {
 ---@field tcdata table[] the rows, 1-indexed
 ---@field tc_size integer number of rows
 ---@field completed boolean whether nothing is in flight
+---@field stopped boolean? the run was stopped (`kill_all_processes`), so nothing more starts
 ---@field preloaded boolean? rows are listed for review, never run
 ---@field build fun(cont: fun())? the build a listed runner runs first (`defer_build`)
 ---@field builds table[]? this run's helper build steps (`plan_builds`)
@@ -110,12 +111,31 @@ end
 ---(`FAILED`) says nothing about whether the solution is right.
 ---@param status string
 ---@return boolean
-local function judged(status)
+function M.judged(status)
     return status == "CORRECT"
         or status == "WRONG"
         or status == "TIMEOUT"
         or status:match("^RET ") ~= nil
         or status:match("^SIG ") ~= nil
+end
+
+---How a process that did not exit cleanly ended: the verdict a row wears for it, its colour,
+---and the same in words, or nil for a clean exit. One vocabulary for every mode and every
+---process, a testcase, a session or a stress helper alike. `vim.system` marks its own timeout
+---kill with code 124 and SIGTERM, which reads as a timeout too.
+---@param how { code: integer?, signal: integer?, timed_out: boolean?, killed: boolean? }
+---@param timeout integer? the budget it had, in milliseconds, for the words
+---@return string? status, string? hlgroup, string? words
+function M.ending(how, timeout)
+    if how.timed_out or (how.code == 124 and how.signal == 15) then
+        return "TIMEOUT", "TunaWrong", ("timed out after %.1f s"):format((timeout or 0) / 1000)
+    elseif how.killed then
+        return "KILLED", "TunaWarning", "was stopped"
+    elseif how.signal and how.signal ~= 0 then
+        return "SIG " .. how.signal, "TunaWarning", ("was killed by signal %d"):format(how.signal)
+    elseif how.code and how.code ~= 0 then
+        return "RET " .. how.code, "TunaWarning", ("exited with code %d"):format(how.code)
+    end
 end
 
 ---Save how a finished run of `solution` went over `rows`: how many judged testcases passed,
@@ -130,7 +150,7 @@ function M.save_local_verdict(solution, rows)
     end
     local passed, total = 0, 0
     for _, tc in ipairs(rows) do
-        if type(tc.tcnum) == "number" and type(tc.status) == "string" and judged(tc.status) then
+        if type(tc.tcnum) == "number" and type(tc.status) == "string" and M.judged(tc.status) then
             total = total + 1
             if tc.status == "CORRECT" then
                 passed = passed + 1
@@ -235,6 +255,15 @@ function RunnerCore:built_first(cont)
     self.preloaded, self.build = false, nil
     build(cont)
     return true
+end
+
+---A listed runner's first run of the whole set: its sources are saved, nothing having saved
+---them yet, and the build it kept is dropped, since such a run builds anyway.
+function RunnerCore:claim_listed()
+    if self.preloaded then
+        tools.save_sources(self.bufnr, self.config)
+        self.preloaded, self.build = false, nil
+    end
 end
 
 ---The build step's row, which every mode that compiles has as row 1 and `build_solution`
@@ -722,17 +751,14 @@ function RunnerCore:finish_process(tc, run_id, timer, res, opts, on_done)
         end
     end
 
-    if tc.timed_out then
-        tc.status, tc.hlgroup = "TIMEOUT", "TunaWrong"
-        finalize()
-    elseif tc.killed then
-        tc.status, tc.hlgroup = "KILLED", "TunaWarning"
-        finalize()
-    elseif tc.exit_signal and tc.exit_signal ~= 0 then
-        tc.status, tc.hlgroup = "SIG " .. tc.exit_signal, "TunaWarning"
-        finalize()
-    elseif tc.exit_code ~= 0 then
-        tc.status, tc.hlgroup = "RET " .. tc.exit_code, "TunaWarning"
+    local ended, hl = M.ending({
+        code = tc.exit_code,
+        signal = tc.exit_signal,
+        timed_out = tc.timed_out,
+        killed = tc.killed,
+    })
+    if ended then
+        tc.status, tc.hlgroup = ended, hl
         finalize()
     elseif opts.judge == false then
         -- The Compile row (or any non-judged step): a clean exit is just DONE, but
@@ -779,11 +805,18 @@ function RunnerCore:kill_process(tcindex)
     end
 end
 
----Kill every running process.
+---Stop the run: what runs is killed, nothing more is started (every mode's lanes read
+---`stopped`, and starting a run clears it), and a row that was waiting its turn says it
+---never ran. The single-row stop (`kill_process`) ends that row and lets the run go on.
 function RunnerCore:kill_all_processes()
-    for tcindex in ipairs(self.tcdata) do
+    self.stopped = true
+    for tcindex, tc in ipairs(self.tcdata) do
         self:kill_process(tcindex)
+        if tc.status == "" then
+            tc.status, tc.hlgroup = "NOT RUN", "TunaDone"
+        end
     end
+    self:update_ui(true)
 end
 
 --------------------------------------------------------------------------------

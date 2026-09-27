@@ -236,6 +236,26 @@ function M.buf_eval_string(bufnr, str, tcnum)
     return M.eval_string(vim.api.nvim_buf_get_name(bufnr), str, tcnum)
 end
 
+---A command with the file modifiers in its exec and every arg expanded against `filepath`, or
+---nil when one of them cannot be.
+---@param filepath string
+---@param command { exec: string, args: string[]? }
+---@return { exec: string, args: string[] }?
+function M.eval_command(filepath, command)
+    local exec = M.eval_string(filepath, command.exec)
+    if not exec then
+        return nil
+    end
+    local args = {}
+    for i, arg in ipairs(command.args or {}) do
+        args[i] = M.eval_string(filepath, arg)
+        if not args[i] then
+            return nil
+        end
+    end
+    return { exec = exec, args = args }
+end
+
 ---------------- FILESYSTEM ----------------
 
 ---@param path string
