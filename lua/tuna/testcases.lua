@@ -489,15 +489,6 @@ function M.tc_directory(source_dir, filepath, cfg)
     return (utils.normalize_path(expanded, source_dir):gsub("/*$", "")) .. "/"
 end
 
----Absolute testcase base directory for a buffer (with trailing slash).
----@param bufnr integer
----@return string
-local function buf_tc_directory(bufnr)
-    local cfg = config.get_buffer_config(bufnr)
-    local filepath = vim.api.nvim_buf_get_name(bufnr)
-    return M.tc_directory(vim.fn.fnamemodify(filepath, ":p:h"), filepath, cfg)
-end
-
 ---The testcases directory of the solution at `filepath`, with no buffer needed.
 ---@param filepath string
 ---@param cfg table
@@ -505,6 +496,10 @@ end
 local function path_tc_directory(filepath, cfg)
     return M.tc_directory(vim.fn.fnamemodify(filepath, ":p:h"), filepath, cfg)
 end
+
+-- Each backend reads and writes by the solution's path and its resolved config (`path_load`,
+-- `path_write`): a problem being downloaded has no buffer yet, and run-all may be started from
+-- one that is not a solution. The `buf_*` forms are the same for a buffer's file and config.
 
 -- files
 function M.files.path_load(filepath, cfg)
@@ -516,37 +511,27 @@ function M.files.path_load(filepath, cfg)
     )
 end
 
-function M.files.buf_load(bufnr)
-    return M.files.path_load(vim.api.nvim_buf_get_name(bufnr), config.get_buffer_config(bufnr))
-end
-
-function M.files.buf_write(bufnr, tctbl)
-    local cfg = config.get_buffer_config(bufnr)
+function M.files.path_write(filepath, cfg, tctbl)
     M.files.write(
-        buf_tc_directory(bufnr),
+        path_tc_directory(filepath, cfg),
         tctbl,
-        vim.api.nvim_buf_get_name(bufnr),
+        filepath,
         cfg.testcases_input_file_format,
         cfg.testcases_output_file_format
     )
 end
 
 -- single_file
-local function buf_single_file_path(bufnr)
-    local cfg = config.get_buffer_config(bufnr)
-    return buf_tc_directory(bufnr) .. utils.buf_eval_string(bufnr, cfg.testcases_single_file_format)
+local function single_file_path(filepath, cfg)
+    return path_tc_directory(filepath, cfg) .. utils.eval_string(filepath, cfg.testcases_single_file_format)
 end
 
 function M.single_file.path_load(filepath, cfg)
-    return M.single_file.load(path_tc_directory(filepath, cfg) .. utils.eval_string(filepath, cfg.testcases_single_file_format))
+    return M.single_file.load(single_file_path(filepath, cfg))
 end
 
-function M.single_file.buf_load(bufnr)
-    return M.single_file.path_load(vim.api.nvim_buf_get_name(bufnr), config.get_buffer_config(bufnr))
-end
-
-function M.single_file.buf_write(bufnr, tctbl)
-    M.single_file.write(buf_single_file_path(bufnr), tctbl)
+function M.single_file.path_write(filepath, cfg, tctbl)
+    M.single_file.write(single_file_path(filepath, cfg), tctbl)
 end
 
 -- directory
@@ -560,33 +545,36 @@ function M.directory.path_load(filepath, cfg)
     )
 end
 
-function M.directory.buf_load(bufnr)
-    return M.directory.path_load(vim.api.nvim_buf_get_name(bufnr), config.get_buffer_config(bufnr))
-end
-
-function M.directory.buf_write(bufnr, tctbl)
-    local cfg = config.get_buffer_config(bufnr)
+function M.directory.path_write(filepath, cfg, tctbl)
     M.directory.write(
-        buf_tc_directory(bufnr),
+        path_tc_directory(filepath, cfg),
         tctbl,
-        vim.api.nvim_buf_get_name(bufnr),
+        filepath,
         cfg.testcases_directory_format,
         cfg.testcases_directory_input,
         cfg.testcases_directory_output
     )
 end
 
+for _, backend in ipairs({ M.files, M.single_file, M.directory }) do
+    backend.buf_load = function(bufnr)
+        return backend.path_load(vim.api.nvim_buf_get_name(bufnr), config.get_buffer_config(bufnr))
+    end
+    backend.buf_write = function(bufnr, tctbl)
+        backend.path_write(vim.api.nvim_buf_get_name(bufnr), config.get_buffer_config(bufnr), tctbl)
+    end
+end
 
 function M.files.buf_clear(bufnr)
     -- Delete every file matching any configured input/output format — not just the
     -- canonical one — so `convert` cleans up testcases that were discovered through a
     -- fallback format (e.g. shared `input0.txt`) too.
     local cfg = config.get_buffer_config(bufnr)
-    local directory = buf_tc_directory(bufnr)
+    local filepath = vim.api.nvim_buf_get_name(bufnr)
+    local directory = path_tc_directory(filepath, cfg)
     if not utils.directory_exists(directory) then
         return
     end
-    local filepath = vim.api.nvim_buf_get_name(bufnr)
     local matchers = {}
     local both = {}
     vim.list_extend(both, normalize_formats(cfg.testcases_input_file_format))
@@ -621,7 +609,7 @@ end
 
 ---------------- DISPATCHER ----------------
 
----@type table<string, { path_load: fun(p: string, c: table): table, buf_load: fun(b: integer): table, buf_write: fun(b: integer, t: table), buf_clear: fun(b: integer) }>
+---@type table<string, { path_load: fun(p: string, c: table): table, path_write: fun(p: string, c: table, t: table), buf_load: fun(b: integer): table, buf_write: fun(b: integer, t: table), buf_clear: fun(b: integer) }>
 M.backends = {
     files = M.files,
     single_file = M.single_file,
@@ -677,6 +665,15 @@ end
 function M.buf_write_testcases(bufnr, tctbl, storage)
     local cfg = config.get_buffer_config(bufnr)
     M.backend(storage or cfg.testcases_storage).buf_write(bufnr, tctbl)
+end
+
+---Write a full testcase table for the solution at `filepath`, with no buffer needed (a
+---problem being downloaded), through the backend `cfg` stores testcases with.
+---@param filepath string
+---@param cfg table resolved config for the solution's directory
+---@param tctbl table<integer, tuna.StoredTestcase>
+function M.write_testcases(filepath, cfg, tctbl)
+    M.backend(cfg.testcases_storage).path_write(filepath, cfg, tctbl)
 end
 
 ---Remove every testcase a buffer stores, using its configured backend.

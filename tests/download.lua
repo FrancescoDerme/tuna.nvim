@@ -1,10 +1,11 @@
 -- tests/download.lua
 --
--- The boundary the Competitive Companion listener sits behind. Whatever arrives on the
--- port is untrusted — an old or patched extension, a third-party sender, a stray
--- browser request — and the pipeline used to index it directly, so a task without a
--- `batch` took the listener down inside a libuv callback and left the queue wedged.
--- Nothing here may throw; a bad task is repaired or dropped.
+-- The Competitive Companion listener and what it stores. Whatever arrives on the port is
+-- untrusted (an old or patched extension, a third-party sender, a stray browser request),
+-- and indexed unchecked a task without a `batch` would raise inside a libuv callback and
+-- wedge the queue. Nothing here may throw; a bad task is repaired or dropped. A request is
+-- handled as soon as its body is complete, and what arrives is stored without disturbing
+-- the testcases already there.
 
 local t = dofile("tests/harness.lua")
 local d = require("tuna.download")._test
@@ -188,5 +189,116 @@ t.eq(
 t.eq("a path function's result is expanded too", d.eval_path(function()
     return "~/cp/x.cpp"
 end, ptask, "cpp", pcfg), home .. "/cp/x.cpp")
+
+--------------------------------------------------------------------------------
+-- The listener answers a request as soon as its body is complete
+--------------------------------------------------------------------------------
+
+local request_body = d.request_body
+local head = "POST / HTTP/1.1\r\nHost: x\r\nContent-Length: 7\r\n\r\n"
+t.eq("a body is complete once Content-Length of it has arrived", request_body(head .. '{"a":1}', false), '{"a":1}')
+t.eq("and not before", request_body(head .. '{"a"', false), nil)
+t.eq("a request without a length is complete when the sender closes", request_body("POST / HTTP/1.1\r\n\r\n{}", true), "{}")
+t.eq("and waits until then", request_body("POST / HTTP/1.1\r\n\r\n{}", false), nil)
+
+-- Live: the sender keeps its side open, as a client waiting for a reply does, and the task
+-- still arrives at once, with a 200 back.
+do
+    local got, reply
+    local listener = d.Listener.new("127.0.0.1", 27197, function(task)
+        got = task.name
+    end)
+    t.ok("the listener starts", type(listener) == "table", listener)
+    local body = vim.json.encode({ name = "A. Waits", tests = {} })
+    local client = assert(vim.uv.new_tcp())
+    client:connect("127.0.0.1", 27197, function()
+        client:read_start(function(_, chunk)
+            if chunk then
+                reply = (reply or "") .. chunk
+            end
+        end)
+        client:write(("POST / HTTP/1.1\r\nContent-Length: %d\r\n\r\n%s"):format(#body, body))
+    end)
+    vim.wait(1000, function()
+        return got ~= nil and reply ~= nil
+    end, 5)
+    t.eq("a task arrives while the sender is still connected", got, "A. Waits")
+    t.has("and the sender is answered", reply or "", "HTTP/1.1 200 OK")
+    client:close()
+    if type(listener) == "table" then
+        listener:close()
+    end
+end
+
+--------------------------------------------------------------------------------
+-- Storing what arrives
+--------------------------------------------------------------------------------
+
+require("tuna").setup({})
+local widgets = require("tuna.widgets")
+local real_menu, real_input = widgets.menu, widgets.input
+widgets.menu = function(_, _, on_choice)
+    on_choice(1)
+end
+
+-- Kept alongside the new ones, a testcase already there stays exactly as it is stored: its
+-- empty answer ("expect no output") is still an empty answer.
+do
+    local pdir = t.tempdir()
+    t.write(pdir, "sol.cpp", "int main(){}\n")
+    t.write(pdir, "sol_input0.txt", "1\n")
+    t.write(pdir, "sol_output0.txt", "")
+    vim.cmd("edit " .. pdir .. "/sol.cpp")
+    local done = false
+    d.store_testcases_into_buffer(vim.api.nvim_get_current_buf(), { { input = "5\n", output = "10\n" } }, false, function()
+        done = true
+    end)
+    t.ok("keeping them stores the new testcase beside the old", done and vim.fn.filereadable(pdir .. "/sol_input1.txt") == 1)
+    t.eq("and the old one's empty answer is still there", vim.fn.filereadable(pdir .. "/sol_output0.txt"), 1)
+end
+
+-- A buffer with no file has nowhere to keep testcases: said, and nothing is written.
+do
+    local cwd = t.tempdir()
+    vim.cmd("cd " .. cwd)
+    vim.cmd("enew")
+    local quiet = vim.notify
+    local said = t.capture_notifications()
+    local done = false
+    d.store_testcases_into_buffer(vim.api.nvim_get_current_buf(), { { input = "5\n", output = "10\n" } }, false, function()
+        done = true
+    end)
+    vim.notify = quiet
+    t.eq("testcases for a buffer with no file write nothing", vim.fn.glob(cwd .. "/*"), "")
+    t.has("and say so", said[1] or "", "open the solution")
+    t.ok("releasing the download queue", done)
+end
+
+-- A path typed in the prompt is read like a configured one: `~` is the home directory.
+do
+    local home, cwd = t.tempdir(), t.tempdir()
+    vim.cmd("cd " .. cwd)
+    local real_home = vim.uv.os_homedir
+    vim.uv.os_homedir = function()
+        return home
+    end
+    widgets.input = function(_, _, _, _, _, on_submit)
+        on_submit("~/typed/sol.cpp")
+    end
+    local cfg = vim.tbl_extend("force", require("tuna.config").current_setup, { open_downloaded_problems = false })
+    local done = false
+    d.store_single_problem(
+        { name = "A. Typed", group = "", url = "", tests = { { input = "1\n", output = "1\n" } }, languages = {}, batch = { id = "t", size = 1 } },
+        cfg,
+        function()
+            done = true
+        end
+    )
+    vim.uv.os_homedir = real_home
+    t.ok("a typed ~ path writes the source under the home directory", done and vim.fn.filereadable(home .. "/typed/sol.cpp") == 1)
+    t.eq("with its testcases beside it", vim.fn.filereadable(home .. "/typed/sol_input0.txt"), 1)
+    t.eq("and no directory called ~", vim.fn.isdirectory(cwd .. "/~"), 0)
+end
+widgets.menu, widgets.input = real_menu, real_input
 
 t.report()

@@ -385,8 +385,9 @@ end
 ---directory (or another user's home), not this user's, so it is left alone. Plain
 ---concatenation rather than `gsub`, whose replacement string would misread a `%` in
 ---the home path as a capture reference.
----@param path string
----@return string
+---@generic T: string?
+---@param path T
+---@return T
 function M.expand_home(path)
     if type(path) ~= "string" or (path ~= "~" and path:sub(1, 2) ~= "~/") then
         return path

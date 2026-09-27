@@ -1,15 +1,19 @@
 -- lua/tuna/submit.lua
 --
--- Submit the current solution to an online judge via an external tool. The design
--- is a small **provider registry** (`M.providers[name]`): a provider receives a
--- resolved context and does the submitting. The shipped default is the "command"
--- provider, which expands a configurable shell command through the modifier engine
--- (adding `$(URL)` and `$(LANG)` to the usual `$(FABSPATH)`/`$(FNAME)`/… set) and
--- runs it in a terminal (toggleterm if installed, else a native `:terminal` split).
+-- Submit the current solution to an online judge, and show the judge's verdict. A small
+-- **provider registry** (`M.providers[name]`) does the submitting from a resolved context:
 --
--- The problem URL is found by scanning the file header for a configurable marker
--- (e.g. `submit at: <url>`, embedded by a template at download time) and, failing
--- that, from a per-problem sidecar (`.tuna.json`) that the download path writes.
+--   * `command` (the default) expands `submit.command` through the modifier engine
+--     (`$(URL)`, `$(PROBLEM_URL)` and `$(LANG)` beside the usual file set), then either
+--     watches it as a job whose output is scanned for the verdict (`submit.watch`, the
+--     default) or runs it in a terminal (toggleterm when installed, else `:terminal`);
+--   * `browser` opens the submit page and copies the source, for judges no headless client
+--     can submit to.
+--
+-- The problem URL comes from a `submit.url` function, else a header marker (`submit at:
+-- <url>`, written by a template at download time), else the problem's sidecar. A final
+-- verdict is kept in the sidecar against the hash of the source it was for, and shown in
+-- lualine while that is the source on disk.
 
 local config = require("tuna.config")
 local utils = require("tuna.utils")
@@ -20,10 +24,7 @@ local M = {}
 -- Per-problem sidecar (written by download, read as a URL fallback here)
 --------------------------------------------------------------------------------
 
--- The sidecar itself lives in `sidecar.lua`, since it also carries the per-problem run
--- state (`tools.lua`).
 local sidecar = require("tuna.sidecar")
-local read_store, write_store = sidecar.read, sidecar.write
 
 -- Forward declaration: `persist_task` below prunes an expired mirror, and the routing
 -- rule that decides what "expired" means lives with the other URL logic further down.
@@ -39,7 +40,7 @@ function M.write_task_store(dir, task, cfg)
     if not task.url or task.url == "" then
         return
     end
-    local store = read_store(dir, cfg)
+    local store = sidecar.read(dir, cfg)
     store.url, store.name, store.group = task.url, task.name, task.group
     -- Where the problem was browsed from, when that is not where its URL points: a
     -- Codeforces mirror carries a live round but has no per-problem pages, so `url` is
@@ -49,7 +50,7 @@ function M.write_task_store(dir, task, cfg)
     -- has to expire (see `live_mirror`).
     store.mirror = task.mirror
     store.mirror_at = task.mirror and os.time() or nil
-    write_store(dir, cfg, store)
+    sidecar.write(dir, cfg, store)
 end
 
 ---First capture of a Lua `pattern` over a buffer's first `scan_lines` header lines,
@@ -82,7 +83,7 @@ end
 local function persist_task(ctx)
     local scfg = ctx.cfg.submit
     local dir = vim.fn.fnamemodify(ctx.filepath, ":h")
-    local store = read_store(dir, ctx.cfg)
+    local store = sidecar.read(dir, ctx.cfg)
     local dirty = false
 
     if ctx.url and ctx.url ~= "" and store.url ~= ctx.url then
@@ -110,16 +111,8 @@ local function persist_task(ctx)
     end
 
     if dirty then
-        write_store(dir, ctx.cfg, store)
+        sidecar.write(dir, ctx.cfg, store)
     end
-end
-
----Read a problem directory's task sidecar, or nil if absent/unreadable.
----@param dir string
----@param cfg table
----@return { url: string?, name: string?, group: string?, submit: table? }?
-function M.read_task_store(dir, cfg)
-    return sidecar.read_or_nil(dir, cfg)
 end
 
 ---A friendly name for a solution in the submit status, resolved exactly like the URL:
@@ -132,7 +125,7 @@ local function display_name(ctx)
     if marked then
         return marked
     end
-    local store = M.read_task_store(vim.fn.fnamemodify(ctx.filepath, ":h"), ctx.cfg)
+    local store = sidecar.read_or_nil(vim.fn.fnamemodify(ctx.filepath, ":h"), ctx.cfg)
     local nm = store and store.name
     if type(nm) == "string" and nm ~= "" then
         return nm
@@ -140,65 +133,14 @@ local function display_name(ctx)
     return vim.fn.fnamemodify(ctx.filepath, ":t")
 end
 
----File modification time as a `"sec.nsec"` string, or nil. Only verdicts recorded with
----an `mtime` and no `hash` are checked against it.
----@param path string
----@return string?
-local function file_mtime(path)
-    local st = vim.uv.fs_stat(path)
-    if not st or not st.mtime then
-        return nil
-    end
-    return st.mtime.sec .. "." .. (st.mtime.nsec or 0)
-end
-
----The SHA-256 of a solution's source on disk, or nil when it can't be read. A verdict is
----recorded against it, so it stays with the exact text that was submitted: a write that
----changes nothing (a `:w`, the save before a run) keeps the verdict, and any edit drops it.
----@param path string
----@return string?
-local function file_hash(path)
-    return utils.file_hash(path)
-end
-
----Whether a persisted verdict still describes the file on disk.
+---Whether a persisted verdict still describes the file on disk: it is recorded against the
+---SHA-256 of the source submitted, so a write that changes nothing (a `:w`, the save before a
+---run) keeps it and any edit drops it.
 ---@param entry table a sidecar `submit` entry
 ---@param path string absolute solution path
 ---@return boolean
 local function still_current(entry, path)
-    if entry.hash then
-        return entry.hash == file_hash(path)
-    end
-    return entry.mtime ~= nil and entry.mtime == file_mtime(path)
-end
-
----Persist a final verdict for one solution file into its directory's sidecar, keyed
----by file name. `entry.hash` (the source as submitted) lets a later edit invalidate
----it. Merges so url/name/group and other files' verdicts are preserved.
----@param path string absolute solution path
----@param entry table { state, text, url?, hash? }
----@param cfg table
-local function write_submit_status(path, entry, cfg)
-    local dir = vim.fn.fnamemodify(path, ":h")
-    local store = read_store(dir, cfg)
-    store.submit = type(store.submit) == "table" and store.submit or {}
-    store.submit[vim.fn.fnamemodify(path, ":t")] = entry
-    write_store(dir, cfg, store)
-end
-
----Remove a solution's persisted verdict from its directory's sidecar (a no-op if
----absent). Used by edit-invalidation so a stale verdict doesn't linger on disk once
----the source changes; url/name/group and other files' verdicts are preserved.
----@param path string absolute solution path
----@param cfg table
-local function clear_submit_status(path, cfg)
-    local dir = vim.fn.fnamemodify(path, ":h")
-    local store = read_store(dir, cfg)
-    local key = vim.fn.fnamemodify(path, ":t")
-    if type(store.submit) == "table" and store.submit[key] ~= nil then
-        store.submit[key] = nil
-        write_store(dir, cfg, store)
-    end
+    return entry.hash ~= nil and entry.hash == utils.file_hash(path)
 end
 
 --------------------------------------------------------------------------------
@@ -278,7 +220,7 @@ local function resolve_url(bufnr, filepath, cfg)
         candidates[#candidates + 1] = scfg.url({ bufnr = bufnr, filepath = filepath })
     else
         candidates[#candidates + 1] = scan_header(bufnr, scfg.url, scfg.url_scan_lines)
-        local store = M.read_task_store(vim.fn.fnamemodify(filepath, ":h"), cfg)
+        local store = sidecar.read_or_nil(vim.fn.fnamemodify(filepath, ":h"), cfg)
         candidates[#candidates + 1] = store and store.url or nil
     end
 
@@ -292,23 +234,6 @@ local function resolve_url(bufnr, filepath, cfg)
     return nil, invalid
 end
 
----Codeforces runs **mirrors** — `m1`/`m2`/`m3.codeforces.com` — that carry the load
----during a live round. They serve the same contests as the main site, but not the same
----submit pages: the main site's per-problem `…/contest/<id>/submit/<index>` **404s on a
----mirror**, which only has the contest-wide `…/contest/<id>/submit` (you pick the
----problem from a dropdown there, since the mirror has no way to preselect it).
----
----That matters here because the CLI submitters this feeds derive their target from the
----problem URL by swapping `/problem/<index>` for `/submit/<index>` — which is exactly
----the shape a mirror does not have. Handing such a tool a URL that ends in `/problem/`
----with **no index** makes it build `…/contest/<id>/submit/`, which the mirror does
----serve. So that trailing-slash form is what the built-in rewrite produces: it is not a
----page anyone would open by hand, it is the input that makes a URL-deriving submitter
----land on the right one.
----
----tuna's own `browser` provider needs none of this — it opens a page directly, so the
----mirror rule for it lives in `browser_submit_url`, which produces the real
----`…/contest/<id>/submit`.
 local MIRROR_TTL = 24 * 60 * 60 -- a round is hours; its mirror lasts a day or two
 
 ---The Codeforces mirror a problem should still be submitted through, or nil.
@@ -331,8 +256,8 @@ local MIRROR_TTL = 24 * 60 * 60 -- a round is hours; its mirror lasts a day or t
 ---@param cfg table
 ---@return string? mirror, boolean expired
 function live_mirror(dir, cfg)
-    local store = M.read_task_store(dir, cfg)
-    local mirror = store and store.mirror
+    local store = sidecar.read_or_nil(dir, cfg) or {}
+    local mirror = store.mirror
     if type(mirror) ~= "string" or not mirror:match("^m%d+$") then
         return nil, false
     end
@@ -347,6 +272,23 @@ function live_mirror(dir, cfg)
     return mirror, false
 end
 
+---Codeforces runs **mirrors** — `m1`/`m2`/`m3.codeforces.com` — that carry the load
+---during a live round. They serve the same contests as the main site, but not the same
+---submit pages: the main site's per-problem `…/contest/<id>/submit/<index>` **404s on a
+---mirror**, which only has the contest-wide `…/contest/<id>/submit` (you pick the
+---problem from a dropdown there, since the mirror has no way to preselect it).
+---
+---That matters here because the CLI submitters this feeds derive their target from the
+---problem URL by swapping `/problem/<index>` for `/submit/<index>` — which is exactly
+---the shape a mirror does not have. Handing such a tool a URL that ends in `/problem/`
+---with **no index** makes it build `…/contest/<id>/submit/`, which the mirror does
+---serve. So that trailing-slash form is what the built-in rewrite produces: it is not a
+---page anyone would open by hand, it is the input that makes a URL-deriving submitter
+---land on the right one.
+---
+---tuna's own `browser` provider needs none of this — it opens a page directly, so the
+---mirror rule for it lives in `browser_submit_url`, which produces the real
+---`…/contest/<id>/submit`.
 ---@param url string the identity URL
 ---@param ctx { bufnr: integer, filepath: string, cfg: table }?
 ---@return string? the URL to submit through, or nil to leave `url` alone
@@ -364,8 +306,7 @@ function M.builtin_url_rewrite(url, ctx)
         -- `/problem/<index>` → `/submit/<index>` derivation works.
         return nil
     end
-    -- A URL still pointing at a mirror — a problem downloaded before URLs were
-    -- canonicalised, or a hand-written `submit at:` marker.
+    -- A URL that points at a mirror itself, as a hand-written `submit at:` marker can.
     local base, mid = url:match("^(https?://m%d+%.codeforces%.com)/contest/(%d+)/problem/")
     if base and mid then
         return ("%s/contest/%s/problem/"):format(base, mid)
@@ -505,6 +446,18 @@ end
 
 local cached = {} -- reused terminals: { tt = <toggleterm Terminal>, native = { buf, chan } }
 
+---Start `cmd` as a terminal job in the current buffer: `jobstart` with `term` where Neovim has
+---it (0.11), `termopen` before that.
+---@param cmd string|string[]
+---@return integer channel
+local function open_terminal(cmd)
+    if vim.fn.has("nvim-0.11") == 1 then
+        return vim.fn.jobstart(cmd, { term = true })
+    end
+    ---@diagnostic disable-next-line: deprecated
+    return vim.fn.termopen(cmd)
+end
+
 ---Start a background native terminal: a hidden `:terminal` buffer hosting a shell,
 ---no window and no focus (mirrors the backgrounded toggleterm path when
 ---`submit.open_terminal` is false). Returns `{ buf, chan }` so it can be cached and
@@ -514,7 +467,7 @@ local function spawn_native_background()
     local buf = vim.api.nvim_create_buf(true, false)
     local chan
     vim.api.nvim_buf_call(buf, function()
-        chan = vim.fn.termopen(vim.o.shell)
+        chan = open_terminal(vim.o.shell)
     end)
     return { buf = buf, chan = chan }
 end
@@ -546,7 +499,7 @@ local function run_native(cmd, scfg)
         end
         vim.cmd(split)
         vim.cmd.enew()
-        vim.fn.termopen({ vim.o.shell, "-c", cmd })
+        open_terminal({ vim.o.shell, "-c", cmd })
         vim.cmd("startinsert")
         return
     end
@@ -583,7 +536,7 @@ local function run_native(cmd, scfg)
     end
     vim.cmd(split)
     vim.cmd.enew()
-    local chan = vim.fn.termopen(vim.o.shell)
+    local chan = open_terminal(vim.o.shell)
     cached.native = { buf = vim.api.nvim_get_current_buf(), chan = chan }
     vim.defer_fn(function()
         pcall(vim.fn.chansend, chan, cmd .. "\n")
@@ -684,7 +637,7 @@ local function buf_path(bufnr)
 end
 
 local function refresh_status()
-    pcall(vim.cmd, "redrawstatus") -- nudge lualine to re-evaluate now
+    pcall(vim.api.nvim_command, "redrawstatus") -- nudge lualine to re-evaluate now
 end
 
 ---Set (or update) a solution's submit state and refresh lualine. When
@@ -751,7 +704,7 @@ local function arm_invalidation(bufnr)
             M.clear(ev.buf) -- hide the lualine verdict now …
             -- … and drop the persisted verdict, so it doesn't linger in the sidecar
             -- (or get restored on a later reopen). Global config for the store path.
-            clear_submit_status(vim.api.nvim_buf_get_name(ev.buf), config.current_setup)
+            sidecar.set_entry(vim.api.nvim_buf_get_name(ev.buf), "submit", nil, config.current_setup)
         end,
     })
 end
@@ -805,16 +758,21 @@ function M.status_hl(bufnr)
     return fg and { fg = fg, gui = "bold" } or spec
 end
 
----Restore a persisted final verdict for a buffer from its sidecar, so the lualine
----indicator survives a restart. Skips if already tracked, if the entry isn't a final
----verdict, or if the file on disk is no longer the source it was recorded against
----(`still_current`). Called from the `BufReadPost` autocmd.
----@param bufnr integer
+---The final verdict the sidecar holds for `path`, while it still describes the source on disk
+---(`still_current`). Read with the global config: the sidecar's name is not something a
+---per-directory config realistically changes, and this runs on every `BufReadPost`.
+---@param path string absolute solution path
+---@return { state: string, text: string, url: string? }?
+local function stored_verdict(path)
+    local entry = sidecar.get_entry(path, "submit", config.current_setup)
+    if entry and FINAL[entry.state] and still_current(entry, path) then
+        return entry
+    end
+    return nil
+end
+
 ---The last submit verdict recorded for `path`, whoever recorded it and whether or not
----the file is open. Read straight from the sidecar rather than from `M.state`, so the
----menu can say how a problem went without opening it — and guarded by the same
----`still_current` rule `M.restore` applies, since a verdict describes the source it was
----submitted from and says nothing about one edited since.
+---the file is open, so the menu can say how a problem went without opening it.
 ---@param path string absolute solution path
 ---@return { state: string, text: string }? verdict, nil when there is none or it is stale
 function M.verdict_for(path)
@@ -825,15 +783,8 @@ function M.verdict_for(path)
     if live and FINAL[live.state] then
         return { state = live.state, text = live.text }
     end
-    local store = M.read_task_store(vim.fn.fnamemodify(path, ":h"), config.current_setup)
-    local entry = store and type(store.submit) == "table" and store.submit[vim.fn.fnamemodify(path, ":t")]
-    if type(entry) ~= "table" or not FINAL[entry.state] then
-        return nil
-    end
-    if not still_current(entry, path) then
-        return nil -- edited since the verdict was recorded
-    end
-    return { state = entry.state, text = entry.text }
+    local entry = stored_verdict(path)
+    return entry and { state = entry.state, text = entry.text } or nil
 end
 
 ---Whether a verdict for `path` could ever reach tuna. Not how the submission is made — that
@@ -847,29 +798,26 @@ function M.reports_verdict(path)
     if type(path) ~= "string" or path == "" then
         return false
     end
-    local cfg = config.current_setup
-    local store = M.read_task_store(vim.fn.fnamemodify(path, ":h"), cfg)
-    local scfg = judge_scfg(cfg.submit or {}, store and store.url)
+    local cfg = config.current_setup or {}
+    local store = sidecar.read_or_nil(vim.fn.fnamemodify(path, ":h"), cfg) or {}
+    local scfg = judge_scfg(cfg.submit or {}, store.url)
     if (scfg.provider or "command") ~= "command" then
         return false
     end
     return scfg.watch ~= false and scfg.expects_verdict ~= false
 end
 
+---Restore a persisted final verdict for a buffer from its sidecar, so the lualine
+---indicator survives a restart. Called from the `BufReadPost` autocmd.
+---@param bufnr integer
 function M.restore(bufnr)
     local path = buf_path(bufnr)
     if path == "" or M.state[path] then
         return
     end
-    -- Global config for the sidecar path (cheap on every BufReadPost); the store
-    -- file name isn't something a per-dir config realistically changes.
-    local store = M.read_task_store(vim.fn.fnamemodify(path, ":h"), config.current_setup)
-    local entry = store and type(store.submit) == "table" and store.submit[vim.fn.fnamemodify(path, ":t")]
-    if type(entry) ~= "table" or not FINAL[entry.state] then
+    local entry = stored_verdict(path)
+    if not entry then
         return
-    end
-    if not still_current(entry, path) then
-        return -- edited since the verdict was recorded
     end
     set_state(path, entry.state, entry.text, entry.url)
     arm_invalidation(bufnr)
@@ -1117,7 +1065,7 @@ end
 ---not the whole concatenated blob.
 ---@param blob string
 ---@param scfg table
----@return string?, string?
+---@return string? state, string? snippet
 local function scan_verdict(blob, scfg)
     local clean = strip_ansi(blob)
     local lower = clean:lower()
@@ -1175,7 +1123,7 @@ local function run_watch(ctx, cmd)
 
     -- The file was just saved by M.context, so this hash identifies the exact source the
     -- verdict belongs to; persist it so a later edit invalidates it.
-    local submit_hash = file_hash(path)
+    local submit_hash = utils.file_hash(path)
     -- This job "owns" the buffer's state only while its own tokens are the latest;
     -- a manual clear or a newer submit supersedes it, and its exit handler must not
     -- clobber that. `my_token` tracks our last write; `reached_final` records our
@@ -1201,13 +1149,13 @@ local function run_watch(ctx, cmd)
         -- Only push a state when it actually changed, so live redraw frames don't
         -- churn lualine (and the initial "submitting…" isn't overwritten by itself).
         local cur = M.state[path]
-        if state and not (cur and cur.state == state and cur.text == seg) then
+        if state and seg and not (cur and cur.state == state and cur.text == seg) then
             my_token = set_state(path, state, seg, url)
             if FINAL[state] then
                 reached_final = true
                 -- Persist the verdict (survives a restart) and drop it the moment
                 -- the solution is edited.
-                write_submit_status(path, { state = state, text = seg, url = url, hash = submit_hash }, ctx.cfg)
+                sidecar.set_entry(path, "submit", { state = state, text = seg, url = url, hash = submit_hash }, ctx.cfg)
                 arm_invalidation(ctx.bufnr)
             end
         end

@@ -35,10 +35,9 @@ M.builtin = {
         -- round), and the two do not describe a contest the same way: the main site
         -- sends `"Codeforces - Codeforces Round 1112 (Div. 2)"`, a mirror sends a bare
         -- `"Codeforces"` with no contest name at all. The id in the URL is the one
-        -- thing they agree on — and it needs no network lookup, which the download path
-        -- must not be doing mid-contest — so deriving the folder from it files the same
-        -- contest in the same place whichever host it came from. That is worth more
-        -- than a prettier name that only one of the two sources can produce.
+        -- thing they agree on, and it needs no network lookup, which the download path
+        -- must not be doing mid-contest, so the same contest is filed in the same place
+        -- whichever host it came from.
         local url = ctx.task and ctx.task.url or ""
         local gym = url:match("/gym/(%d+)")
         if gym then
@@ -53,10 +52,9 @@ M.builtin = {
             or url:match("/problemset/problem/(%d+)/")
             or url:match("/problemsets/acmsguru/problem/(%d+)/")
         if id then
-            -- Bare, with no "contest" word: `$(CONTEST)` is *already* used in places
-            -- that say what it is — the folder sits under `$(JUDGE)`, and the template
-            -- header reads `contest: $(JUDGE) $(CONTEST)` — so spelling it again gave
-            -- `contest: codeforces contest 2248`. It is also how Codeforces itself
+            -- Bare, with no "contest" word: `$(CONTEST)` is used in places that already
+            -- say what it is (the folder sits under `$(JUDGE)`, and the template header
+            -- reads `contest: $(JUDGE) $(CONTEST)`), and it is how Codeforces itself
             -- names a contest. Gyms keep their word, since nothing else says "gym".
             return { contest = id }
         end
@@ -67,9 +65,8 @@ M.builtin = {
     end,
 
     atcoder = function(ctx)
-        -- Each contest kind by its own word: matching everything that says "contest N"
-        -- as a regular round filed AGC and AHC under "reg round", which misnames the
-        -- folder and collides with the ARC of the same number.
+        -- Each contest kind by its own word, so an AGC or AHC is never filed as the ARC
+        -- of the same number.
         local c = ctx.contest
         local kinds = {
             { "beginner", "beg round " },

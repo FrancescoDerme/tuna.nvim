@@ -148,8 +148,34 @@ local function canonicalize_task(task)
     return task
 end
 
+-- What the listener answers a request with, as soon as it has one: an empty success, so the
+-- sender has nothing to wait for.
+local RESPONSE = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+
+---The body of an HTTP request once all of it has arrived, or nil while more is to come. A
+---request that says how long its body is (`Content-Length`) is complete as soon as that much
+---is here; one that does not is complete when the sender closes its side (`closed`).
+---@param data string everything received so far
+---@param closed boolean the sender has closed its side of the connection
+---@return string? body
+local function request_body(data, closed)
+    local head_end = data:find("\r\n\r\n", 1, true)
+    if not head_end then
+        return closed and "" or nil
+    end
+    local body = data:sub(head_end + 4)
+    local length = tonumber(data:sub(1, head_end):lower():match("\r\ncontent%-length:%s*(%d+)"))
+    if length then
+        if #body >= length then
+            return body:sub(1, length)
+        end
+        return closed and body or nil
+    end
+    return closed and body or nil
+end
+
 ---@class tuna.Listener
----@field private server uv_tcp_t
+---@field private server uv.uv_tcp_t
 local Listener = {}
 Listener.__index = Listener
 
@@ -180,30 +206,23 @@ function Listener.new(address, port, callback)
         end
         server:accept(client)
 
-        -- Accumulate chunks until Companion closes its side of the connection
-        -- (EOF, signalled by a nil chunk), then decode the request body.
-        local chunks = {}
-        client:read_start(function(read_err, chunk)
-            if read_err then
-                client:read_stop()
-                client:close()
-                return
-            end
-            if chunk then
-                table.insert(chunks, chunk)
-                return
-            end
+        -- The request is handled the moment its body is complete, and answered then, rather
+        -- than when the sender gives up waiting for a reply and closes the connection.
+        local data, handled = "", false
+        local function handle(body)
+            handled = true
             client:read_stop()
-            client:close()
-            -- The JSON body is the last line, after the blank line ending the
-            -- HTTP headers. `vim.json.decode` is safe to call off the main loop.
-            --
+            client:write(RESPONSE, function()
+                if not client:is_closing() then
+                    client:close()
+                end
+            end)
             -- Nothing below may throw: this is a libuv callback, so an error here is a
             -- raw Vim traceback over a socket read, and the pipeline behind it never
             -- learns that the task it was waiting for is not coming. A request tuna
             -- cannot make sense of is therefore reported and dropped, not raised.
-            local body = string.match(table.concat(chunks), "^.+\r\n(.+)$")
-            if not body then
+            -- (`vim.json.decode` is safe to call off the main loop.)
+            if body == "" then
                 notify_soon("download: ignored a request with no body.", "WARN")
                 return
             end
@@ -220,6 +239,21 @@ function Listener.new(address, port, callback)
             local ok_task, err_task = pcall(callback, canonicalize_task(task))
             if not ok_task then
                 notify_soon("download: could not accept task '" .. task.name .. "', " .. tostring(err_task))
+            end
+        end
+        client:read_start(function(read_err, chunk)
+            if handled then
+                return
+            end
+            if read_err then
+                client:read_stop()
+                client:close()
+                return
+            end
+            data = data .. (chunk or "")
+            local body = request_body(data, chunk == nil)
+            if body then
+                handle(body)
             end
         end)
     end)
@@ -354,7 +388,7 @@ local function eval_download_modifiers(str, task, file_extension, remove_illegal
     ---@type table<string, string>
     local modifiers = {
         [""] = "$",
-        HOME = vim.uv.os_homedir(),
+        HOME = vim.uv.os_homedir() or "",
         CWD = vim.fn.getcwd(),
         FEXT = file_extension,
         PROBLEM = task.name,
@@ -421,31 +455,6 @@ local function task_to_tctbl(task)
     return tctbl
 end
 
----Write a task's testcases beside `filepath` using `cfg`'s storage backend. The
----target file may not be open in a buffer yet, so this drives the pure backend
----writers directly instead of the `buf_*` helpers.
----@param filepath string source file absolute path
----@param tctbl table<integer, { input: string, output: string }>
----@param cfg table resolved configuration for the target directory
-local function store_task_testcases(filepath, tctbl, cfg)
-    local dir = vim.fn.fnamemodify(filepath, ":h")
-    local tcdir = testcases.tc_directory(dir, filepath, cfg)
-    if cfg.testcases_storage == "single_file" then
-        testcases.single_file.write(tcdir .. utils.eval_string(filepath, cfg.testcases_single_file_format), tctbl)
-    elseif cfg.testcases_storage == "directory" then
-        testcases.directory.write(
-            tcdir,
-            tctbl,
-            filepath,
-            cfg.testcases_directory_format,
-            cfg.testcases_directory_input,
-            cfg.testcases_directory_output
-        )
-    else
-        testcases.files.write(tcdir, tctbl, filepath, cfg.testcases_input_file_format, cfg.testcases_output_file_format)
-    end
-end
-
 ---Create the source file (from a template if configured) and write its testcases.
 ---Always writes, overwriting any existing file — the caller decides whether to
 ---proceed when the target already exists (see the floating override prompts in
@@ -500,22 +509,32 @@ local function store_downloaded_task(filepath, task, cfg)
         utils.write_file(filepath, "")
     end
 
-    store_task_testcases(filepath, task_to_tctbl(task), cfg)
+    testcases.write_testcases(filepath, cfg, task_to_tctbl(task))
     -- Persist the task's URL beside the source so `:Tuna submit` can find it even
     -- when the file carries no header marker.
     require("tuna.submit").write_task_store(vim.fn.fnamemodify(filepath, ":h"), task, cfg)
     return template_file
 end
 
----Store downloaded testcases into an open buffer (the `testcases` download mode).
+---Store downloaded testcases into a solution's buffer (the `testcases` download mode, and
+---persistent mode's "testcases only"). A buffer with no file has nowhere to keep them.
 ---@param bufnr integer
 ---@param tclist { input: string, output: string }[]
 ---@param replace boolean replace existing testcases instead of asking
 ---@param finished fun()?
 local function store_testcases_into_buffer(bufnr, tclist, replace, finished)
+    if vim.api.nvim_buf_get_name(bufnr) == "" then
+        utils.notify("download: open the solution to store the testcases into, or store the full problem.")
+        if finished then
+            finished()
+        end
+        return
+    end
     local tctbl = testcases.buf_get_testcases(bufnr)
 
-    ---Append the new testcases to `existing` at the lowest free indices and write.
+    ---Save the new testcases at the lowest numbers `existing` leaves free. Only the new ones
+    ---are written: a testcase already there stays exactly as it is stored, an empty answer
+    ---("expect no output") included, which rewriting it in bulk would turn into none.
     ---@param existing table<integer, table>
     local function write(existing)
         local idx = 0
@@ -524,9 +543,9 @@ local function store_testcases_into_buffer(bufnr, tclist, replace, finished)
                 idx = idx + 1
             end
             existing[idx] = tc
+            testcases.buf_save_testcase(bufnr, idx, tc.input, tc.output)
             idx = idx + 1
         end
-        testcases.buf_write_testcases(bufnr, existing)
         -- The buffer is a problem now (it has testcases), which is what makes it worth
         -- remembering — record it here rather than waiting for the next `BufEnter`.
         local path = vim.api.nvim_buf_get_name(bufnr)
@@ -574,7 +593,7 @@ end
 local function store_single_problem(task, cfg, finished)
     local default_path = eval_path(cfg.downloaded_problems_path, task, cfg.downloaded_files_extension, cfg)
     if not default_path then
-        utils.notify("'downloaded_problems_path' evaluation failed for task '" .. task.name .. "'")
+        utils.notify("'downloaded_problems_path' evaluation failed for task '" .. task.name .. "'.")
         if finished then
             finished()
         end
@@ -588,7 +607,10 @@ local function store_single_problem(task, cfg, finished)
         cfg.floating_border,
         cfg.floating_border_highlight,
         not cfg.downloaded_problems_prompt_path,
-        function(filepath)
+        function(typed)
+            -- A path typed or edited in the prompt is read like a configured one: a leading
+            -- `~` is the home directory, and a relative path is taken from the cwd.
+            local filepath = utils.normalize_path(utils.expand_home(typed))
             -- Re-resolve config at the chosen directory: a `.tuna.lua` there may
             -- change storage layout, templates, etc.
             local local_cfg = config.load_local_config_and_extend(vim.fn.fnamemodify(filepath, ":h"))
@@ -648,7 +670,7 @@ end
 local function store_contest(tasks, cfg, finished)
     local default_dir = eval_path(cfg.downloaded_contests_directory, tasks[1], cfg.downloaded_files_extension, cfg)
     if not default_dir then
-        utils.notify("'downloaded_contests_directory' evaluation failed")
+        utils.notify("'downloaded_contests_directory' evaluation failed.")
         if finished then
             finished()
         end
@@ -662,7 +684,9 @@ local function store_contest(tasks, cfg, finished)
         cfg.floating_border,
         cfg.floating_border_highlight,
         not cfg.downloaded_contests_prompt_directory,
-        function(directory)
+        function(typed)
+            -- Read like a configured path, as the problem path is.
+            local directory = utils.normalize_path(utils.expand_home(typed))
             local local_cfg = config.load_local_config_and_extend(directory)
             widgets.input(
                 "Files extension",
@@ -684,7 +708,7 @@ local function store_contest(tasks, cfg, finished)
                             end
                         else
                             utils.notify(
-                                "'downloaded_contests_problems_path' evaluation failed for task '" .. task.name .. "'"
+                                "'downloaded_contests_problems_path' evaluation failed for task '" .. task.name .. "'."
                             )
                         end
                     end
@@ -845,15 +869,15 @@ local function make_handler(mode, notify_on_download, bufnr, cfg)
         return function(tasks, finished)
             M.stop_downloading()
             if notify_on_download then
-                utils.notify("testcases downloaded successfully!", "INFO")
+                utils.notify("testcases downloaded.", "INFO")
             end
-            store_testcases_into_buffer(bufnr, tasks[1].tests, cfg.replace_downloaded_testcases, finished)
+            store_testcases_into_buffer(bufnr --[[@as integer]], tasks[1].tests, cfg.replace_downloaded_testcases, finished)
         end
     elseif mode == "problem" then
         return function(tasks, finished)
             M.stop_downloading()
             if notify_on_download then
-                utils.notify("problem downloaded successfully!", "INFO")
+                utils.notify("problem downloaded.", "INFO")
             end
             store_single_problem(tasks[1], cfg, finished)
         end
@@ -861,7 +885,7 @@ local function make_handler(mode, notify_on_download, bufnr, cfg)
         return function(tasks, finished)
             M.stop_downloading()
             if notify_on_download then
-                utils.notify("contest (" .. #tasks .. " tasks) downloaded successfully!", "INFO")
+                utils.notify("contest downloaded, " .. #tasks .. " problems.", "INFO")
             end
             store_contest(tasks, cfg, finished)
         end
@@ -869,10 +893,7 @@ local function make_handler(mode, notify_on_download, bufnr, cfg)
         return function(tasks, finished)
             if notify_on_download then
                 local n = #tasks
-                utils.notify(
-                    (n > 1 and ("contest (" .. n .. " tasks)") or "one task") .. " downloaded successfully!",
-                    "INFO"
-                )
+                utils.notify(n > 1 and ("contest downloaded, " .. n .. " problems.") or "problem downloaded.", "INFO")
             end
             if #tasks > 1 then
                 store_contest(tasks, cfg, finished)
@@ -887,7 +908,7 @@ local function make_handler(mode, notify_on_download, bufnr, cfg)
                     function(choice)
                         if choice == 1 then
                             store_testcases_into_buffer(
-                                vim.api.nvim_get_current_buf(),
+                                require("tuna.commands").target_buffer(),
                                 tasks[1].tests,
                                 cfg.replace_downloaded_testcases,
                                 finished
@@ -918,8 +939,8 @@ function M.start_downloading(mode, port, notify_on_start, notify_on_download, bu
     if rs then
         return "already downloading, stop it before changing mode"
     end
-    if mode == "testcases" and not bufnr then
-        return "a buffer is required to download testcases"
+    if mode == "testcases" and not (bufnr and vim.api.nvim_buf_get_name(bufnr) ~= "") then
+        return "open the solution to download its testcases into"
     end
 
     local handler = make_handler(mode, notify_on_download, bufnr, cfg)
@@ -936,14 +957,11 @@ function M.start_downloading(mode, port, notify_on_start, notify_on_download, bu
 
     rs = { mode = mode, port = port, listener = listener, processor = processor }
     if notify_on_start then
-        utils.notify("ready to download " .. mode .. ". Press the green plus button in your browser.", "INFO")
+        utils.notify("ready to download " .. mode .. ", press the green plus button in your browser.", "INFO")
     end
     return nil
 end
 
--- The two boundary helpers, exposed for the test suite. They are what keeps a
--- malformed request from reaching the pipeline at all, and calling them is the only way
--- to check that without a live listener. Not part of the plugin's interface.
 ---Evaluate a configured path against a downloaded task, exactly as the download
 ---itself does. Exported for `clean.lua`, which reconstructs a task from a problem's
 ---sidecar so it can work out which template a file on disk was written from.
@@ -957,7 +975,14 @@ function M.eval_task_path(str, task, file_extension, cfg, filepath)
     return eval_download_modifiers(str, task, file_extension, false, cfg, filepath)
 end
 
+-- The helpers that keep a malformed request out of the pipeline and store what arrives,
+-- exposed for the test suite: calling them is the only way to check them without a live
+-- browser. Not part of the plugin's interface.
 M._test = {
+    Listener = Listener,
+    request_body = request_body,
+    store_testcases_into_buffer = store_testcases_into_buffer,
+    store_single_problem = store_single_problem,
     validate_task = validate_task,
     canonicalize_task = canonicalize_task,
     eval_download_modifiers = eval_download_modifiers,

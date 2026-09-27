@@ -143,8 +143,10 @@ is relative. Every configured path goes through these: compile/running directori
 
 - One 0-based table shape, `{ [n] = { input, output } }`, shared by three backends: `files`,
   `single_file` and `directory`. The `buf_*` functions dispatch to the configured backend and
-  fall back to auto-detection; `get_testcases(filepath, cfg)` is the same by path, for a
-  run started from a buffer that is not a solution (run-all), and `buf_get_testcases` is it.
+  fall back to auto-detection. Every backend reads and writes by the solution's path and
+  config (`path_load`/`path_write`), and its `buf_*` forms are those for a buffer's file:
+  `get_testcases(filepath, cfg)` and `write_testcases(filepath, cfg, tctbl)` are for a
+  solution with no buffer (run-all started elsewhere, a problem being downloaded).
 - **`files` formats** may each be a list. On load the first format that matches anything wins;
   formats are never merged, so two problems sharing a folder don't mix. `active_parts` picks
   the pair a directory already uses, and both load and write go through it, so a new testcase
@@ -728,6 +730,15 @@ specific Vim error about a buffer the user never opened.
 **`download.lua`**
 - Pipeline: `Listener` (TCP, `companion_port` 27121) → `TasksCollector` (groups by `batch`) →
   `BatchesSerialProcessor` (one batch handler at a time).
+- The listener handles a request, and answers it `200`, the moment its body is complete
+  (`request_body`: `Content-Length` of it has arrived, or the sender closed without one),
+  not when the sender gives up waiting for a reply and closes the connection.
+- What arrives is stored without touching what is there: testcases kept alongside new ones
+  are left as they are stored (only the new ones are saved, through `buf_save_testcase`), so
+  an empty answer survives, and a buffer with no file is refused rather than written into
+  the cwd. A path typed or edited in the problem-path or contest-directory prompt goes through
+  `expand_home`/`normalize_path` like a configured one, or a `~/…` path would put the source
+  in a directory called `~` and its testcases in the real home.
 - **Nothing in the pipeline may throw.** `validate_task` repairs or rejects every body: only
   `name` is required, a missing `batch` means a single task, and malformed tests are dropped.
   Messages go through `notify_soon`. `process` schedules the handler under `pcall`, and its
@@ -778,7 +789,8 @@ specific Vim error about a buffer the user never opened.
 - Providers:
   - `command` expands `submit.command` (string or function) and either watches it
     (`submit.watch`, default true, `run_watch` via `vim.system`) or runs it in a terminal
-    (`M.run_terminal` seam; toggleterm if present).
+    (`M.run_terminal` seam; toggleterm if present, else a terminal job through
+    `open_terminal`: `jobstart` with `term` on 0.11, `termopen` on 0.10).
   - `browser` opens the submit page and copies the source to `+`; it exists for judges gated
     behind a Turnstile challenge, such as AtCoder.
 - **Watching**
@@ -795,7 +807,7 @@ specific Vim error about a buffer the user never opened.
   Final verdicts persist in the sidecar with the SHA-256 of the submitted source, not its
   mtime, because a write that changes nothing (a `:w`, the save before a run) must not drop
   one. `restore` (on `BufReadPost`) reloads a verdict only while `still_current` holds (the
-  hash matches; an entry carrying only an `mtime` is compared on that), and
+  hash matches, and an entry without one describes no source), and
   `arm_invalidation` drops shown and stored verdicts on the first edit. `verdict_for(path)`
   reads a verdict without an open buffer (the menu).
 - `persist_task` backfills the sidecar's `url`, and `name`/`group` from header markers when
@@ -973,7 +985,9 @@ specific Vim error about a buffer the user never opened.
     recognising an untouched scaffold, and completion of roles and languages;
   - `temp.lua`: the templates a scratch can start from, when a scratch is resumed, the
     resume/restart and template menus, and absorbing keeping the header of the template actually used;
-  - `testcases.lua`, `compare.lua`, `judges.lua`, `download.lua`, `clean.lua`, `submit.lua`:
+  - `download.lua`: the listener's boundary, a request handled while its sender is still
+    connected, and what is stored (an empty answer kept, no file refused, a typed `~` path);
+  - `testcases.lua`, `compare.lua`, `judges.lua`, `clean.lua`, `submit.lua`:
     unit tests of pure rules (`compare.lua` also: an unknown method reported once, diff marks
     following the verdict, a checker that did not build giving no verdict and no
     notification);
