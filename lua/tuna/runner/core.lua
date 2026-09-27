@@ -52,6 +52,18 @@ M.SKIP = setmetatable({}, {
 ---@field deleted_testcases table[]? what `u` restores
 ---@field run_single fun(self: tuna.RunnerCore, idx: integer) re-run one row
 ---@field run_testcases fun(self: tuna.RunnerCore) re-run every row
+---@field mode string? the run mode the UI shows
+---@field source string? the interactive source playing the other side
+---The seams a mode may fill for the UI (see the header):
+---@field layout (fun(self: tuna.RunnerCore): table?, string?)? its own grid, and the option naming it
+---@field pane_titles (fun(self: tuna.RunnerCore): table<string, string>?)? names its panes go by
+---@field legend_rows (fun(self: tuna.RunnerCore): { title: string, rows: string[][] }?)? its legend section
+---@field on_ui_shown fun(self: tuna.RunnerCore, ui: tuna.RunnerUI)? after the UI is shown or re-tiled
+---@field on_details_rendered fun(self: tuna.RunnerCore, ui: tuna.RunnerUI, tc: table)? after the detail panes are drawn
+---@field status_settings (fun(self: tuna.RunnerCore): string[][])? its settings rows in the Run pane
+---@field status_tail (fun(self: tuna.RunnerCore): string[][])? rows after them
+---@field row_label (fun(self: tuna.RunnerCore, tc: table): string)? a row's header in the selector
+---@field owns_pane (fun(self: tuna.RunnerCore, name: string): boolean)? whether it types into a pane itself
 local RunnerCore = {}
 RunnerCore.__index = RunnerCore
 M.RunnerCore = RunnerCore
@@ -189,14 +201,14 @@ end
 ---Re-show/refresh the UI after a `VimResized`.
 function RunnerCore:resize_ui()
     if self.ui then
-        self.ui:resize_ui()
+        self.ui:redraw_grid()
     end
 end
 
 ---Tear the UI down.
 function RunnerCore:delete_ui()
     if self.ui then
-        self.ui:hide_ui()
+        self.ui:delete()
     end
     self.ui = nil
 end
@@ -488,7 +500,7 @@ end
 ---solution's own failure is the more specific answer, and keeps its exit code.
 function RunnerCore:refresh_build_row()
     local tc = self.tcdata[1]
-    if not (tc and tc.tcnum == "Compile" and tc.status == "DONE") then
+    if not (tc and tc.compile and tc.status == "DONE") then
         return
     end
     for _, step in ipairs(self.builds or {}) do
@@ -962,7 +974,6 @@ function RunnerCore:split_testcase(tcnum, char, input, expected)
     return true
 end
 
----@private
 ---Point the rows for `numbers` at what is now on disk.
 ---@param numbers integer[]
 ---@param tctbl table<integer, table>? testcases already read, to save a second scan

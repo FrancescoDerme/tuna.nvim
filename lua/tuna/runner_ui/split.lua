@@ -1,8 +1,8 @@
 -- lua/tuna/runner_ui/split.lua
 --
--- The "split" interface: the runner UI as real split windows down one edge of
--- the editor, laid out by the same recursive `{ ratio, child }` engine the popup
--- interface uses — but realised with native window splits instead of floats.
+-- The "split" interface: the runner UI as real split windows down one edge of the editor,
+-- over the pane buffers the UI owns, laid out from the same recursive `{ ratio, child }`
+-- grid the popup interface uses.
 --
 -- Splits are created with `nvim_open_win(buf, false, { split = dir, win = … })`,
 -- the modern API that splits an existing window. We build the outer frame off
@@ -15,11 +15,8 @@
 
 local api = vim.api
 local utils = require("tuna.utils")
-local layout_util = require("tuna.runner_ui.layout")
 
 local M = {}
-
-local titles = layout_util.titles
 
 -- config `position` → native split direction
 local dir_map = { left = "left", right = "right", top = "above", bottom = "below" }
@@ -36,31 +33,27 @@ local function get_first_window(layout)
     return layout[2]
 end
 
----Build the grid's windows for `layout`, from the window the runner was launched in. Split
----out of `init_ui` so the same splitting can be done again when the grid changes without the
----panes' buffers (and everything held on them) being thrown away with it.
----@param windows table
+---Place a window for every pane `layout` names over its buffer, splitting off the window the
+---runner was launched in. Windows are opened anew each time: a split's size and place are
+---fixed by the splits around it.
+---@param windows table<string, { bufnr: integer, winid: integer?, title: string }>
 ---@param config table
----@param init_winid integer
----@param status_rows integer?
----@param opts { layout: table?, layout_name: string?, titles: table<string, string>? }?
-local function build_windows(windows, config, init_winid, status_rows, opts)
-    opts = opts or {}
+---@param init_winid integer the window the runner was launched from
+---@param status_rows integer rows of the "Run" pane
+---@param layout table the validated grid
+function M.relayout(windows, config, init_winid, status_rows, layout)
+    for _, w in pairs(windows) do
+        if w.winid and api.nvim_win_is_valid(w.winid) then
+            api.nvim_win_close(w.winid, true)
+        end
+        w.winid = nil
+    end
     for _, w in pairs(windows) do
         if not (w.bufnr and api.nvim_buf_is_valid(w.bufnr)) then
             return -- the panes were wiped out from under the UI; there is nothing to split
         end
     end
-    local STATUS_HEIGHT = status_rows or 2
     local vertical = config.split_ui.position == "left" or config.split_ui.position == "right"
-    local key = (vertical and "vertical" or "horizontal") .. "_layout"
-    local defaults = require("tuna.config").defaults.split_ui[key]
-    -- A run mode that lays the grid out its own way replaces the configured layout.
-    local layout = layout_util.resolve(
-        opts.layout or config.split_ui[key],
-        opts.layout_name or ("split_ui." .. key),
-        defaults
-    )
 
     -- Recursively split `winid` (which already shows the sub-layout's first leaf)
     -- to realise `layout`, fixing sizes as we go.
@@ -139,7 +132,7 @@ local function build_windows(windows, config, init_winid, status_rows, opts)
     if windows.tc.winid and api.nvim_win_is_valid(windows.tc.winid) then
         local st = api.nvim_open_win(windows.st.bufnr, false, { split = "above", win = windows.tc.winid })
         windows.st.winid = st
-        api.nvim_win_set_height(st, STATUS_HEIGHT)
+        api.nvim_win_set_height(st, status_rows)
         vim.wo[st].winfixheight = true
     end
     vim.o.equalalways = old_equalalways
@@ -157,44 +150,6 @@ local function build_windows(windows, config, init_winid, status_rows, opts)
             vim.wo[w.winid].winfixbuf = true
         end
     end
-end
-
----Re-split the frame for another layout, keeping the panes' buffers: the row on screen decides
----the grid, and rebuilding the panes for it would throw away what they hold.
----@param windows table
----@param config table
----@param init_winid integer
----@param status_rows integer?
----@param opts { layout: table?, layout_name: string?, titles: table<string, string>? }?
-function M.relayout(windows, config, init_winid, status_rows, opts)
-    for _, w in pairs(windows) do
-        if w.winid and api.nvim_win_is_valid(w.winid) then
-            api.nvim_win_close(w.winid, true)
-        end
-        w.winid = nil
-    end
-    build_windows(windows, config, init_winid, status_rows, opts)
-end
-
----Create the panes; populates `windows[name] = { bufnr, winid, title }`.
----@param windows table
----@param config table
----@param init_winid integer window the runner was launched from
----@param status_rows integer? rows of the "Run" pane (default 2)
----@param opts { layout: table?, layout_name: string?, titles: table<string, string>? }? what
----the row on screen changes about the grid: a layout of its own (named by `layout_name`, for
----anything it has to report), and titles it gives panes
-function M.init_ui(windows, config, init_winid, status_rows, opts)
-    opts = opts or {}
-    local STATUS_HEIGHT = status_rows or 2
-    for name in pairs(titles) do
-        local buf = api.nvim_create_buf(false, true)
-        require("tuna.surface").adopt(buf, "runner") -- the shared surface contract
-        vim.bo[buf].modifiable = false
-        local title = (opts.titles and opts.titles[name]) or titles[name]
-        windows[name] = { bufnr = buf, winid = nil, title = title }
-    end
-    build_windows(windows, config, init_winid, status_rows, opts)
 end
 
 return M

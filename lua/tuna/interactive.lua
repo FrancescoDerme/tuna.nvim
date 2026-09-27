@@ -255,7 +255,7 @@ end
 ---are in every other mode.
 function InteractiveRunner:pane_content(tc, name)
     if
-        tc.tcnum ~= "Compile"
+        not tc.compile
         and self:conversational()
         and (name == "so" or name == "se" or name == "si" or name == "eo")
     then
@@ -296,7 +296,7 @@ end
 ---@param idx integer
 function InteractiveRunner:run_single(idx)
     local tc = self.tcdata[idx]
-    if not tc or tc.tcnum == "Compile" then
+    if not tc or tc.compile then
         return
     end
     self.completed = false
@@ -447,7 +447,7 @@ end
 ---@param tc table the row being shown
 function InteractiveRunner:on_details_rendered(ui, tc)
     -- The build step is drawn by the UI, one pane per source compiled.
-    if not self:conversational() or tc.tcnum == "Compile" then
+    if not self:conversational() or tc.compile then
         return
     end
     local w = {}
@@ -971,7 +971,7 @@ end
 function InteractiveRunner:run_sessions()
     local order = {}
     for i, tc in ipairs(self.tcdata) do
-        if tc.tcnum ~= "Compile" then
+        if not tc.compile then
             self:reset_row(tc)
             order[#order + 1] = i
         end

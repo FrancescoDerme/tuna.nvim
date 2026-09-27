@@ -432,8 +432,11 @@ as `checker <input> <output> <answer>` (exit 0 means correct) and is compiled vi
 - Panes: `st` (the "Run" status, carved from `tc`'s rectangle), `tc` (selector), and the
   detail panes, each named for the content it shows on a testcase row (competitest's
   vocabulary): `si` standard input, `so` standard output, `se` standard error, `eo` expected
-  output. `popup.lua` tiles floats and `split.lua` builds native splits, from the same
-  recursive `{ ratio, child }` layout; levels alternate between columns and rows.
+  output. The UI creates the six buffers (adopted through `surface`, with `write_panes` as
+  their `:w`) and an interface only places windows onto them: `relayout(windows, config,
+  init_winid, status_rows, grid)` is its whole API. `popup.lua` tiles floats, moving the
+  windows that stay, and `split.lua` opens native splits anew each time, both from the same
+  recursive `{ ratio, child }` grid; levels alternate between columns and rows.
 - **Six pane buffers, never more.** A board is these six and makes no other: a buffer
   nothing shows is a cost with nothing bought. The build step, which has no input, answer or
   output, borrows the four detail buffers for its sources (`BUILD_PANES`) instead of having
@@ -442,7 +445,9 @@ as `checker <input> <output> <answer>` (exit 0 means correct) and is compiled vi
 - `M.owner_of(bufnr)` answers which runner a pane buffer belongs to, from the module-level
   `pane_owner` map filled in `show_ui` and cleared in `delete` (`commands.target_buffer`).
 - `layout.resolve` validates a layout (known names, no duplicates, well-formed pairs, the
-  names its kind requires) and falls back to the default with one WARN. Two kinds, two
+  names its kind requires) and falls back to the default with a WARN. The UI checks each
+  grid once per board (`checked_grid`, by option name), so a re-tile never repeats the
+  warning, and the interfaces are handed a grid already checked. Two kinds, two
   vocabularies that do not mix (`layout.kinds`): a testcase row's grid (`run`) places `tc` and
   the detail panes; the build step's (`build`) places `tc` and one `build` cell, and nothing
   else, since the detail panes' names would say stdout or stdin there. A pane the layout omits still gets a
@@ -450,11 +455,11 @@ as `checker <input> <output> <answer>` (exit 0 means correct) and is compiled vi
   window call goes through `w.winid and api.nvim_win_is_valid(w.winid)`, never the second
   half alone. Which panes are omitted changes with the row on screen, so any pane can be
   windowless at any moment (the build step draws only its own sources).
-- `init_ui(windows, config, winid, status_rows, opts)`; `opts` comes from
-  `RunnerUI:layout_opts(idx?)` (`row_layout` + runner `pane_titles`).
-- **The grid follows the row on screen.** `row_layout` answers the build step with
-  `runner_ui.compile_layout` (`compile_grid`, validated once as a `build` grid) and every
-  other row with the mode's `layout()` or the configured one. `build_assignment` gives each
+- **The grid follows the row on screen.** `grid(idx)` answers the build step with
+  `runner_ui.compile_layout` (checked as a `build` grid) and every other row with the mode's
+  `layout()` or the interface's configured one (`configured_grid`); `titles_for(idx)` gives
+  every pane's title on that row, which `lay_out` stores on the pane records before the
+  interface places them. `build_assignment` gives each
   source of the build step one of the `BUILD_PANES` buffers, in order, and `stack_into`
   splits the grid's `build` cell into them, one above the other (one source takes the cell
   whole), so the answers that have to agree — the grid, the titles (`Errors: gen.cpp`), what
@@ -463,16 +468,18 @@ as `checker <input> <output> <answer>` (exit 0 means correct) and is compiled vi
   thing in every mode. There is no "keep the testcase grid" setting for the build row: that
   grid has no `build` cell, so it would bring back a detail pane's name meaning two things.
   The render tick compares it
-  with `drawn_layout` and calls `redraw_grid`, which asks the interface to `relayout`: the
-  panes keep their buffers (content, keymaps, unwritten edits) and are only moved, opened or
-  closed, because rebuilding them would drop all of that and race the rows landing in them.
-  `resize_ui` is the same call. Titles are taken again on every relayout, not only when a
-  pane is born, because the row on screen can rename one. While it runs, `relayouting` marks the windows closing and
+  with `drawn_layout` and calls `redraw_grid`, which lays the grid out again (`lay_out`): the
+  panes keep their buffers (content, keymaps, unwritten edits) and only their windows are
+  moved, opened or closed, because rebuilding them would drop all of that and race the rows
+  landing in them. A resize is the same call. Focus stays on the pane it was in, else the
+  selector: the split interface closes the window you are in on every re-tile, and a pane the
+  new grid leaves out loses its window. Titles are taken again on every re-tile, because the
+  row on screen can rename a pane. While it runs, `relayouting` marks the windows closing and
   opening as the UI's own, so neither `WinClosed` (which means the user closed the UI) nor a
   cursor event (which means a move by hand) is believed; it is cleared a tick later, when
   those events are delivered. `watch_pane_window` re-arms the per-window `WinClosed` after a
-  relayout, and `draw_pane`/`build_windows` skip a pane whose buffer was wiped from under the
-  UI (`:%bwipeout`).
+  relayout, and both interfaces skip a pane whose buffer was wiped from under the UI
+  (`:%bwipeout`).
 - Rendering is **coalesced to one per tick** (`render_scheduled`, flags `update_windows` and
   `update_details`).
 - **Which row is shown** is the UI's choice until the selector is moved by hand: `user_moved`
@@ -924,7 +931,9 @@ specific Vim error about a buffer the user never opened.
     that failed reported on that row and on the Compile row rather than in a float, the search
     running beside the testcases on disk rather than after them, a failed build finishing it
     and spawning nothing behind it, in every mode that builds a solution of its own),
-    using real UI windows. `testcases.lua` also covers the
+    using real UI windows, in both interfaces where the grid changes (focus, the selector's
+    row, titles and a bad grid said once as the board re-tiles, and `:w` from a read-only
+    pane). `testcases.lua` also covers the
     `single_file` rewrite keeping untouched testcases.
 - Modules expose file-local helpers to tests through `M._test` (`download`, `submit`, `clean`,
   `interactive`, `temp`, `menu`). They are not public interface.

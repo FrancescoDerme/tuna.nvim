@@ -33,6 +33,7 @@ M.titles = {
 ---panes' buffers underneath, but what they hold there is a compiler's output rather than a
 ---stdout or a stdin, so the names that say those things have no place in its grid. `st` is
 ---derived from `tc`, so it is never placed.
+---@type table<string, { placeable: table<string, boolean>, required: string[] }>
 M.kinds = {
     run = { placeable = { tc = true, so = true, eo = true, si = true, se = true }, required = { "tc" } },
     build = { placeable = { tc = true, build = true }, required = { "tc", "build" } },
@@ -76,15 +77,13 @@ local function collect(layout, acc, placeable)
     return acc
 end
 
----Validate a layout and report which panes it places. A layout that can't be used
----is reported once and replaced by the shipped default for that option, so a typo
----costs the user their arrangement — not their results UI.
+---Validate a layout. One that can't be used is reported and replaced by the shipped default
+---for that option, so a typo costs the user their arrangement, not their results UI.
 ---@param layout table the configured layout
 ---@param option string the option's name, for the warning (e.g. "popup_ui.layout")
 ---@param fallback table the default layout for that option
 ---@param kind "run"|"build"? what the grid is for (default a testcase row's, `run`)
 ---@return table layout the layout to lay out
----@return table<string, boolean> placed the panes it places
 function M.resolve(layout, option, fallback, kind)
     local spec = M.kinds[kind or "run"]
     -- The top level is always a list, even for a single pane (`{ { 1, "tc" } }`):
@@ -96,23 +95,19 @@ function M.resolve(layout, option, fallback, kind)
     else
         leaves, err = collect(layout, {}, spec.placeable)
     end
-    for _, name in ipairs(leaves and spec.required or {}) do
-        if not vim.tbl_contains(leaves, name) then
-            err = MISSING[name]
-            break
+    if leaves then
+        for _, name in ipairs(spec.required) do
+            if not vim.tbl_contains(leaves, name) then
+                err = MISSING[name]
+                break
+            end
         end
     end
     if err then
         utils.notify(("%s: %s, using the default layout."):format(option, err), "WARN")
-        leaves = collect(fallback, {}, spec.placeable) or {}
-        layout = fallback
+        return fallback
     end
-
-    local placed = {}
-    for _, name in ipairs(leaves) do
-        placed[name] = true
-    end
-    return layout, placed
+    return layout
 end
 
 return M

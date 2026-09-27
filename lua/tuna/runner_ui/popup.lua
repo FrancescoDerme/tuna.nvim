@@ -1,7 +1,7 @@
 -- lua/tuna/runner_ui/popup.lua
 --
--- The "popup" interface: the runner UI as a grid of floating windows laid out by
--- a recursive layout engine driven by `popup_ui.layout`.
+-- The "popup" interface: the runner UI as a grid of floating windows over the pane buffers
+-- the UI owns, laid out by a recursive layout engine.
 --
 -- A layout is a list of `{ ratio, child }` pairs, where `child` is either a
 -- window name (a leaf: "tc"/"so"/"eo"/"si"/"se") or a nested layout. Levels
@@ -11,12 +11,9 @@
 
 local api = vim.api
 local utils = require("tuna.utils")
-local layout_util = require("tuna.runner_ui.layout")
 local surface = require("tuna.surface")
 
 local M = {}
-
-local titles = layout_util.titles
 
 ---Assign rectangles to leaves by recursively subdividing `width`×`height`.
 ---@param layout table|string a sub-layout, or a leaf window name
@@ -79,7 +76,8 @@ local function draw_pane(w, name, config, s, p)
         return
     end
     if w.winid and api.nvim_win_is_valid(w.winid) then
-        -- Moved rather than reopened: a window that stays keeps its view and its options.
+        -- Moved rather than reopened: a window that stays keeps its view and its options. The
+        -- title is set again, since the row on screen can rename a pane.
         api.nvim_win_set_config(w.winid, {
             relative = "editor",
             width = math.max(1, s.width),
@@ -87,17 +85,15 @@ local function draw_pane(w, name, config, s, p)
             col = p.col,
             row = p.row,
         })
+        pcall(api.nvim_win_set_config, w.winid, { title = w.title, title_pos = "center" })
         return
     end
     w.winid = surface.float(w.bufnr, {
         layer = surface.LAYER.grid,
         width = s.width,
         height = s.height,
-        -- A bordered float's row/col anchor its whole footprint: the border is drawn *at*
-        -- that row/col and the content one cell in. The computed rectangles already include
-        -- the border, so they are passed through unshifted — offsetting by +1 pushed the grid
-        -- a row down and a column right, which on a full-height layout means over the
-        -- statusline.
+        -- A bordered float's row/col anchor its whole footprint, border included, which is
+        -- what the computed rectangles are, so they are passed through unshifted.
         col = p.col,
         row = p.row,
         border = config.floating_border,
@@ -143,69 +139,16 @@ local function compute_layout(config, status_rows, layout)
     return sizes, positions
 end
 
----Create the floating windows; populates `windows[name] = { bufnr, winid, title }`.
----@param windows table
+---Place a window for every pane `layout` names over its buffer, and none for the others.
+---Windows already open are moved rather than reopened, keeping their view.
+---@param windows table<string, { bufnr: integer, winid: integer?, title: string }>
 ---@param config table
----@param _init_winid integer? unused (popup anchors to the editor)
----@param status_rows integer? content rows of the "Run" pane (default 2)
----@param opts { layout: table?, layout_name: string?, titles: table<string, string>? }? what
----the row on screen changes about the grid: a layout of its own (named by `layout_name`, for
----anything it has to report), and titles it gives panes
-function M.init_ui(windows, config, _init_winid, status_rows, opts)
-    opts = opts or {}
-    local defaults = require("tuna.config").defaults.popup_ui.layout
-    -- A run mode that lays the grid out its own way (interactive's conversation columns)
-    -- replaces the configured layout, and is validated the same way.
-    local layout = layout_util.resolve(
-        opts.layout or config.popup_ui.layout,
-        opts.layout_name or "popup_ui.layout",
-        defaults
-    )
-    local sizes, positions = compute_layout(config, status_rows or 2, layout)
-
-    for name in pairs(titles) do
-        local title = (opts.titles and opts.titles[name]) or titles[name]
-        local buf = api.nvim_create_buf(false, true)
-        -- Named, tagged, and answering `:w` instead of erroring — the shared surface
-        -- contract, so a pane cannot be born missing a piece of it. What a write *does*
-        -- here is the runner's business, added on top in `show_ui`.
-        require("tuna.surface").adopt(buf, "runner")
-        vim.bo[buf].modifiable = false
-
-        -- A pane the layout doesn't place gets a buffer but no window: its content is
-        -- still collected (and still openable in the viewer), it just isn't drawn.
-        windows[name] = { bufnr = buf, winid = nil, title = title }
-        draw_pane(windows[name], name, config, sizes[name], positions[name])
-    end
-end
-
----Re-tile the panes for another layout, keeping their buffers and everything held on them —
----the content, the keymaps, an unwritten edit. The row on screen decides the grid (the build
----step is shown with Errors and nothing else), so this runs whenever that changes kind, and
----rebuilding the panes for it would throw away what they hold and race the rows landing in
----them.
----@param windows table
----@param config table
----@param _init_winid integer? unused (the popup grid is anchored to the editor)
----@param status_rows integer?
----@param opts { layout: table?, layout_name: string?, titles: table<string, string>? }?
-function M.relayout(windows, config, _init_winid, status_rows, opts)
-    opts = opts or {}
-    local layout = layout_util.resolve(
-        opts.layout or config.popup_ui.layout,
-        opts.layout_name or "popup_ui.layout",
-        require("tuna.config").defaults.popup_ui.layout
-    )
-    local sizes, positions = compute_layout(config, status_rows or 2, layout)
+---@param _ integer? the window the runner was launched from (unused: the grid is anchored to the editor)
+---@param status_rows integer content rows of the "Run" pane
+---@param layout table the validated grid
+function M.relayout(windows, config, _, status_rows, layout)
+    local sizes, positions = compute_layout(config, status_rows, layout)
     for name, w in pairs(windows) do
-        -- The row on screen can rename a pane — the build step names each of them after the
-        -- source it holds — so the title is taken again here, not only when the pane is born:
-        -- a window that stays open would otherwise keep the name it was opened with.
-        local title = (opts.titles and opts.titles[name]) or titles[name]
-        if w.title ~= title and w.winid and api.nvim_win_is_valid(w.winid) then
-            pcall(api.nvim_win_set_config, w.winid, { title = title, title_pos = "center" })
-        end
-        w.title = title
         draw_pane(w, name, config, sizes[name], positions[name])
     end
 end

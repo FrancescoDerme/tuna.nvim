@@ -29,7 +29,6 @@ local M = {}
 ---@field running_directory string
 ---@field compile boolean whether this run compiles first
 ---@field next_tc integer index of the next unstarted testcase
----@field mode string the run mode the UI shows
 local TCRunner = core.extend()
 M.TCRunner = TCRunner
 

@@ -190,6 +190,113 @@ do
 end
 
 --------------------------------------------------------------------------------
+-- Both interfaces, as the row on screen changes kind
+--------------------------------------------------------------------------------
+
+-- The build step and a testcase row are drawn with different grids, so moving between them
+-- re-tiles the board. The split interface opens its windows anew each time, the popup one
+-- moves them, and either way focus stays on the pane it was in, the selector stays on the
+-- row, the titles follow the row (the viewer's too), and a grid that can't be used is said
+-- once, not on every re-tile.
+local function board(interface, bad_layout)
+    local quiet = vim.notify
+    local said = t.capture_notifications()
+    local br = require("tuna.runner").new(buf)
+    br.config = vim.deepcopy(br.config)
+    br.config.runner_ui.interface = interface
+    -- Unaccented, so a popup's titles are the ones the interface draws.
+    br.config.runner_ui.editable_border_highlight = false
+    if bad_layout then
+        br.config.popup_ui.layout = { { 1, "tc" }, { 1, "nope" } }
+        br.config.split_ui.vertical_layout = { { 1, "tc" }, { 1, "nope" } }
+    end
+    stub_system()
+    br:run_testcases({ [0] = { input = "1\n" }, [1] = { input = "2\n" } }, true)
+    br:show_ui()
+    settled(br)
+    vim.wait(300, function()
+        return false
+    end)
+    vim.system = real_system
+    local ui = br.ui
+    local function move(row)
+        vim.api.nvim_set_current_win(ui.windows.tc.winid)
+        vim.api.nvim_win_set_cursor(0, { row, 0 })
+        vim.api.nvim_exec_autocmds("CursorMoved", { buffer = ui.windows.tc.bufnr })
+        vim.wait(300, function()
+            return false
+        end)
+    end
+    local function state()
+        local tcw = ui.windows.tc.winid
+        return {
+            focus = vim.api.nvim_get_current_win() == tcw and "tc" or "elsewhere",
+            row = tcw and vim.api.nvim_win_is_valid(tcw) and vim.api.nvim_win_get_cursor(tcw)[1] or nil,
+        }
+    end
+    return br, ui, move, state, function()
+        vim.notify = quiet
+        return said
+    end
+end
+
+t.write(dir, "checker.cpp", "int main() {}\n")
+for _, interface in ipairs({ "split", "popup" }) do
+    local br, ui, move, state, done = board(interface)
+    done()
+    t.eq(interface .. ": a run hands the selector the first testcase, focus in it", state(), { focus = "tc", row = 2 })
+    move(1)
+    t.eq(interface .. ": moving onto the build step keeps focus and the row", state(), { focus = "tc", row = 1 })
+    t.has(interface .. ": its panes are named after their sources", ui.windows.so.title, "checker.cpp")
+    if interface == "popup" then
+        local drawn = vim.api.nvim_win_get_config(ui.windows.so.winid).title
+        t.has("popup: and drawn with that name", drawn and drawn[1][1] or "", "checker.cpp")
+    end
+    ui:show_viewer("so")
+    local viewer = ui.viewer_winid and vim.api.nvim_win_get_config(ui.viewer_winid).title
+    t.has(interface .. ": and the viewer opens with that name", viewer and viewer[1][1] or "", "checker.cpp")
+    ui:close_viewer()
+    move(2)
+    t.eq(interface .. ": and back to a testcase row", state(), { focus = "tc", row = 2 })
+    t.eq(interface .. ": where the pane is Output again", ui.windows.so.title, " Output (o) ")
+    if interface == "popup" then
+        local drawn = vim.api.nvim_win_get_config(ui.windows.so.winid).title
+        t.eq("popup: and drawn as Output again", drawn and drawn[1][1], " Output (o) ")
+    end
+    br:delete_ui()
+end
+vim.fn.delete(dir .. "/checker.cpp")
+
+-- `:w` in any pane saves the testcase the panes show, a read-only one included.
+do
+    local br, ui, move, _, done = board("popup")
+    done()
+    move(2)
+    vim.api.nvim_buf_set_lines(ui.windows.si.bufnr, 0, -1, false, { "7" })
+    stub_system()
+    vim.api.nvim_buf_call(ui.windows.so.bufnr, function()
+        vim.cmd("write")
+    end)
+    settled(br)
+    vim.system = real_system
+    t.eq("a :w typed in the Output pane saves the input typed into Input", (tcs.buf_get_testcases(buf)[0] or {}).input, "7")
+    tcs.buf_delete_testcase(buf, 0)
+    br:delete_ui()
+end
+
+for _, interface in ipairs({ "split", "popup" }) do
+    local br, _, move, _, done = board(interface, true)
+    move(1)
+    move(2)
+    move(1)
+    local warned = vim.tbl_filter(function(m)
+        return m:match("using the default layout") ~= nil
+    end, done())
+    t.eq(interface .. ": a grid that can't be used is said once, however often the board re-tiles", #warned, 1)
+    br:delete_ui()
+end
+
+--------------------------------------------------------------------------------
 -- No testcases at all: the program still runs, on empty stdin
 --------------------------------------------------------------------------------
 
@@ -661,11 +768,13 @@ vim.fn.delete(dir .. "/interactor.cpp")
 do
     local popup = require("tuna.runner_ui.popup")
     local wins = {}
-    popup.init_ui(wins, require("tuna.config").current_setup, nil, 2, { titles = { si = " Live " } })
+    for name, title in pairs(require("tuna.runner_ui.layout").titles) do
+        wins[name] = { bufnr = vim.api.nvim_create_buf(false, true), title = name == "si" and " Live " or title }
+    end
+    local setup = require("tuna.config").current_setup
+    popup.relayout(wins, setup, nil, 2, setup.popup_ui.layout)
     local cfg = vim.api.nvim_win_get_config(wins.si.winid)
     t.eq("the interface draws a renamed pane's title", cfg.title and cfg.title[1][1], " Live ")
-    t.eq("and records it for the viewer", wins.si.title, " Live ")
-    t.eq("a pane nobody renamed keeps its own", wins.so.title, " Output ")
     for _, w in pairs(wins) do
         if w.winid and vim.api.nvim_win_is_valid(w.winid) then
             vim.api.nvim_win_close(w.winid, true)
@@ -1087,7 +1196,7 @@ do
     end, 10)
     local bui, first = br.ui, br.tcdata[1]
 
-    t.eq("the build step stacks one pane per source it compiles", (bui:row_layout(1)), {
+    t.eq("the build step stacks one pane per source it compiles", bui:grid(1), {
         { 3, "tc" },
         { 8, { { 1, "se" }, { 1, "so" }, { 1, "eo" }, { 1, "si" } } },
     })
@@ -1104,7 +1213,7 @@ do
         eo = "",
         si = "checker.cpp warns\n",
     })
-    t.eq("a testcase row keeps the grid of the run", (bui:row_layout(2)), nil)
+    t.eq("a testcase row keeps the grid of the run", bui:grid(2), require("tuna.config").current_setup.popup_ui.layout)
     t.ok("a row that is not the build step has no sources", bui:build_assignment(br.tcdata[2]) == nil)
     t.ok("a helper that warned keeps the cursor on the build step", br:build_spoke(first), assigned.text)
     t.eq("though the solution itself built quietly", { first.stderr, first.exit_code }, { "", 0 })
@@ -1349,7 +1458,7 @@ do
     onl:show_ui()
     onl:run_testcases({ [0] = { input = "1\n" } }, true)
     settled(onl)
-    t.eq("one source alone keeps the build step's configured grid", (onl.ui:row_layout(1)), {
+    t.eq("one source alone keeps the build step's configured grid", onl.ui:grid(1), {
         { 3, "tc" },
         { 8, "se" },
     })
