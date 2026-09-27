@@ -299,39 +299,52 @@ do
     vim.cmd("edit " .. dir .. "/one.cpp")
     local widgets = require("tuna.widgets")
     local C = require("tuna.commands")
-    local real = { picker = widgets.picker, editor = widgets.editor, menu = widgets.menu }
-    local picked, edited, asked
-    widgets.picker = function(_, _, title)
-        picked = title
-    end
+    local real = { editor = widgets.editor, menu = widgets.menu }
+    local edited, asked, choices
     widgets.editor = function(_, n)
         edited = n
     end
-    widgets.menu = function(_, title)
-        asked = title
+    widgets.menu = function(items, title, on_choice)
+        asked, choices = title, items
+        if title:find("a testcase") then
+            on_choice(2) -- the second testcase listed
+        end
     end
 
     C.edit_testcase(false)
-    t.eq("with one testcase, edit opens it without asking which", { picked, edited }, { nil, 0 })
+    t.eq("with one testcase, edit opens it without asking which", { asked, edited }, { nil, 0 })
     C.delete_testcase()
-    t.eq("and delete goes straight to confirming it", { picked, asked }, { nil, "delete testcase 0?" })
+    t.eq("and delete goes straight to confirming it", asked, "Delete testcase 0?")
 
-    t.write(dir, "one_input1.txt", "2\n")
-    edited = nil
+    for _, n in ipairs({ 1, 10, 2, 9 }) do
+        t.write(dir, "one_input" .. n .. ".txt", "2\n")
+    end
+    asked, edited = nil, nil
     C.edit_testcase(false)
-    t.eq("with several, edit asks which", { picked, edited }, { "Edit a Testcase", nil })
-    picked = nil
-    C.split_testcase()
-    t.eq("and split asks the same way", picked, "Split a Testcase")
+    t.eq("with several, edit asks which, in order", { asked, choices }, {
+        "Edit a testcase",
+        { "Testcase 0", "Testcase 1", "Testcase 2", "Testcase 9", "Testcase 10" },
+    })
+    t.eq("and opens the one chosen", edited, 1)
+    asked = nil
+    local real_split = C.split_testcase
+    local split
+    C.split_testcase = function(n)
+        split = n
+    end
+    real_split()
+    C.split_testcase = real_split
+    t.eq("and split asks the same way", { asked, split }, { "Split a testcase", 1 })
 
-    os.remove(dir .. "/one_input0.txt")
-    os.remove(dir .. "/one_input1.txt")
-    picked, edited = nil, nil
+    for _, n in ipairs({ 0, 1, 10, 2, 9 }) do
+        os.remove(dir .. "/one_input" .. n .. ".txt")
+    end
+    asked, edited = nil, nil
     local quiet = vim.notify
     local said = t.capture_notifications()
     C.edit_testcase(false)
     vim.notify = quiet
-    t.eq("with none, nothing opens", { picked, edited }, { nil, nil })
+    t.eq("with none, nothing opens", { asked, edited }, { nil, nil })
     t.has("and it says so", said[1], "there are no testcases to edit")
     for k, f in pairs(real) do
         widgets[k] = f

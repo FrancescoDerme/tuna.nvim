@@ -31,7 +31,9 @@ library, contest navigation, a scratch file, an unused-file cleaner, a menu and
 - Never cite upstream competitest issue or PR numbers anywhere (docs, comments, tests).
   Describe the problem instead. Linking the competitest project is fine.
 - User-facing text (notifications, menu items, prompt titles, health output) joins clauses with
-  **commas, never dashes or semicolons**. Send notifications through `utils.notify`.
+  **commas, never dashes or semicolons**. Send notifications through `utils.notify`: they
+  start lowercase (it prefixes `Tuna: `) and a sentence ends with a period. Widget titles
+  and menu items are sentence case, except a title that starts with a path or a name.
 - **Never ask on the command line** (`vim.fn.confirm`, `input()`). Every question is a
   `widgets` float. Widgets are callback-async, so a caller that must continue passes `on_close`
   and handles dismissal.
@@ -46,7 +48,9 @@ library, contest navigation, a scratch file, an unused-file cleaner, a menu and
 
 **Docs**
 - `README.md` and `doc/tuna.txt` are parallel. When user-visible behaviour changes, update
-  both, and update this file when the design changes.
+  both, and update this file when the design changes. Every option in `config.defaults` is
+  documented in both (submit's in their own table, `*tuna-submit-options*`), and so are the
+  action names `keymaps` and `runner_ui.mappings` take.
 - The maintainer edits the README by hand: read it before editing and don't reflow it.
 - The vimdoc is `doc/tuna.txt` (`:helptags` only indexes `*.txt`). Lines are at most 78
   columns, tags look like `*tuna-…*`, and `|` is only a link delimiter, so alternatives are
@@ -66,7 +70,7 @@ lua/tuna/
   commands.lua      subcommand dispatch and completion; per-buffer runner cache
   utils.lua         notify, modifier engine, filesystem helpers, float geometry, place_cursor
   surface.lua       the contract every UI buffer/window follows
-  widgets.lua       input, editor, picker, menu, panels, form floats
+  widgets.lua       input, editor, menu, panels, form floats
   testcases.lua     three storage backends, testcase semantics, split
   sidecar.lua       per-problem .tuna.json
   tools.lua         helper-program discovery/compilation, per-problem run state
@@ -120,7 +124,7 @@ tuna.nvim.json      package metadata
 - `commands.target_buffer(bufnr?)` is the buffer every `:Tuna` subcommand acts on (and bare
   `:Tuna`, from `init.lua`): a results pane resolves to the solution it shows, through
   `runner_ui.owner_of`, a registry the UI fills for its pane buffers and clears when it is
-  deleted. A pane is not a file, so a command acting on one compiled nothing and kept the
+  deleted. A pane is not a file, so a command acting on one would compile nothing and keep the
   problem's run state under a name that is not a path. A helper file is *not* resolved here;
   each run does that itself (`tools.solution_bufnr`).
 
@@ -172,8 +176,8 @@ is relative. Every configured path goes through these: compile/running directori
   per session, because every problem would overwrite the others. The warning is skipped when
   the value comes from a `.tuna.lua`.
 - `:Tuna testcase edit`/`delete`/`split` without a number go through `commands.choose_testcase`:
-  the only testcase when there is one, a picker when there are several, a message when there are
-  none. Delete still confirms.
+  the only testcase when there is one, a `widgets.menu` of them in order when there are several,
+  a message when there are none. Delete still confirms.
 - **Split** (`split_testcase`, `buf_split_testcase`): marker lines come in **pairs**, and what a
   pair brackets becomes a testcase. Everything outside the pairs stays in testcase `n`; new
   cases take the lowest free numbers, and no other testcase is renumbered. The split is
@@ -313,7 +317,10 @@ is relative. Every configured path goes through these: compile/running directori
 - `runner.new(bufnr)` resolves compile/run commands, directories and the checker. Stress,
   interactive and multi reuse it. Every run in every mode calls `RunnerCore:refresh_judge`,
   so a checker added, deleted or switched off, and a comparison overridden since
-  (`compare_method`), apply to the next run of a cached runner.
+  (`compare_method`), apply to the next run of a cached runner. `:Tuna checker` and
+  `:Tuna compare` also set them on the buffer's runners at once (`runners_of`), so an open
+  board's judge row says what the next run will use, and never drop a runner, whose board
+  no later run could then find to hide.
 - `build_rows`: row 1 is `Compile` when compiling, and the build gates the testcases. With **no
   testcases** it builds one `bare` testcase 0, labelled `No input`, run on empty stdin with no
   answer (so `DONE`) and editable; saving it creates the testcase. `n` in the UI reuses an
@@ -367,8 +374,8 @@ is relative. Every configured path goes through these: compile/running directori
   or the board would read one number twice until the next run.
 - **The generator and the bruteforce are judged on the signal too** (`core.ending`), not
   on the exit code alone: a crash (a sanitizer abort, a segfault) exits 0 and reports the
-  signal, so reading the code passed an empty output off as the bruteforce's answer, and
-  then every input was a counterexample saved with no answer beside it. Either failing
+  signal, so reading the code alone would pass an empty output off as the bruteforce's
+  answer, and every input would be a counterexample saved with no answer beside it. Either failing
   stops the search, because every verdict is read off the two of them. A solution that
   crashes or times out on a generated input is a counterexample wearing the same words.
 - **A failure is reported where a testcase's is.** `helper_failed` puts the verdict a
@@ -553,8 +560,8 @@ the checker gives no verdict on, since searching on would end in "no counterexam
   (matched by `row_id`), else `initial_row()` — the first testcase, or Compile when it printed
   something. `building` is about the *run*, not the process (`not preloaded and
   exit_code == nil`): asking whether the compiler runs right now leaves a tick between the rows
-  being built and the process being spawned, and a UI opened inside it drew the panes of a run
-  for a build about to start and redrew them a moment later. For the same reason the mode
+  being built and the process being spawned, and a UI opened inside it would draw the panes of
+  a run for a build about to start and redraw them a moment later. For the same reason the mode
   modules `mark_not_run` before `show_ui`, not after.
 - `render_selector` lays the rows out in three columns (header, verdict, time) through
   `selector_columns`: 10 wide while the pane holds them, content-sized plus a space when it
@@ -650,6 +657,9 @@ the checker gives no verdict on, since searching on would end in "no counterexam
   than one source (`legend_build_row`), since there they do not mean what they say.
 
 **Look**
+- The selector and the detail panes each have their line-number options
+  (`selector_show_nu`/`_rnu`, `show_nu`/`_rnu`), set by a branch in both interfaces: an
+  `and`/`or` would let the selector's `false` fall through to the panes' value.
 - Writable panes wear `runner_ui.editable_border_highlight` (default `TunaEditable`, bold
   magenta, the one hue not used for verdicts) on border and title. The title uses the derived
   `TunaEditableBorder`. `accent_editable_panes` takes the accent off as well as putting it
@@ -668,14 +678,14 @@ the checker gives no verdict on, since searching on would end in "no counterexam
   text as you type (debounced). A row nothing has answered on yet is not diffed, which is
   decided on the row having `stdout`, not on a timestamp: a stress counterexample is written
   by the search that found it rather than spawned like a testcase, and gating on the spawn
-  left exactly the rows worth comparing unmarked.
+  would leave exactly the rows worth comparing unmarked.
 
 ## Widgets and surfaces
 
 **`surface.lua`** is the contract every scratch buffer/window follows. Each rule prevents a
 specific Vim error about a buffer the user never opened.
 - `adopt(buf, kind, opts)`: name `tuna://<kind>/<bufnr>/tuna` (constant last component for
-  statuslines), `filetype=tuna` (what statuslines key on to keep describing the file underneath,
+  statuslines, set by `adopt` itself), `filetype=tuna` (what statuslines key on to keep describing the file underneath,
   e.g. lualine's `ignore_focus`), `buftype=acwrite` with a write handler (`nofile` gives E382 and
   never fires `BufWriteCmd`), `keep_clean` for prompts (watches `TextChanged*` and `on_lines`).
   Adopt a buffer **before** its window opens: entering fires `BufEnter`, and plugins that
@@ -696,7 +706,13 @@ specific Vim error about a buffer the user never opened.
 - **Dismissal** is bound only through `map_cancel`, from `config.cancel_keys`
   `{ normal = { "<Esc>", "<C-c>" }, insert = {} }`: Esc cancels from normal mode and only
   leaves insert mode. Per-widget keys extend the lists. `<C-c>` in insert mode can't be mapped.
-- `input` opens in **normal** mode, because chained prompts can't reliably start in insert.
+- `input(title, default, on_submit, on_close)` opens in **normal** mode, because chained
+  prompts can't reliably start in insert. Like every widget it takes its border from the
+  config; a caller that may skip the question (download's `prompt_*` options) decides that
+  itself (`ask` in `download.lua`).
+- `editor`: a resize rebuilds both panes in the pane, cursor and mode the user was in;
+  `skip_close` keeps the panes' `WinClosed` from running the real close (which leaves insert
+  mode) while they are replaced.
 - `menu`: optional `on_close`; `preview` (fixed lines or cursor-following `content(idx)`, colour
   via `'syntax'` not `'filetype'`, list capped at `MENU_LIST_SHARE` of the height); `notice`
   pane above the menu, outside the focus cycle; `row` to start the cursor on (a resize keeps
@@ -723,7 +739,11 @@ specific Vim error about a buffer the user never opened.
 - Widgets are module singletons: `resize_widgets()` rebuilds them (with a `skip_close` guard),
   opening one over an existing instance closes the old windows, and buffers use
   `bufhidden = wipe`.
-- List widgets set `cursorline` with local scope, so the global value never leaks.
+- `open_float` sets what every widget float needs: `cursorline` with local scope (so the
+  global value never leaks), `wrap`, `keep_scrolloff`. `step_keys` turns
+  `switch_window_keys` into the next/previous keys of stacked panes (menu and preview,
+  form sections). `picker_ui.mappings` are the keys of every list; its `close` adds to
+  `cancel_keys` rather than repeating them.
 
 ## Download and judges
 
@@ -927,7 +947,7 @@ specific Vim error about a buffer the user never opened.
   The shipped folder is found from `scaffold.lua`'s own location (`SHIPPED`), not the
   runtimepath, where another plugin's `scaffolds/` would mix in. The file written is named
   after the role's first `tool_names`, the name discovery looks for first: a separate list of
-  scaffold names could and did disagree with it, writing helpers the run then did not find.
+  scaffold names could disagree with it and write helpers the run does not find.
   The language is the one asked for, else `scaffold.language`, else the solution's; one the
   role has no template in offers the languages it has (a helper is compiled and run in its
   own language, whatever the solution's). Templates are written verbatim, with no `$(…)`
@@ -958,8 +978,9 @@ specific Vim error about a buffer the user never opened.
   `N checks, M failures` through `tests/harness.lua` (`ok`/`eq`/`has`/`report`).
 - Files:
   - `surfaces.lua`: conformance of every surface to the `surface.lua` contract, every float
-    tagged before it is entered, and every `runner_ui.mappings` key still resolving to an
-    action;
+    tagged before it is entered, every `runner_ui.mappings` key still resolving to an
+    action, a menu's starting row and preview, and the editor rebuilt by a resize in the
+    pane, cursor and insert mode it was in;
   - `menu.lua`: the contest summary over both layouts, counting current judge verdicts
     only, a problem's judge verdict beating its local one and either lapsing with an edit,
     which rows a local verdict counts, statuses in the results grid's words and colours with
@@ -978,7 +999,8 @@ specific Vim error about a buffer the user never opened.
     paths and commands, missing ones), automatic choices, forcing and `auto`, forced settings
     giving way and coming back, old sidecar entries, runners refreshing the checker per run,
     run-all honouring `checker off`, the Run pane's settings rows and which of them read as
-    forced, old or nonsense sidecar values reading as automatic, a configured command with no
+    forced, `:Tuna compare` reaching an open board without taking its runner away, old or
+    nonsense sidecar values reading as automatic, a configured command with no
     arguments getting its role's, and stress/interactor reruns offering the starter of a helper gone (Stop writing
     nothing, Create putting the board away and opening it in the editor);
   - `scaffold.lua`: the shipped starters, names from `tool_names` (and found by discovery),
@@ -1018,9 +1040,10 @@ specific Vim error about a buffer the user never opened.
     session `KILLED`, the board idle), `<C-r>` building the solution again and running after
     a stop, the ending vocabulary, and run-all's headers counting judged rows only,
     using real UI windows, in both interfaces where the grid changes (focus, the selector's
-    row, titles and a bad grid said once as the board re-tiles, and `:w` from a read-only
-    pane). `testcases.lua` also covers the
-    `single_file` rewrite keeping untouched testcases.
+    row and line numbers, titles and a bad grid said once as the board re-tiles, and `:w`
+    from a read-only pane). `testcases.lua` also covers the
+    `single_file` rewrite keeping untouched testcases, and which testcase a command without
+    a number acts on.
 - Modules expose file-local helpers to tests through `M._test` (`download`, `submit`, `clean`,
   `interactive`, `temp`, `menu`). They are not public interface.
 - **Mutation-check new tests**: break the rule each test describes and confirm it fails, and

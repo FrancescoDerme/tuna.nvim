@@ -512,7 +512,7 @@ function M.open_contest(index)
     else
         -- The directory is there but holds no solution (yet): the cd still happened,
         -- which is most of what was asked for.
-        utils.notify(("contest %s: no solution file in %s"):format(c.name, pretty(c.dir)), "WARN")
+        utils.notify(("contest %s: no solution file in %s."):format(c.name, pretty(c.dir)), "WARN")
     end
 end
 

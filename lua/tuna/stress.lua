@@ -97,7 +97,7 @@ end
 ---@param bufnr integer
 ---@param opts { win: integer?, before: fun()? }?
 local function offer_helpers(absent, bufnr, opts)
-    local title = "stress needs a " .. table.concat(absent, " and a ")
+    local title = "Stress needs a " .. table.concat(absent, " and a ")
     require("tuna.scaffold").create_missing(absent, bufnr, title, opts)
 end
 

@@ -1272,7 +1272,6 @@ function M.clean(bufnr)
                 custom = { label = "Custom: ", default = "", validate = validate_threshold },
             },
         },
-        "Clean",
         function(results)
             -- A section's `custom` is set (and already validated) when its editable
             -- row was the selection; otherwise the choice is the fixed one at `index`.

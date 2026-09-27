@@ -25,8 +25,8 @@ M.actions = {
     run_stress = "Tuna run stress",
     run_interactive = "Tuna run interactive",
     show_ui = "Tuna show_ui",
-    -- The action names stay per-verb (a key maps to one thing); only the command they
-    -- run gained its subject-first shape.
+    -- Named per verb, since a key maps to one thing, while the command it runs puts the
+    -- subject first.
     add_testcase = "Tuna testcase add",
     edit_testcase = "Tuna testcase edit",
     delete_testcase = "Tuna testcase delete",
@@ -163,6 +163,16 @@ local function filetypes(km)
     return km.filetypes or { "c", "cpp", "rust", "java", "python" }
 end
 
+---A mapping is written as one key or a list of them.
+---@param lhs string|string[]
+---@return string[]
+local function keys_of(lhs)
+    if type(lhs) == "table" then
+        return lhs
+    end
+    return { lhs }
+end
+
 ---Set the action->lhs maps in `mapping_tbl`, merging `base_opts` into each
 ---`vim.keymap.set` call (e.g. `{ buffer = n }` for buffer-local, `{}` for global).
 ---Unknown actions are skipped here (they're reported once in `setup`).
@@ -182,7 +192,7 @@ local function set_maps(mapping_tbl, base_opts, labels)
                 label = action:gsub("_", " ")
                 label = label:sub(1, 1):upper() .. label:sub(2)
             end
-            for _, key in ipairs(type(lhs) == "table" and lhs or { lhs }) do
+            for _, key in ipairs(keys_of(lhs)) do
                 local opts = vim.tbl_extend("force", base_opts, {
                     silent = true,
                     desc = label,
@@ -253,7 +263,7 @@ function M.setup()
         set_maps(global, {}, glabels)
         for action, lhs in pairs(global) do
             if M.actions[action] and lhs then
-                for _, key in ipairs(type(lhs) == "table" and lhs or { lhs }) do
+                for _, key in ipairs(keys_of(lhs)) do
                     applied_global[#applied_global + 1] = key
                 end
             end

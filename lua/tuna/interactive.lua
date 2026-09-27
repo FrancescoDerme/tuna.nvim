@@ -151,7 +151,7 @@ end
 ---@param bufnr integer
 ---@param opts { win: integer?, before: fun()? }?
 local function offer_interactor(bufnr, opts)
-    require("tuna.scaffold").create_missing({ "interactor" }, bufnr, "the interactor source needs an interactor", opts)
+    require("tuna.scaffold").create_missing({ "interactor" }, bufnr, "The interactor source needs an interactor", opts)
 end
 
 --------------------------------------------------------------------------------

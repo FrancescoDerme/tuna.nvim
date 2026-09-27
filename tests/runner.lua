@@ -245,6 +245,12 @@ for _, interface in ipairs({ "split", "popup" }) do
     local br, ui, move, state, done = board(interface)
     done()
     t.eq(interface .. ": a run hands the selector the first testcase, focus in it", state(), { focus = "tc", row = 2 })
+    -- The selector's own line-number options, `false` by default, beside panes numbered by default.
+    t.eq(interface .. ": the selector has no line numbers, the panes do", {
+        vim.wo[ui.windows.tc.winid].number,
+        vim.wo[ui.windows.tc.winid].relativenumber,
+        vim.wo[ui.windows.se.winid].number,
+    }, { false, false, true })
     move(1)
     t.eq(interface .. ": moving onto the build step keeps focus and the row", state(), { focus = "tc", row = 1 })
     t.has(interface .. ": its panes are named after their sources", ui.windows.so.title, "checker.cpp")

@@ -101,8 +101,14 @@ local function draw_pane(w, name, config, s, p)
         title = w.title,
     })
     local selector = name == "tc"
-    vim.wo[w.winid].number = selector and config.runner_ui.selector_show_nu or config.runner_ui.show_nu
-    vim.wo[w.winid].relativenumber = selector and config.runner_ui.selector_show_rnu or config.runner_ui.show_rnu
+    local ui = config.runner_ui
+    -- Spelled out rather than with `and`/`or`: a selector option set to `false` would
+    -- fall through to the detail panes' value.
+    if selector then
+        vim.wo[w.winid].number, vim.wo[w.winid].relativenumber = ui.selector_show_nu, ui.selector_show_rnu
+    else
+        vim.wo[w.winid].number, vim.wo[w.winid].relativenumber = ui.show_nu, ui.show_rnu
+    end
     vim.wo[w.winid].spell = false
     vim.wo[w.winid].cursorline = selector
 end

@@ -282,7 +282,7 @@ do
     vim.uv.os_homedir = function()
         return home
     end
-    widgets.input = function(_, _, _, _, _, on_submit)
+    widgets.input = function(_, _, on_submit)
         on_submit("~/typed/sol.cpp")
     end
     local cfg = vim.tbl_extend("force", require("tuna.config").current_setup, { open_downloaded_problems = false })

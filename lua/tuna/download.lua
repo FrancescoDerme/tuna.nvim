@@ -570,7 +570,7 @@ local function store_testcases_into_buffer(bufnr, tclist, replace, finished)
     -- dismissing (Esc) stores nothing. Every answer releases the batch processor.
     require("tuna.widgets").menu(
         { "Keep them alongside the new ones", "Replace them", "Stop" },
-        "testcases already exist",
+        "Testcases already exist",
         function(idx)
             if idx == 1 then
                 write(tctbl)
@@ -584,6 +584,21 @@ local function store_testcases_into_buffer(bufnr, tclist, replace, finished)
         vim.api.nvim_get_current_win(),
         finished
     )
+end
+
+---Ask for a path in the input prompt, or take the default as it is when the prompt is
+---configured off.
+---@param prompt boolean whether to ask
+---@param title string
+---@param default string
+---@param on_submit fun(text: string)
+---@param on_close fun()?
+local function ask(prompt, title, default, on_submit, on_close)
+    if prompt then
+        require("tuna.widgets").input(title, default, on_submit, on_close)
+    else
+        on_submit(default)
+    end
 end
 
 ---Store one downloaded problem, prompting for its path unless configured not to.
@@ -601,12 +616,10 @@ local function store_single_problem(task, cfg, finished)
     end
 
     local widgets = require("tuna.widgets")
-    widgets.input(
+    ask(
+        cfg.downloaded_problems_prompt_path,
         "Problem path",
         default_path,
-        cfg.floating_border,
-        cfg.floating_border_highlight,
-        not cfg.downloaded_problems_prompt_path,
         function(typed)
             -- A path typed or edited in the prompt is read like a configured one: a leading
             -- `~` is the home directory, and a relative path is taken from the cwd.
@@ -678,22 +691,18 @@ local function store_contest(tasks, cfg, finished)
     end
 
     local widgets = require("tuna.widgets")
-    widgets.input(
+    ask(
+        cfg.downloaded_contests_prompt_directory,
         "Contest directory",
         default_dir,
-        cfg.floating_border,
-        cfg.floating_border_highlight,
-        not cfg.downloaded_contests_prompt_directory,
         function(typed)
             -- Read like a configured path, as the problem path is.
             local directory = utils.normalize_path(utils.expand_home(typed))
             local local_cfg = config.load_local_config_and_extend(directory)
-            widgets.input(
+            ask(
+                local_cfg.downloaded_contests_prompt_extension,
                 "Files extension",
                 local_cfg.downloaded_files_extension,
-                local_cfg.floating_border,
-                local_cfg.floating_border_highlight,
-                not local_cfg.downloaded_contests_prompt_extension,
                 function(file_extension)
                     -- Resolve every problem's path up front so we can decide once,
                     -- for the whole contest, whether any already exist.
@@ -904,7 +913,7 @@ local function make_handler(mode, notify_on_download, bufnr, cfg)
                 -- every answer releases the batch processor.
                 require("tuna.widgets").menu(
                     { "Store the testcases only", "Store the full problem", "Stop" },
-                    "downloaded '" .. tasks[1].name .. "'",
+                    "Downloaded '" .. tasks[1].name .. "'",
                     function(choice)
                         if choice == 1 then
                             store_testcases_into_buffer(

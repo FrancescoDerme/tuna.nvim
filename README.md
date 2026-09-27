@@ -472,8 +472,9 @@ require("lualine").setup({
 
 - **Default keymaps**, opt-in with one line: `keymaps = { preset = "<leader>t" }` gives
   `<leader>tr` run, `<leader>tu` results, `<leader>ts` submit, `<leader>tn`/`<leader>tp`
-  problem navigation, `<leader>tta`/`tte`/`ttd` testcases, `<leader>tdp`/`tdc` downloads,
-  `<leader>tgp`/`tgc` back to the last problem/contest, and `<leader>tm` the menu.
+  problem navigation, `<leader>tta`/`tte`/`ttd` testcases, `<leader>tdt`/`tdp`/`tdc`
+  downloads and `<leader>tds` sync, `<leader>tgp`/`tgc` back to the last problem/contest,
+  `<leader>tl` the library, `<leader>tw` the scratch, and `<leader>tm` the menu.
   Move or drop any of them without giving up the rest.
 - **`:checkhealth tuna`** reports what tuna can see: your Neovim version, whether each
   configured compiler and interpreter is actually on `PATH`, the Competitive Companion
@@ -505,7 +506,8 @@ Three layers, each overriding the one before:
 
 1. the defaults;
 2. what you pass to `setup()`;
-3. a **`.tuna.lua`** anywhere above the file you are editing, returning a table.
+3. a **`.tuna.lua`** anywhere above the file you are editing, returning a table (the name
+   is `local_config_file_name`).
 
 The third is per-directory, found by walking up from the buffer's own path — so a contest
 folder can set a different time limit, template or testcase layout for everything under it
@@ -711,6 +713,12 @@ single key can be moved — or dropped, by mapping its action to `false` — wit
 the rest. The preset groups keys by subject, so which-key shows a `t` testcases group, a
 `d` downloads group and a `g` "go to" group.
 
+The actions, each running the `:Tuna` command it is named after: `menu`, `run`, `run_all`,
+`run_stress`, `run_interactive`, `show_ui`, `add_testcase`, `edit_testcase`,
+`delete_testcase`, `submit`, `submit_clear`, `download_testcases`, `download_problem`,
+`download_contest`, `download_sync`, `clean`, `next_problem`, `prev_problem`,
+`last_problem`, `last_contest`, `temp`, `library`, `library_snippet` and `library_search`.
+
 ### Appearance and widgets
 
 | option                                | default                                          |                                                                                                                                                              |
@@ -721,14 +729,30 @@ the rest. The preset groups keys by subject, so which-key shows a `t` testcases 
 | `cancel_keys`                         | `{ normal = { "<Esc>", "<C-c>" }, insert = {} }` | how every widget is dismissed; `<Esc>` in insert mode leaves insert by default, so dismissing something you are typing into takes a second, deliberate press |
 | `runner_ui.interface`                 | `"popup"`                                        | `"popup"` for floats, `"split"` for real windows                                                                                                             |
 | `runner_ui.mappings`                  | see the key table above                          |                                                                                                                                                              |
-| `runner_ui.viewer`                    | `0.8` × `0.8`                                    | the full-screen pane view                                                                                                                                    |
+| `runner_ui.viewer`                    | `0.8` × `0.8`                                    | the full-screen pane view: `width`, `height`, and line numbers `show_nu` / `show_rnu`                                                                        |
+| `runner_ui.show_nu` / `show_rnu`      | `true` / `false`                                 | line numbers in the detail panes                                                                                                                             |
+| `runner_ui.selector_show_nu` / `_rnu` | `false` / `false`                                | line numbers in the selector                                                                                                                                 |
 | `runner_ui.editable_border_highlight` | `"TunaEditable"`                                 | the accent on the two editable panes; `false` turns it off                                                                                                   |
 | `runner_ui.title_keys`                | `true`                                           | end each pane's title with the key that opens it full-screen, `Errors (e)`                                                                                  |
 | `runner_ui.compile_layout`            | selector + build                                 | the grid drawn while the build row is the one on screen: `tc` and a `build` cell, split into one pane per source compiled                                     |
 | `interactive.layouts`                 | conversation / run                               | the grid each interactive source draws (`live`, `interactor`, `feed`); `false` for any of them keeps the configured one                                      |
 | `popup_ui.layout`                     | three columns                                    | a nested `{ weight, pane }` tree over `tc`, `so`, `eo`, `si`, `se`; a pane you leave out is simply not drawn, and stays reachable in the viewer              |
-| `split_ui`                            | `"right"`, `0.3`                                 | position and size when `interface = "split"`                                                                                                                 |
-| `editor_ui`, `picker_ui`              |                                                  | the standalone testcase editor and picker                                                                                                                    |
+| `popup_ui.total_width` / `_height`    | `0.8` / `0.8`                                    | the floating grid's share of the editor                                                                                                                      |
+| `split_ui.position`                   | `"right"`                                        | where the split frame opens: `"top"`, `"bottom"`, `"left"`, `"right"`                                                                                        |
+| `split_ui.total_width` / `_height`    | `0.3` / `0.4`                                    | its share of the editor beside it (left, right) or below it (top, bottom)                                                                                    |
+| `split_ui.relative_to_editor`         | `true`                                           | take that share of the whole editor, `false` of the window it opens from                                                                                     |
+| `split_ui.vertical_layout`            | columns                                          | the grid beside the editor, shaped like `popup_ui.layout`                                                                                                    |
+| `split_ui.horizontal_layout`          | rows                                             | the grid below it                                                                                                                                            |
+| `editor_ui.width` / `height`          | `0.4` / `0.6`                                    | each pane of the standalone testcase editor, as a share of the editor                                                                                        |
+| `editor_ui.show_nu` / `show_rnu`      | `true` / `false`                                 | its line numbers                                                                                                                                             |
+| `editor_ui.normal_mode_mappings`      |                                                  | `switch_window` (`<C-h>`, `<C-l>`, `<C-i>`), `save_and_close` (`<C-s>`), `cancel` (`q`, `Q`, added to `cancel_keys`)                                         |
+| `editor_ui.insert_mode_mappings`      |                                                  | the same while typing, `cancel` being `<C-q>`                                                                                                                |
+| `picker_ui.mappings`                  |                                                  | the keys of every list: `focus_next` / `focus_prev` (wrapping), `submit`, and `close`, added to `cancel_keys`                                                |
+
+`runner_ui.mappings` names its actions `run_again`, `run_all_again`, `stop`, `stop_all`,
+`toggle_diff`, `view_input`, `view_expected`, `view_stdout`, `view_stderr`, `add_testcase`,
+`delete_testcase`, `undo_delete`, `split_testcase`, `close` and `help`, each taking a key
+or a list of them.
 
 Highlight groups: `TunaCorrect`, `TunaWrong`, `TunaWarning`, `TunaRunning`, `TunaDone`,
 `TunaEditable`, `TunaMenuTitle` (the menu's banner letters; the banner has no background of
@@ -865,6 +889,33 @@ If something goes wrong, `submit.log_file` records each submission's raw output 
 verdict tuna parsed from it, which is the fastest way to work out which pattern your tool
 needs.
 
+### Every submit option
+
+All of them live under `submit`, and `submit.judges` overrides them per judge.
+
+| option            | default                         |                                                                                                                                                                |
+| ----------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `provider`        | `"command"`                     | `"command"` runs your tool, `"browser"` opens the submit page and copies the source                                                                            |
+| `command`         | `nil`                           | the command line, or a `function(ctx) -> string`                                                                                                               |
+| `languages`       | C++, C, Python 3, Java, Rust    | filetype to the language name your tool expects, for `$(LANG)`                                                                                                 |
+| `url`             | `"submit at:%s*(%S+)"`          | the header marker, or a `function(ctx) -> string`                                                                                                              |
+| `url_scan_lines`  | `10`                            | how many header lines the markers are looked for in                                                                                                            |
+| `url_rewrite`     | `nil`                           | a `function(url, ctx) -> string?` over what to submit through (nil falls through to the built-in rules), or `false` to submit through the problem URL as it is |
+| `mirror_ttl`      | a day, in seconds               | how long a problem downloaded from a Codeforces mirror is submitted through it; `false` never expires, `0` never uses a mirror                                 |
+| `group` / `name`  | `contest:` / `problem:` markers | header patterns that fill the sidecar's contest and problem name when a download did not                                                                       |
+| `watch`           | `true`                          | read the tool's output for the verdict; `false` runs it in a terminal                                                                                          |
+| `expects_verdict` | `true`                          | `false` skips looking for a verdict in the output                                                                                                              |
+| `verdicts`        | the judges' vocabulary          | ordered `{ lua_pattern, state }` rules                                                                                                                         |
+| `watch_timeout`   | `120000`                        | stop watching after this many ms without a final verdict, `0` never                                                                                            |
+| `verdict_hl`      | tuna's verdict colours          | per state, a highlight group or a colour table                                                                                                                 |
+| `log_file`        | `nil`                           | a path to record each submission's raw output and parsed verdict in                                                                                            |
+| `terminal`        | `"auto"`                        | with `watch = false`: `"toggleterm"`, `"split"`, or `"auto"` for toggleterm when installed                                                                     |
+| `direction`       | `"vertical"`                    | the terminal's orientation, or `"horizontal"`                                                                                                                  |
+| `reuse_terminal`  | `true`                          | keep one terminal across submits                                                                                                                               |
+| `open_terminal`   | `true`                          | open it in front of you, `false` to leave it in the background                                                                                                 |
+| `status_time`     | `6000`                          | how long the terminal path's "submitting" message stays up, in ms, `0` for none                                                                                |
+| `judges`          | `{}`                            | per judge, a partial table of these options                                                                                                                    |
+
 ## Coming from competitest.nvim
 
 tuna is a rewrite, not a fork, so a few things are deliberately named or shaped
@@ -878,9 +929,7 @@ differently. If you are porting a config:
   detected for you.
 - **`testcases_use_single_file` is `testcases_storage`**, an enum over the three backends.
 - **`editor_ui.popup_width` / `popup_height` are `editor_ui.width` / `height`**, matching
-  `picker_ui` and `viewer`, which always used the shorter names.
-- **`picker_ui.mappings.focus_next` / `focus_prev` are gone.** The picker is an ordinary
-  buffer, so `j`/`k` and the arrow keys already move the selection.
+  `viewer`.
 - **Python runs as `python3`**, not `python`.
 - **No `nui.nvim`.** Every float, split and prompt is built on Neovim's own APIs, so there
   is one less runtime dependency and the layout is yours to rearrange. Every tuna float

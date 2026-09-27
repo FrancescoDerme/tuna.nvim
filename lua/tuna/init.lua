@@ -1,4 +1,8 @@
 -- lua/tuna/init.lua
+--
+-- The entry point: `setup()`, the `:Tuna` command and its completion, the highlight
+-- groups, and the autocmds that keep things in step (resizing the UI, restoring a
+-- submit verdict, recording recent problems).
 local config = require("tuna.config")
 
 local M = {}
@@ -52,10 +56,9 @@ function M.setup_highlight_groups()
         -- their border and title, so the two panes you can type into are told apart
         -- from the four you can only read, at a glance and without a legend.
         --
-        -- A concrete colour rather than a link: linking to a semantic group (`Question`
-        -- and friends) gave a pale tint a shade away from the grey `FloatBorder` it has
-        -- to be told apart from, which defeats the purpose. Magenta is the one hue this
-        -- plugin doesn't already spend — green is CORRECT, red WRONG, amber
+        -- A concrete colour, since it has to stand apart from the grey `FloatBorder`
+        -- beside it, which a colorscheme's semantic groups often don't. Magenta is the
+        -- one hue this plugin doesn't already spend — green is CORRECT, red WRONG, amber
         -- WARNING/EDITED — and it reads as "special" rather than as a verdict. Bold,
         -- since a border is one cell thin. `default = true`, so a colorscheme defining
         -- `TunaEditable` still wins, and `runner_ui.editable_border_highlight` points
@@ -166,7 +169,7 @@ end
 
 ---lualine component: shows the download listener's state, or nothing when idle.
 ---The submit verdict is a separate component (`require("tuna.submit").status`)
----so it can carry its own per-verdict color — see the lualine snippet in CLAUDE.md.
+---so it can carry its own per-verdict color, as the README's statusline section shows.
 function M.lualine_component()
     return require("tuna.download").status()
 end

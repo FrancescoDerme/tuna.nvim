@@ -334,10 +334,10 @@ compiled on demand — there is no manifest to maintain.
     (asked for explicitly)      run all, every sibling solution as a matrix
     checker.*                   any of the above, judged by a special judge
 
-Stress testing generates an input, runs your solution and the bruteforce on it,
-compares them, and repeats until they disagree — then saves the counterexample
-as a testcase. It is for the shape where you know one solution is right and
-slow.
+Stress testing generates an input, runs your solution and the bruteforce on
+it, compares them, and repeats until they disagree — then saves the
+counterexample as a testcase. It is for the shape where you know one solution
+is right and slow.
 
 The hunt is a row of its own, listed with the testcases from the moment the
 board opens, numbered as the counterexample it is looking for and showing the
@@ -588,7 +588,8 @@ Three layers, each overriding the one before:
 
 1. the defaults;
 2. what you pass to `setup()`;
-3. a `.tuna.lua` anywhere above the file you are editing, returning a table.
+3. a `.tuna.lua` anywhere above the file you are editing, returning a table
+   (the name is `local_config_file_name`).
 
 The third is per-directory, found by walking up from the buffer's own path, so
 a contest folder can set a different time limit, template or testcase layout
@@ -735,13 +736,15 @@ DOWNLOAD OPTIONS                                        *tuna-config-download*
         The language new solutions are created in. Default `"cpp"`.
 
 `downloaded_problems_path`
-        Where a single problem is written.
+        Where a single problem is written. Default
+        `"$(CWD)/$(PROBLEM).$(FEXT)"`.
 
 `downloaded_contests_directory`
-        The contest's own folder.
+        The contest's own folder. Default `"$(CWD)"`.
 
 `downloaded_contests_problems_path`
-        Each problem, relative to that folder.
+        Each problem, relative to that folder. Default
+        `"$(PROBLEM).$(FEXT)"`.
 
 `downloaded_problems_prompt_path`
 `downloaded_contests_prompt_directory`
@@ -775,7 +778,7 @@ DOWNLOAD OPTIONS                                        *tuna-config-download*
 `judge_parsers`
         A table of judge name to a function taking the parsed
         information and returning overrides. `false` disables
-        normalizing for that judge; `"*"` is a catch-all.
+        normalizing for that judge; `"*"` is a catch-all. Default `{}`.
 
 `date_format`
         For `$(DATE)`. Default `"%c"`.
@@ -859,9 +862,17 @@ action to `false` — without giving up the rest.
 
 With `preset = "<leader>t"` you get `<leader>tr` run, `<leader>tu` results,
 `<leader>ts` submit, `<leader>tn` and `<leader>tp` problem navigation,
-`<leader>tta`, `tte` and `ttd` for testcases, `<leader>tdp` and `tdc` for
-downloads, `<leader>tgp` and `tgc` back to the last problem or contest, and
-`<leader>tm` the menu.
+`<leader>tta`, `tte` and `ttd` for testcases, `<leader>tdt`, `tdp` and `tdc`
+for downloads and `<leader>tds` to sync, `<leader>tgp` and `tgc` back to the
+last problem or contest, `<leader>tl` the library, `<leader>tw` the scratch,
+and `<leader>tm` the menu.
+
+The actions, each running the `:Tuna` command it is named after: `menu`,
+`run`, `run_all`, `run_stress`, `run_interactive`, `show_ui`, `add_testcase`,
+`edit_testcase`, `delete_testcase`, `submit`, `submit_clear`,
+`download_testcases`, `download_problem`, `download_contest`, `download_sync`,
+`clean`, `next_problem`, `prev_problem`, `last_problem`, `last_contest`,
+`temp`, `library`, `library_snippet` and `library_search`.
 
 ------------------------------------------------------------------------------
 APPEARANCE                                            *tuna-config-appearance*
@@ -886,10 +897,23 @@ APPEARANCE                                            *tuna-config-appearance*
         `"popup"` for floats (default), `"split"` for real windows.
 
 `runner_ui.mappings`
-        The results-UI keys; see |tuna-results-ui|.
+        The results-UI keys (see |tuna-results-ui|), each a key or a list
+        of them: `run_again`, `run_all_again`, `stop`, `stop_all`,
+        `toggle_diff`, `view_input`, `view_expected`, `view_stdout`,
+        `view_stderr`, `add_testcase`, `delete_testcase`, `undo_delete`,
+        `split_testcase`, `close` and `help`.
 
 `runner_ui.viewer`
-        The full-screen pane view, `0.8` by `0.8`.
+        The full-screen pane view: `width` and `height` (`0.8` by
+        `0.8`), and line numbers `show_nu` and `show_rnu`.
+
+`runner_ui.show_nu`
+`runner_ui.show_rnu`
+        Line numbers in the detail panes. Default `true` and `false`.
+
+`runner_ui.selector_show_nu`
+`runner_ui.selector_show_rnu`
+        Line numbers in the selector. Default `false` and `false`.
 
 `runner_ui.title_keys`
         End each pane's title with the key that opens it full-screen, like
@@ -917,12 +941,48 @@ APPEARANCE                                            *tuna-config-appearance*
         `se`. A pane you leave out is not drawn, and stays reachable
         in the viewer.
 
-`split_ui`
-        Position and size when `interface = "split"`.
+`popup_ui.total_width`
+`popup_ui.total_height`
+        The floating grid's share of the editor. Default `0.8` and
+        `0.8`.
 
-`editor_ui`
-`picker_ui`
-        The standalone testcase editor and picker.
+`split_ui.position`
+        Where the split frame opens with `interface = "split"`: `"top"`,
+        `"bottom"`, `"left"` or `"right"` (default).
+
+`split_ui.total_width`
+`split_ui.total_height`
+        Its share of the editor beside it (left, right) or below it (top,
+        bottom). Default `0.3` and `0.4`.
+
+`split_ui.relative_to_editor`
+        Take that share of the whole editor (default), or with `false` of
+        the window it opens from.
+
+`split_ui.vertical_layout`
+`split_ui.horizontal_layout`
+        The grid beside or below the editor, shaped like
+        `popup_ui.layout`.
+
+`editor_ui.width`
+`editor_ui.height`
+        Each pane of the standalone testcase editor, as a share of the
+        editor. Default `0.4` and `0.6`.
+
+`editor_ui.show_nu`
+`editor_ui.show_rnu`
+        Its line numbers. Default `true` and `false`.
+
+`editor_ui.normal_mode_mappings`
+`editor_ui.insert_mode_mappings`
+        `switch_window` (`<C-h>`, `<C-l>`, `<C-i>`), `save_and_close`
+        (`<C-s>`) and `cancel`, added to `cancel_keys` (`q` and `Q`, and
+        `<C-q>` while typing).
+
+`picker_ui.mappings`
+        The keys of every list: `focus_next` and `focus_prev` (wrapping),
+        `submit`, and `close`, added to `cancel_keys`.
+
 Highlight groups: `TunaCorrect`, `TunaWrong`, `TunaWarning`, `TunaRunning`,
 `TunaDone`, `TunaEditable`, `TunaMenuTitle` (the menu's banner letters; the
 banner has no background, so what is behind it shows between them), and
@@ -945,7 +1005,8 @@ LIBRARY, SCRATCH, CLEAN                                     *tuna-config-misc*
         How deep to search below each path. Default `3`.
 
 `temp.file`
-        Where `:Tuna temp` writes its scratch.
+        Where `:Tuna temp` writes its scratch. Default
+        `stdpath("cache") .. "/tuna_temp.$(FEXT)"`.
 
 `temp.extension`
         The scratch's language. Default `"cpp"`.
@@ -954,7 +1015,8 @@ LIBRARY, SCRATCH, CLEAN                                     *tuna-config-misc*
         What `:Tuna download sync` downloads. Default `"contest"`.
 
 `menu.header`
-        Your own banner lines, or `false` for none.
+        Your own banner lines, or `false` for none. Default: the shipped
+        wordmark.
 
 `recent.problems`
 `recent.contests`
@@ -1070,6 +1132,87 @@ statusline, coloured by `submit.verdict_hl`. If something goes wrong,
 parsed from it, which is the fastest way to work out which pattern your tool
 needs.
 
+Every submit option                                     *tuna-submit-options*
+
+All of them live under `submit`, and `submit.judges` overrides them per judge.
+
+`provider`
+        `"command"` (default) runs your tool, `"browser"` opens the submit
+        page and copies the source.
+
+`command`
+        The command line, or a function of the context returning one.
+
+`languages`
+        Filetype to the language name your tool expects, for `$(LANG)`.
+
+`url`
+        The header marker, default `"submit at:%s*(%S+)"`, or a function
+        of the context returning the URL.
+
+`url_scan_lines`
+        How many header lines the markers are looked for in. Default `10`.
+
+`url_rewrite`
+        A function of the URL and the context returning what to submit
+        through, nil falling through to the built-in rules, or `false` to
+        submit through the problem URL as it is. Default `nil`.
+
+`mirror_ttl`
+        How long, in seconds, a problem downloaded from a Codeforces mirror
+        is submitted through it. `false` never expires, `0` never uses a
+        mirror. Default a day.
+
+`group`
+`name`
+        Header patterns that fill the sidecar's contest and problem name
+        when a download did not. Default: the `contest:` and `problem:`
+        lines the default template writes.
+
+`watch`
+        Read the tool's output for the verdict. `false` runs it in a
+        terminal. Default `true`.
+
+`expects_verdict`
+        `false` skips looking for a verdict in the output. Default `true`.
+
+`verdicts`
+        Ordered `{ lua_pattern, state }` rules. Default: the judges' own
+        vocabulary.
+
+`watch_timeout`
+        Stop watching after this many ms without a final verdict, `0`
+        never. Default `120000`.
+
+`verdict_hl`
+        Per state, a highlight group or a colour table.
+
+`log_file`
+        A path to record each submission's raw output and parsed verdict
+        in. Default `nil`.
+
+`terminal`
+        With `watch = false`: `"toggleterm"`, `"split"`, or `"auto"`
+        (default) for toggleterm when it is installed.
+
+`direction`
+        The terminal's orientation, `"vertical"` (default) or
+        `"horizontal"`.
+
+`reuse_terminal`
+        Keep one terminal across submits. Default `true`.
+
+`open_terminal`
+        Open it in front of you, or with `false` leave it in the
+        background. Default `true`.
+
+`status_time`
+        How long the terminal path's "submitting" message stays up, in ms,
+        `0` for none. Default `6000`.
+
+`judges`
+        Per judge, a partial table of these options. Default `{}`.
+
 ==============================================================================
 COMING FROM COMPETITEST                                     *tuna-competitest*
 
@@ -1084,10 +1227,7 @@ shaped differently. If you are porting a config:
   - `testcases_use_single_file` is `testcases_storage`, an enum over the three
     backends.
   - `editor_ui.popup_width` and `popup_height` are `editor_ui.width` and
-    `height`, matching `picker_ui` and `viewer`.
-  - `picker_ui.mappings.focus_next` and `focus_prev` are gone. The picker is
-    an ordinary buffer, so `j`/`k` and the arrow keys already move the
-    selection.
+    `height`, matching `viewer`.
   - Python runs as `python3`, not `python`.
   - No nui.nvim. Every float, split and prompt is built on Neovim's own APIs.
     Every tuna float carries `filetype = "tuna"`, so other plugins can target

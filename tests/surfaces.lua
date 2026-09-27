@@ -1,10 +1,10 @@
 -- Conformance test for tuna's floating **surfaces** — every buffer/window the plugin
 -- puts in front of the user (the results-UI panes, its viewer, message float and key
--- legend, and every widget: menu, picker, input, form, testcase editor).
+-- legend, and every widget: menu, input, form, panels, testcase editor).
 --
 -- They are all scratch buffers pretending to be a UI, and each one has to hold the same
 -- handful of invariants or it grows a red Vim error about something the user never
--- opened. Every one of these was a bug found by hand first:
+-- opened:
 --
 --   * named + `filetype=tuna`  — an unnamed float rewrites the statusline as you move
 --     between panes, and `:w` on it aborts with `E32` before any handler runs
@@ -214,13 +214,13 @@ settle(150)
 conforms("widgets.input")
 close_layer(80)
 
-widgets.form({ { title = "pick", items = { "a", "b" } } }, "a form", function() end)
+widgets.form({ { title = "pick", items = { "a", "b" } } }, function() end)
 settle(150)
 conforms("widgets.form")
 close_layer(80)
 
-widgets.panels({ { title = "left", items = { "a", "b" } }, { title = "right", items = { "x" } } }, "a board",
-    function() end, nil, nil, { "BANNER", "BANNER" })
+widgets.panels({ { title = "left", items = { "a", "b" } }, { title = "right", items = { "x" } } }, function() end,
+    nil, nil, { "BANNER", "BANNER" })
 settle(150)
 conforms("widgets.panels")
 -- `conforms` cannot demand this of every widget — the chooser form has a row that is
@@ -236,6 +236,40 @@ widgets.editor(api.nvim_get_current_buf(), 0, "1\n", "1\n", function() end)
 settle(150)
 conforms("widgets.editor")
 close_layer(80)
+
+-- A resize rebuilds the editor where the user was: the pane being typed in, the cursor in
+-- it, what was typed, and still typing, never going through the editor's own close.
+do
+    widgets.editor(api.nvim_get_current_buf(), 0, "1\n", "1\n", function() end, api.nvim_get_current_win())
+    settle(150)
+    for _, f in ipairs(floats()) do
+        local title = api.nvim_win_get_config(f.win).title
+        if title and vim.inspect(title):find("Output") then
+            api.nvim_set_current_win(f.win)
+        end
+    end
+    api.nvim_buf_set_lines(0, 0, -1, false, { "typed", "here" })
+    api.nvim_win_set_cursor(0, { 2, 0 })
+    -- Resized while typing at the end of the last line: the key after the resize still
+    -- lands in insert mode, and the closing `<Esc>` steps back onto the last character.
+    _G.tuna_probe = {}
+    api.nvim_feedkeys(
+        api.nvim_replace_termcodes(
+            "A<Cmd>lua require('tuna.widgets').resize_widgets()<CR><Cmd>lua tuna_probe.mode = vim.api.nvim_get_mode().mode<CR><Esc>",
+            true, false, true
+        ),
+        "nx",
+        false
+    )
+    settle(150)
+    local title = api.nvim_win_get_config(0).title
+    ok("a resize keeps the editor open", #floats() == 2, #floats() .. " floats")
+    ok("still typing", tuna_probe.mode == "i", tuna_probe.mode)
+    ok("in the pane the user was in", title and vim.inspect(title):find("Output") ~= nil, vim.inspect(title))
+    ok("with its cursor and its text", vim.deep_equal({ api.nvim_win_get_cursor(0), api.nvim_buf_get_lines(0, 0, -1, false) },
+        { { 2, 3 }, { "typed", "here" } }), vim.inspect(api.nvim_win_get_cursor(0)))
+    close_layer(80)
+end
 
 -- A menu can start on a given row (a following preview with it), and a resize keeps the
 -- row the cursor is on rather than going back to the top.

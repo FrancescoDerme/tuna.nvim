@@ -229,14 +229,14 @@ local function rerun_after_deleting(open_mode, file, answer)
 end
 local asked, ir, idir = rerun_after_deleting("interactive", "interactor.py")
 t.eq("an interactor rerun with the interactor gone offers to write it", asked, {
-    title = "the interactor source needs an interactor",
+    title = "The interactor source needs an interactor",
     items = { "Create interactor.py", "Stop" },
 })
 t.eq("and runs no session", ir.sol_handle, nil)
 t.eq("stopping writes nothing", vim.fn.glob(idir .. "/interactor.*"), "")
 local sasked, sr = rerun_after_deleting("stress", "brute.py")
 t.eq("a stress restart with its bruteforce gone offers that one", sasked, {
-    title = "stress needs a bruteforce",
+    title = "Stress needs a bruteforce",
     items = { "Create brute.py", "Stop" },
 })
 t.eq("and searches nothing", sr.iter, 0)
@@ -311,6 +311,23 @@ pr:run_testcases(ptcs, false)
 settle()
 t.eq("an override a checker overrules forces nothing", { status()[2], status()[3] }, { "judge : checker.py", "forced: none" })
 tools.set_compare(psol, nil)
+
+-- `:Tuna compare` reaches the board that is open before any run, and leaves the buffer its
+-- runner: a board whose runner the buffer no longer knows is one no later run hides.
+os.remove(pdir .. "/checker.py")
+pr:run_testcases(ptcs, false)
+settle()
+local commands = require("tuna.commands")
+commands.runners[pbuf] = pr
+local quiet = vim.notify
+vim.notify = function() end
+commands.set_compare(pbuf, { "exact" })
+t.eq("`:Tuna compare` shows on the open board at once", { status()[2], status()[3] }, { "judge : exact", "forced: judge" })
+t.eq("and the buffer keeps the board's runner", commands.runners[pbuf], pr)
+commands.set_compare(pbuf, { "default" })
+vim.notify = quiet
+t.eq("and so does handing it back", { status()[2], status()[3] }, { "judge : squish", "forced: none" })
+commands.runners[pbuf] = nil
 pr.ui:delete()
 
 -- The interactive source is a setting like the others, so it is named the same way.

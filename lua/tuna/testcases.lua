@@ -16,11 +16,22 @@
 local config = require("tuna.config")
 local utils = require("tuna.utils")
 
-local M = {
-    files = {},
-    single_file = {},
-    directory = {},
-}
+---What every storage backend answers to, by a solution's path and config or by its buffer.
+---@class tuna.TestcaseBackend
+---@field path_load fun(filepath: string, cfg: table): table<integer, tuna.StoredTestcase>
+---@field path_write fun(filepath: string, cfg: table, tctbl: table<integer, tuna.StoredTestcase>)
+---@field buf_load fun(bufnr: integer): table<integer, tuna.StoredTestcase>
+---@field buf_write fun(bufnr: integer, tctbl: table<integer, tuna.StoredTestcase>)
+---@field buf_clear fun(bufnr: integer)
+
+local M = {}
+
+---@class tuna.FilesBackend: tuna.TestcaseBackend
+M.files = {}
+---@class tuna.SingleFileBackend: tuna.TestcaseBackend
+M.single_file = {}
+---@class tuna.DirectoryBackend: tuna.TestcaseBackend
+M.directory = {}
 
 ---One testcase as stored. `keep_empty` rides along on a write only: which empty halves are to
 ---be written as empty files rather than removed (see `write_or_delete`).
@@ -282,7 +293,7 @@ end
 ---------------- SINGLE-FILE BACKEND (one msgpack file) ----------------
 
 ---@param path string single file path
----@return table<integer, { input: string?, output: string? }>
+---@return table<integer, tuna.StoredTestcase>
 function M.single_file.load(path)
     -- raw read: msgpack is binary and must not have CRLF rewritten
     local content = utils.read_file(path, true)
@@ -360,7 +371,7 @@ end
 ---@param dir_format string
 ---@param input_name string input file name inside each testcase directory
 ---@param output_name string output file name inside each testcase directory
----@return table<integer, { input: string?, output: string? }>
+---@return table<integer, tuna.StoredTestcase>
 function M.directory.load(base_dir, filepath, dir_format, input_name, output_name)
     local layout = resolve_directory_layout(base_dir, filepath, dir_format)
     if not layout then
@@ -609,7 +620,7 @@ end
 
 ---------------- DISPATCHER ----------------
 
----@type table<string, { path_load: fun(p: string, c: table): table, path_write: fun(p: string, c: table, t: table), buf_load: fun(b: integer): table, buf_write: fun(b: integer, t: table), buf_clear: fun(b: integer) }>
+---@type table<string, tuna.TestcaseBackend>
 M.backends = {
     files = M.files,
     single_file = M.single_file,
@@ -623,7 +634,7 @@ M.BACKEND_ORDER = { "files", "single_file", "directory" }
 
 ---Return the backend for a storage mode, defaulting to `files`.
 ---@param storage string?
----@return table
+---@return tuna.TestcaseBackend
 function M.backend(storage)
     return M.backends[storage] or M.files
 end
@@ -631,7 +642,7 @@ end
 ---Load all testcases for a buffer using the configured backend, falling back to
 ---the other backends when auto-detect is on and the primary found nothing.
 ---@param bufnr integer
----@return table<integer, { input: string?, output: string? }>
+---@return table<integer, tuna.StoredTestcase>
 function M.buf_get_testcases(bufnr)
     return M.get_testcases(vim.api.nvim_buf_get_name(bufnr), config.get_buffer_config(bufnr))
 end
@@ -640,7 +651,7 @@ end
 ---buffer that is not a solution): the configured backend, else the others in a fixed order.
 ---@param filepath string
 ---@param cfg table resolved config
----@return table<integer, { input: string?, output: string? }>
+---@return table<integer, tuna.StoredTestcase>
 function M.get_testcases(filepath, cfg)
     local primary = M.backend(cfg.testcases_storage)
     local tctbl = primary.path_load(filepath, cfg)
@@ -660,7 +671,7 @@ end
 
 ---Write a full testcase table for a buffer.
 ---@param bufnr integer
----@param tctbl table<integer, { input: string?, output: string? }>
+---@param tctbl table<integer, tuna.StoredTestcase>
 ---@param storage string? override the configured storage mode
 function M.buf_write_testcases(bufnr, tctbl, storage)
     local cfg = config.get_buffer_config(bufnr)
@@ -1053,7 +1064,7 @@ function M.offer_case_counts(bufnr, numbers, original_input, on_settled)
     require("tuna.widgets").menu({
         ("Yes: %d becomes %d here, and each new testcase starts with 1"):format(total, remaining),
         "No, leave the numbers alone",
-    }, ("testcase %d starts with '%d', is that a case count?"):format(numbers[1], total), function(idx)
+    }, ("Testcase %d starts with '%d', is that a case count?"):format(numbers[1], total), function(idx)
         settle(idx == 1)
     end, vim.api.nvim_get_current_win(), function()
         settle(false) -- dismissed: "no", the answer that changes nothing

@@ -508,7 +508,7 @@ function M.open(bufnr)
         { title = "Contests", format = format(1), column = 1 },
         { title = "Problems", format = format(2), column = 1 },
         { title = "Catch of the day", items = labels, column = 2 },
-    }, "Tuna", function(section, idx)
+    }, function(section, idx)
         if lists[section] then
             local e = lists[section][idx]
             if e then

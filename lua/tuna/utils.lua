@@ -1,13 +1,9 @@
 -- lua/tuna/utils.lua
 --
--- Foundation module: string-modifier evaluation, filesystem helpers and
--- notifications. Everything else in tuna depends on this, so it avoids
--- depending on any other tuna module.
---
--- A note on `vim.uv`: this is Neovim's binding to libuv, the same async
--- event loop Node.js uses. We prefer it over the older `vim.loop` alias and
--- over blocking Lua `io.*` calls. For simple synchronous file reads/writes the
--- `fs_*` functions are used without a callback, which runs them synchronously.
+-- Foundation module: notifications, string-modifier evaluation, filesystem and path
+-- helpers, and float geometry. Everything else in tuna depends on this, so it depends on
+-- no other tuna module. Files are read and written through `vim.uv`, whose `fs_*`
+-- functions run synchronously when given no callback.
 
 local M = {}
 
@@ -123,7 +119,7 @@ end
 M.file_format_modifiers = {
     [""] = "$", -- $() inserts a literal dollar sign
     HOME = function()
-        return vim.uv.os_homedir()
+        return vim.uv.os_homedir() or ""
     end,
     CWD = function()
         return vim.fn.getcwd()
@@ -342,30 +338,8 @@ end
 ---@param path string
 ---@return string?
 function M.file_hash(path)
-    local f = io.open(path, "rb")
-    if not f then
-        return nil
-    end
-    local content = f:read("*a")
-    f:close()
-    return vim.fn.sha256(content)
-end
-
----Name one of the plugin's scratch buffers.
----
----Every tuna window is a throwaway buffer, and a statusline shows `%:t` — the *last*
----path component. Left nameless they render as `[No Name]`; named after themselves
----they render as whatever came last, which for a `<bufnr>` suffix is a bare number.
----Either way the statusline rewrites itself as you move between panes, over buffers
----that are not files and have nothing to say about themselves. So the last component
----is always `tuna`: constant, so moving around the UI never changes it, while the
----middle keeps the name unique (Vim requires that) and still identifies the float in
----`:ls`. Buffers that take a `:w` (the testcase editor, the runner's editable panes)
----need *a* name regardless — `:w` aborts with E32 before `BufWriteCmd` without one.
----@param bufnr integer
----@param kind string? what this float is, for `:ls` (default "float")
-function M.name_float_buffer(bufnr, kind)
-    pcall(vim.api.nvim_buf_set_name, bufnr, ("tuna://%s/%d/tuna"):format(kind or "float", bufnr))
+    local content = M.read_file(path, true)
+    return content and vim.fn.sha256(content) or nil
 end
 
 ---Whether `path` is absolute. Checked after `vim.fs.normalize`, so a Windows path

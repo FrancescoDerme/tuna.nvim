@@ -285,7 +285,7 @@ widgets.panels({
     { title = "Contests", format = format(1), column = 1 },
     { title = "Problems", format = format(2), column = 1 },
     { title = "Commands", items = { "Run", "Submit" }, column = 2 },
-}, "Tuna")
+})
 local b = board()
 t.ok("three lists are drawn", b.Contests and b.Problems and b.Commands, vim.tbl_keys(b))
 t.eq("stacked lists share a column", { b.Problems.col, b.Problems.width }, { b.Contests.col, b.Contests.width })
@@ -341,7 +341,7 @@ widgets.panels({
     { title = "Contests", items = { "c1", "c2", "c3" }, column = 1 },
     { title = "Problems", items = many, column = 1 },
     { title = "Commands", items = { "Run" }, column = 2 },
-}, "Tuna", nil, nil, nil, { "BANNER" })
+}, nil, nil, nil, { "BANNER" })
 b = board()
 local band_row, band_h = require("tuna.utils").float_band()
 t.eq("a short list keeps all its rows", b.Contests.height, 3)

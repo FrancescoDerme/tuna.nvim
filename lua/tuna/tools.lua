@@ -719,7 +719,7 @@ function M.get_compare(path)
     return state_for(path).compare
 end
 
----Override the compare method for this buffer (nil clears it back to config).
+---Override the compare method for this problem (nil clears it back to the configured one).
 ---@param path string
 ---@param method tuna.CompareSpec?
 function M.set_compare(path, method)

@@ -1,21 +1,24 @@
----A **surface** is any buffer this plugin puts in front of the user that is not a file:
----the results-UI panes, its viewer, message float and key legend, and every widget
----(menu, picker, input, form, testcase editor). They differ in what they show and what
----their keys do; they do not differ in what Vim must be told about them, and a surface
----missing any piece of that grows a red error about a buffer the user never opened:
----
----  * unnamed  → the statusline rewrites itself as you move between panes, and `:w`
----    aborts with `E32` before any handler can run
----  * `nofile` → `:w` answers `E382`, and a `BufWriteCmd` on it never fires,
----    so a surface that wants `:w` to mean something has to be `acwrite`
----  * `acwrite` left `modified` → Vim counts it as an unsaved *file*: `:q` answers `E37`
----    and quitting answers `E162`, naming a scratch buffer
----  * read-only without inert keys → `i`, `c`, `u`… land in a mode that errors with
----    `E21` a keystroke later, about an edit the user never started
----
----So the invariants live here, once, and `tests/surfaces.lua` checks that every surface
----still holds them. What a surface *does* — which keys act, when it closes, what a write
----saves — stays with the surface: this module is about what Vim is told, not policy.
+-- lua/tuna/surface.lua
+--
+-- A **surface** is any buffer this plugin puts in front of the user that is not a file:
+-- the results-UI panes, its viewer, message float and key legend, and every widget
+-- (menu, input, form, panels, testcase editor). They differ in what they show and what
+-- their keys do; they do not differ in what Vim must be told about them, and a surface
+-- missing any piece of that grows a red error about a buffer the user never opened:
+--
+--  * unnamed  → the statusline rewrites itself as you move between panes, and `:w`
+--    aborts with `E32` before any handler can run
+--  * `nofile` → `:w` answers `E382`, and a `BufWriteCmd` on it never fires,
+--    so a surface that wants `:w` to mean something has to be `acwrite`
+--  * `acwrite` left `modified` → Vim counts it as an unsaved *file*: `:q` answers `E37`
+--    and quitting answers `E162`, naming a scratch buffer
+--  * read-only without inert keys → `i`, `c`, `u`… land in a mode that errors with
+--    `E21` a keystroke later, about an edit the user never started
+--
+-- So the invariants live here, once, and `tests/surfaces.lua` checks that every surface
+-- still holds them. What a surface *does* — which keys act, when it closes, what a write
+-- saves — stays with the surface: this module is about what Vim is told, not policy.
+
 local api = vim.api
 
 local M = {}
@@ -53,7 +56,13 @@ function M.adopt(bufnr, kind, opts)
     if not (bufnr and api.nvim_buf_is_valid(bufnr)) then
         return
     end
-    require("tuna.utils").name_float_buffer(bufnr, kind)
+    -- A statusline shows `%:t`, the last path component: left nameless a surface reads
+    -- `[No Name]`, and named after itself the name would change as you move between
+    -- panes that have nothing to say about themselves. So the last component is always
+    -- `tuna`, while the middle keeps the name unique (Vim requires that) and says what
+    -- the float is in `:ls`. A buffer that takes a `:w` needs a name regardless: `:w`
+    -- aborts with E32 before `BufWriteCmd` without one.
+    pcall(api.nvim_buf_set_name, bufnr, ("tuna://%s/%d/tuna"):format(kind, bufnr))
     -- Tagged so users (and other plugins) can target every tuna float at once — e.g.
     -- lualine's `disabled_filetypes`, or scrollEOF's.
     vim.bo[bufnr].filetype = "tuna"
@@ -101,8 +110,8 @@ function M.read_only(bufnr)
     vim.bo[bufnr].modified = false
     -- Compared as **terminal codes**, not as written: `nvim_buf_get_keymap` hands back
     -- what a key really is (`<C-r>` comes back as a raw `\18`), so matching the written
-    -- form against it finds nothing and a surface's own action gets `<Nop>`ed over —
-    -- which is exactly what silently killed the results UI's "run all" key.
+    -- form against it finds nothing and a surface's own action (the results UI's
+    -- `<C-r>`, run all) would be `<Nop>`ed over.
     local function code(key)
         return api.nvim_replace_termcodes(key, true, false, true)
     end
@@ -230,7 +239,12 @@ end
 ---@return string[] lines what the buffer now holds
 function M.render(bufnr, content, opts)
     opts = opts or {}
-    local lines = type(content) == "table" and content or vim.split(content or "", "\n", { plain = true })
+    local lines
+    if type(content) == "table" then
+        lines = content
+    else
+        lines = vim.split(content or "", "\n", { plain = true })
+    end
     if not (bufnr and api.nvim_buf_is_valid(bufnr)) then
         return lines
     end

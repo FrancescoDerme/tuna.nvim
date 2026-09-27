@@ -46,19 +46,24 @@ MODE_SET.auto = true
 
 ---The testcase a command acts on when none was named: with one there is nothing to choose
 ---between, so it is that one; with several, the one picked; with none, it says so.
----@param bufnr integer
 ---@param tctbl table<integer, table>
 ---@param verb string what the command does to it ("edit"), for the title and the message
 ---@param cb fun(n: integer)
-local function choose_testcase(bufnr, tctbl, verb, cb)
+local function choose_testcase(tctbl, verb, cb)
     local nums = vim.tbl_keys(tctbl)
+    table.sort(nums)
     if #nums == 0 then
         utils.notify(("testcase %s: there are no testcases to %s."):format(verb, verb))
     elseif #nums == 1 then
         cb(nums[1])
     else
-        local title = verb:sub(1, 1):upper() .. verb:sub(2) .. " a Testcase"
-        require("tuna.widgets").picker(bufnr, tctbl, title, cb, api.nvim_get_current_win())
+        local labels = vim.tbl_map(function(n)
+            return "Testcase " .. n
+        end, nums)
+        local title = verb:sub(1, 1):upper() .. verb:sub(2) .. " a testcase"
+        require("tuna.widgets").menu(labels, title, function(idx)
+            cb(nums[idx])
+        end, api.nvim_get_current_win())
     end
 end
 
@@ -94,7 +99,7 @@ function M.edit_testcase(add, tcnum)
     if tcnum then
         start_editor(tcnum)
     else
-        choose_testcase(bufnr, tctbl, "edit", start_editor)
+        choose_testcase(tctbl, "edit", start_editor)
     end
 end
 
@@ -110,10 +115,7 @@ function M.delete_testcase(tcnum)
             utils.notify("testcase delete: testcase " .. tostring(n) .. " doesn't exist.")
             return
         end
-        -- A float like every other tuna prompt, not `vim.fn.confirm`: a command-line
-        -- question in the middle of a floating UI is exactly what the download path
-        -- stopped doing.
-        require("tuna.widgets").menu({ "Delete", "Keep" }, "delete testcase " .. n .. "?", function(idx)
+        require("tuna.widgets").menu({ "Delete", "Keep" }, "Delete testcase " .. n .. "?", function(idx)
             if idx == 1 then
                 testcases.buf_delete_testcase(bufnr, n)
             end
@@ -123,7 +125,7 @@ function M.delete_testcase(tcnum)
     if tcnum then
         delete(tcnum)
     else
-        choose_testcase(bufnr, tctbl, "delete", delete)
+        choose_testcase(tctbl, "delete", delete)
     end
 end
 
@@ -141,7 +143,7 @@ function M.split_testcase(tcnum, sep)
     sep = (sep and sep ~= "") and sep or cfg.testcases_split_markers
 
     if not tcnum then
-        return choose_testcase(bufnr, testcases.buf_get_testcases(bufnr), "split", function(n)
+        return choose_testcase(testcases.buf_get_testcases(bufnr), "split", function(n)
             M.split_testcase(n, sep)
         end)
     end
@@ -484,23 +486,23 @@ end
 ---Parse `:Tuna compare` args into a compare-method spec (or nil to clear the
 ---override back to the configured default). Notifies and returns false on a bad name.
 ---@param args string[] e.g. { "float", "1e-9" } or { "exact" } or { "default" }
----@return boolean ok, tuna.CompareSpec? method, boolean cleared
+---@return boolean ok, tuna.CompareSpec? method nil clears the override
 local function parse_compare(args)
     local name = args[1]
     if name == nil or name == "default" then
-        return true, nil, true -- clear the override
+        return true, nil
     elseif name == "exact" or name == "squish" then
-        return true, name, false
+        return true, name
     elseif name == "float" then
         local tol = args[2] and tonumber(args[2]) or nil
         if args[2] and not tol then
             utils.notify("compare: '" .. args[2] .. "' is not a valid tolerance.")
-            return false
+            return false, nil
         end
-        return true, { "float", tol = tol or 1e-6 }, false
+        return true, { "float", tol = tol or 1e-6 }
     end
     utils.notify("compare: unknown method '" .. tostring(name) .. "' (exact | squish | float [tol] | default).")
-    return false
+    return false, nil
 end
 
 -- Order the menu's "Compare" entry cycles through (default = clear the override).
@@ -517,12 +519,10 @@ local last_float_tol = {}
 ---@return string
 local function compare_token(path)
     local cur = tools.get_compare(path)
-    if cur == nil then
-        return "default"
-    elseif type(cur) == "table" then
+    if type(cur) == "table" then
         return cur[1]
     end
-    return cur
+    return type(cur) == "string" and cur or "default"
 end
 
 ---Advance the per-buffer compare method to the next one in `COMPARE_CYCLE` (used by
@@ -546,12 +546,12 @@ function M.cycle_compare(bufnr)
     M.set_compare(bufnr, args)
 end
 
----Set (or clear) the per-buffer output-compare override. Drops the cached runner so
----the next run re-resolves.
+---Set (or clear) the problem's output-compare override. Its runners take it at once, so
+---the Run pane's judge row says what the next run will judge with, as `set_checker` does.
 ---@param bufnr integer
 ---@param args string[]
 function M.set_compare(bufnr, args)
-    local ok, method, cleared = parse_compare(args)
+    local ok, method = parse_compare(args)
     if not ok then
         return
     end
@@ -560,14 +560,14 @@ function M.set_compare(bufnr, args)
         last_float_tol[path] = method.tol
     end
     tools.set_compare(path, method)
-    M.runners[bufnr] = nil
-    if cleared then
-        utils.notify("compare method reset to config default for this buffer.", "INFO")
+    for _, r in ipairs(runners_of(bufnr)) do
+        r.compare_method = method
+        r:update_ui()
+    end
+    if method == nil then
+        utils.notify("compare method reset to the configured one for this problem.", "INFO")
     else
-        utils.notify(
-            "compare method set to " .. require("tuna.compare").method_name(method) .. " for this buffer.",
-            "INFO"
-        )
+        utils.notify("compare method set to " .. require("tuna.compare").method_name(method) .. " for this problem.", "INFO")
     end
 end
 
@@ -614,8 +614,8 @@ M.subcommands = {
     -- `:Tuna testcase [add|edit|delete] [n]` — one subcommand per *subject*, with the
     -- verb as its argument, matching `run`/`download`/`convert` rather than spelling
     -- three separate commands whose shared noun the completion could not group.
-    -- Bare `:Tuna testcase` is `edit`: it opens the picker, which is the one that shows
-    -- what is there before asking you to choose.
+    -- Bare `:Tuna testcase` is `edit`, the verb that shows what is there before
+    -- anything is changed.
     testcase = function(args)
         local mode = args[1]
         if mode == nil or mode == "edit" then

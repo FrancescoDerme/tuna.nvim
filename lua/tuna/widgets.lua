@@ -1,15 +1,15 @@
 -- lua/tuna/widgets.lua
 --
--- Interactive floating-window widgets, built on Neovim's native window API
--- instead of nui.nvim. The widgets exposed:
+-- The floating dialogs every question tuna asks goes through, built on Neovim's own
+-- window API:
 --
---   * `input`  — a single-line prompt (used by download to confirm paths)
+--   * `input`  — a single-line prompt (download's paths)
 --   * `editor` — side-by-side input/output buffers for editing a testcase
---   * `picker` — a list to choose a testcase from
---   * `menu`   — a single-choice chooser (confirmations, templates; optional
---                read-only preview pane beneath it)
---   * `form`   — several single-choice lists visible at once (clean's directory,
---                depth and match-threshold choosers)
+--   * `menu`   — a single-choice list (confirmations, templates, the testcase to act
+--                on), with an optional read-only preview beneath it and notice above it
+--   * `form`   — several single-choice lists answered together (clean's directory,
+--                depth and match threshold)
+--   * `panels` — lists in columns, each acted on alone (the `:Tuna` menu)
 --
 -- Each widget is a module-level singleton holding the state of the one instance
 -- that can be visible at a time, which lets `resize_widgets()` rebuild whatever is
@@ -20,15 +20,6 @@
 -- keys are bound (see the dismissal contract there): the same keypress means the same
 -- thing whether the widget in front of you is a download path prompt, a testcase
 -- editor or a clean confirmation.
---
--- A few native APIs used throughout, briefly:
---   * `nvim_create_buf(listed, scratch)` — make a buffer to back a window.
---   * `nvim_open_win(buf, enter, cfg)`   — open a floating window; `cfg.relative
---     = "editor"` positions it with `row`/`col` against the whole UI, and
---     `border`/`title` draw the frame natively (no nui needed).
---   * `vim.keymap.set(mode, lhs, fn, { buffer = b })` — a buffer-local mapping.
---   * `nvim_create_autocmd(event, { buffer = b, callback = fn })` — react to
---     buffer events such as `:w` (`BufWriteCmd`) or the window closing.
 
 local api = vim.api
 local utils = require("tuna.utils")
@@ -40,7 +31,8 @@ local M = {}
 ---Open a floating window over the editor.
 ---@param bufnr integer buffer to display
 ---@param enter boolean whether to move the cursor into the new window
----@param opts table { width, height, row, col, border, border_highlight, title }
+---@param opts table { width, height, row, col, border, border_highlight, title, kind?,
+---  keep_scrolloff?, wrap?, cursorline? }
 ---@return integer winid
 local function open_float(bufnr, enter, opts)
     -- Everything Vim has to be told about a scratch surface — the name, the `tuna`
@@ -75,7 +67,13 @@ local function open_float(bufnr, enter, opts)
         -- preview) is read like a normal buffer rather than navigated as a list, so it
         -- keeps the user's own scrolloff.
         keep_scrolloff = opts.keep_scrolloff,
+        wrap = opts.wrap,
     })
+    if opts.cursorline ~= nil then
+        -- Set with local scope: `vim.wo[win]` on the *current* window also writes the
+        -- option's global value, which would leak a list's cursorline into the editor.
+        api.nvim_set_option_value("cursorline", opts.cursorline, { scope = "local", win = winid })
+    end
     -- Wiped when its window closes: every widget creates fresh buffers on every open
     -- and closes only its windows, so without this each prompt of a long session left
     -- a hidden `tuna://widget` buffer (and its buffer-local autocmds) behind for good
@@ -122,11 +120,31 @@ local function map_keys(spec, mode, bufnr, fn)
     end
 end
 
+---The plugin-wide pane keys (`switch_window_keys`, given as { left, down, up, right };
+---default <C-hjkl>) as a walk through panes stacked top to bottom: down and right to the
+---next, up and left to the previous, with Tab/S-Tab always accepted as well.
+---@param cfg table
+---@return string[] next, string[] prev
+local function step_keys(cfg)
+    local sw = cfg.switch_window_keys or {}
+    local function keys(...)
+        local out = {}
+        for i = 1, select("#", ...) do
+            local k = select(i, ...)
+            if k then
+                out[#out + 1] = k
+            end
+        end
+        return out
+    end
+    return keys("<Tab>", sw[2], sw[4]), keys("<S-Tab>", sw[3], sw[1])
+end
+
 --------------------------------------------------------------------------------
 -- Dismissal contract
 --------------------------------------------------------------------------------
 
--- Every widget in this file is cancelled the same way — prompt, picker, menu, chooser
+-- Every widget in this file is cancelled the same way — prompt, menu, panels, chooser
 -- form and testcase editor alike — so the habit learned on one carries to all of them:
 --
 --   * `<Esc>` **from normal mode cancels.** No widget is exempt: an editor holding a
@@ -158,13 +176,11 @@ end
 ---  widget's own keys, added to the shared ones
 local function map_cancel(bufs, cancel, opts)
     opts = opts or {}
-    if type(bufs) == "number" then
-        bufs = { bufs }
-    end
+    local list = type(bufs) == "table" and bufs or { bufs --[[@as integer]] }
     local shared = (config.current_setup or config.defaults or {}).cancel_keys or {}
     local normal = vim.list_extend(vim.list_extend({}, to_list(shared.normal)), to_list(opts.normal))
     local insert = vim.list_extend(vim.list_extend({}, to_list(shared.insert)), to_list(opts.insert))
-    for _, b in ipairs(bufs) do
+    for _, b in ipairs(list) do
         map_keys(normal, "n", b, cancel)
         map_keys(insert, "i", b, cancel)
     end
@@ -250,8 +266,7 @@ end
 ---@field ui_visible boolean
 ---@field title string
 ---@field default_text string
----@field border string
----@field on_submit fun(text: string)
+---@field on_submit fun(text: string)?
 ---@field on_close fun()?
 ---@field skip_on_close boolean swallow the next close callback (used by resize)
 ---@field winid integer?
@@ -260,13 +275,10 @@ local input = { ui_visible = false }
 
 ---Open a single-line input popup.
 ---@param title string|nil popup title, or `nil` to re-render after a resize
----@param default_text string initial text
----@param border string border style passed to `nvim_open_win`
----@param border_highlight string? highlight group for the border (remaps `FloatBorder`)
----@param callback_only boolean if true, skip the UI and call `on_submit(default_text)` directly
----@param on_submit fun(text: string) called with the entered text on `<CR>`
+---@param default_text string? initial text
+---@param on_submit fun(text: string)? called with the entered text on `<CR>`
 ---@param on_close fun()? called when the prompt is cancelled
-function M.input(title, default_text, border, border_highlight, callback_only, on_submit, on_close)
+function M.input(title, default_text, on_submit, on_close)
     if title == nil then -- resize: rebuild with the current text
         if not input.ui_visible then
             return
@@ -275,10 +287,6 @@ function M.input(title, default_text, border, border_highlight, callback_only, o
         input.default_text = api.nvim_buf_get_lines(input.bufnr, 0, -1, false)[1] or ""
         close_win(input.winid)
     else
-        if callback_only then -- caller wants no prompt: use the default verbatim
-            on_submit(default_text)
-            return
-        end
         if input.ui_visible then
             -- Opened over an open prompt: repointing the singleton would orphan the
             -- old window (see the menu).
@@ -288,13 +296,12 @@ function M.input(title, default_text, border, border_highlight, callback_only, o
             input.skip_on_close = false
         end
         input.title = title
-        input.default_text = default_text
-        input.border = border
-        input.border_highlight = border_highlight
+        input.default_text = default_text or ""
         input.on_submit = on_submit
         input.on_close = on_close
     end
 
+    local cfg = config.get_buffer_config(api.nvim_get_current_buf())
     local vim_width = utils.get_ui_size()
     local band_row, band_h = utils.float_band()
     local width = math.floor(vim_width * 0.5)
@@ -307,8 +314,8 @@ function M.input(title, default_text, border, border_highlight, callback_only, o
         height = 1,
         row = band_row + math.max(0, math.floor((band_h - 3) / 2)), -- one content row plus its border
         col = math.floor((vim_width - width) / 2),
-        border = input.border,
-        border_highlight = input.border_highlight,
+        border = cfg.floating_border,
+        border_highlight = cfg.floating_border_highlight,
         title = " " .. input.title .. " ",
     })
     input.ui_visible = true
@@ -326,7 +333,9 @@ function M.input(title, default_text, border, border_highlight, callback_only, o
         local text = api.nvim_buf_get_lines(input.bufnr, 0, -1, false)[1] or ""
         close_win(input.winid)
         if submit then
-            input.on_submit(text)
+            if input.on_submit then
+                input.on_submit(text)
+            end
         elseif input.on_close then
             input.on_close()
         end
@@ -377,6 +386,7 @@ end
 ---@field input_win integer?
 ---@field output_buf integer?
 ---@field output_win integer?
+---@field skip_close boolean? set while a resize closes the panes it is about to rebuild
 local editor = { ui_visible = false }
 
 ---Open the two-pane testcase editor.
@@ -388,14 +398,24 @@ local editor = { ui_visible = false }
 ---@param restore_winid integer? window to refocus once the editor closes
 function M.editor(bufnr, tcnum, input_content, output_content, callback, restore_winid)
     local input_lines, output_lines
+    local in_output, cursor -- the pane and the spot a resize finds the user in
     if bufnr == nil then -- resize: keep the current, possibly-unsaved content
         if not editor.ui_visible then
             return
         end
         input_lines = api.nvim_buf_get_lines(editor.input_buf, 0, -1, false)
         output_lines = api.nvim_buf_get_lines(editor.output_buf, 0, -1, false)
+        local cur = api.nvim_get_current_win()
+        if cur == editor.input_win or cur == editor.output_win then
+            in_output = cur == editor.output_win
+            cursor = api.nvim_win_get_cursor(cur)
+        end
+        -- The panes' `WinClosed` would otherwise take this for the user closing the
+        -- editor: leave insert mode and hand focus back before the rebuild.
+        editor.skip_close = true
         close_win(editor.input_win)
         close_win(editor.output_win)
+        editor.skip_close = false
     else
         if editor.ui_visible then
             -- Opened over an open editor: repointing the singleton would orphan the
@@ -430,14 +450,9 @@ function M.editor(bufnr, tcnum, input_content, output_content, callback, restore
     ---@return integer bufnr, integer winid
     local function make_pane(title, col, lines)
         local b = api.nvim_create_buf(false, true)
-        -- `acwrite` makes `:w` route through our BufWriteCmd autocmd instead of
-        -- trying (and failing) to write the scratch buffer to disk. (The name `:w`
-        -- also needs, or it aborts with E32 before BufWriteCmd fires, is given by
-        -- `open_float` below — see `utils.name_float_buffer`.)
-        vim.bo[b].buftype = "acwrite"
-        vim.bo[b].filetype = "tuna"
         api.nvim_buf_set_lines(b, 0, -1, false, lines)
-        vim.bo[b].modified = false
+        -- `open_float` adopts the buffer as an `acwrite` surface, so `:w` reaches the
+        -- `BufWriteCmd` below that saves the testcase.
         local w = open_float(b, false, {
             width = width,
             height = height,
@@ -453,9 +468,15 @@ function M.editor(bufnr, tcnum, input_content, output_content, callback, restore
     end
 
     -- Place the two panes symmetrically about the editor's vertical centre.
-    editor.input_buf, editor.input_win = make_pane("Input", math.floor(vim_width / 2) - width - 1, input_lines)
-    editor.output_buf, editor.output_win = make_pane("Output", math.floor(vim_width / 2) + 1, output_lines)
-    api.nvim_set_current_win(editor.input_win)
+    local in_win, out_win
+    editor.input_buf, in_win = make_pane("Input", math.floor(vim_width / 2) - width - 1, input_lines)
+    editor.output_buf, out_win = make_pane("Output", math.floor(vim_width / 2) + 1, output_lines)
+    editor.input_win, editor.output_win = in_win, out_win
+    local focus = in_output and out_win or in_win
+    api.nvim_set_current_win(focus)
+    if cursor then
+        pcall(api.nvim_win_set_cursor, focus, cursor)
+    end
     editor.ui_visible = true
 
     ---Send the edited content back through the callback and clear modified flags.
@@ -473,7 +494,7 @@ function M.editor(bufnr, tcnum, input_content, output_content, callback, restore
     ---Close both panes and restore focus. Guarded so the WinClosed autocmd that
     ---fires while we close the first pane doesn't recurse.
     local function close()
-        if not editor.ui_visible then
+        if not editor.ui_visible or editor.skip_close then
             return
         end
         editor.ui_visible = false
@@ -524,117 +545,17 @@ function M.editor(bufnr, tcnum, input_content, output_content, callback, restore
 end
 
 --------------------------------------------------------------------------------
--- Testcase picker
+-- Single-choice menu
 --------------------------------------------------------------------------------
 
----@class tuna.PickerWidget
----@field ui_visible boolean
----@field bufnr integer source buffer
----@field tcnums integer[] testcase numbers, in display order
----@field title string
----@field callback fun(tcnum: integer)?
----@field restore_winid integer?
----@field winid integer?
----@field menu_buf integer?
-local picker = { ui_visible = false }
-
----Open a list to pick a testcase from.
----@param bufnr integer|nil source buffer, or `nil` to re-render after a resize
----@param tctbl table<integer, table> testcase table (`{ [n] = { input, output } }`)
----@param title string? floating window title
----@param callback fun(tcnum: integer)? receives the chosen testcase number
----@param restore_winid integer? window to refocus once the picker closes
-function M.picker(bufnr, tctbl, title, callback, restore_winid)
-    if bufnr == nil then -- resize
-        if not picker.ui_visible then
-            return
-        end
-        close_win(picker.winid)
-    else
-        if next(tctbl) == nil then
-            utils.notify("there's no testcase to pick from.", "WARN")
-            return
-        end
-        if picker.ui_visible then
-            -- Opened over an open picker: repointing the singleton would orphan the
-            -- old window (see the menu).
-            picker.ui_visible = false
-            close_win(picker.winid)
-        end
-        picker.bufnr = bufnr
-        picker.tcnums = vim.tbl_keys(tctbl)
-        table.sort(picker.tcnums)
-        picker.title = title and (" " .. title .. " ") or " Testcase Picker "
-        picker.callback = callback
-        picker.restore_winid = restore_winid
-    end
-
-    local cfg = config.get_buffer_config(picker.bufnr)
-    local vim_width, vim_height = utils.get_ui_size()
-
-    local lines = {}
-    for _, tcnum in ipairs(picker.tcnums) do
-        table.insert(lines, "Testcase " .. tcnum)
-    end
-
-    picker.menu_buf = api.nvim_create_buf(false, true)
-    api.nvim_buf_set_lines(picker.menu_buf, 0, -1, false, lines)
-    vim.bo[picker.menu_buf].modifiable = false
-    vim.bo[picker.menu_buf].filetype = "tuna"
-
-    local band_row, band_h = utils.float_band()
-    local picker_h = math.max(1, math.min(math.floor(vim_height * cfg.picker_ui.height), band_h - 2))
-    picker.winid = open_float(picker.menu_buf, true, {
-        width = math.floor(vim_width * cfg.picker_ui.width),
-        height = picker_h,
-        row = band_row + math.max(0, math.floor((band_h - picker_h - 2) / 2)),
-        col = math.floor((vim_width - math.floor(vim_width * cfg.picker_ui.width)) / 2),
-        border = cfg.floating_border,
-        border_highlight = cfg.floating_border_highlight,
-        title = picker.title,
-    })
-    -- Highlight the active row; cursor movement (j/k, arrows) is native. setlocal, so
-    -- it doesn't leak cursorline's global default off this float (see the menu note).
-    api.nvim_set_option_value("cursorline", true, { scope = "local", win = picker.winid })
-    picker.ui_visible = true
-
-    ---@param tcnum integer? chosen testcase, or nil if cancelled
-    local function close(tcnum)
-        if not picker.ui_visible then
-            return
-        end
-        picker.ui_visible = false
-        close_win(picker.winid)
-        if picker.restore_winid and api.nvim_win_is_valid(picker.restore_winid) then
-            api.nvim_set_current_win(picker.restore_winid)
-        end
-        if tcnum and picker.callback then
-            picker.callback(tcnum)
-        end
-    end
-
-    map_keys(cfg.picker_ui.mappings.focus_next, "n", picker.menu_buf, function()
-        move_cursor(picker.winid, #picker.tcnums, 1)
-    end)
-    map_keys(cfg.picker_ui.mappings.focus_prev, "n", picker.menu_buf, function()
-        move_cursor(picker.winid, #picker.tcnums, -1)
-    end)
-    map_keys(cfg.picker_ui.mappings.submit, "n", picker.menu_buf, function()
-        local row = api.nvim_win_get_cursor(picker.winid)[1]
-        close(picker.tcnums[row])
-    end)
-    map_cancel(picker.menu_buf, function()
-        close(nil)
-    end, { normal = cfg.picker_ui.mappings.close })
-    api.nvim_create_autocmd("WinClosed", {
-        buffer = picker.menu_buf,
-        callback = function()
-            close(nil)
-        end,
-    })
-end
-
---------------------------------------------------------------------------------
+---A menu's content pane: fixed lines, or with `content` the lines of the highlighted row.
+---@class tuna.MenuPreview
+---@field title string?
+---@field lines string[]?
+---@field filetype string?
+---@field width integer? pins the float's width, so a sequence of menus keeps its size
+---@field height integer? pins the pane's height
+---@field content (fun(idx: integer): { title: string?, lines: string[], filetype: string? })?
 
 ---@class tuna.MenuWidget
 ---@field ui_visible boolean
@@ -646,7 +567,9 @@ end
 ---@field restore_winid integer?
 ---@field winid integer?
 ---@field menu_buf integer?
----@field preview { title: string?, lines: string[], filetype: string?, width: integer? }?
+---@field preview tuna.MenuPreview?
+---@field preview_idx integer? the row the preview shows
+---@field row integer? the row the cursor starts on
 ---@field preview_win integer?
 ---@field preview_buf integer?
 ---@field notice { title: string?, lines: string[] }?
@@ -667,8 +590,8 @@ local menu = { ui_visible = false }
 ---@param on_close fun()? called when the menu is dismissed without a choice (Esc /
 ---  window closed) — so a caller that must always continue (e.g. download's batch
 ---  processor) isn't left hanging on a cancellation
----@param preview { title: string?, lines: string[]?, filetype: string?, width: integer?, height: integer?, content: (fun(idx: integer): { title: string?, lines: string[], filetype: string? })? }?
----  content pane; with `content` it follows the highlighted row (pin `width`/`height`)
+---@param preview tuna.MenuPreview? content pane; with `content` it follows the highlighted
+---  row (pin `width`/`height`)
 ---@param notice { title: string?, lines: string[] }? a read-only pane *above* the menu,
 ---  for something the user needs to know before choosing (e.g. that a scan was partial)
 ---@param row integer? the row the cursor starts on (default 1), so a caller asking the same
@@ -734,11 +657,12 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
     local user_cursorline = api.nvim_get_option_value("cursorline", { scope = "global" })
 
     local width
-    if pv and pv.width then
+    local pinned = pv and pv.width
+    if pinned then
         -- A caller-fixed width keeps a *sequence* of previews the same size — e.g.
         -- `:Tuna clean` steps through files whose names and contents vary in length,
         -- and a float that resized on every step would be distracting.
-        width = math.min(math.max(pv.width, 24), vim_width - 4)
+        width = math.min(math.max(pinned, 24), vim_width - 4)
     else
         -- Display width, not byte length: a multibyte title (a problem name in a
         -- `already exists` prompt) is fewer cells than bytes, and sizing by bytes
@@ -824,9 +748,8 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
             border = cfg.floating_border,
             border_highlight = cfg.floating_border_highlight,
             title = nt.title and (" " .. nt.title .. " ") or nil,
+            wrap = true,
         })
-        vim.wo[menu.notice_win].wrap = true
-        api.nvim_set_option_value("cursorline", false, { scope = "local", win = menu.notice_win })
     else
         menu.notice_win, menu.notice_buf = nil, nil
     end
@@ -834,7 +757,6 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
     menu.menu_buf = api.nvim_create_buf(false, true)
     api.nvim_buf_set_lines(menu.menu_buf, 0, -1, false, menu.items)
     vim.bo[menu.menu_buf].modifiable = false
-    vim.bo[menu.menu_buf].filetype = "tuna"
 
     menu.winid = open_float(menu.menu_buf, true, {
         width = width,
@@ -848,11 +770,8 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
         -- reachable; one that has to scroll is read like any other buffer, so the
         -- user's own scrolloff applies.
         keep_scrolloff = menu_h < #menu.items,
+        cursorline = true,
     })
-    -- setlocal (scope="local"), not `vim.wo[...] =`: on the *current* window the
-    -- latter also writes cursorline's global default, leaking a UI choice into the
-    -- user's editor. scope="local" keeps it to this float.
-    api.nvim_set_option_value("cursorline", true, { scope = "local", win = menu.winid })
     api.nvim_win_set_cursor(menu.winid, { start_row, 0 })
 
     if pv then
@@ -864,12 +783,11 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
             col = col,
             border = cfg.floating_border,
             border_highlight = cfg.floating_border_highlight,
-            keep_scrolloff = true, -- a file preview, read like a buffer; honour user scrolloff
+            -- Read like a normal buffer, so the user's own scrolloff and cursorline
+            -- apply (the minimal float style would turn the cursorline off).
+            keep_scrolloff = true,
+            cursorline = user_cursorline,
         })
-        vim.wo[menu.preview_win].wrap = false
-        -- The preview is read like a normal buffer, so honour the user's cursorline
-        -- (style="minimal" forces it off, so restore their setting explicitly).
-        api.nvim_set_option_value("cursorline", user_cursorline, { scope = "local", win = menu.preview_win })
         fill_preview(menu.preview_buf, menu.preview_win, shown, pv)
 
         if pv.content then
@@ -944,25 +862,15 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
             scroll("<C-u>")
         end)
 
-        -- Move focus between the menu and the preview with the plugin-wide
-        -- pane-navigation keys (`switch_window_keys`, given as { left, down, up,
-        -- right }; default <C-hjkl>) plus <Tab>/<S-Tab>. The menu sits above the
-        -- preview, so down/right descends into the preview and up/left climbs back;
-        -- with focus in the preview, j/k and <C-d>/<C-u> scroll it natively, and the
-        -- menu's own submit/close keys still act on the highlighted menu row.
+        -- The pane keys move between the menu and the preview beneath it. With focus in
+        -- the preview, j/k and <C-d>/<C-u> scroll it natively, and the menu's own
+        -- submit/close keys still act on the highlighted menu row.
         local function focus(win)
             if win and api.nvim_win_is_valid(win) then
                 api.nvim_set_current_win(win)
             end
         end
-        local sw = cfg.switch_window_keys or {}
-        local to_preview, to_menu = { "<Tab>" }, { "<S-Tab>" }
-        for _, k in ipairs({ sw[2], sw[4] }) do
-            to_preview[#to_preview + 1] = k
-        end
-        for _, k in ipairs({ sw[3], sw[1] }) do
-            to_menu[#to_menu + 1] = k
-        end
+        local to_preview, to_menu = step_keys(cfg)
         for _, b in ipairs({ menu.menu_buf, menu.preview_buf }) do
             map_keys(to_preview, "n", b, function()
                 focus(menu.preview_win)
@@ -1005,7 +913,6 @@ end
 ---@class tuna.FormWidget
 ---@field ui_visible boolean
 ---@field sections { title: string, items: string[], custom: tuna.FormCustom?, sel: integer, text: string? }[]
----@field title string?
 ---@field on_submit fun(results: { index: integer, custom: any? }[])?
 ---@field on_close fun()?
 ---@field skip_close boolean swallow WinClosed events during a resize/teardown
@@ -1105,13 +1012,12 @@ end
 ---is `validate`d; a failure keeps the form open, reports the error and parks the
 ---cursor on the offending row, so nothing typed is lost.
 ---@param sections { title: string, items: string[], custom: tuna.FormCustom? }[]? sections, or `nil` to resize
----@param title string? overall form title (unused chrome for now; kept for parity)
 ---@param on_submit fun(results: { index: integer, custom: any? }[])? one result per
 ---  section: the chosen 1-based row, plus the validated value when that row is the
 ---  custom one
 ---@param restore_winid integer? window to refocus once the form closes
 ---@param on_close fun()? called when the form is dismissed without submitting
-function M.form(sections, title, on_submit, restore_winid, on_close)
+function M.form(sections, on_submit, restore_winid, on_close)
     if sections == nil then -- resize: keep each section's selection and typed text
         if not form.ui_visible then
             return
@@ -1148,7 +1054,6 @@ function M.form(sections, title, on_submit, restore_winid, on_close)
                 text = s.custom and s.custom.default or nil,
             }
         end
-        form.title = title
         form.on_submit = on_submit
         form.on_close = on_close
         form.restore_winid = restore_winid
@@ -1199,7 +1104,6 @@ function M.form(sections, title, on_submit, restore_winid, on_close)
         -- Only a section with a custom row is writable at all; `guard_section` then
         -- confines the writing to that one row.
         vim.bo[b].modifiable = s.custom ~= nil
-        vim.bo[b].filetype = "tuna"
         local w = open_float(b, i == form.focused, {
             width = width,
             height = heights[i],
@@ -1208,10 +1112,8 @@ function M.form(sections, title, on_submit, restore_winid, on_close)
             border = cfg.floating_border,
             border_highlight = cfg.floating_border_highlight,
             title = " " .. s.title .. " ",
+            cursorline = true,
         })
-        -- setlocal, so the focused (current) section doesn't leak cursorline's global
-        -- default off this float (see the menu note).
-        api.nvim_set_option_value("cursorline", true, { scope = "local", win = w })
         api.nvim_win_set_cursor(w, { math.min(s.sel, form_rows(s)), 0 })
         form.wins[i] = w
         form.bufs[i] = b
@@ -1304,18 +1206,8 @@ function M.form(sections, title, on_submit, restore_winid, on_close)
         end
     end
 
-    -- Switch lists with the plugin-wide pane-navigation keys (`switch_window_keys`,
-    -- also used to move between result panes; default <C-hjkl>), given as
-    -- { left, down, up, right }: down/right go to the next list, up/left to the
-    -- previous. Tab/S-Tab are always accepted as a portable fallback.
-    local sw = cfg.switch_window_keys or {}
-    local next_keys, prev_keys = { "<Tab>" }, { "<S-Tab>" }
-    for _, k in ipairs({ sw[2], sw[4] }) do
-        next_keys[#next_keys + 1] = k
-    end
-    for _, k in ipairs({ sw[3], sw[1] }) do
-        prev_keys[#prev_keys + 1] = k
-    end
+    -- The pane keys switch lists, the same keys that move between the result panes.
+    local next_keys, prev_keys = step_keys(cfg)
 
     for i, b in ipairs(form.bufs) do
         local s = form.sections[i]
@@ -1436,7 +1328,7 @@ end
 
 ---@class tuna.PanelsWidget
 ---@field ui_visible boolean
----@field sections { title: string, items: string[], format: function?, column: integer, sel: integer }[]
+---@field sections { title: string, items: string[], highlights: table[]?, format: function?, column: integer, sel: integer }[]
 ---@field place { column: integer, top: integer }[] where each list was drawn, for moving focus
 ---@field wins integer[]
 ---@field bufs integer[]
@@ -1444,7 +1336,6 @@ end
 ---@field header_win integer?
 ---@field header_buf integer?
 ---@field focused integer
----@field title string?
 ---@field on_choice fun(section: integer, item: integer)?
 ---@field on_close fun()?
 ---@field restore_winid integer?
@@ -1455,12 +1346,11 @@ local panels = { ui_visible = false, sections = {}, wins = {}, bufs = {}, focuse
 ---one focused. `<CR>` chooses from the focused list only. Call with `sections == nil` to
 ---rebuild on `VimResized`, keeping each list's selection and which one had focus.
 ---@param sections tuna.PanelSection[]? nil to resize
----@param title string? unused today, kept for symmetry with the other widgets
 ---@param on_choice fun(section: integer, item: integer)?
 ---@param restore_winid integer?
 ---@param on_close fun()?
 ---@param header string[]? a banner above the lists, drawn only when there is room for it
-function M.panels(sections, title, on_choice, restore_winid, on_close, header)
+function M.panels(sections, on_choice, restore_winid, on_close, header)
     if sections == nil then -- resize: keep each list's selection and the focused one
         if not panels.ui_visible then
             return
@@ -1499,7 +1389,6 @@ function M.panels(sections, title, on_choice, restore_winid, on_close, header)
                 sel = 1,
             }
         end
-        panels.title = title
         panels.on_choice = on_choice
         panels.on_close = on_close
         panels.restore_winid = restore_winid
@@ -1685,10 +1574,8 @@ function M.panels(sections, title, on_choice, restore_winid, on_close, header)
                 -- scrolloff applies; one that fits keeps the pin so its edge rows stay
                 -- reachable (the same rule the menu follows).
                 keep_scrolloff = heights[i] < #sec.items,
+                cursorline = true,
             })
-            -- setlocal, so focusing a list does not leak cursorline's global default into
-            -- the user's editor (see the menu note).
-            api.nvim_set_option_value("cursorline", true, { scope = "local", win = w })
             pcall(api.nvim_win_set_cursor, w, { math.min(sec.sel, #sec.items), 0 })
             panels.wins[i], panels.bufs[i] = w, b
             panels.place[i] = { column = c, top = top }
@@ -1815,7 +1702,6 @@ end
 ---autocmd so floats stay centred and proportional after the UI changes size.
 function M.resize_widgets()
     M.editor(nil)
-    M.picker(nil)
     M.input(nil)
     M.menu(nil)
     M.form(nil)

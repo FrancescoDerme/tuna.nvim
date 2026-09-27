@@ -12,8 +12,7 @@ local utils = require("tuna.utils")
 
 local M = {}
 
----Default configuration. UI sub-tables are provisional and will be finalized as
----the native UI modules land (widgets, runner_ui).
+---Default configuration.
 M.defaults = {
     -- name of the per-directory config file, searched upward from each file
     local_config_file_name = ".tuna.lua",
@@ -75,10 +74,12 @@ M.defaults = {
     -- a trusted bruteforce disagree. generator/bruteforce are discovered by
     -- convention (gen.* / brute.*); set these to use your own instead: a path to
     -- a helper file (compiled and run by its language, or a prebuilt binary), or an
-    -- { exec, args } command, expanded with the usual $(FNOEXT)/$(ABSDIR)/… modifiers. The generator gets the iteration number appended as a seed (unless
+    -- { exec, args } command, expanded with the usual $(FNOEXT)/$(ABSDIR)/… modifiers.
+    -- The generator gets the iteration number appended as a seed (unless
     -- seed_arg = false) so failures are reproducible.
     stress = {
-        generator = nil, -- override discovery, e.g. { exec = "python3", args = { "$(ABSDIR)/gen.py" } }
+        -- override discovery, e.g. { exec = "python3", args = { "$(ABSDIR)/gen.py" } }
+        generator = nil,
         bruteforce = nil, -- override discovery: a correct-but-slow solution
         count = 100, -- maximum generator iterations before giving up
         seed_arg = true, -- append the iteration seed as the generator's last argument
@@ -105,12 +106,13 @@ M.defaults = {
     --                  judged against the expected output if present.
     --   * interactor — a written interactor.* program decides the verdict (exit 0 =
     --                  AC). Secondary: auto-used only when an interactor.* exists.
-    -- The chosen source is remembered per buffer, so a later bare `:Tuna run`
+    -- The chosen source is remembered per problem, so a later bare `:Tuna run`
     -- repeats it. `interactor` below overrides interactor discovery; it receives the
     -- testcase input/answer via $(INPUT)/$(ANSWER) (default: those two files appended
     -- as args).
     interactive = {
-        interactor = nil, -- override discovery, e.g. { exec = "python3", args = { "$(ABSDIR)/interactor.py" } }
+        -- override discovery, e.g. { exec = "python3", args = { "$(ABSDIR)/interactor.py" } }
+        interactor = nil,
         -- The grid each source draws, in the shape `popup_ui.layout` takes: a nested
         -- `{ ratio, pane }` tree over `tc`, `so`, `eo`, `si`, `se`. `live` and `interactor`
         -- read as a conversation, so they default to the selector beside Output, Live and
@@ -264,21 +266,6 @@ M.defaults = {
         download = "contest", -- "contest" | "problem"
     },
 
-    -- `:Tuna lib` — copy a piece of your own algorithm library into the current file.
-    -- `path` is where that library lives (a directory, or a list of them); only files
-    -- with the current file's extension are offered, so a C++ problem gets the C++
-    -- library. Nothing has to be maintained in a special format: mark the parts worth
-    -- copying, in place, with a pair of comments carrying `marker`:
-    --
-    --     // TUNALIB: binary exp start
-    --     ll bexp(ll n, ll m) { … }
-    --     // TUNALIB: binary exp end
-    --
-    -- Everything outside the guards (includes, `main`, scratch code) is ignored, and
-    -- the guards work in any language since they are recognized anywhere in a line.
-    -- Three ways in: `:Tuna lib` (file, then snippet), `:Tuna lib snippet` (straight
-    -- from every snippet) and `:Tuna lib search` (the same catalogue in telescope,
-    -- matching names first and code second — needs telescope, the others do not).
     -- menu (bare `:Tuna`)
     menu = {
         -- The banner across the top: a list of lines to draw instead of the shipped
@@ -294,6 +281,21 @@ M.defaults = {
         contests = 3,
     },
 
+    -- `:Tuna lib` — copy a piece of your own algorithm library into the current file.
+    -- `path` is where that library lives (a directory, or a list of them); only files
+    -- with the current file's extension are offered, so a C++ problem gets the C++
+    -- library. Nothing has to be maintained in a special format: mark the parts worth
+    -- copying, in place, with a pair of comments carrying `marker`:
+    --
+    --     // TUNALIB: binary exp start
+    --     ll bexp(ll n, ll m) { … }
+    --     // TUNALIB: binary exp end
+    --
+    -- Everything outside the guards (includes, `main`, scratch code) is ignored, and
+    -- the guards work in any language since they are recognized anywhere in a line.
+    -- Three ways in: `:Tuna lib` (file, then snippet), `:Tuna lib snippet` (straight
+    -- from every snippet) and `:Tuna lib search` (the same catalogue in telescope,
+    -- matching names first and code second — needs telescope, the others do not).
     library = {
         path = false, -- false | "~/cp/snippets" | { dir, dir, … }
         marker = "TUNALIB",
@@ -398,9 +400,9 @@ M.defaults = {
         status_time = 6000,
         -- Whether to read the submit tool's output for a verdict at all. false skips
         -- the parsing for a tool that just submits and prints nothing useful, so a
-        -- stray "accepted" in its chatter can't be misread as the judge's word. It no
-        -- longer changes what a *silent* run means: either way, a clean exit with no
-        -- verdict clears the indicator rather than reporting a failure.
+        -- stray "accepted" in its chatter can't be misread as the judge's word. A
+        -- *silent* run means the same either way: a clean exit with no verdict clears
+        -- the indicator rather than reporting a failure.
         expects_verdict = true,
         -- Watch-mode safety net (ms): if a submit job never reports a final verdict
         -- within this long (a hung/abandoned poll), stop watching and clear the
@@ -509,15 +511,15 @@ M.defaults = {
     -- Given as { left, down, up, right }. (The testcase editor keeps its own 2-pane
     -- `editor_ui.*_mappings.switch_window`, which also has an insert-mode variant.)
     switch_window_keys = { "<C-h>", "<C-j>", "<C-k>", "<C-l>" },
-    -- Plugin-wide keys that dismiss a floating widget (prompt, picker, menu, chooser
-    -- form, testcase editor), bound in one place so the same press means the same thing
-    -- in all of them. The default `insert` list is empty on purpose: `<Esc>` there
-    -- leaves insert mode, as everywhere else in vim, so cancelling something being
-    -- typed into takes a second, deliberate press — put `"<Esc>"` in `insert` to have
-    -- it cancel straight from insert mode instead. (`<C-c>` is not worth listing under
-    -- `insert`: Neovim handles `i_CTRL-C` itself and never runs a mapping for it.)
-    -- Per-widget keys (`editor_ui.*_mappings.cancel`, `picker_ui.mappings.close`) are
-    -- added to these rather than replacing them.
+    -- Plugin-wide keys that dismiss a floating widget (prompt, menu, chooser form, the
+    -- `:Tuna` menu's lists, testcase editor), bound in one place so the same press
+    -- means the same thing in all of them. The default `insert` list is empty on
+    -- purpose: `<Esc>` there leaves insert mode, as everywhere else in vim, so
+    -- cancelling something being typed into takes a second, deliberate press. Put
+    -- `"<Esc>"` in `insert` to have it cancel straight from insert mode instead.
+    -- (`<C-c>` is not worth listing under `insert`: Neovim handles `i_CTRL-C` itself
+    -- and never runs a mapping for it.) Per-widget keys (`editor_ui.*_mappings.cancel`,
+    -- `picker_ui.mappings.close`) are added to these rather than replacing them.
     cancel_keys = {
         normal = { "<Esc>", "<C-c>" },
         insert = {},
@@ -538,13 +540,13 @@ M.defaults = {
             cancel = "<C-q>",
         },
     },
+    -- The keys of every single-choice list: the menus tuna asks its questions in and the
+    -- lists of the `:Tuna` menu. `close` adds to `cancel_keys`.
     picker_ui = {
-        width = 0.2,
-        height = 0.3,
         mappings = {
             focus_next = { "j", "<down>", "<Tab>" }, -- move to the next entry (wraps)
             focus_prev = { "k", "<up>", "<S-Tab>" }, -- move to the previous entry (wraps)
-            close = { "<esc>", "<C-c>", "q", "Q" },
+            close = { "q", "Q" },
             submit = "<cr>",
         },
     },
@@ -598,7 +600,7 @@ M.defaults = {
             view_stderr = { "e", "E" },
             toggle_diff = { "d", "D" },
             -- `<Esc>`/`<C-c>` are what dismisses every other surface in the plugin
-            -- (`cancel_keys`, and `picker_ui.mappings.close`), so they dismiss this
+            -- (`cancel_keys`), so they dismiss this
             -- one too. Bound in normal mode only, as all the close keys are, so an
             -- `<Esc>` typed while editing a testcase only leaves insert mode; a
             -- second one closes the UI, and an unsaved edit is caught by the same
@@ -687,7 +689,7 @@ function M.update_config_table(cfg_tbl, opts)
     -- no special-casing: only map-like tables merge key by key. The one shape it
     -- treats differently is an empty list, which merges — and "override with an empty
     -- list" has no meaning for any option here.
-    return vim.tbl_deep_extend("force", cfg_tbl or M.defaults, opts)
+    return vim.tbl_deep_extend("force", cfg_tbl or M.defaults, opts) --[[@as table]]
 end
 
 ---Initialise configuration from user options.

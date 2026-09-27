@@ -445,7 +445,7 @@ function RunnerUI:with_answer_settled(tcnum, proceed)
     vim.schedule(function()
         require("tuna.widgets").menu(
             { "Don't specify output", "Expect empty output", "Keep editing" },
-            "the answer to testcase " .. tcnum .. " is empty",
+            "The answer to testcase " .. tcnum .. " is empty",
             function(idx)
                 if idx == 1 or idx == 2 then
                     proceed(idx == 2)
@@ -524,7 +524,7 @@ function RunnerUI:request_close(torn, on_closed)
     -- choosing "Keep editing" — the safe answer is the one a stray Esc gives.
     require("tuna.widgets").menu(
         unsaved_items("close"),
-        "unsaved " .. testcase_label(nums),
+        "Unsaved " .. testcase_label(nums),
         function(idx)
             if idx == 1 then
                 self:save_all_pending()
@@ -698,7 +698,7 @@ function RunnerUI:with_disk_settled(tcnum, what, proceed)
     -- nothing at all.
     require("tuna.widgets").menu(
         { "Restore and " .. what, "Discard", "Stop" },
-        label .. " no longer on disk",
+        label:sub(1, 1):upper() .. label:sub(2) .. " no longer on disk",
         function(idx)
             if idx == 1 then
                 self:restore_missing(nums)
@@ -745,7 +745,7 @@ function RunnerUI:with_pending_settled(tcnum, what, proceed, after_save)
 
     require("tuna.widgets").menu(
         unsaved_items(what),
-        "unsaved " .. testcase_label(nums),
+        "Unsaved " .. testcase_label(nums),
         function(idx)
             if idx == 1 then
                 -- Saving re-runs what it saved, so the run is already under way.
@@ -966,7 +966,6 @@ function RunnerUI:select_row(idx)
     end
 end
 
----@private
 ---Whether any testcase has unsaved edits (including one being typed right now).
 ---@return boolean
 function RunnerUI:has_pending()

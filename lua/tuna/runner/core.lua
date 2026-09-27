@@ -1028,7 +1028,6 @@ function RunnerCore:sync_rows(numbers, tctbl)
     return rows
 end
 
----@private
 ---A run of the whole set has been asked for: the board chooses the row again
 ---(`RunnerUI:choose_row_again`).
 function RunnerCore:choose_row_again()

@@ -1359,7 +1359,7 @@ M.providers.browser = function(ctx)
     end)
 
     if not open_url(page) then
-        utils.notify("submit: could not open a browser for " .. page, "ERROR")
+        utils.notify("submit: could not open a browser for " .. page .. ".", "ERROR")
         return
     end
     -- Same lualine text as the terminal/watch paths ("submitting <name>"): the browser

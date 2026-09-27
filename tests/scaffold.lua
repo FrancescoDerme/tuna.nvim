@@ -153,7 +153,7 @@ do
     require("tuna.stress").run(buf, 1)
     t.eq("stress with no helpers offers to write them", asked, {
         items = { "Create gen.cpp and brute.cpp", "Stop" },
-        title = "stress needs a generator and a bruteforce",
+        title = "Stress needs a generator and a bruteforce",
     })
     t.ok("creating writes both", read(dir .. "/gen.cpp") ~= nil and read(dir .. "/brute.cpp") ~= nil)
     t.eq("opens the first to be written", vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t"), "gen.cpp")

@@ -88,7 +88,7 @@ end
 ---when compiling, then one row per testcase in ascending order. Split out of
 ---`run_testcases` because the rows are also what the UI needs to *show* testcases that
 ---have not been run yet (see `load_testcases`).
----@param tctbl table<integer, { input: string, output: string? }>
+---@param tctbl table<integer, tuna.StoredTestcase>
 ---@param do_compile boolean? whether the run will compile first (defaults to true)
 function TCRunner:build_rows(tctbl, do_compile)
     if do_compile == nil then
@@ -138,7 +138,7 @@ end
 ---reviewable in the detail panes — instead of an empty results window. The rows are
 ---built exactly as a run would build them (compile row included), so `R` on a row and
 ---`<C-r>` for all of them work straight from this view.
----@param tctbl table<integer, { input: string, output: string? }>
+---@param tctbl table<integer, tuna.StoredTestcase>
 ---@param do_compile boolean? whether a run from here would compile first
 function TCRunner:load_testcases(tctbl, do_compile)
     self:build_rows(tctbl, do_compile)
@@ -165,7 +165,7 @@ end
 
 ---Run testcases. Pass a `tctbl` for a fresh run, or `nil` to re-run the testcases
 ---loaded by the previous call (keeping their inputs/expected outputs).
----@param tctbl table<integer, { input: string, output: string? }>? testcases, or nil to re-run
+---@param tctbl table<integer, tuna.StoredTestcase>? testcases, or nil to re-run
 ---@param do_compile boolean? whether to compile first (defaults to true)
 function TCRunner:run_testcases(tctbl, do_compile)
     -- A fresh run saves its source; a re-run keeps the rows it has, and the file on disk,
