@@ -13,9 +13,14 @@ void generator(unsigned ll seed) {
         return lo + (ll)(rng() % (hi - lo + 1));
     };
 
-    ll n = rnd(1, 10);
-    cout << n << '\n';
-    for (ll i = 0; i < n; ++i) cout << rnd(1, 100) << " \n"[i == n - 1];
+    ll t = rnd(1, 3);
+    cout << t << '\n';
+    while (t--) {
+        ll n = rnd(1, 10);
+        cout << n << '\n';
+        for (ll i = 0; i < n; ++i)
+            cout << rnd(1, 100) << " \n"[i == n - 1];
+    }
 }
 
 int main(int argc, char** argv) {

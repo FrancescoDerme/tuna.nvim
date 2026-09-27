@@ -4,7 +4,7 @@
 using namespace std;
 
 // Bruteforce solution for stress-testing.
-// Read from stdin, write the correct answer to stdout.
+// Read the input from stdin, write the correct answer to stdout.
 void bruteforce() {
     ll n;
     cin >> n;
@@ -19,5 +19,9 @@ int main() {
     cin.tie(0);
     cout.tie(0);
 
-    bruteforce();
+    int tt = 1;
+    cin >> tt;
+    while (tt--) {
+        bruteforce();
+    }
 }
