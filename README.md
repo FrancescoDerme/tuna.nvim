@@ -288,8 +288,10 @@ them: `:Tuna run <mode>` forces a mode, `:Tuna run interactive <source>` a sourc
 `:Tuna checker off` plain comparison, and `auto` hands any of them back. A forced choice
 that needs a helper you have since deleted, stress without its bruteforce say, runs the
 automatic choice instead, says so, and comes back with the helper. Every run looks the
-helpers up again, so adding, deleting or editing one takes effect on the next run, and a
-rerun from an open results UI whose mode has lost its helper says so rather than running.
+helpers up again, so adding, deleting or editing one takes effect on the next run. A run in a
+mode that has no helper it needs, a rerun from the results UI included, offers to write its
+starter (`Create gen.cpp and brute.cpp` / `Stop`) and opens it, rather than running; a helper you
+configured that isn't there is only reported, since a starter beside your solution wouldn't be used.
 The judge is resolved per run the same way, so `:Tuna checker off` and `:Tuna compare` apply
 from the next run on.
 

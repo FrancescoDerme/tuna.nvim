@@ -385,8 +385,11 @@ checker each follow the helpers present until you force them: `:Tuna run
 {mode}`, `:Tuna run interactive {source}` and `:Tuna checker off`, with `auto`
 handing any of them back. A forced choice that needs a helper you have since
 deleted runs the automatic choice instead, says so, and applies again once
-the helper is back. Every run looks the helpers up again, and a rerun from an
-open results UI whose mode has lost its helper says so rather than running.
+the helper is back. Every run looks the helpers up again. A run in a mode that
+has no helper it needs, a rerun from the results UI included, offers to write
+its starter and opens it, rather than running; a helper you configured that
+isn't there is only reported, since a starter beside your solution wouldn't
+be used.
 The judge is resolved per run the same way, so `:Tuna checker off` and `:Tuna
 compare` apply from the next run on.
 

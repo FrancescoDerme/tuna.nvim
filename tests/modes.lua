@@ -187,8 +187,9 @@ settle()
 t.eq(":Tuna run auto makes the mode automatic", tools.get_mode(ksol), nil)
 C.settle_results(kbuf, { run = true }, function() end)
 
--- A rerun keeps its mode, so a helper that mode needs being gone is said, and nothing runs.
-local function rerun_after_deleting(open_mode, file)
+-- A rerun keeps its mode, so a helper that mode needs being gone stops it, and nothing runs:
+-- the run offers to write the missing starter instead, and Stop writes nothing.
+local function rerun_after_deleting(open_mode, file, answer)
     local dir, sol = problem({ "interactor.py", "gen.py", "brute.py" })
     local buf = open(sol)
     local runner_of
@@ -199,23 +200,43 @@ local function rerun_after_deleting(open_mode, file)
         require("tuna.stress").run(buf, nil, { show_only = true })
         runner_of = require("tuna.stress").active[buf]
     end
-    local said
-    runner_of.ui.show_message = function(_, title, text)
-        said = title .. text
+    local widgets = require("tuna.widgets")
+    local menu, asked = widgets.menu, nil
+    widgets.menu = function(items, title, on_choice)
+        asked = { title = title, items = items }
+        on_choice(answer or 2)
     end
     os.remove(dir .. "/" .. file)
     runner_of:run_testcases()
     settle(300)
+    widgets.menu = menu
+    -- What the answer left on screen, before this cleans the board up.
+    local after = {
+        board = runner_of.ui ~= nil and runner_of.ui.ui_visible,
+        file = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t"),
+        float = vim.api.nvim_win_get_config(0).relative ~= "",
+    }
     runner_of:kill_all_processes()
     runner_of:delete_ui()
-    return said, runner_of
+    return asked, runner_of, dir, after
 end
-local said, ir = rerun_after_deleting("interactive", "interactor.py")
-t.ok("an interactor rerun with the interactor gone says so", said ~= nil and said:find("no interactor") ~= nil, said)
+local asked, ir, idir = rerun_after_deleting("interactive", "interactor.py")
+t.eq("an interactor rerun with the interactor gone offers to write it", asked, {
+    title = "the interactor source needs an interactor",
+    items = { "Create interactor.py", "Stop" },
+})
 t.eq("and runs no session", ir.sol_handle, nil)
-local ssaid, sr = rerun_after_deleting("stress", "brute.py")
-t.ok("a stress restart with its bruteforce gone says so", ssaid ~= nil and ssaid:find("bruteforce") ~= nil, ssaid)
+t.eq("stopping writes nothing", vim.fn.glob(idir .. "/interactor.*"), "")
+local sasked, sr = rerun_after_deleting("stress", "brute.py")
+t.eq("a stress restart with its bruteforce gone offers that one", sasked, {
+    title = "stress needs a bruteforce",
+    items = { "Create brute.py", "Stop" },
+})
 t.eq("and searches nothing", sr.iter, 0)
+-- Created from the board, the starter opens in the editor the board was over, not in a pane.
+local _, _, _, after = rerun_after_deleting("stress", "gen.py", 1)
+t.eq("a starter created from the board puts the board away", after.board, false)
+t.eq("and opens in the editor window", { after.file, after.float }, { "gen.py", false })
 
 -- A sidecar travels with a problem's folder, so a buffer that is not a file gets none:
 -- `:Tuna run all` typed while standing in a results pane would otherwise write a `tuna:/`

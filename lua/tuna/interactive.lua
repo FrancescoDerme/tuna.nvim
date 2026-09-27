@@ -157,6 +157,14 @@ local function set_column(bufnr, lines, keep_last, modifiable)
     vim.bo[bufnr].modified = false
 end
 
+---What the interactor source asks for when there is no interactor at all: to write its
+---starter.
+---@param bufnr integer
+---@param opts { win: integer?, before: fun()? }?
+local function offer_interactor(bufnr, opts)
+    require("tuna.scaffold").create_missing({ "interactor" }, bufnr, "the interactor source needs an interactor", opts)
+end
+
 --------------------------------------------------------------------------------
 -- InteractiveRunner (a RunnerCore subclass the runner UI drives)
 --------------------------------------------------------------------------------
@@ -349,18 +357,27 @@ function InteractiveRunner:with_helpers(cont, whole)
         self:build_judge()
         return build(self, {}, cont)
     end
-    local function stop(title, text)
+    local spec, missing = tools.helper("interactor", solution, self.config)
+    if not spec then
         self.completed = true
+        self:update_ui(true)
+        if not missing then
+            -- Simply not there: its starter can stand in. Written, it opens in the editor the
+            -- board was over, the board having nothing to run until it is filled in.
+            return offer_interactor(self.bufnr, {
+                win = self.ui and self.ui.restore_winid,
+                before = function()
+                    self:delete_ui()
+                end,
+            })
+        end
+        local text = missing .. ", :Tuna run picks the source again."
         if self.ui then
-            self.ui:show_message(title, text)
+            self.ui:show_message(" interactive: no interactor ", text)
         else
             utils.notify("interactive: " .. text, "WARN")
         end
-        self:update_ui(true)
-    end
-    local spec, missing = tools.helper("interactor", solution, self.config)
-    if not spec then
-        return stop(" interactive: no interactor ", (missing or "the interactor is gone") .. ", :Tuna run picks the source again.")
+        return
     end
     self.interactor = spec
     self:plan_builds({ spec, self.checker })
@@ -1092,12 +1109,11 @@ function M.run(bufnr, args, opts)
         local missing
         interactor, missing = tools.helper("interactor", path, cfg)
         if not interactor then
-            utils.notify(
-                "interactive: "
-                    .. (missing or "no interactor, add an interactor.* file or set interactive.interactor")
-                    .. ", or run ':Tuna run interactive live' or 'feed'.",
-                "WARN"
-            )
+            if missing then
+                utils.notify("interactive: " .. missing .. ", or run ':Tuna run interactive live' or 'feed'.", "WARN")
+            else
+                offer_interactor(bufnr)
+            end
             return
         end
     end

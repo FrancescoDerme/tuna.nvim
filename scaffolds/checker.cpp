@@ -1,10 +1,28 @@
-// Checker (special judge). Invoked as: checker <input> <output> <answer>
-//   argv[1] = test input        argv[2] = participant output
-//   argv[3] = jury answer
-// Exit 0 = accepted, non-zero = wrong answer. Put a short reason on
-// stderr. Use this when a problem has several correct answers.
 #include <bits/stdc++.h>
+#define ll long long
+#define ld long double
 using namespace std;
+
+// Checker for problems with multiple answers.
+// Exit 0 = accepted, non-zero = wrong answer.
+int checker([[maybe_unused]] ifstream& input, ifstream& output, ifstream& answer) {
+    string a, b;
+
+    while (answer >> b) {
+        if (!(output >> a) || a != b) {
+            cerr << "wrong answer\n";
+            return 1;
+        }
+    }
+
+    if (output >> a) {
+        cerr << "wrong answer: trailing output\n";
+        return 1;
+    }
+
+    cerr << "ok\n";
+    return 0;
+}
 
 int main(int argc, char** argv) {
     if (argc < 4) {
@@ -12,22 +30,6 @@ int main(int argc, char** argv) {
         return 2;
     }
 
-    ifstream inf(argv[1]), ouf(argv[2]), ansf(argv[3]);
-
-    // TODO: validate `ouf` against `inf`/`ansf`. Default: token-by-token
-    // equality.
-    string a, b;
-    while (ansf >> b) {
-        if (!(ouf >> a) || a != b) {
-            cerr << "wrong answer\n";
-            return 1;
-        }
-    }
-    if (ouf >> a) {
-        cerr << "trailing output\n";
-        return 1;
-    }
-
-    cerr << "ok\n";
-    return 0;
+    ifstream input(argv[1]), output(argv[2]), answer(argv[3]);
+    return checker(input, output, answer);
 }

@@ -11,7 +11,8 @@
 -- discovery looks for first, so a scaffold is always found by the run it was made for.
 --
 -- The language is the one asked for, else `scaffold.language`, else the solution's. A role
--- with no template in it but one in other languages offers those instead of stopping.
+-- with no template in it but one in other languages offers those instead of stopping. A run
+-- that needs a helper it does not have offers to write its starter (`create_missing`).
 
 local config = require("tuna.config")
 local tools = require("tuna.tools")
@@ -92,21 +93,46 @@ function M.template_for(role, ext, cfg, dir)
     return path and utils.read_file(path) or nil
 end
 
----Write the scaffold of `role` in `ext` beside the solution and open it, asking first when a
----file of that name is already there.
+---The name a scaffold of `role` in `ext` is written under: the role's first `tool_names`.
+---@param role string
+---@param ext string
+---@param cfg table
+---@return string
+local function file_name(role, ext, cfg)
+    local names = (cfg.tool_names and cfg.tool_names[role]) or tools.DEFAULT_NAMES[role] or {}
+    return (names[1] or role) .. "." .. ext
+end
+
+---@class tuna.ScaffoldOpts
+---@field open boolean? open what was written (default true)
+---@field on_done fun(path: string?)? told the file written or opened, or nil when nothing was
+
+---Write the scaffold of `role` in `ext` beside the solution, asking first when a file of that
+---name is already there.
 ---@param role string
 ---@param ext string
 ---@param cfg table
 ---@param dir string the solution's directory
 ---@param dirs string[] the template folders
-local function write(role, ext, cfg, dir, dirs)
-    local names = (cfg.tool_names and cfg.tool_names[role]) or tools.DEFAULT_NAMES[role] or {}
-    local fname = (names[1] or role) .. "." .. ext
+---@param opts tuna.ScaffoldOpts
+local function write(role, ext, cfg, dir, dirs, opts)
+    local fname = file_name(role, ext, cfg)
     local path = dir .. "/" .. fname
+    local function done(written)
+        if written and opts.open ~= false then
+            vim.cmd.edit(vim.fn.fnameescape(written))
+        end
+        if opts.on_done then
+            opts.on_done(written)
+        end
+    end
     local function create()
-        utils.write_file(path, utils.read_file(template_path(role, ext, dirs)) or "")
-        vim.cmd.edit(vim.fn.fnameescape(path))
-        utils.notify("scaffold: created " .. fname .. ".", "INFO")
+        local template = template_path(role, ext, dirs)
+        utils.write_file(path, template and utils.read_file(template) or "")
+        if opts.open ~= false then
+            utils.notify("scaffold: created " .. fname .. ".", "INFO")
+        end
+        done(path)
     end
     if not utils.file_exists(path) then
         create()
@@ -114,36 +140,56 @@ local function write(role, ext, cfg, dir, dirs)
     end
     widgets.menu({ "Open it", "Overwrite", "Stop" }, '"' .. fname .. '" already exists', function(idx)
         if idx == 1 then
-            vim.cmd.edit(vim.fn.fnameescape(path))
+            done(path)
         elseif idx == 2 then
             create()
+        else
+            done(nil)
         end
-    end, vim.api.nvim_get_current_win())
+    end, vim.api.nvim_get_current_win(), function()
+        done(nil)
+    end)
+end
+
+---The language a scaffold for the solution in `bufnr` is written in when none is asked for:
+---`scaffold.language`, else the solution's own.
+---@param cfg table
+---@param solution string
+---@return string
+local function default_language(cfg, solution)
+    return (cfg.scaffold and cfg.scaffold.language) or vim.fn.fnamemodify(solution, ":e")
 end
 
 ---Create (or open) the scaffold of `role` beside the solution in `bufnr`.
 ---@param role string one of `tools.ROLES`
 ---@param bufnr integer? defaults to the current buffer
 ---@param ext string? the language to write it in; else `scaffold.language`, else the solution's
-function M.create(role, bufnr, ext)
+---@param opts tuna.ScaffoldOpts?
+function M.create(role, bufnr, ext, opts)
+    opts = opts or {}
+    local function nothing()
+        if opts.on_done then
+            opts.on_done(nil)
+        end
+    end
     bufnr = bufnr or vim.api.nvim_get_current_buf()
     if not vim.tbl_contains(tools.ROLES, role) then
         utils.notify("scaffold: the role is one of " .. table.concat(tools.ROLES, ", ") .. ".")
-        return
+        return nothing()
     end
     config.load_buffer_config(bufnr)
     local cfg = config.get_buffer_config(bufnr)
     local solution = vim.api.nvim_buf_get_name(bufnr)
     local dir = vim.fn.fnamemodify(solution, ":p:h")
-    ext = ext or (cfg.scaffold and cfg.scaffold.language) or vim.fn.fnamemodify(solution, ":e")
+    ext = ext or default_language(cfg, solution)
     if ext == "" then
         utils.notify("scaffold: no language to write it in, open a solution file or pass an extension.")
-        return
+        return nothing()
     end
 
     local dirs = folders(cfg, dir)
     if template_path(role, ext, dirs) then
-        write(role, ext, cfg, dir, dirs)
+        write(role, ext, cfg, dir, dirs, opts)
         return
     end
     -- Not in this language. One it does have is still a working helper, since helpers are
@@ -153,7 +199,7 @@ function M.create(role, bufnr, ext)
         local where = #dirs > 1 and ("add a " .. role .. "." .. ext .. " to " .. dirs[1])
             or "set scaffold.directory and add one there"
         utils.notify(("scaffold: no %s template in any language, %s."):format(role, where), "WARN")
-        return
+        return nothing()
     end
     local items = {}
     for i, other in ipairs(others) do
@@ -162,8 +208,70 @@ function M.create(role, bufnr, ext)
     items[#items + 1] = "Stop"
     widgets.menu(items, ("No %s template for .%s"):format(role, ext), function(idx)
         if idx and others[idx] then
-            write(role, others[idx], cfg, dir, dirs)
+            write(role, others[idx], cfg, dir, dirs, opts)
+        else
+            nothing()
         end
+    end, vim.api.nvim_get_current_win(), nothing)
+end
+
+---Offer to write the starters a run needs and does not have, rather than only saying so: a
+---menu naming the files it would create, and Stop. What is created is opened to be written,
+---the first file in `opts.win` (else the current window) and the rest in the buffer list: a
+---starter is where a helper begins, not one the run could use yet, so nothing runs.
+---@param roles string[] the roles missing, in the order they are written
+---@param bufnr integer the solution's buffer
+---@param title string what the run needs, the menu's title
+---@param opts { win: integer?, before: fun()? }? `before` runs once Create is chosen,
+---before anything is written (a results board closing, so files open in the editor)
+function M.create_missing(roles, bufnr, title, opts)
+    opts = opts or {}
+    local cfg = config.get_buffer_config(bufnr)
+    local ext = default_language(cfg, vim.api.nvim_buf_get_name(bufnr))
+    local names = vim.tbl_map(function(role)
+        return file_name(role, ext, cfg)
+    end, roles)
+    local label = "Create " .. table.concat(names, " and ")
+    widgets.menu({ label, "Stop" }, title, function(idx)
+        if idx ~= 1 then
+            return
+        end
+        if opts.before then
+            opts.before()
+        end
+        local created = {}
+        local function step(i)
+            if i <= #roles then
+                return M.create(roles[i], bufnr, nil, {
+                    open = false,
+                    on_done = function(path)
+                        created[#created + 1] = path
+                        step(i + 1)
+                    end,
+                })
+            end
+            if #created == 0 then
+                return
+            end
+            if opts.win and vim.api.nvim_win_is_valid(opts.win) then
+                vim.api.nvim_set_current_win(opts.win)
+            end
+            vim.cmd.edit(vim.fn.fnameescape(created[1]))
+            for j = 2, #created do
+                vim.cmd.badd(vim.fn.fnameescape(created[j]))
+            end
+            local written = vim.tbl_map(function(path)
+                return vim.fn.fnamemodify(path, ":t")
+            end, created)
+            utils.notify(
+                ("created %s, fill %s in and run again."):format(
+                    table.concat(written, " and "),
+                    #written > 1 and "them" or "it"
+                ),
+                "INFO"
+            )
+        end
+        step(1)
     end, vim.api.nvim_get_current_win())
 end
 

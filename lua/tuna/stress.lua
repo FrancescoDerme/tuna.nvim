@@ -64,10 +64,12 @@ M.active = {}
 local StressRunner = core.extend()
 
 ---The generator and bruteforce of a solution, or nil and what to tell the user about the
----ones that are missing.
+---ones that are missing: in words, and as the roles a starter can stand in for, which is
+---every missing one only when none of them is a configured helper that is broken (a starter
+---written beside the solution would not be the one used).
 ---@param solution string
 ---@param cfg table
----@return table? gen, table? ref, string? missing
+---@return table? gen, table? ref, string? missing, string[]? absent
 local function stress_helpers(solution, cfg)
     local gen, gen_note = tools.helper("generator", solution, cfg)
     local ref, ref_note = tools.helper("bruteforce", solution, cfg)
@@ -75,16 +77,28 @@ local function stress_helpers(solution, cfg)
         return gen, ref
     end
     local names = cfg.tool_names
-    local missing = {}
+    local missing, absent = {}, {}
     if not gen then
         missing[#missing + 1] = gen_note
             or ("no generator (a " .. names.generator[1] .. ".* file or stress.generator)")
+        absent[#absent + 1] = "generator"
     end
     if not ref then
         missing[#missing + 1] = ref_note
             or ("no bruteforce (a " .. names.bruteforce[1] .. ".* file or stress.bruteforce)")
+        absent[#absent + 1] = "bruteforce"
     end
-    return nil, nil, "stress needs a generator and a bruteforce, " .. table.concat(missing, " and ")
+    local broken = (not gen and gen_note) or (not ref and ref_note)
+    return nil, nil, "stress needs a generator and a bruteforce, " .. table.concat(missing, " and "), not broken and absent or nil
+end
+
+---What stress asks for when its helpers are simply not there: to write their starters.
+---@param absent string[]
+---@param bufnr integer
+---@param opts { win: integer?, before: fun()? }?
+local function offer_helpers(absent, bufnr, opts)
+    local title = "stress needs a " .. table.concat(absent, " and a ")
+    require("tuna.scaffold").create_missing(absent, bufnr, title, opts)
 end
 
 ---What the `?` legend adds for a stress run: the row the search is shown on, and what the
@@ -268,7 +282,7 @@ end
 ---@param sol_out string the solution's (wrong) output
 ---@param sol_err string the solution's stderr
 ---@param status string the verdict it earned, in a testcase's words (`WRONG`, `TIMEOUT`, `SIG n`…)
----@param hlgroup string its colour
+---@param hlgroup string? its colour
 function StressRunner:record_counterexample(seed, input, expected, sol_out, sol_err, status, hlgroup)
     -- Don't save a counterexample whose input we already have (as a pre-existing
     -- testcase or one saved earlier this run); just keep searching. The search row
@@ -299,7 +313,7 @@ function StressRunner:record_counterexample(seed, input, expected, sol_out, sol_
         stdout = sol_out,
         stderr = sol_err,
         status = status,
-        hlgroup = hlgroup,
+        hlgroup = hlgroup or "TunaWrong",
         -- A freshly-saved counterexample has no runtime to show; the UI displays
         -- this in the time column instead (re-running it fills in a real time).
         time_label = "saved",
@@ -530,15 +544,24 @@ function StressRunner:run_testcases()
     -- Every run looks its helpers up again, as every run does. It keeps its mode, so a
     -- helper that is gone is reported and nothing runs: `:Tuna run` picks the mode again.
     local solution = vim.api.nvim_buf_get_name(self.bufnr)
-    local gen, ref, missing = stress_helpers(solution, self.config)
+    local gen, ref, missing, absent = stress_helpers(solution, self.config)
     if not gen then
         self.finished = true
-        if self.ui then
+        self:update_ui(true)
+        if absent then
+            -- Written, they open in the editor the board was over, the board having nothing
+            -- to run until they are filled in.
+            offer_helpers(absent, self.bufnr, {
+                win = self.ui and self.ui.restore_winid,
+                before = function()
+                    self:delete_ui()
+                end,
+            })
+        elseif self.ui then
             self.ui:show_message(" stress: a helper is missing ", missing .. ".\n\n:Tuna run picks the run mode again.")
         else
             utils.notify(missing .. ".", "WARN")
         end
-        self:update_ui(true)
         return
     end
     self.gen, self.ref = gen, ref
@@ -589,9 +612,13 @@ function M.run(bufnr, count_override, opts)
         tools.save_sources(bufnr, cfg) -- save the solution (helpers are saved in tools.prepare)
     end
 
-    local gen, ref, missing = stress_helpers(vim.api.nvim_buf_get_name(bufnr), cfg)
+    local gen, ref, missing, absent = stress_helpers(vim.api.nvim_buf_get_name(bufnr), cfg)
     if not gen then
-        utils.notify(missing .. ", `:Tuna scaffold` writes starters.", "WARN")
+        if absent then
+            offer_helpers(absent, bufnr)
+        else
+            utils.notify(missing .. ".", "WARN")
+        end
         return
     end
 

@@ -324,8 +324,9 @@ is relative. Every configured path goes through these: compile/running directori
   could slip through mid-run.
 
 **Stress (`stress.lua`)**: `StressRunner`.
-- Helpers come from `stress_helpers` (`tools.helper` for both roles). A restart resolves them
-  again: missing ones are shown in a message and nothing runs, since a rerun keeps its mode.
+- Helpers come from `stress_helpers` (`tools.helper` for both roles), resolved again by every
+  run: missing ones stop the run (a rerun keeps its mode) and, when they are simply absent,
+  are offered as starters (`scaffold.create_missing`), see below.
   Every run builds them through `build_helpers` (the cache makes an unchanged one free, an
   edited one rebuilds, and one whose first compile failed is retried rather than the search
   spawning a binary that was never produced). Each step of the search goes through `spawn`,
@@ -366,8 +367,8 @@ is relative. Every configured path goes through these: compile/running directori
   one carrying a verdict) holding the seed's input, which is what there is to debug. Nothing
   in a runner answers a process with a float: a compile failure of a *helper* is the same,
   said on the Compile row (`refresh_build_row`, FAILED) beside the pane holding what its
-  compiler wrote. The floats that remain are about the mode, not a process: a helper that is
-  gone on a rerun.
+  compiler wrote. The floats that remain are about the mode, not a process: a configured
+  helper that is broken, found on a rerun.
 - The bruteforce runs on `stress.bruteforce_time`, not `maximum_time`: it is slow by design,
   and the solution's limit is not a statement about it.
 - A counterexample whose bruteforce output is empty is saved with `expect_empty_output`, an
@@ -416,8 +417,9 @@ is relative. Every configured path goes through these: compile/running directori
   the interactor's exit code, and it gets `$(INPUT)`/`$(ANSWER)`. The solution crashing and
   the time running out end the session with `core.ending`'s status instead. Every run goes
   through `with_helpers(cont, whole)`, which refreshes the checker and, for the interactor
-  source, resolves and prepares the interactor again, reporting a missing one instead of
-  running; `whole` (a run of every session) builds the solution too.
+  source, resolves and prepares the interactor again, offering its starter when it is absent
+  and reporting a broken configured one, instead of running; `whole` (a run of every session)
+  builds the solution too.
 - Sessions run one at a time (`run_sessions`). `kill_process` ends the one running, marking
   its row `killed` so every source's exit path reads `KILLED`; `kill_all_processes` also sets
   `stopped`, and no session starts after it.
@@ -901,7 +903,17 @@ specific Vim error about a buffer the user never opened.
   own language, whatever the solution's). Templates are written verbatim, with no `$(…)`
   expansion: `$(` is command substitution in a shell. `languages` feeds the completion of
   `:Tuna scaffold <role> <Tab>`, and `template_for` lets `clean` recognise an untouched
-  scaffold.
+  scaffold. `create` takes `{ open, on_done }`, so a caller can chain it.
+  - **A run that needs a helper it does not have offers its starter** (`create_missing`): a
+    menu naming the files (`Create gen.cpp and brute.cpp` / `Stop`), rather than a warning,
+    from stress and the interactor source, on the first run and on a rerun alike. It writes
+    them through `create` (the language fallback included), opens the first in the editor
+    window and lists the rest, and runs nothing, a starter being where a helper begins. A
+    rerun from the board passes `before`, which puts the board away so the file opens in the
+    window it was over. Only a helper that is *absent* is offered: `tools.helper` returns a
+    note for a configured one that is broken, and a starter beside the solution would not be
+    the one used, so that is still reported. A saved forced mode giving way to the automatic
+    one is not a run asking for the mode, and offers nothing.
 - **`health.lua`**: read-only checks for Neovim version, setup, the executables named by
   compile/run commands, Competitive Companion, submit providers and optional plugins.
 - **`init.lua`** also wires `recent.setup()`, `submit.restore` on `BufReadPost`, and a
@@ -934,11 +946,14 @@ specific Vim error about a buffer the user never opened.
     paths and commands, missing ones), automatic choices, forcing and `auto`, forced settings
     giving way and coming back, old sidecar entries, runners refreshing the checker per run,
     run-all honouring `checker off`, the Run pane's settings rows and which of them read as
-    forced, and stress/interactor reruns reporting a missing helper;
+    forced, and stress/interactor reruns offering the starter of a helper gone (Stop writing
+    nothing, Create putting the board away and opening it in the editor);
   - `scaffold.lua`: the shipped starters, names from `tool_names` (and found by discovery),
     the user's folder over the shipped one for its own language only, adding a language by
     adding a file, `scaffold.language` and a language asked for by name over it, the
-    languages offered when one has no starter, an existing file asked about, `clean`
+    languages offered when one has no starter, an existing file asked about, a run that needs
+    helpers offering their starters (Create writing and opening them, Stop writing nothing, a
+    broken configured helper only reported), `clean`
     recognising an untouched scaffold, and completion of roles and languages;
   - `temp.lua`: the templates a scratch can start from, when a scratch is resumed, the
     resume/restart and template menus, and absorbing keeping the header of the template actually used;

@@ -141,6 +141,50 @@ scaffold.create("generator", buf)
 t.eq("overwriting writes the template over it", read(dir .. "/gen.cpp"), "// my generator\n")
 
 --------------------------------------------------------------------------------
+-- Offered by a run that needs them
+--------------------------------------------------------------------------------
+
+do
+    -- A run that needs helpers it does not have offers to write their starters, naming the files,
+    -- and runs nothing: a starter is where a helper begins.
+    said = t.capture_notifications()
+    local dir, buf = problem()
+    answer, asked = 1, nil
+    require("tuna.stress").run(buf, 1)
+    t.eq("stress with no helpers offers to write them", asked, {
+        items = { "Create gen.cpp and brute.cpp", "Stop" },
+        title = "stress needs a generator and a bruteforce",
+    })
+    t.ok("creating writes both", read(dir .. "/gen.cpp") ~= nil and read(dir .. "/brute.cpp") ~= nil)
+    t.eq("opens the first to be written", vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t"), "gen.cpp")
+    t.eq("and lists the other", vim.fn.buflisted(dir .. "/brute.cpp"), 1)
+    t.has("saying what to do next", said[#said], "created gen.cpp and brute.cpp, fill them in and run again.")
+    t.eq("without running anything", require("tuna.stress").active[buf], nil)
+
+    dir, buf = problem()
+    answer = 2
+    require("tuna.stress").run(buf, 1)
+    t.eq("stopping writes nothing", vim.fn.glob(dir .. "/gen.*") .. vim.fn.glob(dir .. "/brute.*"), "")
+
+    dir, buf = problem()
+    answer, asked = 1, nil
+    require("tuna.interactive").run(buf, { "interactor" })
+    t.eq("the interactor source offers its interactor", asked and asked.items, { "Create interactor.cpp", "Stop" })
+    t.eq("and opens it", vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t"), "interactor.cpp")
+
+    -- A configured helper that is broken is not something a starter beside the solution fixes: the
+    -- run says what is wrong with it, as before.
+    setup({ stress = { generator = "nope.cpp" } })
+    dir, buf = problem()
+    answer, asked = 1, nil
+    said = t.capture_notifications()
+    require("tuna.stress").run(buf, 1)
+    t.eq("a broken configured helper offers nothing", asked, nil)
+    t.has("and says what is wrong with it", said[#said], "does not exist")
+    setup()
+end
+
+--------------------------------------------------------------------------------
 -- What else reads the templates
 --------------------------------------------------------------------------------
 
