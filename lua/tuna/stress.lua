@@ -684,7 +684,7 @@ function M.run(bufnr, count_override, opts)
         return
     end
 
-    local timeout = (cfg.maximum_time and cfg.maximum_time > 0) and cfg.maximum_time or nil
+    local timeout = core.time_limit(cfg)
     local rundir = r.running_directory
     utils.ensure_directory(rundir)
 

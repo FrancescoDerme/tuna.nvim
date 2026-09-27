@@ -51,7 +51,7 @@ end
 ---Judge a finished testcase.
 ---@param tc table testcase data; reads `.stdin`, `.stdout`, `.expected`
 ---@param checker "builtin"|{ exec: string, args: string[]? } resolved checker spec
----@param compare_method tuna.CompareBuiltin|tuna.CompareMethod builtin compare method
+---@param compare_method tuna.CompareSpec builtin compare method
 ---@param callback fun(correct: boolean?, message: string?) verdict (`nil` => uncheckable/DONE)
 function M.judge(tc, checker, compare_method, callback)
     -- Builtin: plain comparison. Preserves exact/squish/custom behaviour, and

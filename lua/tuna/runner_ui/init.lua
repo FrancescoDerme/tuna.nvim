@@ -93,7 +93,7 @@ local augroup_counter = 0
 local detail_windows = { "so", "eo", "si", "se" }
 
 ---@class tuna.RunnerUI
----@field runner tuna.TCRunner
+---@field runner tuna.RunnerCore
 ---@field config table
 ---@field interface table popup or split interface
 ---@field windows table<string, { bufnr: integer, winid: integer, title: string }>
@@ -109,19 +109,15 @@ local RunnerUI = {}
 RunnerUI.__index = RunnerUI
 
 ---Create a runner UI for `runner` (does not show it yet).
----@param runner tuna.TCRunner
----@return tuna.RunnerUI?
+---@param runner tuna.RunnerCore
+---@return tuna.RunnerUI
 function M.new(runner)
-    local interface
     local kind = runner.config.runner_ui.interface
-    if kind == "popup" then
-        interface = require("tuna.runner_ui.popup")
-    elseif kind == "split" then
-        interface = require("tuna.runner_ui.split")
-    else
-        utils.notify("runner_ui: unknown interface " .. vim.inspect(kind) .. ".")
-        return nil
+    if kind ~= "popup" and kind ~= "split" then
+        utils.notify("runner_ui.interface is " .. vim.inspect(kind) .. ", using popup instead.", "WARN")
+        kind = "popup"
     end
+    local interface = require("tuna.runner_ui." .. kind)
 
     return setmetatable({
         runner = runner,

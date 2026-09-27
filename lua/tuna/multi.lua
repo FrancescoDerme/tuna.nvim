@@ -419,14 +419,7 @@ function MultiRunner:run_cases_parallel()
         return
     end
 
-    local parallel = self.config.multiple_testing
-    if parallel == -1 then
-        parallel = vim.uv.available_parallelism()
-    elseif parallel == 0 then
-        parallel = #self.queue
-    end
-    parallel = math.max(1, parallel)
-    for _ = 1, parallel do
+    for _ = 1, core.parallelism(self.config, #self.queue) do
         self:next_case_lane()
     end
 end
@@ -683,7 +676,7 @@ function M.run(bufnr, opts)
         }
     end
 
-    local timeout = (cfg.maximum_time and cfg.maximum_time > 0) and cfg.maximum_time or nil
+    local timeout = core.time_limit(cfg)
 
     if M.active[bufnr] then
         M.active[bufnr]:kill_all_processes()

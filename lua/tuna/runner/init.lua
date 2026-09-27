@@ -8,12 +8,12 @@
 -- child process.
 --
 -- Everything the results UI touches — `tcdata`, the show/update/resize plumbing, the
--- spawn-and-judge routine (`execute_process`), kill helpers — lives in `RunnerCore`
--- (`runner/core.lua`); `NormalRunner` is a thin subclass that only adds the parallel
--- lane scheduling, completion check, and a fallback results float.
+-- build, the spawn-and-judge routine (`execute_process`), kill helpers — lives in
+-- `RunnerCore` (`runner/core.lua`); `TCRunner` is a thin subclass that only adds the
+-- parallel lanes and the completion check.
 --
--- The "compile" step is modelled as a special testcase at index 1 (`tcnum =
--- "Compile"`): it runs first, and the real testcases only start if it succeeds.
+-- The build is row 1 (`tcnum = "Compile"`): it runs first, and the real testcases only
+-- start if it succeeds.
 
 local config = require("tuna.config")
 local utils = require("tuna.utils")
@@ -23,21 +23,13 @@ local core = require("tuna.runner.core")
 local M = {}
 
 ---@class tuna.TCRunner : tuna.RunnerCore
----@field config table buffer configuration
----@field bufnr integer
 ---@field cc { exec: string, args: string[] }? compile command (nil for interpreted languages)
 ---@field rc { exec: string, args: string[] } run command
----@field checker "builtin"|{ exec: string, args: string[]? } resolved verdict checker
 ---@field compile_directory string
 ---@field running_directory string
----@field tcdata table[] per-testcase status/data/results (1-indexed)
----@field tc_size integer number of entries in tcdata
 ---@field compile boolean whether this run compiles first
 ---@field next_tc integer index of the next unstarted testcase
----@field completed boolean whether the current run has finished
----@field preloaded boolean? rows are testcases listed for review, never run (see `load_testcases`)
----@field ui table? results UI (set by runner_ui)
----@field on_complete fun(runner: tuna.TCRunner)? called once when a run finishes
+---@field mode string the run mode the UI shows
 local TCRunner = core.extend()
 M.TCRunner = TCRunner
 
@@ -96,10 +88,8 @@ function M.new(bufnr)
         rc = run_command,
         checker = resolved_checker,
         compare_method = tools.get_compare(path), -- per-buffer `:Tuna compare` override (nil = use config)
-        -- Resolved against the source's directory only when relative. Joined
-        -- unconditionally, an absolute `/tmp/build` became `<source dir>/tmp/build`
-        -- and a `~/build` a directory literally named `~` — the second visibly wrong,
-        -- the first worse for looking as though it had worked.
+        -- Resolved against the source's directory only when relative, so an absolute
+        -- `/tmp/build` and a `~/build` mean what they say.
         compile_directory = utils.normalize_path(cfg.compile_directory, filedir) .. "/",
         running_directory = utils.normalize_path(cfg.running_directory, filedir) .. "/",
         tcdata = {},
@@ -108,7 +98,7 @@ function M.new(bufnr)
         next_tc = 1,
         completed = false,
         mode = "normal", -- run mode shown in the UI (set by commands)
-    }, TCRunner)
+    }, TCRunner) --[[@as tuna.TCRunner]]
 end
 
 ---Build the `tcdata` rows for a set of testcases: the compile pseudo-testcase first
@@ -130,7 +120,7 @@ function TCRunner:build_rows(tctbl, do_compile)
     -- Insert testcases in ascending tcnum order for a stable display.
     local nums = vim.tbl_keys(tctbl)
     table.sort(nums)
-    local timelimit = (self.config.maximum_time and self.config.maximum_time > 0) and self.config.maximum_time or nil
+    local timelimit = core.time_limit(self.config)
     for _, tcnum in ipairs(nums) do
         local tc = tctbl[tcnum]
         table.insert(self.tcdata, {
@@ -181,8 +171,12 @@ function TCRunner:load_testcases(tctbl, do_compile)
     self.next_tc = self.tc_size + 1
     self.completed = true
     -- Marks these rows as "listed, never run", so re-opening the UI picks up testcases
-    -- added or edited since — results, by contrast, are kept as they are.
+    -- added or edited since — results, by contrast, are kept as they are. Nothing is built
+    -- yet, so a single row's run key builds first (`built_first`).
     self.preloaded = true
+    self:defer_build(function(cont)
+        self:build_solution(cont)
+    end)
     self:update_ui(true)
 end
 
@@ -193,16 +187,17 @@ end
 function TCRunner:run_testcases(tctbl, do_compile)
     -- A re-run keeps the rows it already has, but a *preloaded* runner has never run at
     -- all — its source has not been through `save_sources` once, so this is that source's
-    -- first run and it has to be on disk before the compiler is pointed at it.
+    -- first run and it has to be on disk before the compiler is pointed at it. The build a
+    -- listed runner kept is this run's own, so it is dropped rather than run twice.
     if tctbl or self.preloaded then
         tools.save_sources(self.bufnr, self.config)
     end
+    self.preloaded, self.build = false, nil
     self:refresh_judge(vim.api.nvim_buf_get_name(self.bufnr))
     -- What this run compiles besides the solution: a checker, when it is a program of its
     -- own. Declared before anything is spawned, so the build step is laid out once.
     self:plan_builds({ self.checker })
     self:build_judge()
-    self.preloaded = false
     if tctbl then
         self:build_rows(tctbl, do_compile)
     end
@@ -219,51 +214,23 @@ function TCRunner:run_testcases(tctbl, do_compile)
         return
     end
 
-    -- How many testcases to run concurrently.
-    local parallel = self.config.multiple_testing
-    if parallel == -1 then
-        parallel = vim.uv.available_parallelism()
-    elseif parallel == 0 then
-        parallel = self.tc_size
-    end
-    parallel = math.max(1, parallel)
-
-    if self.compile then
-        self.next_tc = 2
-        self:execute_process(1, self.cc, self.compile_directory, { judge = false }, function()
-            if self.tcdata[1].exit_code == 0 then
-                self:fill_lanes(parallel)
-            else
-                -- compilation failed: skip the rest so the run can complete
-                self.next_tc = self.tc_size + 1
-                self:check_complete()
-            end
-        end)
-    else
-        self.next_tc = 1
-        self:fill_lanes(parallel)
-    end
-end
-
----@private
----Start up to `parallel` testcases; each, on finishing, pulls the next one.
----@param parallel integer
-function TCRunner:fill_lanes(parallel)
-    for _ = 1, parallel do
-        if self.next_tc > self.tc_size then
-            break
-        end
-        local n = self.next_tc
-        self.next_tc = self.next_tc + 1
-        self:execute_process(n, self.rc, self.running_directory, {}, function()
+    self.next_tc = self.compile and 2 or 1
+    self:build_solution(function()
+        for _ = 1, core.parallelism(self.config, self.tc_size) do
             self:run_next_testcase()
-            self:check_complete()
-        end)
-    end
+        end
+    end)
+end
+
+---Nothing will run after a failed build, so the lanes are done and the run completes.
+function TCRunner:on_build_failed()
+    self.next_tc = self.tc_size + 1
+    self:check_complete()
 end
 
 ---@private
----Run the next unstarted testcase, if any (one parallel lane's continuation).
+---Run the next unstarted testcase, if any; each, on finishing, pulls the next one, so
+---starting it `parallel` times keeps that many lanes busy.
 function TCRunner:run_next_testcase()
     if self.next_tc > self.tc_size then
         return
@@ -290,16 +257,12 @@ function TCRunner:check_complete()
     self.completed = true
     core.save_buffer_verdict(self.bufnr, self.tcdata)
     self:update_ui(true)
-    if self.on_complete then
-        self.on_complete(self)
-    end
-    if not self.ui then
-        self:display_results()
-    end
 end
 
----Re-run a single testcase (used by the UI's "run again"). Resets that entry and
----executes it with the appropriate command/directory.
+---Re-run a single row (the UI's "run again"). The Compile row is the build, so running it
+---builds. A testcase row of a runner that was only listed builds first (`built_first`),
+---since nothing it would spawn exists yet, and is reset only once the build succeeded: a
+---build that fails leaves it saying `NOT RUN`, which is the truth.
 ---@param tcindex integer
 function TCRunner:run_single(tcindex)
     local tc = self.tcdata[tcindex]
@@ -310,101 +273,23 @@ function TCRunner:run_single(tcindex)
     -- idle, or the structural edits (`n`/`x`/`c`/`u`) that wait on `idle()` would be
     -- let through mid-flight. `check_complete` flips it back once the row settles.
     self.completed = false
-    self:refresh_judge(vim.api.nvim_buf_get_name(self.bufnr))
-    -- These rows were only ever *listed* (`:Tuna show_ui` before any run), so nothing has
-    -- been built: running one on its own would spawn a binary that does not exist yet and
-    -- report `ENOENT` as the testcase's verdict. Compile first, then run the row — the
-    -- compile step is a row of its own, so the build is watched in the UI either way.
-    local build_first = self.preloaded and self.compile and tcindex ~= 1
-    self.preloaded = false
-    if build_first then
-        tools.save_sources(self.bufnr, self.config)
-        self:reset_row(self.tcdata[1])
-        self:execute_process(1, self.cc, self.compile_directory, { judge = false }, function()
-            if self.tcdata[1].exit_code == 0 then
-                -- Reset only now: a build that fails leaves the row saying `NOT RUN`,
-                -- which is the truth — clearing it up front would blank the row and
-                -- report the compile error as if the testcase itself had no verdict.
-                self:reset_row(tc)
-                self:execute_process(tcindex, self.rc, self.running_directory, {}, function()
-                    self:check_complete()
-                end)
-            else
-                self:check_complete()
-            end
-        end)
+    local function settle()
+        self:check_complete()
+    end
+    if tc.compile then
+        if not self:built_first(settle) then
+            self:build_solution(settle)
+        end
         return
     end
+    if self:built_first(function()
+        self:run_single(tcindex)
+    end) then
+        return
+    end
+    self:refresh_judge(vim.api.nvim_buf_get_name(self.bufnr))
     self:reset_row(tc)
-    if tcindex == 1 and self.compile then
-        self:execute_process(tcindex, self.cc, self.compile_directory, { judge = false }, function()
-            self:check_complete()
-        end)
-    else
-        self:execute_process(tcindex, self.rc, self.running_directory, {}, function()
-            self:check_complete()
-        end)
-    end
-end
-
----@private
----Temporary results display used when the runner UI can't be created: a read-only
----float summarising each testcase, with expected/actual shown on a mismatch.
-function TCRunner:display_results()
-    local lines = {}
-    for _, tc in ipairs(self.tcdata) do
-        local label = type(tc.tcnum) == "number" and ("Testcase " .. tc.tcnum) or tostring(tc.tcnum)
-        local timestr = (tc.time and tc.time >= 0) and (" (" .. tc.time .. "ms)") or ""
-        table.insert(lines, ("%-12s %s%s"):format(label, tc.status, timestr))
-        if tc.stderr and tc.stderr ~= "" then
-            table.insert(lines, "  stderr:")
-            for _, l in ipairs(vim.split(tc.stderr:gsub("%s+$", ""), "\n", { plain = true })) do
-                table.insert(lines, "    " .. l)
-            end
-        end
-        if tc.status == "WRONG" then
-            table.insert(lines, "  expected:")
-            for _, l in ipairs(vim.split((tc.expected or ""):gsub("%s+$", ""), "\n", { plain = true })) do
-                table.insert(lines, "    " .. l)
-            end
-            table.insert(lines, "  got:")
-            for _, l in ipairs(vim.split((tc.stdout or ""):gsub("%s+$", ""), "\n", { plain = true })) do
-                table.insert(lines, "    " .. l)
-            end
-        end
-    end
-    if #lines == 0 then
-        lines = { "no results" }
-    end
-
-    local buf = vim.api.nvim_create_buf(false, true)
-    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-    vim.bo[buf].modifiable = false
-    vim.bo[buf].filetype = "tuna"
-
-    local width, height = utils.get_ui_size()
-    local band_row, band_h = utils.float_band()
-    local win_w = math.min(math.max(40, width - 8), 100)
-    local win_h = math.max(1, math.min(#lines + 1, math.floor(height * 0.6), band_h - 2))
-    local win = vim.api.nvim_open_win(buf, true, {
-        relative = "editor",
-        width = win_w,
-        height = win_h,
-        row = band_row + math.max(0, math.floor((band_h - win_h - 2) / 2)),
-        col = math.floor((width - win_w) / 2),
-        border = self.config.floating_border,
-        title = " Results ",
-        title_pos = "center",
-        style = "minimal",
-    })
-    utils.set_border_highlight(win, self.config.floating_border_highlight)
-    for _, key in ipairs({ "q", "<Esc>" }) do
-        vim.keymap.set("n", key, function()
-            if vim.api.nvim_win_is_valid(win) then
-                vim.api.nvim_win_close(win, true)
-            end
-        end, { buffer = buf, nowait = true })
-    end
+    self:execute_process(tcindex, self.rc, self.running_directory, {}, settle)
 end
 
 return M

@@ -58,7 +58,6 @@ M.defaults = {
     -- correct, which is how problems with several valid outputs are judged.
     -- `:Tuna checker off` compares outputs for one problem regardless.
     checker = nil,
-    view_output_diff = false,
 
     -- Helper programs (checker / generator / bruteforce / interactor) for the
     -- stress / interactive / special-judge run modes are discovered by convention:

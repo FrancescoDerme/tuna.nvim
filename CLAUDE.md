@@ -249,18 +249,17 @@ is relative. Every configured path goes through these: compile/running directori
   - `save_testcase(tcnum, input, expected, expect_empty_output)` writes, updates every row
     showing that testcase, clears `bare`, and re-runs, unless the runner is `preloaded`.
 - **One build, for every mode.** `build_solution` spawns the compiler for the Compile row
-  through the same `execute_process` the normal runner uses for row 1, so a build reads the
-  same everywhere: the same verdicts, the same timing, the same answer when a helper beside
-  it failed. `build_all` starts it and the mode's helpers (`build_helpers`) **at once**, each
+  through `execute_process`, with the runner's own commands in normal mode and those of the
+  normal runner a mode holds (`r`) otherwise, so a build reads the same everywhere: the same
+  verdicts, the same timing, the same answer when a helper beside it failed. `build_all` starts it and the mode's helpers (`build_helpers`) **at once**, each
   being its own program with its own compiler: queued one behind another they are most of
   what a run waits for, and the cursor is held on the build step until the last of them
   lands. Its `on_solution` is for what needs only the solution (stress starts the testcases
   already on disk there). A failure stops at `on_build_failed`, the one thing that differs
-  per mode, since what "nothing will run" means is its own (stress `finish()`es its search,
-  interactive sets `completed`).
+  per mode, since what "nothing will run" means is its own (normal ends its lanes, stress
+  `finish()`es its search, interactive sets `completed`).
   `defer_build` keeps that build on the runner for a UI opened with its rows only listed, and
-  `M.compile_row()` is the row itself. Every mode had a copy of all of this, which is why a
-  change to how a build is reported had to be made three times.
+  `M.compile_row()` is the row itself.
 - **The build step is every source the run compiles.** The solution is the Compile row
   itself; each helper the mode needs is a step in `self.builds`, declared up front with
   `plan_builds` (a pane appearing halfway through would re-tile the row under someone reading
@@ -275,6 +274,8 @@ is relative. Every configured path goes through these: compile/running directori
   if the cursor may be handed to the first testcase. Run-all has no build step: each
   solution's build is a row of its own.
 - `effective_compare()` returns the per-buffer override, else the config.
+- `M.time_limit(cfg)` and `M.parallelism(cfg, jobs)` are how every mode reads `maximum_time`
+  and `multiple_testing`.
 - **Local verdicts**: `save_local_verdict(solution, rows)` writes the sidecar's `results` when
   a run finishes: normal `check_complete`, run-all completion and `settle_single`
   (`save_local_verdicts`, each solution over its own case rows), and interactive session ends
@@ -293,8 +294,9 @@ is relative. Every configured path goes through these: compile/running directori
   untouched bare row. An explicit `:Tuna run 5` for a missing testcase reports it and stops
   instead of falling through to a bare run.
 - `load_testcases` builds the same rows as `NOT RUN` with `preloaded = true` (`:Tuna show_ui`
-  before any run). A preloaded runner has built nothing, so `run_single` compiles first
-  (`build_first`) and `run_testcases(nil)` saves sources first.
+  before any run) and keeps the build (`defer_build`), so `run_single` builds first through
+  `built_first` as in every mode, and `run_testcases(nil)` saves sources first. The Compile
+  row's own run key is the build.
 - `:Tuna show_ui` (`commands.show_results_ui`) opens the mode last run in this session, else
   the one saved for the problem (`tools.resolve_mode`), since after a restart nothing has
   run. Interactive, stress and run-all open the same way when they have no runner yet:

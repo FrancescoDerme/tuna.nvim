@@ -1,13 +1,14 @@
 -- lua/tuna/runner/core.lua
 --
--- RunnerCore: the shared base every run mode (normal, stress, interactive, and
--- later run-all) is built on. It owns the half of the runner that the results UI
--- (`runner_ui`) actually talks to — the `tcdata` rows, the UI show/update/resize
--- plumbing, the verdict label, kill helpers — plus one reusable "spawn a process
--- and judge it" routine (`execute_process`). A mode subclass supplies only its own
--- driving loop (parallel lanes / a generation search / interactive sessions) and,
--- if it wants, a `status_settings`/`status_tail`, a `pane_content` override, an `on_ui_shown` hook, a
--- `layout`/`pane_titles` of its own, or `on_details_rendered` to draw the panes it owns.
+-- RunnerCore: the shared base every run mode (normal, stress, interactive, run-all) is
+-- built on. It owns the half of the runner that the results UI (`runner_ui`) talks to —
+-- the `tcdata` rows, the UI show/update/resize plumbing, the verdict label, kill helpers —
+-- the build step every mode shares (`build_all`), and one "spawn a process and judge it"
+-- routine (`execute_process`). A mode subclass supplies its own driving loop (parallel
+-- lanes, a generation search, interactive sessions), what a failed build means to it
+-- (`on_build_failed`), and whichever UI seams it needs (`status_settings`,
+-- `status_tail`, `pane_content`, `on_ui_shown`, `layout`, `pane_titles`,
+-- `on_details_rendered`, `legend_rows`).
 --
 -- Inheritance is plain Lua metatable single-dispatch: `M.extend()` returns a
 -- subclass table chained to `RunnerCore`, and instances `setmetatable(obj, Sub)`.
@@ -17,6 +18,10 @@
 local api = vim.api
 local utils = require("tuna.utils")
 local checker = require("tuna.checker")
+local compare = require("tuna.compare")
+local sidecar = require("tuna.sidecar")
+local testcases = require("tuna.testcases")
+local tools = require("tuna.tools")
 
 local M = {}
 
@@ -28,6 +33,25 @@ M.SKIP = setmetatable({}, {
     end,
 })
 
+---What every mode's runner carries. The build commands come from the normal runner a mode
+---holds (`r`), or are the normal runner's own.
+---@class tuna.RunnerCore
+---@field config table buffer configuration
+---@field bufnr integer the solution's buffer
+---@field tcdata table[] the rows, 1-indexed
+---@field tc_size integer number of rows
+---@field completed boolean whether nothing is in flight
+---@field preloaded boolean? rows are listed for review, never run
+---@field build fun(cont: fun())? the build a listed runner runs first (`defer_build`)
+---@field builds table[]? this run's helper build steps (`plan_builds`)
+---@field checker "builtin"|table the resolved judge (a helper spec when a checker program judges)
+---@field compare_method tuna.CompareSpec? the per-buffer `:Tuna compare` override
+---@field r tuna.TCRunner? the normal runner whose commands a mode runs
+---@field ui tuna.RunnerUI? the results UI, once shown
+---@field last_row_id any? the row the UI was last on (`row_id`)
+---@field deleted_testcases table[]? what `u` restores
+---@field run_single fun(self: tuna.RunnerCore, idx: integer) re-run one row
+---@field run_testcases fun(self: tuna.RunnerCore) re-run every row
 local RunnerCore = {}
 RunnerCore.__index = RunnerCore
 M.RunnerCore = RunnerCore
@@ -44,6 +68,29 @@ function M.answer(text)
         return nil
     end
     return text
+end
+
+---The time limit a solution run is held to, in ms, or nil for none (`maximum_time`).
+---@param cfg table resolved buffer config
+---@return integer?
+function M.time_limit(cfg)
+    local limit = cfg.maximum_time
+    return (limit and limit > 0) and limit or nil
+end
+
+---How many processes run at once over `jobs` of them: `multiple_testing`, where -1 is one per
+---core and 0 is all of them.
+---@param cfg table resolved buffer config
+---@param jobs integer
+---@return integer
+function M.parallelism(cfg, jobs)
+    local parallel = cfg.multiple_testing
+    if parallel == -1 then
+        parallel = vim.uv.available_parallelism()
+    elseif parallel == 0 then
+        parallel = jobs
+    end
+    return math.max(1, parallel)
 end
 
 ---Whether a row's status is a verdict on the solution, what a local verdict counts. A
@@ -78,9 +125,9 @@ function M.save_local_verdict(solution, rows)
             end
         end
     end
-    local hash = total > 0 and require("tuna.utils").file_hash(solution)
+    local hash = total > 0 and utils.file_hash(solution)
     if hash then
-        require("tuna.sidecar").set_entry(solution, "results", { passed = passed, total = total, hash = hash })
+        sidecar.set_entry(solution, "results", { passed = passed, total = total, hash = hash })
     end
 end
 
@@ -89,8 +136,8 @@ end
 ---@param bufnr integer
 ---@param rows table[]
 function M.save_buffer_verdict(bufnr, rows)
-    if vim.api.nvim_buf_is_valid(bufnr) then
-        M.save_local_verdict(vim.api.nvim_buf_get_name(bufnr), rows)
+    if api.nvim_buf_is_valid(bufnr) then
+        M.save_local_verdict(api.nvim_buf_get_name(bufnr), rows)
     end
 end
 
@@ -98,11 +145,11 @@ end
 ---@param solution string absolute path of the solution
 ---@return integer? passed, integer? total
 function M.local_verdict(solution)
-    local entry = require("tuna.sidecar").get_entry(solution, "results")
+    local entry = sidecar.get_entry(solution, "results")
     if not (entry and type(entry.passed) == "number" and type(entry.total) == "number") then
         return nil
     end
-    if entry.hash ~= require("tuna.utils").file_hash(solution) then
+    if entry.hash ~= utils.file_hash(solution) then
         return nil
     end
     return entry.passed, entry.total
@@ -135,14 +182,8 @@ end
 
 ---Show the results UI, creating it on first use.
 function RunnerCore:show_ui()
-    if not self.ui then
-        self.ui = require("tuna.runner_ui").new(self)
-    end
-    if self.ui then
-        self.ui:show_ui()
-    elseif self.display_results then
-        self:display_results() -- normal runner's fallback float
-    end
+    self.ui = self.ui or require("tuna.runner_ui").new(self)
+    self.ui:show_ui()
 end
 
 ---Re-show/refresh the UI after a `VimResized`.
@@ -198,19 +239,19 @@ end
 function RunnerCore:on_build_failed() end
 
 ---Build the solution, driving the Compile row, and then `cont`. A run that has nothing to
----compile goes straight on. The modes that own their Compile row (stress, interactive) spawn
----the compiler through the same `execute_process` the normal runner uses for row 1, so a
----build reads the same everywhere: the same verdicts, the same timing, and the same answer
----when a helper beside it failed (`refresh_build_row`).
+---compile (no Compile row) goes straight on. Every mode builds through here, so a build
+---reads the same everywhere: the same verdicts, the same timing, and the same answer when a
+---helper beside it failed (`refresh_build_row`). The commands are the runner's own for the
+---normal mode and those of the normal runner it holds (`r`) for the others.
 ---@param cont fun() run only when the build succeeded
 function RunnerCore:build_solution(cont)
-    local tc = self.compile_entry
-    if not (tc and self.r and self.r.compile and self.tcdata[1] == tc) then
+    local tc, r = self.tcdata[1], self.r or self
+    if not (tc and tc.compile and r.cc) then
         cont()
         return
     end
     self:reset_row(tc)
-    self:execute_process(1, self.r.cc, self.r.compile_directory, { judge = false }, function()
+    self:execute_process(1, r.cc, r.compile_directory, { judge = false }, function()
         if tc.exit_code == 0 then
             cont()
         else
@@ -282,7 +323,7 @@ end
 ---@param build fun(cont: fun()) what this run builds
 function RunnerCore:defer_build(build)
     self.build = function(cont)
-        require("tuna.tools").save_sources(self.bufnr, self.config)
+        tools.save_sources(self.bufnr, self.config)
         build(cont)
     end
 end
@@ -301,7 +342,7 @@ function RunnerCore:judge_label()
     if type(self.checker) == "table" then
         return vim.fn.fnamemodify(self.checker.source or self.checker.exec, ":t")
     end
-    return require("tuna.compare").method_name(self:effective_compare())
+    return compare.method_name(self:effective_compare())
 end
 
 ---Look the judge up again, as every run does, so a checker added, deleted or switched off
@@ -310,12 +351,11 @@ end
 ---in one place and at one moment, like every helper.
 ---@param solution string absolute path of the solution being run
 function RunnerCore:refresh_judge(solution)
-    local tools = require("tuna.tools")
-    local checker, note = tools.resolve_checker(solution, self.config)
-    self.checker = checker
+    local judge, note = tools.resolve_checker(solution, self.config)
+    self.checker = judge
     self.compare_method = tools.get_compare(solution)
     if note then
-        require("tuna.utils").notify("checker: " .. note .. ", comparing outputs instead.", "WARN")
+        utils.notify("checker: " .. note .. ", comparing outputs instead.", "WARN")
     end
 end
 
@@ -323,7 +363,7 @@ end
 ---relabel a pane; return `M.SKIP` to tell the UI to leave the pane untouched.
 ---@param tc table the selected testcase row
 ---@param name string pane name: "so" | "eo" | "si" | "se"
----@return string|table content, or `M.SKIP`
+---@return string|table|nil content # nil for nothing to show, `M.SKIP` to leave the pane alone
 function RunnerCore:pane_content(tc, name)
     if name == "so" then
         return tc.stdout
@@ -399,7 +439,7 @@ end
 ---halfway through would re-tile the row under someone reading it. A spec with nothing to
 ---compile (a prebuilt binary, an interpreted helper) has no compiler to quote and gets no
 ---pane.
----@param specs table[] helper specs, anything that is not one is skipped
+---@param specs any[] helper specs, anything that is not one is skipped
 function RunnerCore:plan_builds(specs)
     self.builds = {}
     for _, spec in ipairs(specs) do
@@ -415,13 +455,13 @@ end
 ---@param cb fun(ok: boolean, err: string?)
 function RunnerCore:build_helper(spec, cb)
     if not (type(spec) == "table" and spec.compile) then
-        require("tuna.tools").prepare(spec, cb)
+        tools.prepare(spec, cb)
         return
     end
     local step = self:build_step(spec)
     step.failed, step.output = false, nil -- building: no output is what "not done yet" is
     self:update_ui(true)
-    require("tuna.tools").prepare(spec, function(ok, err, output)
+    tools.prepare(spec, function(ok, err, output)
         step.failed = not ok
         step.output = ok and (output or "") or (err or "")
         self:refresh_build_row()
@@ -436,8 +476,9 @@ end
 ---failed or warned says so on the build step, beside every other source, rather than on the
 ---first verdict, where the only place left to say it is a notification.
 function RunnerCore:build_judge()
-    if type(self.checker) == "table" and self.checker.compile then
-        self:build_helper(self.checker, function() end)
+    local spec = self.checker
+    if type(spec) == "table" and spec.compile then
+        self:build_helper(spec, function() end)
     end
 end
 
@@ -572,7 +613,7 @@ function RunnerCore:execute_process(tcindex, cmd, dir, opts, on_done)
     -- the replacement run's.
     local timer
     if timelimit then
-        timer = vim.uv.new_timer()
+        timer = assert(vim.uv.new_timer())
         timer:start(timelimit, 0, function()
             if tc.run_id == run_id and tc.running and tc.handle then
                 tc.timed_out = true
@@ -639,7 +680,7 @@ end
 ---came from wherever that row now sits.
 ---@param tc table
 ---@param run_id integer the spawn token captured by `execute_process`
----@param timer uv_timer_t? that spawn's timeout timer
+---@param timer uv.uv_timer_t? that spawn's timeout timer
 ---@param res vim.SystemCompleted
 ---@param opts table
 ---@param on_done fun()?
@@ -793,7 +834,7 @@ end
 ---@return integer
 function RunnerCore:next_tcnum()
     local used = {}
-    for n in pairs(require("tuna.testcases").buf_get_testcases(self:edit_bufnr())) do
+    for n in pairs(testcases.buf_get_testcases(self:edit_bufnr())) do
         used[n] = true
     end
     for _, tc in ipairs(self.tcdata) do
@@ -812,12 +853,11 @@ end
 ---run-all overrides this to add the testcase to every solution.
 ---@param tcnum integer
 function RunnerCore:add_testcase_row(tcnum)
-    local timelimit = (self.config.maximum_time and self.config.maximum_time > 0) and self.config.maximum_time or nil
     table.insert(self.tcdata, {
         tcnum = tcnum,
         stdin = "",
         expected = nil,
-        timelimit = timelimit,
+        timelimit = M.time_limit(self.config),
         status = "NOT RUN",
         hlgroup = "TunaDone",
     })
@@ -848,7 +888,7 @@ end
 ---@return boolean # whether the write succeeded
 function RunnerCore:save_testcase(tcnum, input, expected, expect_empty_output)
     local ok, err = pcall(function()
-        require("tuna.testcases").buf_save_testcase(self:edit_bufnr(), tcnum, input, expected, expect_empty_output)
+        testcases.buf_save_testcase(self:edit_bufnr(), tcnum, input, expected, expect_empty_output)
     end)
     if not ok then
         utils.notify("could not save testcase " .. tcnum .. ": " .. tostring(err))
@@ -892,13 +932,12 @@ end
 ---@param expected string? text to split instead of the stored expected output
 ---@return boolean # whether anything was split
 function RunnerCore:split_testcase(tcnum, char, input, expected)
-    local tc_module = require("tuna.testcases")
     local bufnr = self:edit_bufnr()
     -- Read before the split, since the split rewrites it. The pane text wins where
     -- there is one: it is the input the user marked up, and the input being split.
-    local before = input or (tc_module.buf_get_testcases(bufnr)[tcnum] or {}).input
+    local before = input or (testcases.buf_get_testcases(bufnr)[tcnum] or {}).input
 
-    local numbers, err, summary = tc_module.buf_split_testcase(bufnr, tcnum, char, input, expected)
+    local numbers, err, summary = testcases.buf_split_testcase(bufnr, tcnum, char, input, expected)
     if not numbers then
         utils.notify("split testcase " .. tcnum .. ": " .. err .. ".")
         return false
@@ -917,7 +956,7 @@ function RunnerCore:split_testcase(tcnum, char, input, expected)
     -- time the answer came the first run would still be in flight, which is precisely
     -- when a re-run is refused. `offer_case_counts` settles either way, so the run
     -- happens whatever the answer, and only once.
-    tc_module.offer_case_counts(bufnr, numbers, before, function()
+    testcases.offer_case_counts(bufnr, numbers, before, function()
         self:run_rows(self:sync_rows(numbers))
     end)
     return true
@@ -929,7 +968,7 @@ end
 ---@param tctbl table<integer, table>? testcases already read, to save a second scan
 ---@return integer[] rows the row indices that stand for them
 function RunnerCore:sync_rows(numbers, tctbl)
-    tctbl = tctbl or require("tuna.testcases").buf_get_testcases(self:edit_bufnr())
+    tctbl = tctbl or testcases.buf_get_testcases(self:edit_bufnr())
     local rows = {}
     for _, n in ipairs(numbers) do
         local case = tctbl[n] or {}

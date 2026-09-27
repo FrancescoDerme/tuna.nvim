@@ -153,6 +153,42 @@ local sidecar = require("tuna.sidecar")
 t.eq("a finished run saves its local verdict, over the testcases it judged", { core.local_verdict(dir .. "/sol.cpp") }, { 0, 1 })
 sidecar.set_entry(dir .. "/sol.cpp", "results", nil)
 
+-- A run that does not compile (`:Tuna run_no_compile`) has no Compile row, and spawns the
+-- solution on every testcase and nothing else.
+stub_system()
+r = require("tuna.runner").new(buf)
+r:run_testcases({ [0] = { input = "1\n" }, [1] = { input = "2\n" } }, false)
+settled(r)
+vim.system = real_system
+t.eq("a run that does not compile spawns only the solution", vim.tbl_map(function(s)
+    return s.argv[1]
+end, spawns), { r.rc.exec, r.rc.exec })
+
+-- How many run at once: `multiple_testing`, where 0 is all of them and -1 one per core.
+t.eq("multiple_testing is how many run at once", core.parallelism({ multiple_testing = 2 }, 5), 2)
+t.eq("0 runs every one at once", core.parallelism({ multiple_testing = 0 }, 5), 5)
+t.eq("-1 runs one per core", core.parallelism({ multiple_testing = -1 }, 5), vim.uv.available_parallelism())
+t.eq("and never fewer than one", core.parallelism({ multiple_testing = 0 }, 0), 1)
+
+-- An interface that does not exist is said once and the results open as a popup, the same
+-- board as ever.
+do
+    local quiet = vim.notify
+    local said = t.capture_notifications()
+    r = require("tuna.runner").new(buf)
+    r.config = vim.deepcopy(r.config)
+    r.config.runner_ui.interface = "tabs"
+    stub_system()
+    r:run_testcases({ [0] = { input = "1\n" } }, true)
+    r:show_ui()
+    settled(r)
+    vim.system = real_system
+    vim.notify = quiet
+    t.has("an unknown interface is reported", table.concat(said, "\n"), "runner_ui.interface is \"tabs\", using popup instead.")
+    t.ok("and the results open as the popup board", r.ui ~= nil and r.ui.interface == require("tuna.runner_ui.popup"), r.ui)
+    r:delete_ui()
+end
+
 --------------------------------------------------------------------------------
 -- No testcases at all: the program still runs, on empty stdin
 --------------------------------------------------------------------------------
@@ -1878,6 +1914,67 @@ do
     t.ok("run-all opens listed too", matrix ~= nil and matrix.ui ~= nil and matrix.ui.ui_visible)
     t.eq("with nothing run", #spawns, 0)
     vim.system = real_system
+
+    -- The normal board listed has built nothing either: a testcase's run key builds first
+    -- through the same build every mode has, and a build that fails leaves the row saying it
+    -- was never run, which is the truth. The Compile row's run key is the build, once.
+    local function listed_normal(compile_code)
+        clear_runners()
+        spawns = {}
+        vim.system = function(argv, opts, on_exit)
+            spawns[#spawns + 1] = { argv = argv, stdin = opts and opts.stdin }
+            local code = argv[1] == compiler and compile_code or 0
+            if on_exit then
+                vim.schedule(function()
+                    on_exit({ code = code, signal = 0, stdout = "", stderr = "" })
+                end)
+            end
+            return { kill = function() end, wait = function() return { code = code } end, pid = 0 }
+        end
+        C.run_testcases(rbuf, nil, true, true)
+        return C.runners[rbuf]
+    end
+    local function commands_run()
+        return vim.tbl_map(function(s)
+            return s.argv[1]
+        end, spawns)
+    end
+    local nr = listed_normal(0)
+    nr:run_single(2)
+    settle_ms(300)
+    t.eq("a listed normal board's run key builds, then runs the row", commands_run(), { compiler, "./sol" })
+    t.ok("which then has a verdict", nr.tcdata[2].status ~= "NOT RUN", nr.tcdata[2].status)
+
+    nr = listed_normal(1)
+    nr:run_single(2)
+    settle_ms(300)
+    t.eq("a build that fails runs nothing behind it", commands_run(), { compiler })
+    t.eq("and leaves the row saying it was never run", nr.tcdata[2].status, "NOT RUN")
+    t.eq("with the runner idle again", nr:idle(), true)
+
+    nr = listed_normal(0)
+    nr:run_single(1)
+    settle_ms(300)
+    t.eq("the Compile row's run key builds once", commands_run(), { compiler })
+    t.eq("and settles", nr:idle(), true)
+
+    -- An interpreted solution builds nothing, but its first run still saves it: the row runs
+    -- the file on disk.
+    local py = rdir .. "/sol.py"
+    t.write(rdir, "sol.py", "print(1)\n")
+    vim.cmd("edit " .. py)
+    vim.bo.filetype = "python"
+    local pybuf = vim.api.nvim_get_current_buf()
+    stub_system()
+    C.run_testcases(pybuf, nil, true, true)
+    vim.api.nvim_buf_set_lines(pybuf, 0, -1, false, { "print(2)" })
+    C.runners[pybuf]:run_single(1)
+    settle_ms(300)
+    t.eq("a listed interpreted solution is saved before its first row runs", vim.fn.readfile(py), { "print(2)" })
+    C.runners[pybuf]:delete_ui()
+    C.runners[pybuf] = nil
+    vim.system = real_system
+    vim.cmd("buffer " .. rbuf)
 
     clear_runners()
     vim.fn.delete(rdir, "rf")
