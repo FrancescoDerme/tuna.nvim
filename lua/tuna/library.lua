@@ -31,6 +31,16 @@ local config = require("tuna.config")
 
 local M = {}
 
+---One insertable piece of the library: a guarded snippet, or a whole file with no guards.
+---@class tuna.Snippet
+---@field name string
+---@field lines string[]
+---@field first integer the line of its file it starts on
+---@field file string? its file, relative to the library root
+---@field path string? its file's absolute path
+---@field whole boolean? a whole file rather than a guarded snippet
+---@field body string? its code, lowercased with whitespace removed, for searching
+
 --------------------------------------------------------------------------------
 -- Scanning
 --------------------------------------------------------------------------------
@@ -45,7 +55,7 @@ local function roots(cfg)
     end
     local out = {}
     for _, p in ipairs(type(spec) == "table" and spec or { spec }) do
-        local dir = vim.fs.normalize(vim.fn.expand(p))
+        local dir = utils.normalize_path(utils.expand_home(p))
         if utils.directory_exists(dir) then
             out[#out + 1] = dir
         end
@@ -62,15 +72,14 @@ function M.files(cfg, ext)
     local out = {}
     for _, root in ipairs(roots(cfg)) do
         local ok = pcall(function()
-            for name, typ in
-                vim.fs.dir(root, {
-                    depth = lib.depth or 3,
-                    skip = function(d)
-                        return d:sub(1, 1) ~= "."
-                    end,
-                })
-            do
-                if typ == "file" and name:sub(1, 1) ~= "." and name:match("%.([^./]+)$") == ext then
+            -- Dot-directories and dotfiles are never library code, at any depth: `vim.fs.dir`
+            -- hands `skip` and the loop paths relative to the root, so each is judged by its
+            -- own name.
+            local function visible(rel)
+                return vim.fs.basename(rel):sub(1, 1) ~= "."
+            end
+            for name, typ in vim.fs.dir(root, { depth = lib.depth or 3, skip = visible }) do
+                if typ == "file" and visible(name) and name:match("%.([^./]+)$") == ext then
                     out[#out + 1] = { path = root .. "/" .. name, rel = name }
                 end
             end
@@ -93,7 +102,7 @@ end
 ---— a typo'd `end` would otherwise make a snippet mysteriously reach to end of file.
 ---@param lines string[]
 ---@param marker string
----@return { name: string, lines: string[], first: integer }[] snippets, string? warning
+---@return tuna.Snippet[] snippets, string? warning
 function M.parse(lines, marker)
     local open_pat = marker .. ":%s*(.-)%s+start%s*$"
     local close_pat = marker .. ":%s*(.-)%s+end%s*$"
@@ -120,10 +129,11 @@ function M.parse(lines, marker)
     return out, unclosed and ("unclosed '" .. unclosed .. "' guard") or nil
 end
 
----The snippets of one library file.
+---The snippets of one library file, warning about an unclosed guard in it. A picker reads a
+---file through `parsed_once`, so the warning comes once however often its preview is drawn.
 ---@param file { path: string, rel: string }
 ---@param cfg table
----@return { name: string, lines: string[], first: integer }[]
+---@return tuna.Snippet[]
 local function snippets_of(file, cfg)
     local content = utils.read_file(file.path)
     if not content then
@@ -138,6 +148,18 @@ local function snippets_of(file, cfg)
         s.path = file.path
     end
     return snips
+end
+
+---`snippets_of` for one picker, each file parsed once: its preview is drawn on every move
+---of the cursor.
+---@param cfg table
+---@return fun(file: { path: string, rel: string }): tuna.Snippet[]
+local function parsed_once(cfg)
+    local seen = {}
+    return function(file)
+        seen[file.path] = seen[file.path] or snippets_of(file, cfg)
+        return seen[file.path]
+    end
 end
 
 --------------------------------------------------------------------------------
@@ -173,7 +195,7 @@ local function reindent(lines, indent)
 end
 
 ---Insert a snippet below the cursor and leave the cursor on its first line.
----@param snippet { name: string, lines: string[], file: string? }
+---@param snippet tuna.Snippet
 ---@param bufnr integer
 function M.insert(snippet, bufnr)
     local win = vim.fn.bufwinid(bufnr)
@@ -267,23 +289,35 @@ local function choose_snippet(snips, bufnr, restore, label)
     )
 end
 
+---The shared preamble of every picker: resolve the config, the buffer's extension
+---and check the library is configured at all.
+---@param bufnr integer
+---@return table? cfg, string? ext
+local function picker_context(bufnr)
+    config.load_buffer_config(bufnr)
+    local cfg = config.get_buffer_config(bufnr)
+    local ext = buffer_ext(bufnr)
+    if not ext then
+        utils.notify("library: this buffer has no file extension, so no library to match it.", "WARN")
+        return nil
+    end
+    if #roots(cfg) == 0 then
+        utils.notify("library: set `library.path` to your snippet directory first.", "WARN")
+        return nil
+    end
+    return cfg, ext
+end
+
 ---`:Tuna lib` — pick a library file, then a snippet inside it.
 ---@param bufnr integer? defaults to the current buffer
 function M.browse(bufnr)
     bufnr = bufnr or vim.api.nvim_get_current_buf()
-    config.load_buffer_config(bufnr)
-    local cfg = config.get_buffer_config(bufnr)
     local restore = vim.api.nvim_get_current_win()
-
-    local ext = buffer_ext(bufnr)
-    if not ext then
-        utils.notify("library: this buffer has no file extension, so no library to match it.", "WARN")
+    local cfg, ext = picker_context(bufnr)
+    if not (cfg and ext) then
         return
     end
-    if #roots(cfg) == 0 then
-        utils.notify("library: set `library.path` to your snippet directory first.", "WARN")
-        return
-    end
+    local snippets_in = parsed_once(cfg)
 
     local files = M.files(cfg, ext)
     if #files == 0 then
@@ -300,7 +334,7 @@ function M.browse(bufnr)
         "Library",
         function(idx)
             local file = files[idx]
-            local snips = snippets_of(file, cfg)
+            local snips = snippets_in(file)
             if #snips == 0 then
                 -- Nothing is marked up, so there is nothing to pick from — but the file is
                 -- still a perfectly good thing to copy whole, which is what the library was
@@ -337,7 +371,7 @@ function M.browse(bufnr)
             end
             -- Preview the file's snippet names when it has any, the file itself when not:
             -- the question at this step is "is what I want in here?".
-            local snips = snippets_of(f, cfg)
+            local snips = snippets_in(f)
             if #snips == 0 then
                 return { title = f.rel, lines = vim.split(utils.read_file(f.path) or "", "\n", { plain = true }) }
             end
@@ -384,32 +418,13 @@ local function catalogue(cfg, ext, whole_files)
     return all
 end
 
----The shared preamble of the flat pickers: resolve the config, the buffer's extension
----and check the library is configured at all.
----@param bufnr integer
----@return table? cfg, string? ext
-local function picker_context(bufnr)
-    config.load_buffer_config(bufnr)
-    local cfg = config.get_buffer_config(bufnr)
-    local ext = buffer_ext(bufnr)
-    if not ext then
-        utils.notify("library: this buffer has no file extension, so no library to match it.", "WARN")
-        return nil
-    end
-    if #roots(cfg) == 0 then
-        utils.notify("library: set `library.path` to your snippet directory first.", "WARN")
-        return nil
-    end
-    return cfg, ext
-end
-
 ---`:Tuna lib snippet` — pick straight from every snippet in the library.
 ---@param bufnr integer? defaults to the current buffer
 function M.pick(bufnr)
     bufnr = bufnr or vim.api.nvim_get_current_buf()
     local restore = vim.api.nvim_get_current_win()
     local cfg, ext = picker_context(bufnr)
-    if not cfg then
+    if not (cfg and ext) then
         return
     end
 
@@ -476,7 +491,7 @@ function M.search(bufnr)
     local action_state = require("telescope.actions.state")
 
     local cfg, ext = picker_context(bufnr)
-    if not cfg then
+    if not (cfg and ext) then
         return
     end
 

@@ -2,8 +2,8 @@
 --
 -- What `:Tuna last` and the menu remember: the last problems and contests, most recent
 -- first and as many of each as `recent.problems`/`recent.contests` ask, a revisited one
--- moving back to the top, one whose directory is gone forgotten, and a state file holding a
--- single problem or contest reading as a history of one.
+-- moving back to the top, one whose directory is gone forgotten, and the histories read back
+-- from the state file.
 
 local t = dofile("tests/harness.lua")
 -- This test writes the state file, so it only runs where `stdpath("state")` is a throwaway
@@ -11,13 +11,13 @@ local t = dofile("tests/harness.lua")
 assert(vim.env.XDG_STATE_HOME and vim.env.XDG_STATE_HOME ~= "", "run through tests/run.sh")
 
 local store_dir = vim.fn.stdpath("state") .. "/tuna"
-local legacy = t.tempdir()
-t.write(legacy, "main.cpp", "int main() {}\n")
-local legacy_contest = t.tempdir()
+local stored = t.tempdir()
+t.write(stored, "main.cpp", "int main() {}\n")
+local stored_contest = t.tempdir()
 vim.fn.mkdir(store_dir, "p")
 t.write(store_dir, "recent.json", vim.json.encode({
-    problem = { file = legacy .. "/main.cpp", dir = legacy, name = "L" },
-    contest = { dir = legacy_contest, name = "LC" },
+    problems = { { file = stored .. "/main.cpp", dir = stored, name = "L" } },
+    contests = { { dir = stored_contest, name = "LC", judge = "codeforces" } },
 }))
 
 require("tuna").setup({})
@@ -37,8 +37,8 @@ local function contests()
     end, recent.snapshot().contests or {})
 end
 
-t.eq("a state file with one problem reads as a history of one", files(), { legacy .. "/main.cpp" })
-t.eq("and one with one contest too", contests(), { legacy_contest })
+t.eq("the problems in the state file are read back", files(), { stored .. "/main.cpp" })
+t.eq("and the contests", contests(), { stored_contest })
 t.eq("five problems and three contests by default", { cfg.recent.problems, cfg.recent.contests }, { 5, 3 })
 
 --------------------------------------------------------------------------------
@@ -55,7 +55,7 @@ local function file_of(i)
     return norm(dirs[i] .. "/main.cpp")
 end
 t.eq("five are kept, the most recent first", files(), { file_of(6), file_of(5), file_of(4), file_of(3), file_of(2) })
-t.eq("problems outside any contest leave the contests alone", contests(), { legacy_contest })
+t.eq("problems outside any contest leave the contests alone", contests(), { stored_contest })
 
 recent.record_problem(dirs[3] .. "/main.cpp", cfg)
 t.eq("a problem visited again moves back to the top, once", files(), { file_of(3), file_of(6), file_of(5), file_of(4), file_of(2) })
@@ -108,17 +108,6 @@ recent.open_contest(2)
 t.eq("any of them can be opened, at the problem last visited in it", norm(vim.api.nvim_buf_get_name(0)), cs[2] .. "/B/main.cpp")
 t.eq("which brings it back to the top", contests(), { cs[2], cs[3] })
 
--- A contest with no judge recorded, as the menu names it.
-local cf = t.tempdir()
-vim.fn.mkdir(cf .. "/B", "p")
-local group = "Codeforces - Codeforces Round 1120 (Div. 2)"
-t.write(cf .. "/B", ".tuna.json", vim.json.encode({ group = group, url = "https://codeforces.com/contest/2263/problem/B" }))
-local legacy_entry = { dir = cf, name = "2263", problem = cf .. "/B/main.cpp" }
-t.eq("a contest with no judge takes it from its last problem's sidecar", { recent.contest_label(legacy_entry, cfg) }, { "codeforces", "2263" })
-legacy_entry.name = group
-t.eq("and its contest name too, when named by the raw group", { recent.contest_label(legacy_entry, cfg) }, { "codeforces", "2263" })
-t.eq("a recorded judge is kept", { recent.contest_label({ dir = cf, name = "abc400", judge = "atcoder" }, cfg) }, { "atcoder", "abc400" })
-
 --------------------------------------------------------------------------------
 -- How many
 --------------------------------------------------------------------------------
@@ -139,6 +128,5 @@ t.eq("the histories are what gets written, in order", {
         return c.dir
     end, written.contests),
 }, { files(), contests() })
-t.eq("with no single problem or contest beside them", { written.problem, written.contest }, {})
 
 t.report()

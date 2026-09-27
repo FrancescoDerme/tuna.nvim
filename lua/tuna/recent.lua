@@ -99,15 +99,10 @@ local function load()
     end
     local ok, decoded = pcall(vim.json.decode, content)
     if ok and type(decoded) == "table" then
-        M.state = decoded
-        -- A state file holding a single `problem` or `contest` is a history of one.
-        if type(M.state.problems) ~= "table" then
-            M.state.problems = type(M.state.problem) == "table" and { M.state.problem } or nil
-        end
-        if type(M.state.contests) ~= "table" then
-            M.state.contests = type(M.state.contest) == "table" and { M.state.contest } or nil
-        end
-        M.state.problem, M.state.contest = nil, nil
+        M.state = {
+            problems = type(decoded.problems) == "table" and decoded.problems or nil,
+            contests = type(decoded.contests) == "table" and decoded.contests or nil,
+        }
     end
 end
 
@@ -144,7 +139,7 @@ local function persist()
     if timer then
         timer:stop()
     else
-        timer = vim.uv.new_timer()
+        timer = assert(vim.uv.new_timer())
     end
     timer:start(WRITE_DELAY, 0, function()
         vim.schedule(M.flush)
@@ -161,12 +156,8 @@ end
 ---@param cfg table
 ---@return table?
 local function sidecar_task(dir, cfg)
-    local content = utils.read_file(require("tuna.sidecar").path(dir, cfg))
-    if not content then
-        return nil
-    end
-    local ok, store = pcall(vim.json.decode, content)
-    if ok and type(store) == "table" and type(store.group) == "string" and store.group ~= "" then
+    local store = require("tuna.sidecar").read_or_nil(dir, cfg)
+    if store and type(store.group) == "string" and store.group ~= "" then
         return store
     end
     return nil
@@ -414,11 +405,12 @@ function M.open_problem(index)
         -- The directory survived but the file was renamed or written in another
         -- language: open whatever solution is in there rather than giving up.
         local cfg = config.load_local_config_and_extend(p.dir)
-        file = require("tuna.navigate").solution_in(p.dir, p.file, cfg)
-        if not file then
+        local other = require("tuna.navigate").solution_in(p.dir, p.file, cfg)
+        if not other then
             utils.notify("last: '" .. pretty(p.file) .. "' no longer exists.", "WARN")
             return
         end
+        file = other
     end
 
     open_at(file, p.dir)
@@ -493,24 +485,6 @@ function M.contest_problems(dir, like, cfg)
         end
     end
     return files
-end
-
----A contest's judge and name, as the menu shows them. An entry carrying no judge takes it
----from the sidecar of the problem last visited in it, and when the entry is named by the raw
----sidecar group, the contest name that group parses into as well.
----@param contest tuna.RecentContest
----@param cfg table
----@return string? judge, string name
-function M.contest_label(contest, cfg)
-    if contest.judge or not contest.problem then
-        return contest.judge, contest.name
-    end
-    local task = sidecar_task(vim.fs.dirname(contest.problem), cfg)
-    if not task then
-        return nil, contest.name
-    end
-    local judge, parsed = require("tuna.judges").parse(task, cfg.judge_parsers)
-    return judge, contest.name == task.group and parsed or contest.name
 end
 
 ---`:Tuna last contest` — cd to the contest last worked on and open a problem in it.

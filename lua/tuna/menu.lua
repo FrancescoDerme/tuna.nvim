@@ -222,11 +222,7 @@ local function recent_entries()
     local recent = require("tuna.recent")
     local st = recent.snapshot() or {}
     local contests = entries_of(st.contests or {}, function(_, c)
-        local cfg = vim.fn.isdirectory(c.dir or "") == 1 and config.load_local_config_and_extend(c.dir)
-            or config.current_setup
-            or config.defaults
-        local judge, name = recent.contest_label(c, cfg)
-        return name or vim.fn.fnamemodify(c.dir or "", ":t"), judge
+        return c.name or vim.fn.fnamemodify(c.dir or "", ":t"), c.judge
     end, contest_status, recent.open_contest)
 
     local names = problem_names(st.problems or {})

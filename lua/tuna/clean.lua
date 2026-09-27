@@ -312,8 +312,15 @@ local function base_dir_of(path_str)
     if type(path_str) ~= "string" or path_str == "" then
         return nil
     end
-    local home = vim.uv.os_homedir()
-    local s = path_str:gsub("^~", home):gsub("%$%(HOME%)", home):gsub("%$%(CWD%)", vim.fn.getcwd())
+    local home, cwd = vim.uv.os_homedir() or "", vim.fn.getcwd()
+    -- Replaced through functions, so a `%` in either path is not read as a capture.
+    local s = utils.expand_home(path_str)
+        :gsub("%$%(HOME%)", function()
+            return home
+        end)
+        :gsub("%$%(CWD%)", function()
+            return cwd
+        end)
     local mod = s:find("%$%b()")
     if mod then
         s = s:sub(1, mod - 1)
@@ -371,11 +378,14 @@ local function skip_set(cfg)
 end
 
 ---A `vim.fs.dir` `skip` predicate: false stops the walk descending into that
----directory, which is the only place pruning actually saves anything.
+---directory, which is the only place pruning actually saves anything. It is handed the
+---path relative to the scan's root (`contest/A/.git`), so the rule is read off the
+---directory's own name, at every depth.
 ---@param skips table<string, boolean>
----@return fun(name: string): boolean
+---@return fun(rel: string): boolean
 local function descend_into(skips)
-    return function(name)
+    return function(rel)
+        local name = vim.fs.basename(rel)
         return not (skips[name] or name:sub(1, 1) == ".")
     end
 end
@@ -513,7 +523,8 @@ local ARTIFACT_EXTS = { exe = true, out = true, o = true, obj = true, class = tr
 ---not empty.
 ---@param dir string
 ---@param name string basename
----@param ctx table scan context, whose `artifacts` maps a directory to the stems removed from it
+---@param ctx { artifacts: table<string, table<string, boolean>>? } scan context, whose
+---  `artifacts` maps a directory to the stems removed from it
 ---@return boolean
 local function is_artifact(dir, name, ctx)
     local stems = ctx.artifacts and ctx.artifacts[vim.fs.normalize(dir)]
@@ -608,7 +619,7 @@ local function protected_dirs(root, cfg, bufnr)
     end
     add(root)
     add(vim.fn.getcwd())
-    local home = vim.fs.normalize(vim.env.HOME or vim.fn.expand("~"))
+    local home = vim.fs.normalize(utils.expand_home("~"))
     add(home)
     for _, d in ipairs(xdg_user_dirs(home)) do
         add(d)
@@ -617,7 +628,7 @@ local function protected_dirs(root, cfg, bufnr)
         add(d)
     end
     for _, d in ipairs((cfg.clean or {}).protected_dirs or {}) do
-        add(vim.fn.expand(d))
+        add(utils.normalize_path(utils.expand_home(d)))
     end
     local name = bufnr and api.nvim_buf_is_valid(bufnr) and api.nvim_buf_get_name(bufnr) or ""
     if name ~= "" then
@@ -638,7 +649,7 @@ end
 ---evaluated from two different starting points (the targeted pass over what the run
 ---emptied, and the general sweep) without walking any subtree twice.
 ---@param dir string
----@param ctx { pats: string[], protected: table<string, boolean>, skips: table<string, boolean>, budget: table, decided: table<string, { removable: boolean, files: integer }> }
+---@param ctx { pats: string[], protected: table<string, boolean>, skips: table<string, boolean>, budget: table, decided: table<string, { removable: boolean, files: integer }>, artifacts: table<string, table<string, boolean>>? }
 ---@param out { path: string, files: integer }[] collected, deepest first
 ---@param depth number levels left to descend
 ---@return boolean removable whether `dir` itself could go
@@ -833,7 +844,7 @@ end
 ---@param files { path: string, rel: string, reason: string, sim: number }[]
 ---@param i integer index into `files`
 ---@param restore integer? window to refocus after each menu
----@param stats { deleted: integer, dirs: integer, emptied: table<string, boolean>, stopped: boolean? }
+---@param stats { deleted: integer, dirs: integer, emptied: table<string, boolean>, artifacts: table<string, table<string, boolean>>, stopped: boolean? }
 ---@param ui { width: integer, notice: table?, row: integer? } fixed menu width shared by every file
 ---  this run, plus an optional notice pane shown above each prompt
 ---@param done fun() continuation, run once the last file has been decided
@@ -970,13 +981,6 @@ local function confirm_dirs(dirs, i, restore, stats, ui, done)
     end, restore, nil, preview, ui.notice, ui.row)
 end
 
----Offer to remove the directories left empty — either found that way or emptied by
----the file pass just run.
----@param root string
----@param cfg table
----@param bufnr integer?
----@param restore integer?
----@param stats { deleted: integer, dirs: integer, emptied: table<string, boolean>, stopped: boolean? }
 ---The pane shown above every confirmation when a scan could not cover its whole tree,
 ---so the caveat sits in front of the user at the moment of deciding instead of being a
 ---command-line line they have already scrolled past.
@@ -1000,6 +1004,13 @@ local function truncation_notice(stats, dir, cfg)
     }
 end
 
+---Offer to remove the directories left empty — either found that way or emptied by
+---the file pass just run.
+---@param root string
+---@param cfg table
+---@param bufnr integer?
+---@param restore integer?
+---@param stats { deleted: integer, dirs: integer, emptied: table<string, boolean>, artifacts: table<string, table<string, boolean>>, stopped: boolean?, truncated: boolean?, found: integer? }
 ---@param depth number how far the file scan reached, so both passes cover the same area
 ---@param done fun()
 local function prune_dirs(root, cfg, bufnr, restore, stats, depth, done)
@@ -1085,7 +1096,7 @@ local function validate_dir(text)
     if text == "" then
         return nil, "clean: enter a directory to scan."
     end
-    local dir = vim.fs.normalize(vim.fn.expand(text))
+    local dir = utils.normalize_path(utils.expand_home(text))
     if not utils.directory_exists(dir) then
         return nil, "clean: '" .. dir .. "' is not a directory."
     end
@@ -1129,7 +1140,7 @@ end
 ---@param threshold number similarity threshold in [0,1]
 ---@param bufnr integer? the buffer `:Tuna clean` was launched from
 local function scan_and_confirm(dir, cfg, restore, depth, threshold, bufnr)
-    dir = vim.fs.normalize(vim.fn.expand(dir))
+    dir = utils.normalize_path(utils.expand_home(dir))
     if not utils.directory_exists(dir) then
         utils.notify("clean: '" .. dir .. "' is not a directory.")
         return
@@ -1202,6 +1213,9 @@ end
 -- `M.clean` would mean driving a chooser form and a confirmation per file. Not part of
 -- the plugin's interface.
 M._test = {
+    base_dir_of = base_dir_of,
+    scan = scan,
+    validate_dir = validate_dir,
     classify = classify,
     solution_templates = solution_templates,
     similarity = similarity,

@@ -826,7 +826,8 @@ specific Vim error about a buffer the user never opened.
     `Delete`/`Keep`/`Stop` menu per file with a preview, sorted by match, at a fixed width,
     each starting on the answer last given (`ui.row`), and the same for directories.
   - **Scan cost is bounded**: pruning at traversal (`descend_into`, `clean.skip_dirs`,
-    dot-directories), a shared `clean.max_entries` budget reported through the `notice` pane,
+    dot-directories, judged by the directory's own name at every depth: `vim.fs.dir` hands
+    `skip` the path relative to the root), a shared `clean.max_entries` budget reported through the `notice` pane,
     early rejection on the line-count ceiling, and a 1 MiB size guard.
   - **Directory pass**: offers directories left empty apart from disposable files (testcases,
     the sidecar, and `is_artifact` build outputs of a solution *this run* removed). Directories
@@ -838,7 +839,10 @@ specific Vim error about a buffer the user never opened.
     and buffers of deleted files are wiped.
 - **`library.lua`**: snippets are regions between `library.marker` guard comments in plain
   source files; files without guards are offered whole. Only files with the current buffer's
-  extension are shown. Snippets are inserted dedented and re-indented to the cursor line.
+  extension are shown, dotfiles and dot-directories left out at every depth, and
+  `library.path` goes through `expand_home`/`normalize_path`. Snippets are inserted dedented
+  and re-indented to the cursor line. A picker parses each file once (`parsed_once`), since
+  its preview is drawn on every cursor move, so an unclosed guard warns once.
   `:Tuna lib search` uses telescope when present, fuzzy-matching `name + file` only; a body
   match is appended to the ordinal so it ranks below name matches (fuzzy-matching bodies swamps
   the sorter).
@@ -849,16 +853,15 @@ specific Vim error about a buffer the user never opened.
   `VimLeavePre`, read once per session. It holds `problems` and `contests`, most recent first
   and capped by `recent.problems`/`recent.contests` (read from `config.current_setup` when
   recording). `push_front` moves a recorded entry to the top and drops entries whose
-  directory is gone. A file holding a single `problem` or `contest` loads as a list of one.
+  directory is gone.
   `open_problem(i)`/`open_contest(i)` open any of them, 1 by default.
   - A `BufEnter` records a buffer only when it looks like a problem (runnable, non-helper,
     with testcases or a sidecar beside it).
   - Recording a problem inside a remembered contest moves that contest to the top with the
     problem as its `problem`, even when the problem was already on top. A contest is
     otherwise recorded by downloads, or inferred when a sibling problem shares the sidecar
-    `group`. Both store the `judge` and contest `judges.parse` gives, and `contest_label`
-    reads an entry without a judge from its last problem's sidecar (the parsed contest too,
-    when the entry is named by the raw group).
+    `group`. Both store the `judge` and contest `judges.parse` gives, which is how the menu
+    names a contest.
   - `change_dir` honours `cd_command` (`cd`/`tcd`/`lcd`/`false`). `snapshot()` returns the
     loaded state for the menu. `contest_problems` lists a contest's solutions in both
     layouts (plain files in the contest directory, and one per problem directory).
@@ -966,9 +969,11 @@ specific Vim error about a buffer the user never opened.
     squeezing a `format` column before the others, and the real menu's titles and
     free-standing banner;
   - `recent.lua`: both histories (default and configured sizes, move to top, a problem
-    bringing its contest back, contests named by their parsed judge and contest or from the
-    sidecar when no judge was recorded, dropping deleted directories, loading single-entry files,
-    opening any entry, what is written);
+    bringing its contest back, contests named by the judge and contest recorded with them,
+    dropping deleted directories, reading the state file back, opening any entry, what is
+    written);
+  - `library.lua`: the files listed for a language (no dotfiles at any depth, `~` in
+    `library.path`), guarded snippets, and an unclosed guard warned about once per picker;
   - `modes.lua`: the helper and run-setting rule end to end: availability (files, configured
     paths and commands, missing ones), automatic choices, forcing and `auto`, forced settings
     giving way and coming back, old sidecar entries, runners refreshing the checker per run,

@@ -393,7 +393,7 @@ function M.absorb(filepath, cfg, template)
             pcall(vim.api.nvim_win_set_cursor, win, { math.min(row, vim.api.nvim_buf_line_count(buf)), 0 })
         end
     end
-    utils.notify("temp: scratch folded into " .. vim.fn.fnamemodify(filepath, ":~:."), "INFO")
+    utils.notify("temp: scratch folded into " .. vim.fn.fnamemodify(filepath, ":~:.") .. ".", "INFO")
 end
 
 M._test = { template_choices = template_choices, resumable = resumable }

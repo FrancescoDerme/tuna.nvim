@@ -162,4 +162,42 @@ do
     vim.fn.delete(d2, "rf")
 end
 
+--------------------------------------------------------------------------------
+-- What a scan walks, and how paths are read
+--------------------------------------------------------------------------------
+
+-- A directory `clean.skip_dirs` names, and every dot-directory, is left alone at every
+-- depth, not only at the top of the scan: an empty source file inside one is never offered.
+do
+    config.setup({ clean = { skip_dirs = { "node_modules" } } })
+    local root = t.tempdir()
+    for _, sub in ipairs({ "contest/A", "contest/A/.git", "contest/node_modules", "node_modules" }) do
+        vim.fn.mkdir(root .. "/" .. sub, "p")
+    end
+    t.write(root .. "/contest/A", "main.cpp", "")
+    t.write(root .. "/contest/A/.git", "hook.cpp", "")
+    t.write(root .. "/contest/node_modules", "dep.cpp", "")
+    t.write(root .. "/node_modules", "top.cpp", "")
+    local found = clean.scan(root, config.current_setup, math.huge, 1.0)
+    t.eq("a scan offers what is outside skipped directories, at every depth", vim.tbl_map(function(f)
+        return f.rel
+    end, found), { "contest/A/main.cpp" })
+    config.setup({})
+end
+
+-- A path typed into the form, or configured, reads `~` as the home directory.
+do
+    local home = vim.uv.os_homedir()
+    t.eq("a configured root reads ~ as home", clean.base_dir_of("~/cp/problems/$(JUDGE)/x.cpp"), home .. "/cp/problems")
+    t.eq("as it reads $(HOME)", clean.base_dir_of("$(HOME)/cp/problems/$(JUDGE)/x.cpp"), home .. "/cp/problems")
+    local fake = t.tempdir()
+    vim.fn.mkdir(fake .. "/cp", "p")
+    local real = vim.uv.os_homedir
+    vim.uv.os_homedir = function()
+        return fake
+    end
+    t.eq("a typed directory reads ~ as home too", clean.validate_dir("~/cp"), fake .. "/cp")
+    vim.uv.os_homedir = real
+end
+
 t.report()
