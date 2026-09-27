@@ -44,6 +44,16 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim):
 }
 ```
 
+With [vim.pack](https://neovim.io/doc/user/pack/):
+
+```lua
+{
+    vim.pack.add({ 'https://github.com/FrancescoDerme/tuna.nvim' })
+
+    require("tuna").setup({})
+}
+```
+
 ## Quick start
 
 1. **`:Tuna`** opens the menu,
