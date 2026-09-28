@@ -4,7 +4,9 @@
 -- `:Tuna menu`). Two columns, side by side:
 --
 --   * **Contests** over **Problems** — the recent ones `:Tuna last …` returns to, most
---     recent first, each with how it went. `<CR>` goes there.
+--     recent first — over **Pinned**, the problems put aside to solve later (`:Tuna pin`),
+--     each with how it went. `<CR>` goes there. Pinned has no limit, so it is the list
+--     that scrolls when the column runs out of rows.
 --   * **Catch of the day** — what tuna can do from the file you are on. `<CR>` runs it.
 --
 -- The split is the point. The left column is *where you were*, the right is *what to
@@ -216,8 +218,8 @@ local function problem_names(problems)
 end
 
 ---The recent contests and the recent problems, most recent first, as `recent` has them, so
----the board says exactly what `:Tuna last` would do.
----@return table[] contests, table[] problems
+---the board says exactly what `:Tuna last` would do, and the pinned problems.
+---@return table[] contests, table[] problems, table[] pinned
 local function recent_entries()
     local recent = require("tuna.recent")
     local st = recent.snapshot() or {}
@@ -231,7 +233,14 @@ local function recent_entries()
     end, function(p)
         return entry_status(p.file)
     end, recent.open_problem)
-    return contests, problems
+
+    local pinned_names = problem_names(st.pinned or {})
+    local pinned = entries_of(st.pinned or {}, function(i)
+        return pinned_names[i]
+    end, function(p)
+        return entry_status(p.file)
+    end, recent.open_pinned)
+    return contests, problems, pinned
 end
 
 --------------------------------------------------------------------------------
@@ -318,6 +327,9 @@ local function command_entries(sol, cur)
         end)
         add("Previous problem", function()
             require("tuna.navigate").go(-1)
+        end)
+        add(require("tuna.recent").is_pinned(path) and "Unpin this problem" or "Pin this problem", function()
+            commands.toggle_pin(sol)
         end)
     end
 
@@ -488,8 +500,8 @@ function M.open(bufnr)
     -- Act on the solution even when opened from a helper buffer (checker.cpp).
     local sol = tools.solution_bufnr(cur, config.get_buffer_config(cur)) or cur
 
-    local contests, problems = recent_entries()
-    local lists = { contests, problems }
+    local contests, problems, pinned = recent_entries()
+    local lists = { contests, problems, pinned }
     -- Laid out for whatever width the board gives the column, so a narrow editor shortens
     -- names rather than cutting off verdicts.
     local function format(l)
@@ -507,6 +519,7 @@ function M.open(bufnr)
     require("tuna.widgets").panels({
         { title = "Contests", format = format(1), column = 1 },
         { title = "Problems", format = format(2), column = 1 },
+        { title = "Pinned", format = format(3), column = 1 },
         { title = "Catch of the day", items = labels, column = 2 },
     }, function(section, idx)
         if lists[section] then

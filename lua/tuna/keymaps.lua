@@ -36,6 +36,7 @@ M.actions = {
     download_problem = "Tuna download problem",
     download_contest = "Tuna download contest",
     clean = "Tuna clean",
+    pin = "Tuna pin", -- put a problem aside to solve later, or take it back
     next_problem = "Tuna next", -- step to the next/previous problem of a contest
     prev_problem = "Tuna prev",
     last_problem = "Tuna last problem", -- back to the problem/contest last worked on
@@ -58,7 +59,7 @@ M.actions = {
 --   <leader>ttd  Delete             <leader>ts  Submit         <leader>tdc  Contest
 --   <leader>tn   Next problem       <leader>tm  Menu           <leader>tds  Sync
 --   <leader>tp   Prev problem       <leader>tw  Temp
---   <leader>tl   Library
+--   <leader>tl   Library        <leader>tf  Pin
 --   <leader>tgp  Problem            <leader>tgc Contest
 --
 -- The labels above are the which-key entries. A key inside a group does not repeat
@@ -83,6 +84,7 @@ M.preset = {
         submit = "s",
         next_problem = "n",
         prev_problem = "p",
+        pin = "f", -- f for "flag it for later": `p` is the previous problem
         -- The library inserts into the file you are in, so it is buffer-local like the
         -- rest of the editing actions. Only the file→snippet route is bound; the flat
         -- `library_snippet` one is there to map if it suits you better.

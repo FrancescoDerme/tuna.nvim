@@ -17,6 +17,10 @@
 -- such evidence (your template, a library snippet, the `:Tuna temp` scratch) never
 -- overwrite it.
 --
+-- **Pinned** problems are the ones put aside to solve later (`:Tuna pin`): kept in the same
+-- file, most recently pinned first, with no limit, until they are unpinned or their
+-- solution is deleted.
+--
 -- The **contest** is recorded outright when one is downloaded (that is the one moment
 -- the contest directory is known for certain), and otherwise inferred from the
 -- sidecar `group`: a problem's contest directory is its parent when a sibling problem
@@ -48,7 +52,7 @@ local WRITE_DELAY = 1000
 ---@field judge string? the judge it is on, as `judges.parse` names it
 ---@field problem string? the last problem visited inside it
 
----@type { problems: tuna.RecentProblem[]?, contests: tuna.RecentContest[]? }
+---@type { problems: tuna.RecentProblem[]?, contests: tuna.RecentContest[]?, pinned: tuna.RecentProblem[]? }
 M.state = {}
 
 local loaded = false
@@ -102,19 +106,9 @@ local function load()
         M.state = {
             problems = type(decoded.problems) == "table" and decoded.problems or nil,
             contests = type(decoded.contests) == "table" and decoded.contests or nil,
+            pinned = type(decoded.pinned) == "table" and decoded.pinned or nil,
         }
     end
-end
-
----The recent problems and contests, most recent first (the first of each being what
----`:Tuna last problem` and `last contest` return to), hydrated from disk if this session has
----not read them yet. Exported so the menu can *show* what those commands
----would do without doing it — the state itself is `M.state`, but reading that directly
----would see an empty table until something else happened to load it.
----@return { problems: tuna.RecentProblem[]?, contests: tuna.RecentContest[]? }
-function M.snapshot()
-    load()
-    return M.state
 end
 
 ---Write the state file now.
@@ -144,6 +138,36 @@ local function persist()
     timer:start(WRITE_DELAY, 0, function()
         vim.schedule(M.flush)
     end)
+end
+
+---Drop the pinned problems whose solution is gone, however it went: a pin is a problem to
+---come back to, and a deleted one is not there to come back to.
+local function prune_pinned()
+    local kept = {}
+    for _, p in ipairs(M.state.pinned or {}) do
+        if type(p) == "table" and type(p.file) == "string" and utils.file_exists(p.file) then
+            kept[#kept + 1] = p
+        end
+    end
+    if #kept ~= #(M.state.pinned or {}) then
+        M.state.pinned = #kept > 0 and kept or nil
+        return true
+    end
+    return false
+end
+
+---The recent problems and contests, most recent first (the first of each being what
+---`:Tuna last problem` and `last contest` return to), and the pinned problems, most recently
+---pinned first, hydrated from disk if this session has not read them yet. Exported so the menu
+---can *show* what those commands would do without doing it — the state itself is `M.state`,
+---but reading that directly would see an empty table until something else happened to load it.
+---@return { problems: tuna.RecentProblem[]?, contests: tuna.RecentContest[]?, pinned: tuna.RecentProblem[]? }
+function M.snapshot()
+    load()
+    if prune_pinned() then
+        persist()
+    end
+    return M.state
 end
 
 --------------------------------------------------------------------------------
@@ -274,6 +298,66 @@ function M.record_contest(dir, name, problem, judge)
 end
 
 --------------------------------------------------------------------------------
+-- Pinning
+--------------------------------------------------------------------------------
+
+---A solution path in the one form the lists compare by.
+---@param file string
+---@return string
+local function canonical(file)
+    return vim.fs.normalize(vim.fn.fnamemodify(file, ":p"))
+end
+
+---Whether `file` is pinned. A solution that is gone is not, whatever the list still says.
+---@param file string
+---@return boolean
+function M.is_pinned(file)
+    load()
+    file = canonical(file)
+    if not utils.file_exists(file) then
+        return false
+    end
+    for _, p in ipairs(M.state.pinned or {}) do
+        if p.file == file then
+            return true
+        end
+    end
+    return false
+end
+
+---Unpin `file`, doing nothing when it is not pinned.
+---@param file string
+function M.unpin(file)
+    load()
+    file = canonical(file)
+    local kept = vim.tbl_filter(function(p)
+        return p.file ~= file
+    end, M.state.pinned or {})
+    if #kept ~= #(M.state.pinned or {}) then
+        M.state.pinned = #kept > 0 and kept or nil
+        persist()
+    end
+end
+
+---Pin `file`, the most recently pinned first, or unpin it when it is pinned. There is no
+---limit: a pin stays until it is taken off or its solution is deleted, since it is a problem
+---put aside on purpose, and the menu scrolls a long list.
+---@param file string
+---@return boolean pinned whether it is pinned now
+function M.toggle_pin(file)
+    load()
+    file = canonical(file)
+    if M.is_pinned(file) then
+        M.unpin(file)
+        return false
+    end
+    local dir = vim.fs.dirname(file)
+    M.state.pinned = vim.list_extend({ { file = file, dir = dir, name = vim.fn.fnamemodify(dir, ":t") } }, M.state.pinned or {})
+    persist()
+    return true
+end
+
+--------------------------------------------------------------------------------
 -- Tracking open buffers
 --------------------------------------------------------------------------------
 
@@ -386,17 +470,12 @@ local function pretty(path)
     return vim.fn.fnamemodify(path, ":~")
 end
 
----`:Tuna last problem` — reopen the solution last worked on and cd to its directory.
----@param index integer? which recent problem, 1 (the default) being the most recent
-function M.open_problem(index)
-    load()
-    local p = (M.state.problems or {})[index or 1]
-    if not p then
-        utils.notify("last: no problem visited yet, download one or open a solution with its testcases.", "WARN")
-        return
-    end
+---Reopen a remembered problem and cd to its directory.
+---@param p tuna.RecentProblem
+---@param what string the command, for its messages
+local function open_remembered(p, what)
     if not utils.directory_exists(p.dir) then
-        utils.notify("last: '" .. pretty(p.dir) .. "' no longer exists.", "WARN")
+        utils.notify(what .. ": '" .. pretty(p.dir) .. "' no longer exists.", "WARN")
         return
     end
 
@@ -407,7 +486,7 @@ function M.open_problem(index)
         local cfg = config.load_local_config_and_extend(p.dir)
         local other = require("tuna.navigate").solution_in(p.dir, p.file, cfg)
         if not other then
-            utils.notify("last: '" .. pretty(p.file) .. "' no longer exists.", "WARN")
+            utils.notify(what .. ": '" .. pretty(p.file) .. "' no longer exists.", "WARN")
             return
         end
         file = other
@@ -415,6 +494,29 @@ function M.open_problem(index)
 
     open_at(file, p.dir)
     utils.notify("problem: " .. pretty(file), "INFO")
+end
+
+---`:Tuna last problem` — reopen the solution last worked on and cd to its directory.
+---@param index integer? which recent problem, 1 (the default) being the most recent
+function M.open_problem(index)
+    load()
+    local p = (M.state.problems or {})[index or 1]
+    if not p then
+        utils.notify("last: no problem visited yet, download one or open a solution with its testcases.", "WARN")
+        return
+    end
+    open_remembered(p, "last")
+end
+
+---Reopen a pinned problem and cd to its directory.
+---@param index integer? which pinned problem, 1 (the default) being the most recently pinned
+function M.open_pinned(index)
+    local p = (M.snapshot().pinned or {})[index or 1]
+    if not p then
+        utils.notify("pin: nothing pinned yet, pin a problem to come back to with `:Tuna pin`.", "WARN")
+        return
+    end
+    open_remembered(p, "pin")
 end
 
 ---The solution to open when entering a contest directory: the problem last visited

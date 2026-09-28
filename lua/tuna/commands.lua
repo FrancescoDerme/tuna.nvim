@@ -572,6 +572,31 @@ function M.set_compare(bufnr, args)
 end
 
 --------------------------------------------------------------------------------
+-- Pinning
+--------------------------------------------------------------------------------
+
+---Pin the buffer's problem to solve later, or unpin it (`:Tuna pin`). A helper file pins
+---the solution beside it, which is the problem.
+---@param bufnr integer? defaults to the buffer `:Tuna` acts on
+function M.toggle_pin(bufnr)
+    bufnr = M.target_buffer(bufnr)
+    config.load_buffer_config(bufnr)
+    local cfg = config.get_buffer_config(bufnr)
+    local sol = tools.solution_bufnr(bufnr, cfg) or bufnr
+    local path = api.nvim_buf_get_name(sol)
+    if path == "" or not utils.file_exists(path) or not (cfg.run_command or {})[vim.bo[sol].filetype] then
+        utils.notify("pin: this is not a solution file tuna can run, so there is no problem to pin.", "WARN")
+        return
+    end
+    local name = vim.fn.fnamemodify(path, ":~:.")
+    if require("tuna.recent").toggle_pin(path) then
+        utils.notify("pinned " .. name .. ", it waits in the menu.", "INFO")
+    else
+        utils.notify("unpinned " .. name .. ".", "INFO")
+    end
+end
+
+--------------------------------------------------------------------------------
 -- Downloading
 --------------------------------------------------------------------------------
 
@@ -755,6 +780,9 @@ M.subcommands = {
     -- (`:Tuna download sync`), since that is what it does — it downloads.
     temp = function()
         require("tuna.temp").start(M.target_buffer())
+    end,
+    pin = function()
+        M.toggle_pin()
     end,
     menu = function()
         require("tuna.menu").open(M.target_buffer())

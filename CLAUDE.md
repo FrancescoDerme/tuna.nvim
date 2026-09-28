@@ -92,7 +92,7 @@ lua/tuna/
   clean.lua         remove unused templated files and emptied directories
   library.lua       snippet library
   navigate.lua      :Tuna next / prev
-  recent.lua        :Tuna last problem / contest, cwd changes
+  recent.lua        :Tuna last problem / contest, pinned problems, cwd changes
   temp.lua          scratch solution, folded into a download by `download sync`
   scaffold.lua      helper-file starters (checker/generator/bruteforce/interactor)
   menu.lua          bare :Tuna menu
@@ -844,7 +844,9 @@ specific Vim error about a buffer the user never opened.
     itself is never offered.
   - The flow is floats only: a `form` for directory, depth and threshold, then one
     `Delete`/`Keep`/`Stop` menu per file with a preview, sorted by match, at a fixed width,
-    each starting on the answer last given (`ui.row`), and the same for directories.
+    each starting on the answer last given (`ui.row`), and the same for directories. A
+    pinned file (`scan` marks it) is titled `pinned, …` and starts on `Keep` whatever was
+    answered last, so a run of Deletes cannot carry it along.
   - **Scan cost is bounded**: pruning at traversal (`descend_into`, `clean.skip_dirs`,
     dot-directories, judged by the directory's own name at every depth: `vim.fs.dir` hands
     `skip` the path relative to the root), a shared `clean.max_entries` budget reported through the `notice` pane,
@@ -875,6 +877,14 @@ specific Vim error about a buffer the user never opened.
   recording). `push_front` moves a recorded entry to the top and drops entries whose
   directory is gone.
   `open_problem(i)`/`open_contest(i)` open any of them, 1 by default.
+  - **Pinned** problems (`pinned`, `:Tuna pin` through `commands.toggle_pin`, which pins a
+    helper's solution and refuses a buffer that is not a runnable solution on disk) are
+    kept in the same file, most recently pinned first, with **no cap**: a pin is put aside
+    on purpose, and the menu scrolls a long list, so there is no `recent` option for it.
+    One whose solution is gone is dropped by `snapshot` (`prune_pinned`), and `is_pinned`
+    answers false for it meanwhile, so deleting a problem by any means unpins it;
+    `clean` also unpins what it deletes. `open_pinned(i)` opens one the way
+    `open_problem` does (`open_remembered`).
   - A `BufEnter` records a buffer only when it looks like a problem (runnable, non-helper,
     with testcases or a sidecar beside it).
   - Recording a problem inside a remembered contest moves that contest to the top with the
@@ -900,8 +910,12 @@ specific Vim error about a buffer the user never opened.
 - **`menu.lua`**: the `:Tuna` menu, built on `widgets.panels` (not `widgets.menu`) with a
   free-standing banner (no border and `winblend = 100`, so the editor shows between the
   wordmark's letters, which are extmarked `TunaMenuTitle`, whose `blend = 0` keeps them out
-  of the blending that would otherwise paint them in the colours underneath): Contests stacked over Problems in the left column (from
-  `recent.snapshot()`), the commands on the right under "Catch of the day".
+  of the blending that would otherwise paint them in the colours underneath): Contests over
+  Problems over Pinned in the left column (from `recent.snapshot()`), the commands on the
+  right under "Catch of the day". Pinned is last because it is the unbounded one: `panels`
+  hands a column's rows out smallest list first, so it is the list that scrolls. The three
+  are laid out together by `recent_layout`, so statuses line up down the column, and the
+  commands offer `Pin this problem`/`Unpin this problem` for a runnable buffer.
   - A problem's status (`entry_status`) is the judge's verdict from `submit.verdict_for` while
     it is current, else `core.local_verdict`, else nothing: the judge's answer settles a
     problem, so it always wins. A contest's (`contest_status`) counts current judge verdicts
@@ -938,7 +952,8 @@ specific Vim error about a buffer the user never opened.
   via a `FileType` autocmd over `keymaps.filetypes`; `global` are global. `setup()` can be
   re-run (it tracks `applied_global` and clears the augroup). `preset` expands under a prefix
   with which-key groups (`tt`, `td`, `tg`); a key keeps its short label only while it stays in
-  its group. `clean` is not in the preset.
+  its group. `clean` is not in the preset. `pin` is `f` ("flag it for later"), `p` being the
+  previous problem.
 - **`scaffold.lua`**: starter helper files. Templates are **plain files** named `<role>.<ext>`
   (the role words of `tools.ROLES`, the same as everywhere), looked up in
   `scaffold.directory` (default under `stdpath("config")`) and then in the `scaffolds/` folder
@@ -987,12 +1002,14 @@ specific Vim error about a buffer the user never opened.
     counts uncoloured and stacked in a column of their own while every verdict ends on one
     edge, counted or not, names giving way to a narrow
     width (a contest's judge first), and `panels` stacking, scrolling, moving focus and
-    squeezing a `format` column before the others, and the real menu's titles and
-    free-standing banner;
+    squeezing a `format` column before the others, the real menu's titles and
+    free-standing banner, and its Pinned list (every pin, scrolling within the editor,
+    under the other two) with the pin/unpin command;
   - `recent.lua`: both histories (default and configured sizes, move to top, a problem
     bringing its contest back, contests named by the judge and contest recorded with them,
     dropping deleted directories, reading the state file back, opening any entry, what is
-    written);
+    written) and the pins (most recent first, uncapped, toggling, a deleted solution
+    unpinned, `:Tuna pin` refusing a non-solution and pinning a helper's solution);
   - `library.lua`: the files listed for a language (no dotfiles at any depth, `~` in
     `library.path`), guarded snippets, and an unclosed guard warned about once per picker;
   - `modes.lua`: the helper and run-setting rule end to end: availability (files, configured
@@ -1017,7 +1034,8 @@ specific Vim error about a buffer the user never opened.
   - `testcases.lua`, `compare.lua`, `judges.lua`, `clean.lua`, `submit.lua`:
     unit tests of pure rules (`compare.lua` also: an unknown method reported once, diff marks
     following the verdict, a checker that did not build giving no verdict and no
-    notification);
+    notification; `clean.lua` also: a pinned file named, starting on Keep, and unpinned when
+    deleted);
   - `runner.lua`: all four run modes with `vim.system` stubbed, covering what each child is
     handed, bare rows, save/answer semantics, disk drift and restore, path resolution, the
     swapfile contract, interactive grids and the conversation model, and the run gate

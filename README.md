@@ -119,6 +119,10 @@ Every command is a subcommand of `:Tuna` with tab-completion.
   <td>go back to what you were working on</td>
 </tr>
 <tr>
+  <td><code>:Tuna pin</code></td>
+  <td>pin this problem to solve later, or unpin it</td>
+</tr>
+<tr>
   <td><code>:Tuna temp</code></td>
   <td>drop in a scratch solution for before a contest opens</td>
 </tr>
@@ -430,13 +434,18 @@ opens the same catalogue in telescope.
   hasn't judged the source as it is now, how its last finished run went (`3/4 PASSED`),
   which is saved beside it and forgotten when you edit. Names too long for the screen are
   shortened, never the verdicts.
+- `:Tuna pin` puts the problem you are on aside to solve later, and again takes it back.
+  The menu lists pinned problems under the recent ones, most recently pinned first, with
+  their status, and `<CR>` on one goes there. There is no limit to set: a long list
+  scrolls. A pin stays until you unpin it or delete the solution.
 - `:Tuna temp` opens a scratch solution for the minutes before a contest starts, when
   there is no problem to download yet, asking which of your templates to start from. An
   existing scratch first asks whether to resume it or restart. `:Tuna download sync` then
   folds what you wrote into the first problem it downloads, header and all.
 - `:Tuna clean` removes files you created and never used — templated solutions still
   holding the template, scaffolds you never filled in — and then the directories they
-  leave empty. Every deletion is confirmed one at a time, with the file in front of you.
+  leave empty. Every deletion is confirmed one at a time, with the file in front of you,
+  and a pinned problem is named as pinned, its prompt starting on Keep.
 
 ### Statusline
 
@@ -474,7 +483,8 @@ require("lualine").setup({
   `<leader>tr` run, `<leader>tu` results, `<leader>ts` submit, `<leader>tn`/`<leader>tp`
   problem navigation, `<leader>tta`/`tte`/`ttd` testcases, `<leader>tdt`/`tdp`/`tdc`
   downloads and `<leader>tds` sync, `<leader>tgp`/`tgc` back to the last problem/contest,
-  `<leader>tl` the library, `<leader>tw` the scratch, and `<leader>tm` the menu.
+  `<leader>tf` pin, `<leader>tl` the library, `<leader>tw` the scratch, and `<leader>tm`
+  the menu.
   Move or drop any of them without giving up the rest.
 - **`:checkhealth tuna`** reports what tuna can see: your Neovim version, whether each
   configured compiler and interpreter is actually on `PATH`, the Competitive Companion
@@ -716,7 +726,7 @@ the rest. The preset groups keys by subject, so which-key shows a `t` testcases 
 The actions, each running the `:Tuna` command it is named after: `menu`, `run`, `run_all`,
 `run_stress`, `run_interactive`, `show_ui`, `add_testcase`, `edit_testcase`,
 `delete_testcase`, `submit`, `submit_clear`, `download_testcases`, `download_problem`,
-`download_contest`, `download_sync`, `clean`, `next_problem`, `prev_problem`,
+`download_contest`, `download_sync`, `clean`, `pin`, `next_problem`, `prev_problem`,
 `last_problem`, `last_contest`, `temp`, `library`, `library_snippet` and `library_search`.
 
 ### Appearance and widgets

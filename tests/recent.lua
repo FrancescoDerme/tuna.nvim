@@ -3,7 +3,8 @@
 -- What `:Tuna last` and the menu remember: the last problems and contests, most recent
 -- first and as many of each as `recent.problems`/`recent.contests` ask, a revisited one
 -- moving back to the top, one whose directory is gone forgotten, and the histories read back
--- from the state file.
+-- from the state file; and the pinned problems, most recently pinned first with no limit,
+-- toggled by `:Tuna pin` (a helper file pinning its solution), and forgotten once deleted.
 
 local t = dofile("tests/harness.lua")
 -- This test writes the state file, so it only runs where `stdpath("state")` is a throwaway
@@ -14,10 +15,16 @@ local store_dir = vim.fn.stdpath("state") .. "/tuna"
 local stored = t.tempdir()
 t.write(stored, "main.cpp", "int main() {}\n")
 local stored_contest = t.tempdir()
+local stored_pin = t.tempdir()
+t.write(stored_pin, "main.cpp", "int main() {}\n")
 vim.fn.mkdir(store_dir, "p")
 t.write(store_dir, "recent.json", vim.json.encode({
     problems = { { file = stored .. "/main.cpp", dir = stored, name = "L" } },
     contests = { { dir = stored_contest, name = "LC", judge = "codeforces" } },
+    pinned = {
+        { file = stored_pin .. "/gone.cpp", dir = stored_pin, name = "G" },
+        { file = stored_pin .. "/main.cpp", dir = stored_pin, name = "P" },
+    },
 }))
 
 require("tuna").setup({})
@@ -39,6 +46,12 @@ end
 
 t.eq("the problems in the state file are read back", files(), { stored .. "/main.cpp" })
 t.eq("and the contests", contests(), { stored_contest })
+local function pins()
+    return vim.tbl_map(function(p)
+        return p.file
+    end, recent.snapshot().pinned or {})
+end
+t.eq("and the pinned problems, one whose solution is gone dropped", pins(), { stored_pin .. "/main.cpp" })
 t.eq("five problems and three contests by default", { cfg.recent.problems, cfg.recent.contests }, { 5, 3 })
 
 --------------------------------------------------------------------------------
@@ -109,6 +122,52 @@ t.eq("any of them can be opened, at the problem last visited in it", norm(vim.ap
 t.eq("which brings it back to the top", contests(), { cs[2], cs[3] })
 
 --------------------------------------------------------------------------------
+-- Pinned
+--------------------------------------------------------------------------------
+
+do
+    local many = {}
+    for i = 1, 12 do
+        many[i] = norm(t.tempdir() .. "/main.cpp")
+        t.write(vim.fs.dirname(many[i]), "main.cpp", "int main() {}\n")
+        t.eq("pinning says it is pinned " .. i, recent.toggle_pin(many[i]), true)
+    end
+    local want = { many[12], many[11] }
+    t.eq("the most recently pinned first, and every one kept", { #pins(), pins()[1], pins()[2] }, { 13, want[1], want[2] })
+    t.eq("each one is pinned", recent.is_pinned(many[5]), true)
+
+    t.eq("pinning again unpins", recent.toggle_pin(many[5]), false)
+    t.eq("and it is gone from the list", { recent.is_pinned(many[5]), #pins() }, { false, 12 })
+
+    os.remove(many[7])
+    t.eq("deleting a pinned solution unpins it", { recent.is_pinned(many[7]), #pins() }, { false, 11 })
+    recent.unpin(many[8])
+    t.eq("and unpin takes one off", vim.tbl_contains(pins(), many[8]), false)
+
+    recent.open_pinned(2)
+    t.eq("a pinned problem can be opened", norm(vim.api.nvim_buf_get_name(0)), pins()[2])
+
+    -- `:Tuna pin` acts on the problem: a solution tuna can run, the solution beside a helper.
+    local commands = require("tuna.commands")
+    local quiet = vim.notify
+    local said = t.capture_notifications()
+    local pdir = t.tempdir()
+    t.write(pdir, "main.cpp", "int main() {}\n")
+    t.write(pdir, "gen.cpp", "int main() {}\n")
+    t.write(pdir, "notes.txt", "later\n")
+    vim.cmd("edit " .. pdir .. "/notes.txt")
+    commands.toggle_pin()
+    t.eq("a file that is not a solution is not pinned", recent.is_pinned(pdir .. "/notes.txt"), false)
+    t.has("and it says why", said[#said], "no problem to pin")
+    vim.cmd("edit " .. pdir .. "/gen.cpp")
+    commands.execute({ "pin" })
+    t.eq("`:Tuna pin` in a helper pins its solution", { recent.is_pinned(pdir .. "/main.cpp"), recent.is_pinned(pdir .. "/gen.cpp") }, { true, false })
+    commands.execute({ "pin" })
+    t.eq("and again unpins it", recent.is_pinned(pdir .. "/main.cpp"), false)
+    vim.notify = quiet
+end
+
+--------------------------------------------------------------------------------
 -- How many
 --------------------------------------------------------------------------------
 
@@ -120,13 +179,17 @@ t.eq("and recent.contests how many contests", contests(), { cs[1] })
 
 recent.flush()
 local written = vim.json.decode(table.concat(vim.fn.readfile(store_dir .. "/recent.json"), "\n"))
-t.eq("the histories are what gets written, in order", {
+t.eq("the histories and the pins are what gets written, in order", {
     vim.tbl_map(function(p)
         return p.file
     end, written.problems),
     vim.tbl_map(function(c)
         return c.dir
     end, written.contests),
-}, { files(), contests() })
+    vim.tbl_map(function(p)
+        return p.file
+    end, written.pinned),
+}, { files(), contests(), pins() })
+t.eq("however few problems are remembered, every pin is", #pins(), 10)
 
 t.report()

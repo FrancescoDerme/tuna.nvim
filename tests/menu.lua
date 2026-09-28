@@ -3,8 +3,9 @@
 -- The menu's Contests and Problems lists: a contest summarised over every problem in
 -- it, in either layout and counting only verdicts that still describe the file on disk; a
 -- problem's judge verdict, else its saved local verdict; statuses in the results grid's
--- words and colours, counts left plain and flush right; and `widgets.panels` stacking the
--- two lists in one column, scrolling a list that does not fit.
+-- words and colours, counts left plain and flush right; `widgets.panels` stacking the
+-- two lists in one column, scrolling a list that does not fit; and the Pinned list under
+-- them, as long as it needs to be and scrolling past what the column holds.
 
 local t = dofile("tests/harness.lua")
 require("tuna").setup({})
@@ -392,7 +393,7 @@ for _, w in ipairs(api.nvim_list_wins()) do
     end
 end
 table.sort(titles)
-t.eq("the menu's lists, the commands being the catch of the day", titles, { "Catch of the day", "Contests", "Problems" })
+t.eq("the menu's lists, the commands being the catch of the day", titles, { "Catch of the day", "Contests", "Pinned", "Problems" })
 t.ok("the banner is drawn", banner ~= nil)
 if banner then
     t.ok("with no border around it", borderless(banner.config), banner.config.border)
@@ -406,6 +407,44 @@ if banner then
     t.eq("a blank row above the lists", lists_top, banner.config.row + banner.config.height + 1)
 end
 press("<Esc>")
+
+--------------------------------------------------------------------------------
+-- Pinned
+--------------------------------------------------------------------------------
+
+do
+    local recent = require("tuna.recent")
+    local pinned = {}
+    for i = 1, 30 do
+        local dir = t.tempdir()
+        solution(dir, "main.cpp", i == 30 and "accepted" or nil)
+        pinned[i] = dir .. "/main.cpp"
+        recent.toggle_pin(pinned[i])
+    end
+    vim.cmd("filetype on")
+    vim.cmd("edit " .. pinned[30])
+    require("tuna.menu").open()
+    local b = board()
+    local pin = b.Pinned
+    t.ok("the Pinned list is drawn", pin ~= nil)
+    if pin then
+        local c = api.nvim_win_get_config(pin.win)
+        local lines = api.nvim_buf_get_lines(api.nvim_win_get_buf(pin.win), 0, -1, false)
+        t.eq("every pin is listed, the most recent first", { #lines, lines[1]:match("ACCEPTED") }, { 30, "ACCEPTED" })
+        t.ok("in fewer rows than it has, so it scrolls", c.height < 30, c.height)
+        t.ok("and the board stays inside the editor", c.row + c.height + 2 <= vim.o.lines, c.row + c.height)
+        t.ok("under Contests and Problems", c.row > api.nvim_win_get_config(b.Problems.win).row)
+    end
+    local cmds = b["Catch of the day"] and api.nvim_buf_get_lines(api.nvim_win_get_buf(b["Catch of the day"].win), 0, -1, false) or {}
+    t.ok("a pinned problem offers to unpin itself", vim.tbl_contains(cmds, "Unpin this problem"), cmds)
+    press("<Esc>")
+    recent.unpin(pinned[30])
+    require("tuna.menu").open()
+    b = board()
+    cmds = b["Catch of the day"] and api.nvim_buf_get_lines(api.nvim_win_get_buf(b["Catch of the day"].win), 0, -1, false) or {}
+    t.ok("and an unpinned one to pin itself", vim.tbl_contains(cmds, "Pin this problem"), cmds)
+    press("<Esc>")
+end
 
 vim.fn.delete(contest, "rf")
 vim.fn.delete(flat, "rf")

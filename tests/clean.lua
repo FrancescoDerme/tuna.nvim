@@ -162,6 +162,41 @@ do
     vim.fn.delete(d2, "rf")
 end
 
+-- A pinned problem says so, and its prompt starts on Keep whatever was answered before,
+-- since it was put aside on purpose; deleting it all the same unpins it.
+do
+    local widgets = require("tuna.widgets")
+    local recent = require("tuna.recent")
+    local real_menu = widgets.menu
+    local pdir = t.tempdir()
+    t.write(pdir, "a.cpp", "")
+    t.write(pdir, "b.cpp", "")
+    local pinned = vim.fs.normalize(pdir .. "/b.cpp")
+    recent.toggle_pin(pinned)
+    local found = clean.scan(pdir, config.current_setup, 1, 1.0)
+    table.sort(found, function(x, y)
+        return x.rel < y.rel
+    end)
+    t.eq("a scan marks the pinned file", vim.tbl_map(function(f)
+        return f.pinned
+    end, found), { false, true })
+
+    local titles, rows = {}, {}
+    widgets.menu = function(_, title, on_choice, _, _, _, _, row)
+        titles[#titles + 1], rows[#rows + 1] = title, row or 1
+        on_choice(1) -- Delete
+    end
+    clean.confirm_each(found, 1, nil, { deleted = 0, dirs = 0, emptied = {}, artifacts = {} }, { width = 40 }, function() end)
+    widgets.menu = real_menu
+    t.eq("its prompt says it is pinned", titles[2], "[2/2] pinned, empty file")
+    t.eq("and starts on Keep, though the one before was deleted", rows, { 1, 2 })
+    local left = vim.tbl_filter(function(p)
+        return p.file == pinned
+    end, recent.state.pinned or {})
+    t.eq("deleting it unpins it", #left, 0)
+    vim.fn.delete(pdir, "rf")
+end
+
 --------------------------------------------------------------------------------
 -- What a scan walks, and how paths are read
 --------------------------------------------------------------------------------

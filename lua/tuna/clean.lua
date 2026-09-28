@@ -404,7 +404,7 @@ end
 ---@param cfg table
 ---@param depth number recursion depth passed to `vim.fs.dir`
 ---@param threshold number similarity threshold in [0,1]
----@return { path: string, rel: string, reason: string, sim: number }[] files, boolean truncated
+---@return { path: string, rel: string, reason: string, sim: number, pinned: boolean? }[] files, boolean truncated
 local function scan(dir, cfg, depth, threshold)
     local exts = source_exts(cfg)
     local roles = tool_roles(cfg)
@@ -429,7 +429,13 @@ local function scan(dir, cfg, depth, threshold)
                     local full = dir .. "/" .. name
                     local reason, sim = classify(full, ext, base, roles, cfg, threshold, cache)
                     if reason then
-                        out[#out + 1] = { path = full, rel = name, reason = reason, sim = sim or 0 }
+                        out[#out + 1] = {
+                            path = full,
+                            rel = name,
+                            reason = reason,
+                            sim = sim or 0,
+                            pinned = require("tuna.recent").is_pinned(full),
+                        }
                     end
                 end
             end
@@ -797,12 +803,15 @@ end
 
 ---The confirmation title for a single candidate, e.g.
 ---`[2/7] 100% match to solution template`. The file itself is named by the preview
----pane's title just below, so repeating it here would only crowd the prompt.
----@param files { path: string, rel: string, reason: string, sim: number }[]
+---pane's title just below, so repeating it here would only crowd the prompt. A pinned
+---problem says so first: it was put aside to solve later, which is exactly what an untouched
+---template looks like.
+---@param files { path: string, rel: string, reason: string, sim: number, pinned: boolean? }[]
 ---@param i integer
 ---@return string
 local function confirm_title(files, i)
-    return ("[%d/%d] %s"):format(i, #files, files[i].reason)
+    local f = files[i]
+    return ("[%d/%d] %s%s"):format(i, #files, f.pinned and "pinned, " or "", f.reason)
 end
 
 ---A single width to use for *every* confirmation menu in a pass, so the float doesn't
@@ -829,7 +838,7 @@ local function menu_width(titles, subtitles, cfg)
     return math.max(lo, math.min(longest + 4, hi))
 end
 
----@param files { path: string, rel: string, reason: string, sim: number }[]
+---@param files { path: string, rel: string, reason: string, sim: number, pinned: boolean? }[]
 ---@param cfg table
 ---@return integer
 local function confirm_width(files, cfg)
@@ -841,7 +850,7 @@ local function confirm_width(files, cfg)
 end
 
 ---Confirm and delete the candidate files one at a time, via a menu per file.
----@param files { path: string, rel: string, reason: string, sim: number }[]
+---@param files { path: string, rel: string, reason: string, sim: number, pinned: boolean? }[]
 ---@param i integer index into `files`
 ---@param restore integer? window to refocus after each menu
 ---@param stats { deleted: integer, dirs: integer, emptied: table<string, boolean>, artifacts: table<string, table<string, boolean>>, stopped: boolean? }
@@ -861,6 +870,9 @@ local function confirm_each(files, i, restore, stats, ui, done)
         filetype = vim.filetype.match({ filename = f.path }),
         width = ui.width,
     }
+    -- A pinned file starts on Keep, whatever was answered last: a run of Deletes must not carry
+    -- a problem put aside on purpose along with it.
+    local start = f.pinned and 2 or ui.row
     widgets.menu({ "Delete", "Keep", "Stop" }, confirm_title(files, i), function(idx)
         -- The next prompt starts on this answer, so a run of the same one is a key each.
         ui.row = idx
@@ -881,12 +893,13 @@ local function confirm_each(files, i, restore, stats, ui, done)
                 stats.artifacts[into] = stats.artifacts[into] or {}
                 stats.artifacts[into][(vim.fs.basename(f.path):gsub("%.[^.]*$", ""))] = true
                 drop_buffer(f.path)
+                require("tuna.recent").unpin(f.path)
             else
                 utils.notify("clean: could not delete " .. f.rel .. ".", "WARN")
             end
         end
         confirm_each(files, i + 1, restore, stats, ui, done) -- idx 2 (Keep) lands here too
-    end, restore, nil, preview, ui.notice, ui.row)
+    end, restore, nil, preview, ui.notice, start)
 end
 
 ---Wipe the buffers backing anything inside a directory that is about to be removed,
