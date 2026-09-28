@@ -697,9 +697,12 @@ specific Vim error about a buffer the user never opened.
 - `render(buf, content, opts)`: no write when unchanged, `undolevels = -1` around the write,
   `modified` cleared.
 - `float(buf, opts)` with `LAYER`: grid 50, viewer 60, overlay 70, dialog 80. Neovim's default
-  is 50, so always set a layer. A float starts with the `statusline` of the window it opens
-  over: a new window otherwise takes the global value, which lualine leaves blank until its
-  next refresh, so the bar would flicker whenever a float takes focus.
+  is 50, so always set a layer. With `laststatus=3`, and only then, a float starts with the
+  `statusline` of the window it opens over: a new window otherwise takes the global value,
+  which lualine leaves blank until its next refresh, so the one bar would flicker whenever a
+  float takes focus. With any other `laststatus` it keeps the empty one `style = "minimal"`
+  gives it, because from Neovim 0.12 a float with a `statusline` of its own draws it inside
+  its border, showing the pane's `tuna://` name.
 - `group(wins, on_close)`: windows that close together, keyed on `WinClosed`.
 
 **`widgets.lua`**
@@ -993,8 +996,9 @@ specific Vim error about a buffer the user never opened.
   `N checks, M failures` through `tests/harness.lua` (`ok`/`eq`/`has`/`report`).
 - Files:
   - `surfaces.lua`: conformance of every surface to the `surface.lua` contract, every float
-    tagged before it is entered, every `runner_ui.mappings` key still resolving to an
-    action, a menu's starting row and preview, and the editor rebuilt by a resize in the
+    tagged before it is entered, no float drawing a statusline of its own unless the
+    statusline is global (read off the screen), every `runner_ui.mappings` key still
+    resolving to an action, a menu's starting row and preview, and the editor rebuilt by a resize in the
     pane, cursor and insert mode it was in;
   - `menu.lua`: the contest summary over both layouts, counting current judge verdicts
     only, a problem's judge verdict beating its local one and either lapsing with an edit,

@@ -297,18 +297,66 @@ end
 ok("a following preview starts on that row too", previewed == "row 2", previewed)
 close_layer(80)
 
--- A float starts from the statusline of the window it opens over: a statusline plugin that
--- renders into each window (lualine) otherwise blanks the bar whenever a float takes focus.
+-- With a global statusline a float starts from the bar of the window it opens over: a
+-- statusline plugin that renders into each window (lualine) otherwise blanks the one bar
+-- whenever a float takes focus.
 local code = api.nvim_get_current_win()
+local laststatus = vim.o.laststatus
+vim.o.laststatus = 3
 api.nvim_set_option_value("statusline", "CODE BAR", { scope = "local", win = code })
 widgets.menu({ "one" }, "a menu", function() end)
 settle(150)
 local focused = api.nvim_get_current_win()
 local bar = api.nvim_get_option_value("statusline", { win = focused })
-ok("a float starts with the statusline of the window it opened over", focused ~= code and bar == "CODE BAR", bar)
+ok("laststatus=3: a float starts with the statusline of the window it opened over", focused ~= code and bar == "CODE BAR", bar)
 close_layer(80)
+vim.o.laststatus = laststatus
 
 ok("every float is tagged as tuna's before it is entered", #entered_untagged == 0, entered_untagged)
+
+-- Otherwise a float draws no statusline of its own: from Neovim 0.12 a float whose
+-- 'statusline' is set draws it inside its border unless the statusline is global.
+do
+    local surface = require("tuna.surface")
+    local global_sl, global_ls = vim.o.statusline, vim.o.laststatus
+    local columns, lines = vim.o.columns, vim.o.lines
+    vim.o.columns, vim.o.lines = 80, 20
+    vim.o.statusline = "BAR %f"
+    local function open()
+        local b = api.nvim_create_buf(false, true)
+        surface.adopt(b, "check")
+        api.nvim_buf_set_lines(b, 0, -1, false, { "one", "two", "three", "four" })
+        local w = surface.float(b, { layer = surface.LAYER.dialog, width = 30, height = 4, row = 2, col = 2, border = "single" })
+        vim.cmd("redraw!")
+        -- Every screen row, as drawn: what matters is what sits between the float's last
+        -- line and its bottom border, wherever the grid puts it.
+        local drawn = {}
+        for r = 1, vim.o.lines do
+            local line = ""
+            for c = 1, vim.o.columns do
+                line = line .. vim.fn.screenstring(r, c)
+            end
+            drawn[r] = line
+        end
+        local sl = api.nvim_get_option_value("statusline", { scope = "local", win = w })
+        api.nvim_win_close(w, true)
+        return sl, drawn, api.nvim_buf_get_name(b)
+    end
+
+    vim.o.laststatus = 2
+    local sl, drawn, name = open()
+    ok("laststatus=2: a float gets no statusline of its own", sl == "", sl)
+    local last, named = nil, false
+    for r, line in ipairs(drawn) do
+        last = last or (line:find("four", 1, true) and r)
+        named = named or line:find(name, 1, true) ~= nil
+    end
+    local below = last and drawn[last + 1] or ""
+    ok("and draws no bar inside its border", last and below:find("└", 1, true) and not named, vim.inspect(drawn))
+
+    vim.o.statusline, vim.o.laststatus = global_sl, global_ls
+    vim.o.columns, vim.o.lines = columns, lines
+end
 
 vim.fn.delete(dir, "rf")
 print(string.format("\n%d checks, %d failures", checks, failures))
