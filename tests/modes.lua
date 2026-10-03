@@ -158,6 +158,40 @@ local function open(sol)
     return vim.api.nvim_get_current_buf()
 end
 
+-- `:Tuna checker` and `:Tuna compare` change only when the new value is named (`off` forces
+-- the checker, `auto` hands it back), and bare they say how they are set, changing nothing.
+do
+    local _, ksol = problem({ "checker.py" })
+    open(ksol)
+    local commands = require("tuna.commands")
+    local function setting()
+        return tools.checker_setting(ksol) == "off" and "off" or "auto"
+    end
+    local quiet = vim.notify
+    local said = t.capture_notifications()
+    local seen = {}
+    for _, args in ipairs({ { "checker", "off" }, { "checker" }, { "checker", "auto" }, { "checker" }, { "checker", "toggle" } }) do
+        commands.execute(args)
+        seen[#seen + 1] = setting()
+    end
+    t.eq("off forces, auto hands back, and neither bare nor a word it does not know changes it", seen, { "off", "off", "auto", "auto", "auto" })
+    t.eq("bare, it says how it is set", { said[2], said[4] }, {
+        "Tuna: checker: off for this problem, comparing outputs.",
+        "Tuna: checker: automatic for this problem, using checker.py.",
+    })
+    t.has("and the unknown word is answered", said[5], "use auto or off")
+    t.eq("completion offers the two words", commands.complete("", "Tuna checker ", 13), { "auto", "off" })
+
+    commands.execute({ "compare", "exact" })
+    commands.execute({ "compare" })
+    t.eq("bare compare leaves the method alone", tools.get_compare(ksol), "exact")
+    t.eq("and says what it is", said[#said], "Tuna: compare: exact for this problem.")
+    commands.execute({ "compare", "default" })
+    commands.execute({ "compare" })
+    t.eq("down to the configured one", said[#said], "Tuna: compare: squish, the configured method.")
+    vim.notify = quiet
+end
+
 local rdir, rsol = problem({ "checker.py" })
 local rbuf = open(rsol)
 local r = require("tuna.runner").new(rbuf)

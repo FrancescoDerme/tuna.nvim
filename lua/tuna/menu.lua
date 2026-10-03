@@ -312,7 +312,7 @@ local function command_entries(sol, cur)
         local checker_label = tools.checker_setting(path) == "off" and "off"
             or ("automatic, " .. (type(checker) == "table" and vim.fn.fnamemodify(checker.source or checker.exec, ":t") or "none found"))
         add("Checker: " .. checker_label, function()
-            commands.set_checker(sol)
+            commands.set_checker(sol, tools.checker_setting(path) == "off" and "auto" or "off")
         end)
         add("Compare: " .. cmp_label, function()
             commands.cycle_compare(sol)

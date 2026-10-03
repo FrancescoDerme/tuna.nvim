@@ -167,7 +167,7 @@ M.defaults = {
     -- The per-problem sidecar (`sidecar.lua`): what tuna knows about a problem and
     -- can't recover from the source — the downloaded task's url/name/group, the last
     -- submit verdict per file, and the per-file run state (`:Tuna compare`, the
-    -- checker toggle, the chosen run mode / interactive source). Written beside the
+    -- checker setting, the chosen run mode / interactive source). Written beside the
     -- solution so it travels with the problem and `:Tuna clean` disposes of it along
     -- with it.
     problem_store_file = ".tuna.json",

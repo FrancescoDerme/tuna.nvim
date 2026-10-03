@@ -30,11 +30,11 @@ Every command is a subcommand of `:Tuna` with tab-completion.
   <td>rewrite the testcases into another layout</td>
 </tr>
 <tr>
-  <td><a href="#compare"><code>:Tuna compare &lt;exact|squish|float [tol]|default&gt;</code></a></td>
+  <td><a href="#compare"><code>:Tuna compare [exact|squish|float [tol]|default]</code></a></td>
   <td>override the comparison for this problem</td>
 </tr>
 <tr>
-  <td><a href="#checker"><code>:Tuna checker [auto|off|toggle]</code></a></td>
+  <td><a href="#checker"><code>:Tuna checker [auto|off]</code></a></td>
   <td>judge with a custom checker or with the default one</td>
 </tr>
 <tr>
@@ -175,7 +175,7 @@ The storage backends, chosen with `testcases_storage`:
 ## compare
 
 ```
-:Tuna compare <exact|squish|float [tol]|default>
+:Tuna compare [exact|squish|float [tol]|default]
 ```
 
 Overrides how the output is compared with the expected output, for this problem only. It is
@@ -188,19 +188,21 @@ remembered across restarts.
   `tol` (`1e-6` when not given).
 - `default` goes back to `output_compare_method` from your config.
 
+Without an argument it changes nothing and says which method is in use.
+
 ## checker
 
 ```
-:Tuna checker [auto|off|toggle]
+:Tuna checker [auto|off]
 ```
 
 - `auto`, the default, judges with the problem's checker when there is one: a `checker.*`
   file beside the solution, or the `checker` option. It runs as
   `checker <input> <output> <answer>`, testlib's order, and exit code 0 means correct.
 - `off` ignores the checker and compares the outputs (see [compare](#compare)).
-- `toggle`, or no argument, switches between the two.
 
-The choice is remembered for the problem.
+The choice is remembered for the problem. Without an argument it changes nothing and says
+which of the two is set, and which checker that finds.
 
 ## download
 

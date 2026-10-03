@@ -87,35 +87,12 @@ cores, by default) and opens the runner UI. You can also open this UI by [`:Tuna
 
 <img width="1920" height="1080" alt="runner UI" src="https://github.com/user-attachments/assets/f6f51cc6-52cc-4d59-b5ea-e5047aebca1d" />
 
-A `:Tuna` command typed in one of these panes is about the solution the pane is showing, so
-`:Tuna run all` or `:Tuna submit` from inside the grid does what it would from the file.
-
-Output faces Expected Output across the top, because the comparison is read _across_;
-Errors and Input sit under them, and the two editable panes end up as one column down the
-right-hand edge. The whole grid is `popup_ui.layout`, a nested `{ weight, pane }` tree, if
-you want it arranged differently — or `runner_ui.interface = "split"` for real windows
+Blue panes are not editable while purple ones are. The whole grid is defined in `popup_ui.layout` as a nested `{ weight, pane }` tree, you can
+arrabge it differently or move to `runner_ui.interface = "split"` for real windows
 instead of floats.
 
-Each testcase is a row and the four panes show that run. The compile step is a row too,
-so its warnings and errors are somewhere you can read them, whatever your own grid leaves
-out. The build has no input, no answer and nothing to compare, so its row is shown
-with a pane for each source it compiles and nothing else, where a compiler's complaint has
-the room to be read — the panes of a run come back the moment you move off it
-(`runner_ui.compile_layout`). A run that builds more than your solution — a generator and a
-bruteforce, an interactor, a checker — stacks one pane per source, each named after what it
-holds (`Errors: gen.cpp`), so a warning is read where it belongs and not in one pane's worth
-of everything. Each of those panes opens full-screen with the key of the pane its program is
-about when a testcase runs, and every title says which: `e` for your solution (its errors),
-`i` for the generator or the interactor (they write the input), `a` for the bruteforce (it
-writes the answer), `o` for the checker (it judges the output). They are built
-at once, so a run waits for the slowest compile rather than for all of them end to end. Opening the UI
-puts you on the first testcase, and a run starts on the compile step and moves there itself
-as soon as the build ends with nothing to say — a build that failed or printed something
-keeps the cursor, being the row that answers the run, and it waits for every source it is
-building, not only your solution. Move the selector yourself and it stays where you put it,
-results landing and all, until you ask for another run — that one starts
-over the way the first did. Reopening the UI returns to the row you were last on. Every mode
-works this way, interactive following the row it is talking to.
+Each testcase is a row, and the compile step is a row too that shows warnings and errors if there are any, customizable at `runner_ui.compile_layout`.
+Each pane opens full-screen with the key mentioned in the pane's title.
 
 | key                             |                                                                                                                      |
 | ------------------------------- | -------------------------------------------------------------------------------------------------------------------- |

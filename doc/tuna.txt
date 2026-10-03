@@ -155,13 +155,15 @@ lowercase `:tuna` expands to it.
                         Rewrite the testcases into `files`, `single_file` or
                         `directory`. The source layout is detected for you.
 
-:Tuna compare {method}  Override the comparison for this problem: `exact`,
+:Tuna compare [method]  Override the comparison for this problem: `exact`,
                         `squish`, `float [tol]`, or `default` to clear it. The
-                        choice is remembered across restarts.
+                        choice is remembered across restarts. Without an
+                        argument, say which method is in use.
 
-:Tuna checker [auto/off/toggle]
+:Tuna checker [auto/off]
                         Judge with the problem's checker when there is one
                         (`auto`, the default), or compare outputs (`off`).
+                        Without an argument, say which is set.
 
 :Tuna download {mode}   One of `testcases`, `problem`, `contest`, `sync`,
                         `persistently`, `status`, `stop`; see |tuna-download|.

@@ -22,7 +22,7 @@ local subcommand_args = {
     convert = { "files", "single_file", "directory" },
     download = { "testcases", "problem", "contest", "sync", "persistently", "status", "stop" },
     scaffold = tools.ROLES,
-    checker = { "auto", "off", "toggle" },
+    checker = { "auto", "off" },
     compare = { "exact", "squish", "float", "default" },
     submit = { "clear" },
     lib = { "snippet", "search" },
@@ -448,24 +448,14 @@ function M.run_mode(args)
     M.dispatch_mode(mode, args, true, bufnr)
 end
 
----Set a problem's checker to automatic or off, or flip between the two. Every run looks
----the checker up, so it applies to the next run of any mode, and an open results UI shows
----the new judge straight away.
+---Say how the problem's checker is set: off, or automatic and which checker that finds. The
+---one sentence for setting it and for asking about it (bare `:Tuna checker`), so the two
+---read alike.
 ---@param bufnr integer
----@param want "auto"|"off"|nil nil flips the current setting
-function M.set_checker(bufnr, want)
+function M.show_checker(bufnr)
     local path = api.nvim_buf_get_name(bufnr)
-    if want == nil then
-        want = tools.checker_setting(path) == "off" and "auto" or "off"
-    end
-    tools.set_checker(path, want)
-    local cfg = config.get_buffer_config(bufnr)
-    local checker = tools.resolve_checker(path, cfg)
-    for _, r in ipairs(runners_of(bufnr)) do
-        r.checker = checker
-        r:update_ui()
-    end
-    if want == "off" then
+    local checker = tools.resolve_checker(path, config.get_buffer_config(bufnr))
+    if tools.checker_setting(path) == "off" then
         utils.notify("checker: off for this problem, comparing outputs.", "INFO")
     elseif type(checker) == "table" then
         local name = vim.fn.fnamemodify(checker.source or checker.exec, ":t")
@@ -475,13 +465,29 @@ function M.set_checker(bufnr, want)
     end
 end
 
+---Set a problem's checker to automatic or off. Every run looks the checker up, so it
+---applies to the next run of any mode, and an open results UI shows the new judge straight
+---away.
+---@param bufnr integer
+---@param want "auto"|"off"
+function M.set_checker(bufnr, want)
+    local path = api.nvim_buf_get_name(bufnr)
+    tools.set_checker(path, want)
+    local checker = tools.resolve_checker(path, config.get_buffer_config(bufnr))
+    for _, r in ipairs(runners_of(bufnr)) do
+        r.checker = checker
+        r:update_ui()
+    end
+    M.show_checker(bufnr)
+end
+
 ---Parse `:Tuna compare` args into a compare-method spec (or nil to clear the
 ---override back to the configured default). Notifies and returns false on a bad name.
 ---@param args string[] e.g. { "float", "1e-9" } or { "exact" } or { "default" }
 ---@return boolean ok, tuna.CompareSpec? method nil clears the override
 local function parse_compare(args)
     local name = args[1]
-    if name == nil or name == "default" then
+    if name == "default" then
         return true, nil
     elseif name == "exact" or name == "squish" then
         return true, name
@@ -556,10 +562,20 @@ function M.set_compare(bufnr, args)
         r.compare_method = method
         r:update_ui()
     end
-    if method == nil then
-        utils.notify("compare method reset to the configured one for this problem.", "INFO")
+    M.show_compare(bufnr)
+end
+
+---Say how the problem's output is compared: its own method, or the configured one. The one
+---sentence for setting it and for asking about it (bare `:Tuna compare`), as for the checker.
+---@param bufnr integer
+function M.show_compare(bufnr)
+    local name = require("tuna.compare").method_name
+    local own = tools.get_compare(api.nvim_buf_get_name(bufnr))
+    if own then
+        utils.notify("compare: " .. name(own) .. " for this problem.", "INFO")
     else
-        utils.notify("compare method set to " .. require("tuna.compare").method_name(method) .. " for this problem.", "INFO")
+        local configured = config.get_buffer_config(bufnr).output_compare_method
+        utils.notify("compare: " .. name(configured) .. ", the configured method.", "INFO")
     end
 end
 
@@ -694,22 +710,26 @@ M.subcommands = {
         end
         M.download(args[1])
     end,
+    -- A setting changes only when its new value is named (`off` forces the checker, `auto`
+    -- hands it back), and the bare command says how it is set, as bare `:Tuna compare` does.
     checker = function(args)
-        local want
-        if args[1] == "auto" or args[1] == "off" then
-            want = args[1]
-        elseif args[1] ~= nil and args[1] ~= "toggle" then
-            utils.notify("checker: use auto, off or toggle.", "WARN")
+        local want = args[1]
+        if want ~= nil and want ~= "auto" and want ~= "off" then
+            utils.notify("checker: use auto or off, or nothing to see how it is set.", "WARN")
             return
         end
         local bufnr = M.solution_bufnr()
-        if bufnr then
+        if bufnr and want then
             M.set_checker(bufnr, want)
+        elseif bufnr then
+            M.show_checker(bufnr)
         end
     end,
     compare = function(args)
         local bufnr = M.solution_bufnr()
-        if bufnr then
+        if bufnr and #args == 0 then
+            M.show_compare(bufnr)
+        elseif bufnr then
             M.set_compare(bufnr, args)
         end
     end,

@@ -444,6 +444,26 @@ do
     cmds = b["Catch of the day"] and api.nvim_buf_get_lines(api.nvim_win_get_buf(b["Catch of the day"].win), 0, -1, false) or {}
     t.ok("and an unpinned one to pin itself", vim.tbl_contains(cmds, "Pin this problem"), cmds)
     press("<Esc>")
+
+    -- The Checker entry switches the setting each time it is chosen, which is the one place
+    -- that happens: the command only changes it when told which way.
+    local tools = require("tuna.tools")
+    local function choose_checker()
+        require("tuna.menu").open()
+        local win = board()["Catch of the day"].win
+        for i, line in ipairs(api.nvim_buf_get_lines(api.nvim_win_get_buf(win), 0, -1, false)) do
+            if line:find("^Checker:") then
+                api.nvim_set_current_win(win)
+                api.nvim_win_set_cursor(win, { i, 0 })
+            end
+        end
+        local quiet = vim.notify
+        vim.notify = function() end
+        press("<CR>")
+        vim.notify = quiet
+        return tools.checker_setting(pinned[30]) == "off" and "off" or "auto"
+    end
+    t.eq("the menu's Checker entry switches it off and back", { choose_checker(), choose_checker() }, { "off", "auto" })
 end
 
 vim.fn.delete(contest, "rf")

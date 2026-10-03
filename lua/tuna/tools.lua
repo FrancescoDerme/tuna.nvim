@@ -547,7 +547,7 @@ local function decode_compare(stored)
 end
 
 ---@private
----How this problem is run — the compare method, the checker toggle, the chosen mode
+---How this problem is run — the compare method, the checker setting, the chosen mode
 ---and interactive source — is a property of the *problem*, so it lives in the
 ---per-problem sidecar and comes back after a restart. (`recent.lua`'s state file is
 ---for the opposite kind of thing: where *you* were, which is per machine.)

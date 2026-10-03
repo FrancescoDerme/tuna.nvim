@@ -236,7 +236,14 @@ is relative. Every configured path goes through these: compile/running directori
     interactor-else-live, the checker when there is one. `resolve_mode`/`resolve_source`/
     `resolve_checker` return the forced choice while what it needs is available, else the
     automatic one plus a note (only stress and the interactor source need helpers). Keywords
-    typed now force and run as typed; `auto` clears. Persisted in the sidecar with the compare
+    typed now force and run as typed; `auto` clears. The commands spell every one of them
+    the same way: a setting changes only when its new value is named (a keyword forces,
+    `auto` hands back, no keyword switches), and a **bare** setting command changes nothing
+    and says how it is set (`show_checker`, `show_compare`, the same sentence a change
+    ends with). `:Tuna checker` is `off`/`auto`; `:Tuna compare` clears with `default`
+    instead, since what it goes back to is the config's `output_compare_method`, not a
+    choice tuna makes. Switching and cycling with one keypress belong to the menu's
+    "Checker:" and "Compare:" entries, which show the state they move from. Persisted in the sidecar with the compare
     override, loaded lazily, removed when nothing is forced.
   - `prepare` caches builds session-wide, keyed by path + mtime + compile command, and queues
     concurrent callers. It reports `(ok, err, output)`: the compiler's words on a build that
@@ -1035,7 +1042,9 @@ specific Vim error about a buffer the user never opened.
     paths and commands, missing ones), automatic choices, forcing and `auto`, forced settings
     giving way and coming back, old sidecar entries, runners refreshing the checker per run,
     run-all honouring `checker off`, the Run pane's settings rows and which of them read as
-    forced, `:Tuna compare` reaching an open board without taking its runner away, old or
+    forced, `:Tuna compare` reaching an open board without taking its runner away,
+    `:Tuna checker`'s and `:Tuna compare`'s words (`off`/`auto`, bare reporting and
+    changing nothing, no `toggle`) and the menu's Checker entry switching, old or
     nonsense sidecar values reading as automatic, a configured command with no
     arguments getting its role's, and stress/interactor reruns offering the starter of a helper gone (Stop writing
     nothing, Create putting the board away and opening it in the editor);
