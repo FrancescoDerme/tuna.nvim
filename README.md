@@ -85,6 +85,8 @@ region becomes a testcase of its own.
 `:Tuna run` compiles, runs every testcase in parallel (as many at once as you have
 cores, by default) and opens the runner UI. You can also open this UI by [`:Tuna show_ui`](COMMANDS.md#show_ui).
 
+<img width="1920" height="1080" alt="runner UI" src="https://github.com/user-attachments/assets/f6f51cc6-52cc-4d59-b5ea-e5047aebca1d" />
+
 A `:Tuna` command typed in one of these panes is about the solution the pane is showing, so
 `:Tuna run all` or `:Tuna submit` from inside the grid does what it would from the file.
 
