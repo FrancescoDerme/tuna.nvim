@@ -170,18 +170,10 @@ function M.convert_testcases(target)
     end
     local bufnr = M.target_buffer()
     config.load_buffer_config(bufnr)
-    -- buf_get_testcases auto-detects whichever backend currently holds them.
-    local tctbl = testcases.buf_get_testcases(bufnr)
-    if next(tctbl) == nil then
+    if testcases.buf_convert(bufnr, target) == 0 then
         utils.notify("convert: there's nothing to convert.")
         return
     end
-
-    -- Clear every backend's on-disk storage, then write to the target one.
-    for _, backend in pairs(testcases.backends) do
-        backend.buf_clear(bufnr)
-    end
-    testcases.buf_write_testcases(bufnr, tctbl, target)
     utils.notify("converted testcases to '" .. target .. "' storage.", "INFO")
 end
 

@@ -47,11 +47,19 @@ library, contest navigation, a scratch file, an unused-file cleaner, a menu and
   is clamped to 160 characters.
 
 **Docs**
-- `README.md` and `doc/tuna.txt` are parallel. When user-visible behaviour changes, update
-  both, and update this file when the design changes. Every option in `config.defaults` is
-  documented in both (submit's in their own table, `*tuna-submit-options*`), and so are the
-  action names `keymaps` and `runner_ui.mappings` take.
-- The maintainer edits the README by hand: read it before editing and don't reflow it.
+- Three user docs are kept in step: `README.md` (features and workflows), `COMMANDS.md` (the
+  command reference) and `doc/tuna.txt`, which mirrors both. When user-visible behaviour
+  changes, update every one it touches, and update this file when the design changes. Every
+  option in `config.defaults` is documented in the README and the vimdoc (submit's in their
+  own table, `*tuna-submit-options*`), and so are the action names `keymaps` and
+  `runner_ui.mappings` take.
+- `COMMANDS.md` is an HTML table indexing every command, each linked to a `##` section of
+  its own below it (plain headings, `## convert`, so the anchors stay `#convert`), where
+  the detail goes. A new command gets a row and a section, and the vimdoc's `COMMANDS` entry.
+  The README links the **first** mention of each command to its section
+  (`[`:Tuna run`](COMMANDS.md#run)`) and does not repeat the reference.
+- The maintainer edits the README and `COMMANDS.md` by hand: read them before editing and
+  don't reflow them.
 - The vimdoc is `doc/tuna.txt` (`:helptags` only indexes `*.txt`). Lines are at most 78
   columns, tags look like `*tuna-…*`, and `|` is only a link delimiter, so alternatives are
   written `[add/edit/delete]`. Check tags with `:helptags doc`. `doc/tags` is gitignored,
@@ -100,6 +108,7 @@ lua/tuna/
   health.lua        :checkhealth tuna
 scaffolds/          the shipped helper starters, `<role>.<ext>`
 doc/tuna.txt        vimdoc
+COMMANDS.md         the command reference the README links into
 tests/              test suite (`tests/run.sh`)
 tuna.nvim.json      package metadata
 ```
@@ -175,6 +184,12 @@ is relative. Every configured path goes through these: compile/running directori
   without a per-problem modifier (decided by modifier name, `has_scoping_modifier`) warns once
   per session, because every problem would overwrite the others. The warning is skipped when
   the value comes from a `.tuna.lua`.
+- `buf_convert(bufnr, target)` (`:Tuna convert`) moves the testcases from the backend holding
+  them to `target`, clearing every backend first, and writes them through `keep_stored`,
+  exactly as they were: the bulk rule would turn an answer stored empty into none. The
+  `directory` backend, removing a testcase, also removes the directories its format made
+  for it once empty (`tests/0`, then `tests`), stopping at the store's root
+  (`testcases_directory`), which is the user's.
 - `:Tuna testcase edit`/`delete`/`split` without a number go through `commands.choose_testcase`:
   the only testcase when there is one, a `widgets.menu` of them in order when there are several,
   a message when there are none. Delete still confirms.
@@ -1064,8 +1079,9 @@ specific Vim error about a buffer the user never opened.
     using real UI windows, in both interfaces where the grid changes (focus, the selector's
     row and line numbers, titles and a bad grid said once as the board re-tiles, and `:w`
     from a read-only pane). `testcases.lua` also covers the
-    `single_file` rewrite keeping untouched testcases, and which testcase a command without
-    a number acts on.
+    `single_file` rewrite keeping untouched testcases, a conversion through every backend
+    keeping an answer stored empty and leaving no layout behind (the store's root kept),
+    and which testcase a command without a number acts on.
 - Modules expose file-local helpers to tests through `M._test` (`download`, `submit`, `clean`,
   `interactive`, `temp`, `menu`). They are not public interface.
 - **Mutation-check new tests**: break the rule each test describes and confirm it fails, and

@@ -413,11 +413,15 @@ function M.directory.write(base_dir, tctbl, filepath, dir_format, input_name, ou
         local keep = tc.keep_empty or {}
         local empty = (not tc.input or tc.input == "") and (not tc.output or tc.output == "")
         if empty and not (keep.input or keep.output) then
-            -- remove the testcase's files, and the directory itself if now empty
+            -- Remove the testcase's files, then every directory the format made for it that
+            -- is now empty (`tests/0`, then `tests`), up to the store's root, which is left
+            -- alone: a layout converted away from, or emptied, leaves nothing behind.
             write_or_delete(tcdir .. input_name, nil)
             write_or_delete(tcdir .. output_name, nil)
-            if utils.directory_exists(tcdir) then
-                pcall(vim.uv.fs_rmdir, (tcdir:gsub("/$", "")))
+            local root = vim.fs.normalize(base_dir)
+            local dir = vim.fs.normalize(tcdir)
+            while dir:sub(1, #root + 1) == root .. "/" and vim.uv.fs_rmdir(dir) do
+                dir = vim.fs.dirname(dir)
             end
         else
             utils.ensure_directory(tcdir)
@@ -669,6 +673,39 @@ function M.get_testcases(filepath, cfg)
     return tctbl
 end
 
+---Mark testcases read from a store to be written back exactly as they are. A write that
+---rewrites testcases it is not changing (a single-file save or delete, which rewrites the
+---whole file, and a conversion) would otherwise go by the bulk rule, empty means absent,
+---and drop a stored empty testcase and turn an expected empty answer into no answer.
+---@param tctbl table<integer, table>
+---@return table<integer, table>
+local function keep_stored(tctbl)
+    for _, entry in pairs(tctbl) do
+        entry.keep_empty = { input = true, output = entry.output == "" or nil }
+    end
+    return tctbl
+end
+
+---Move a buffer's testcases into another storage backend, exactly as they are stored: the
+---backend holding them now is detected, every backend's files are removed, and the target's
+---are written. Exactly, because the bulk rule ("empty means absent") would turn an answer
+---that is stored empty, the instruction to expect no output, into no answer at all.
+---@param bufnr integer
+---@param target string "files" | "single_file" | "directory"
+---@return integer count how many testcases were moved, 0 when there were none
+function M.buf_convert(bufnr, target)
+    local tctbl = M.buf_get_testcases(bufnr)
+    local count = vim.tbl_count(tctbl)
+    if count == 0 then
+        return 0
+    end
+    for _, backend in pairs(M.backends) do
+        backend.buf_clear(bufnr)
+    end
+    M.buf_write_testcases(bufnr, keep_stored(tctbl), target)
+    return count
+end
+
 ---Write a full testcase table for a buffer.
 ---@param bufnr integer
 ---@param tctbl table<integer, tuna.StoredTestcase>
@@ -692,19 +729,6 @@ end
 function M.buf_clear(bufnr)
     local cfg = config.get_buffer_config(bufnr)
     M.backend(cfg.testcases_storage).buf_clear(bufnr)
-end
-
----Mark every testcase already in a single-file store to be written back exactly as it is.
----Saving or deleting one testcase rewrites the whole file, and the bulk rule in
----`single_file.write` (empty means absent) would otherwise drop a stored empty testcase
----and turn an expected empty answer into no answer, while saving an unrelated one.
----@param tctbl table<integer, table>
----@return table<integer, table>
-local function keep_stored(tctbl)
-    for _, entry in pairs(tctbl) do
-        entry.keep_empty = { input = true, output = entry.output == "" or nil }
-    end
-    return tctbl
 end
 
 ---Create or replace a single testcase for a buffer. Saving a testcase **stores** it,

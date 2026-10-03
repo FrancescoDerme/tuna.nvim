@@ -292,6 +292,49 @@ vim.fn.delete(sfdir, "rf")
 -- A testcase command given no number asks which only when there is a choice
 --------------------------------------------------------------------------------
 
+-- A conversion moves the testcases exactly as stored, through every backend and back: an
+-- answer stored empty (the solution must print nothing) stays an answer, and a layout
+-- converted away from leaves nothing behind, `directory`'s `tests/` included.
+do
+    local cdir = t.tempdir()
+    t.write(cdir, "main.cpp", "int main(){}\n")
+    t.write(cdir, "main_input0.txt", "1\n")
+    t.write(cdir, "main_output0.txt", "")
+    t.write(cdir, "main_input1.txt", "2\n")
+    t.write(cdir, "main_output1.txt", "2\n")
+    require("tuna").setup({})
+    vim.cmd("edit " .. cdir .. "/main.cpp")
+    local cbuf = vim.api.nvim_get_current_buf()
+    local answers = {}
+    for _, target in ipairs({ "single_file", "directory", "files" }) do
+        tc.buf_convert(cbuf, target)
+        require("tuna").setup({ testcases_storage = target })
+        local got = tc.buf_get_testcases(cbuf)
+        answers[#answers + 1] = { target, got[0] and got[0].output, got[1] and got[1].output }
+    end
+    t.eq("an answer stored empty survives every conversion", answers, {
+        { "single_file", "", "2\n" },
+        { "directory", "", "2\n" },
+        { "files", "", "2\n" },
+    })
+    local left = vim.fn.readdir(cdir)
+    table.sort(left)
+    t.eq("and each layout left behind is gone", left, { "main.cpp", "main_input0.txt", "main_input1.txt", "main_output0.txt", "main_output1.txt" })
+
+    -- Emptying the `directory` layout takes the directories its format made with it, and
+    -- stops at the store's own root: that is where `testcases_directory` points, not a
+    -- directory tuna made.
+    require("tuna").setup({ testcases_storage = "directory", testcases_directory = "store" })
+    tc.buf_write_testcases(cbuf, { [0] = { input = "1\n", output = "1\n" } })
+    tc.buf_delete_testcase(cbuf, 0)
+    t.eq("deleting the last testcase leaves the store's root, and nothing under it", {
+        vim.fn.isdirectory(cdir .. "/store"),
+        vim.fn.readdir(cdir .. "/store"),
+    }, { 1, {} })
+    require("tuna").setup({})
+    vim.fn.delete(cdir, "rf")
+end
+
 do
     local dir = t.tempdir()
     t.write(dir, "one.cpp", "int main(){}\n")
