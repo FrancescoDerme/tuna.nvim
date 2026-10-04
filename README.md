@@ -87,44 +87,21 @@ cores, by default) and opens the runner UI. You can also open this UI by [`:Tuna
 
 <img width="1920" height="1080" alt="runner UI" src="https://github.com/user-attachments/assets/f6f51cc6-52cc-4d59-b5ea-e5047aebca1d" />
 
-Blue panes are not editable while purple ones are. The whole grid is defined in `popup_ui.layout` as a nested `{ weight, pane }` tree, you can
-arrabge it differently or move to `runner_ui.interface = "split"` for real windows
+The whole grid is defined in `popup_ui.layout` as a nested `{ weight, pane }` tree, you can
+arrange it differently or move to `runner_ui.interface = "split"` for real windows
 instead of floats.
 
 Each testcase is a row, and the compile step is a row too that shows warnings and errors if there are any, customizable at `runner_ui.compile_layout`.
-Each pane opens full-screen with the key mentioned in the pane's title.
 
-| key                             |                                                                                                                      |
-| ------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `j` / `k`                       | walk the testcases                                                                                                   |
-| `r` / `<C-r>`                   | re-run this one / all of them                                                                                        |
-| `s` / `<C-s>`                   | stop this one / all of them                                                                                          |
-| `d`                             | toggle the diff                                                                                                      |
-| `i` `a` `o` `e`                 | open input / expected / stdout / stderr full-screen, each title says its key                                         |
-| `n` `x` `u`                     | add a testcase, delete one, undo that                                                                                |
-| `c`                             | split this testcase on its marker lines                                                                              |
-| `<C-h>` `<C-j>` `<C-k>` `<C-l>` | move between panes                                                                                                   |
-| `q`                             | close                                                                                                                |
-| `?`                             | the full legend, which is the authority — these are just the defaults, and stress and interactive add what is theirs |
+The runner UI can do a lot, but it aims to stay intuitive by aligning to Neovim's defaults: purple panes are editable and any key behaves on them as it would on a normal buffer. From blue panes you can:
+- toggle the diff view with `d`, 
+- rerun a testcase or all of them with `r` and `<C-r>`,
+- add or delete a testcase with `n` and `x`,
+- and more.
 
-Stopping all of them ends the run, in every mode: what was running reads `KILLED` and what it had
-not reached yet `NOT RUN`. `<C-r>` builds your solution again before it runs them, from the file on disk.
+Each pane opens full-screen with the key in the pane's title, and `<C-hjkl>` move you between panes.
 
-**The Input and Expected Output panes are editable.** They are ordinary buffers with an
-accent on their border, so there is no key to learn: move in, type, and `:w`. That writes
-the testcase and re-runs it. Nothing reaches disk before `:w`, unwritten edits survive
-moving to another row, and closing with one pending asks rather than dropping it. So does
-starting a run, in this mode or another: a problem shows one results UI at a time, and
-switching modes stops the previous run and puts its UI away.
-
-**The diff is positional.** Vim's own diff may decide a line was deleted and re-pair
-everything after it, which for `2 2 0 2` against `2 2 2 5` reports one deletion and then
-compares your fourth line with the answer's third. Competitive-programming output is
-positional, so tuna walks both sides in lockstep — line _i_ against line _i_, token _i_
-against token _i_ — and never re-aligns. Its granularity follows the comparison in force,
-so the marks can never contradict the verdict.
-
-Comparison is `output_compare_method`: `"exact"`, `"squish"` (whitespace-insensitive, the
+Comparison between Outout and Expected Outout is driven by `output_compare_method`: `"exact"`, `"squish"` (whitespace-insensitive, the
 default), `{ "float", tol = 1e-6 }` for problems with a tolerance, or a function of your
 own. [`:Tuna compare <method>`](COMMANDS.md#compare) overrides it for one problem, and remembers.
 
