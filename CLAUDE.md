@@ -48,9 +48,17 @@ library, contest navigation, a scratch file, an unused-file cleaner, a menu and
 
 **Docs**
 - Three user docs are kept in step: `README.md` (what a beginner needs: install, quick start,
-  the feature tour, the submit walkthrough), `REFERENCE.md` (the reference, `# Commands` and
-  `# Configuration`) and `doc/tuna.txt`, which mirrors both. When user-visible behaviour
+  the feature tour), `REFERENCE.md` (the reference: `# Commands`, `# Configuration`, and
+  `# Submitting`, the step-by-step submit setup the README's submit feature links to) and
+  `doc/tuna.txt`, which mirrors both. When user-visible behaviour
   changes, update every one it touches, and update this file when the design changes.
+- **Useful before complete.** The docs a user starts from (the README, and the vimdoc's
+  introduction and feature sections) aim to be useful, not complete: they say what a user
+  needs in order to use the plugin well, and leave out behaviour that is intuitive or that
+  a user would expect or easily find out by themselves (a key that does what Vim's would,
+  a prompt that explains itself, a default that is what anyone would pick). Completeness
+  lives in the reference (`REFERENCE.md`, the vimdoc's reference sections) and in
+  `config.lua`'s comments, and even there what a reader would assume goes unsaid.
 - **Options are documented where they are defined.** Every option in `config.defaults` has a
   comment in `config.lua` saying what it does (a block comment may cover a group), and an
   entry in the vimdoc (submit's under `*tuna-submit-options*`). No doc has option tables:
@@ -66,7 +74,9 @@ library, contest navigation, a scratch file, an unused-file cleaner, a menu and
   The README links the **first** mention of each command to its section
   (`[`:Tuna run`](REFERENCE.md#run)`) and does not repeat the reference.
 - The maintainer edits the README and `REFERENCE.md` by hand: read them before editing and
-  don't reflow them.
+  don't reflow them. The Markdown docs put **one sentence per line**, never hard-wrapped
+  (a list item's further sentences indented under it), so a diff shows the sentence that
+  changed; code blocks, tables and HTML are left as they are.
 - The vimdoc is `doc/tuna.txt` (`:helptags` only indexes `*.txt`). Lines are at most 78
   columns, tags look like `*tuna-…*`, and `|` is only a link delimiter, so alternatives are
   written `[add/edit/delete]`. Check tags with `:helptags doc`. `doc/tags` is gitignored,
