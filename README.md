@@ -184,6 +184,8 @@ The full setup, from pointing tuna at your tool to reading the verdict, is in th
 `:Tuna clean` removes files you created and never used, and then the directories they leave empty.
 Every deletion is confirmed one at a time, with the file in front of you.
 
+<img width="1920" height="1080" alt="clean" src="https://github.com/user-attachments/assets/de4f558c-9fe4-41e5-a002-70031b36f2d2" />
+
 ### Your algorithms library
 
 [`:Tuna lib`](REFERENCE.md#lib) copies a piece of your own library into the file you are writing.
