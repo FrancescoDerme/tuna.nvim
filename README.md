@@ -46,21 +46,21 @@ With [vim.pack](https://neovim.io/doc/user/pack/):
 
 ## Quick start
 
-1. **[`:Tuna`](COMMANDS.md#menu)** opens the menu,
-2. **[`:Tuna download problem`](COMMANDS.md#download)** begins listening for a problem from Competitive companion,
+1. **[`:Tuna`](REFERENCE.md#menu)** opens the menu,
+2. **[`:Tuna download problem`](REFERENCE.md#download)** begins listening for a problem from Competitive companion,
    press the green plus in your browser to download.
    A solution file is created from your template, the testcases are written beside it,
    Neovim moves into the problem's directory, and the file opens.
-3. **[`:Tuna run`](COMMANDS.md#run)** compiles, runs the testcases in parallel, and opens the runner UI.
+3. **[`:Tuna run`](REFERENCE.md#run)** compiles, runs the testcases in parallel, and opens the runner UI.
    The four panes show output, expected output, input and stderr. This UI can do a lot,
    for example `d` toggles a diff of the two outputs.
-4. **[`:Tuna submit`](COMMANDS.md#submit)** hands the solution to whichever submit tool you have configured,
+4. **[`:Tuna submit`](REFERENCE.md#submit)** hands the solution to whichever submit tool you have configured,
    reads that tool's output as it runs, and puts the judge's verdict in your statusline.
-5. **[`:Tuna pin`](COMMANDS.md#pin)**, **[`:Tuna last`](COMMANDS.md#last)**, and **[`:Tuna clean`](COMMANDS.md#clean)** facilitate moving around to upsolve problems and keeping your directory clean.
+5. **[`:Tuna pin`](REFERENCE.md#pin)**, **[`:Tuna last`](REFERENCE.md#last)**, and **[`:Tuna clean`](REFERENCE.md#clean)** facilitate moving around to upsolve problems and keeping your directory clean.
 
 ## Features
 
-You can find a complete list of the commands in [COMMANDS.md](COMMANDS.md), along with a detailed explanation of how each one works. Here we aim to describe the most important features and some basic workflows.
+You can find a complete list of the commands in [REFERENCE.md](REFERENCE.md), along with a detailed explanation of how each one works. Here we aim to describe the most important features and some basic workflows.
 
 ### Testcases
 
@@ -75,15 +75,15 @@ anything wins:
 testcases_input_file_format = { "$(FNOEXT)_input$(TCNUM).txt", "input$(TCNUM).txt", "in.txt" }
 ```
 
-Add, edit and delete them with [`:Tuna testcase add|edit|delete`](COMMANDS.md#testcase), or in place in the
-results UI, which is usually where you want to be. [`:Tuna testcase split`](COMMANDS.md#testcase-split) breaks
+Add, edit and delete them with [`:Tuna testcase add|edit|delete`](REFERENCE.md#testcase), or in place in the
+results UI, which is usually where you want to be. [`:Tuna testcase split`](REFERENCE.md#testcase-split) breaks
 one testcase into several: mark the cases inside it with a line of `-`, and each bracketed
 region becomes a testcase of its own.
 
 ### Running and the runner UI
 
 `:Tuna run` compiles, runs every testcase in parallel (as many at once as you have
-cores, by default) and opens the runner UI. You can also open this UI by [`:Tuna show_ui`](COMMANDS.md#show_ui).
+cores, by default) and opens the runner UI. You can also open this UI by [`:Tuna show_ui`](REFERENCE.md#show_ui).
 
 <img width="1920" height="1080" alt="runner UI" src="https://github.com/user-attachments/assets/f6f51cc6-52cc-4d59-b5ea-e5047aebca1d" />
 
@@ -104,7 +104,7 @@ Each pane opens full-screen with the key in the pane's title, and `<C-hjkl>` mov
 
 Comparison between Outout and Expected Outout is driven by `output_compare_method`: `"exact"`, `"squish"` (whitespace-insensitive, the
 default), `{ "float", tol = 1e-6 }` for problems with a tolerance, or a function of your
-own. [`:Tuna compare <method>`](COMMANDS.md#compare) overrides it for one problem, and remembers.
+own. [`:Tuna compare <method>`](REFERENCE.md#compare) overrides it for one problem, and remembers.
 
 ### Run modes and scaffolding
 
@@ -123,9 +123,9 @@ Every helper is found the same way: a file named after it beside your solution (
 
 The run mode, interactive's source and the checker are decided based on the helpers present until you force
 them: `:Tuna run <mode>` forces a mode, `:Tuna run interactive <source>` a source,
-[`:Tuna checker off`](COMMANDS.md#checker) plain comparison, and `auto` hands any of them back.
+[`:Tuna checker off`](REFERENCE.md#checker) plain comparison, and `auto` hands any of them back.
 
-[`:Tuna scaffold checker|generator|bruteforce|interactor`](COMMANDS.md#scaffold) drops in a starter
+[`:Tuna scaffold checker|generator|bruteforce|interactor`](REFERENCE.md#scaffold) drops in a starter
 file, named as `tool_names` says, in your solution's language,
 or in the one configured at `scaffold.language`. Tuna ships `cpp` and `py` starters in its `scaffolds/` folder, and a file of
 the same name in your `scaffold.directory` (by default `tuna/scaffolds` in your Neovim config)
@@ -195,7 +195,7 @@ For a working setup of a submit tool see [here](https://github.com/FrancescoDerm
 
 ### Getting around
 
-- [`:Tuna next`](COMMANDS.md#next-and-prev) / [`:Tuna prev`](COMMANDS.md#next-and-prev) step between the problems of a contest, preferring the same
+- [`:Tuna next`](REFERENCE.md#next-and-prev) / [`:Tuna prev`](REFERENCE.md#next-and-prev) step between the problems of a contest, preferring the same
   file name you are leaving (`A/main.cpp` → `B/main.cpp`).
 - `:Tuna last problem` / `:Tuna last contest` go back to what you were working on, across
   restarts. The menu also provides access to your recent
@@ -210,7 +210,7 @@ leave empty. Every deletion is confirmed one at a time, with the file in front o
 
 ### Your algorithms library
 
-[`:Tuna lib`](COMMANDS.md#lib) copies a piece of your own library into the file you are writing. The library
+[`:Tuna lib`](REFERENCE.md#lib) copies a piece of your own library into the file you are writing. The library
 is plain source files, with the parts worth copying marked in place:
 
 ```cpp
@@ -265,15 +265,8 @@ require("lualine").setup({
 
 ## Configuration
 
-Settings come from three layers, each overriding the one before:
-
-1. the defaults;
-2. what you pass to `setup()`;
-3. a `.tuna.lua` anywhere above the file you are editing, returning a table, so a contest
-   folder can set a different time limit, template or testcase layout for everything under it
-   without touching your config.
-
-This means that everything is optional. The following is an example of a minimal configuration.
+Everything is optional: `setup()` takes a table shaped like the defaults, and anything you
+leave out keeps its default.
 
 ```lua
 require("tuna").setup({
@@ -289,153 +282,13 @@ require("tuna").setup({
 
 [This](https://github.com/FrancescoDerme/dotfiles/blob/master/nvim/.config/nvim/lua/plugins/tuna.lua) is an example of a complete configuration.
 
-Every option, with its default and what it does, is commented in
-[`lua/tuna/config.lua`](lua/tuna/config.lua) and documented in `:h tuna-configuration`. The
-sections below cover what takes more than a line.
+Settings can also live in a `.tuna.lua` in any folder above the file you are editing. It returns
+a table of the same shape, so a contest folder can set its own time limit, template or testcase
+layout without touching your config.
 
-### Modifiers
-
-The `$(...)` placeholders that appear in commands, file formats and paths. There are two
-sets, and which one applies depends on whether a downloaded problem is involved.
-
-**File modifiers** — available anywhere a path or command is evaluated:
-
-<table>
-<tr>
-  <td><code>$(FNAME)</code></td>
-  <td><code>main.cpp</code></td>
-</tr>
-<tr>
-  <td><code>$(FNOEXT)</code></td>
-  <td><code>main</code></td>
-</tr>
-<tr>
-  <td><code>$(FEXT)</code></td>
-  <td><code>cpp</code></td>
-</tr>
-<tr>
-  <td><code>$(FABSPATH)</code></td>
-  <td><code>/home/you/cp/A/main.cpp</code></td>
-</tr>
-<tr>
-  <td><code>$(ABSDIR)</code></td>
-  <td><code>/home/you/cp/A</code></td>
-</tr>
-<tr>
-  <td><code>$(DIRNAME)</code></td>
-  <td><code>A</code> — the <em>name</em> of the directory, which for a downloaded problem is the problem</td>
-</tr>
-<tr>
-  <td><code>$(HOME)</code>, <code>$(CWD)</code></td>
-  <td>your home directory, the current directory</td>
-</tr>
-<tr>
-  <td><code>$(TCNUM)</code></td>
-  <td>the testcase number (testcase file formats only)</td>
-</tr>
-<tr>
-  <td><code>$()</code></td>
-  <td>a literal <code>$</code></td>
-</tr>
-</table>
-
-**Download modifiers** — additionally available in `downloaded_*` paths and in
-`template_file`, because they only exist while a problem is being downloaded:
-
-<table>
-<tr>
-  <td><code>$(PROBLEM)</code></td>
-  <td>the problem's name</td>
-</tr>
-<tr>
-  <td><code>$(JUDGE)</code>, <code>$(CONTEST)</code></td>
-  <td>as parsed from what the extension sent (see <code>judge_parsers</code>)</td>
-</tr>
-<tr>
-  <td><code>$(GROUP)</code></td>
-  <td>the raw, unparsed group</td>
-</tr>
-<tr>
-  <td><code>$(URL)</code></td>
-  <td>the problem's address</td>
-</tr>
-<tr>
-  <td><code>$(TIMELIM)</code>, <code>$(MEMLIM)</code></td>
-  <td>the judge's limits, in ms and MB</td>
-</tr>
-<tr>
-  <td><code>$(JAVA_MAIN_CLASS)</code>, <code>$(JAVA_TASK_CLASS)</code></td>
-  <td>for Java solution templates</td>
-</tr>
-<tr>
-  <td><code>$(DATE)</code></td>
-  <td>now, formatted with <code>date_format</code></td>
-</tr>
-</table>
-
-Characters that cannot appear in a filename are replaced with `_` in every modifier that
-becomes part of a path.
-
-### Compiling and running
-
-`compile_command` and `run_command` are argv, not shell lines: `exec` is the program and
-`args` is a list, so nothing is word-split or glob-expanded behind your back.
-
-### Testcases
-
-A `testcases_*_file_format` without `$(TCNUM)` names a _single_ testcase, which is what
-makes a bare `in.txt` / `out.txt` pair work.
-
-### Downloading
-
-Downloading a problem whose target already exists asks before overwriting; downloading a
-contest asks **once** for the whole batch, and offers to write only the problems that are
-missing — which is what re-downloading a contest you are half-way through should do.
-
-### Templates
-
-`template_cursor` takes a line number, a Lua pattern to search for, `{ pattern, offset }`
-for _n_ lines below the match, or a function. A pattern that matches nothing leaves the
-cursor alone, so one written for C++ is harmless to a Python template.
-
-### Keymaps
-
-Nothing is mapped unless you ask:
-
-```lua
-keymaps = {
-    preset = "<leader>t",              -- the whole set, under one prefix
-    filetypes = { "c", "cpp", "rust", "java", "python" },
-    mappings = { run = "<leader><leader>", delete_testcase = false },  -- move one, drop one
-    global = {},                       -- always available, not just in a solution
-},
-```
-
-`mappings` are buffer-local and set for `filetypes`, so they follow you from solution to
-solution; `global` are set once. Both layer over `preset` rather than replacing it, so a
-single key can be moved — or dropped, by mapping its action to `false` — without giving up
-the rest. The preset groups keys by subject, so which-key shows a `t` testcases group, a
-`d` downloads group and a `g` "go to" group.
-
-The actions, each running the `:Tuna` command it is named after: `menu`, `run`, `run_all`,
-`run_stress`, `run_interactive`, `show_ui`, `add_testcase`, `edit_testcase`,
-`delete_testcase`, `submit`, `submit_clear`, `download_testcases`, `download_problem`,
-`download_contest`, `download_sync`, `clean`, `pin`, `next_problem`, `prev_problem`,
-`last_problem`, `last_contest`, `scratch`, `library`, `library_snippet` and `library_search`.
-
-### Appearance and widgets
-
-`runner_ui.mappings` names its actions `run_again`, `run_all_again`, `stop`, `stop_all`,
-`toggle_diff`, `view_input`, `view_expected`, `view_stdout`, `view_stderr`, `add_testcase`,
-`delete_testcase`, `undo_delete`, `split_testcase`, `close` and `help`, each taking a key
-or a list of them.
-
-Highlight groups: `TunaCorrect`, `TunaWrong`, `TunaWarning`, `TunaRunning`, `TunaDone`,
-`TunaEditable`, `TunaMenuTitle` (the menu's banner letters; the banner has no background of
-its own, so what is behind it shows between them), and `TunaDiffChange` / `TunaDiffText` /
-`TunaDiffAdd` / `TunaDiffDelete`.
-Override any of them with `:hi` after startup — they are re-applied on `ColorScheme`, so
-they follow your theme.
+Everything else, from the `$(...)` placeholders that paths and commands use to keymap actions and
+highlight groups, is in the [reference](REFERENCE.md#configuration), and every option is commented
+in [`lua/tuna/config.lua`](lua/tuna/config.lua).
 
 ## Submitting
 

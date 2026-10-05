@@ -47,22 +47,25 @@ library, contest navigation, a scratch file, an unused-file cleaner, a menu and
   is clamped to 160 characters.
 
 **Docs**
-- Three user docs are kept in step: `README.md` (features and workflows), `COMMANDS.md` (the
-  command reference) and `doc/tuna.txt`, which mirrors both. When user-visible behaviour
+- Three user docs are kept in step: `README.md` (what a beginner needs: install, quick start,
+  the feature tour, the submit walkthrough), `REFERENCE.md` (the reference, `# Commands` and
+  `# Configuration`) and `doc/tuna.txt`, which mirrors both. When user-visible behaviour
   changes, update every one it touches, and update this file when the design changes.
 - **Options are documented where they are defined.** Every option in `config.defaults` has a
   comment in `config.lua` saying what it does (a block comment may cover a group), and an
-  entry in the vimdoc (submit's under `*tuna-submit-options*`). The README has no option
-  tables: it points to `config.lua` and `:h tuna-configuration`, and its Configuration
-  section keeps only what takes more than a line (the modifiers, the setting layers,
-  keymaps, the action names `keymaps` and `runner_ui.mappings` take, highlight groups). A
-  new option gets its comment and its vimdoc entry, not a README row.
-- `COMMANDS.md` is an HTML table indexing every command, each linked to a `##` section of
-  its own below it (plain headings, `## convert`, so the anchors stay `#convert`), where
-  the detail goes. A new command gets a row and a section, and the vimdoc's `COMMANDS` entry.
+  entry in the vimdoc (submit's under `*tuna-submit-options*`). No doc has option tables:
+  the README's Configuration section is a minimal example, `.tuna.lua`, and a link to
+  `REFERENCE.md#configuration`, which keeps only what takes more than a line (the setting
+  layers, the modifiers, keymaps, the action names `keymaps` and `runner_ui.mappings`
+  take, highlight groups) and points to `config.lua` and `:h tuna-configuration` for the
+  rest. A new option gets its comment and its vimdoc entry, not a table row.
+- `REFERENCE.md`'s `# Commands` is an HTML table indexing every command, each linked to a
+  `##` section of its own below it (plain headings, `## convert`, so the anchors stay
+  `#convert`), where the detail goes; `# Configuration` follows, its `##` headings named so
+  they never take a command's anchor (`## Downloading` beside `## download`). A new command gets a row and a section, and the vimdoc's `COMMANDS` entry.
   The README links the **first** mention of each command to its section
-  (`[`:Tuna run`](COMMANDS.md#run)`) and does not repeat the reference.
-- The maintainer edits the README and `COMMANDS.md` by hand: read them before editing and
+  (`[`:Tuna run`](REFERENCE.md#run)`) and does not repeat the reference.
+- The maintainer edits the README and `REFERENCE.md` by hand: read them before editing and
   don't reflow them.
 - The vimdoc is `doc/tuna.txt` (`:helptags` only indexes `*.txt`). Lines are at most 78
   columns, tags look like `*tuna-…*`, and `|` is only a link delimiter, so alternatives are
@@ -112,7 +115,7 @@ lua/tuna/
   health.lua        :checkhealth tuna
 scaffolds/          the shipped helper starters, `<role>.<ext>`
 doc/tuna.txt        vimdoc
-COMMANDS.md         the command reference the README links into
+REFERENCE.md         the reference (commands, configuration) the README links into
 tests/              test suite (`tests/run.sh`)
 tuna.nvim.json      package metadata
 ```
