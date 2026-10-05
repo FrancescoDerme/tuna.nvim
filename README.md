@@ -168,21 +168,21 @@ A downloaded problem knows the correct URL to submit at (even without the header
 The `browser` provider exists for judges for which you don't have a submission tool: it opens the submit page with the task preselected and puts your source on the clipboard.
 
 For a working setup of a submit tool see [here](https://github.com/FrancescoDerme/dotfiles/blob/master/nvim/.config/nvim/lua/plugins/tuna.lua).
-In this example, a [`subwithoutcred`](https://github.com/FrancescoDerme/dotfiles/blob/master/scripts/.local/bin/subwithoutcred) script acts as a wrapper around the real tool, which is [`submitter`](https://github.com/EgorKulikov/submitter).
+In this example, the submission tool is [`submitter`](https://github.com/EgorKulikov/submitter).
 
 A step-by-step guide on setting this up, from pointing tuna at your tool to reading the verdict, is in the [reference](REFERENCE.md#submitting).
 
 ### Getting around
 
 - [`:Tuna next`](REFERENCE.md#next-and-prev) / [`:Tuna prev`](REFERENCE.md#next-and-prev) step between the problems of a contest.
-- `:Tuna last problem` / `:Tuna last contest` go back to what you were working on, across restarts.
+- `:Tuna last problem` / `:Tuna last contest` go back to what you were working on.
   The menu also provides access to your recent contests and problems.
 - `:Tuna pin` puts the problem you are on aside to solve later, and pinning it again lets it go.
-  The menu also lists pinned problems.
+  The menu provides access to your pinned problems.
 
 ### Cleaning
 
-`:Tuna clean` removes files you created and never used, and then the directories they leave empty.
+`:Tuna clean` removes files you created and never used (or the ones you only slighly modified, with a tolerance the command asks for when you run it), and then the directories they leave empty.
 Every deletion is confirmed one at a time, with the file in front of you.
 
 <img width="1920" height="1080" alt="clean" src="https://github.com/user-attachments/assets/de4f558c-9fe4-41e5-a002-70031b36f2d2" />
@@ -209,7 +209,7 @@ You can edit or drop any of them without giving up the rest.
 
 ### Statusline
 
-Two optional [lualine](https://github.com/nvim-lualine/lualine.nvim) components can make for a better experience: the download listener while it is waiting, and the current problem's submit verdict.
+Two optional [lualine](https://github.com/nvim-lualine/lualine.nvim) components can make for a better experience: the download listener indicator and the current problem's submit verdict.
 
 Every tuna window has the filetype `tuna`.
 Listing it in lualine's `ignore_focus` keeps the statusline describing the file underneath while a tuna window has focus.
@@ -253,7 +253,7 @@ require("tuna").setup({
 
 [This](https://github.com/FrancescoDerme/dotfiles/blob/master/nvim/.config/nvim/lua/plugins/tuna.lua) is an example of a complete configuration.
 
-Settings can also live in a `.tuna.lua` in any folder above the file you are editing, which returns a table of the same shape.
+Settings can also live in a `.tuna.lua` in any folder above the file you are editing.
 This way a contest can set its own time limit, template or testcase layout without touching your config.
 
 You can find more information on how to customize your configuration in the [reference](REFERENCE.md#configuration), and every option is commented in [`lua/tuna/config.lua`](lua/tuna/config.lua).
