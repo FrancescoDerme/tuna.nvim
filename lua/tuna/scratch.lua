@@ -1,6 +1,6 @@
--- lua/tuna/temp.lua
+-- lua/tuna/scratch.lua
 --
--- `:Tuna temp` — a scratch solution to write in *before* the problem exists.
+-- `:Tuna scratch` — a scratch solution to write in *before* the problem exists.
 --
 -- The minutes before a contest opens are dead time one would rather spend typing the
 -- parts of a solution that never change. The obstacle is the template's header: those
@@ -41,7 +41,7 @@ local function template_path(ext, cfg)
         if utils.only_file_modifiers(candidate) then
             -- The rest are file-format modifiers, which need a file name to expand
             -- against; a fictitious one in the cwd is enough to fill `$(FEXT)`.
-            local path = utils.eval_string(vim.fn.getcwd() .. "/temp." .. ext, candidate)
+            local path = utils.eval_string(vim.fn.getcwd() .. "/scratch." .. ext, candidate)
             if path then
                 path = utils.expand_home(path)
                 if utils.file_exists(path) then
@@ -70,7 +70,7 @@ local function template_choices(ext, cfg)
                 return "\1"
             end
         end)
-        local path = utils.eval_string(vim.fn.getcwd() .. "/temp." .. ext, marked)
+        local path = utils.eval_string(vim.fn.getcwd() .. "/scratch." .. ext, marked)
         if path then
             local pattern = utils.expand_home(path):gsub("[%[%]%?%*]", "\\%0"):gsub("\1", "*")
             for _, match in ipairs(vim.fn.glob(pattern, false, true)) do
@@ -120,12 +120,12 @@ local function split_template(lines)
     return header, blanks
 end
 
----Where the scratch file lives (`temp.file`, with `$(FEXT)` expanded).
+---Where the scratch file lives (`scratch.file`, with `$(FEXT)` expanded).
 ---@param ext string
 ---@param cfg table
 ---@return string
 local function scratch_path(ext, cfg)
-    local spec = (cfg.temp or {}).file or (vim.fn.stdpath("cache") .. "/tuna_temp.$(FEXT)")
+    local spec = (cfg.scratch or {}).file or (vim.fn.stdpath("cache") .. "/tuna_scratch.$(FEXT)")
     return utils.expand_home((spec:gsub("%$%(FEXT%)", ext)))
 end
 
@@ -140,7 +140,7 @@ local function scratch_ext(bufnr, cfg)
     if ext ~= "" and (cfg.run_command or {})[vim.bo[bufnr].filetype] then
         return ext
     end
-    return (cfg.temp or {}).extension or cfg.downloaded_files_extension or "cpp"
+    return (cfg.scratch or {}).extension or cfg.downloaded_files_extension or "cpp"
 end
 
 ---Put the cursor where `template_cursor` asks it to be. A line *number* counts lines of
@@ -189,7 +189,7 @@ local function create(path, cfg, tmpl)
         pcall(vim.api.nvim_buf_delete, stale, { force = true })
     end
     if not utils.write_file(path, table.concat(body, "\n")) then
-        utils.notify("temp: could not write the scratch file at '" .. path .. "'.", "WARN")
+        utils.notify("scratch: could not write the scratch file at '" .. path .. "'.", "WARN")
         return
     end
     vim.cmd.edit(vim.fn.fnameescape(path))
@@ -210,7 +210,7 @@ local function resume(path, ext, cfg)
     end
     place_cursor(cfg, header, blanks)
     utils.notify(
-        "temp: resumed the existing scratch, use ':Tuna download sync' to fold it into a problem or contest.",
+        "scratch: resumed the existing scratch, use ':Tuna download sync' to fold it into a problem or contest.",
         "INFO"
     )
 end
@@ -240,7 +240,7 @@ local function start_over(path, ext, cfg)
         -- where one was expected.
         if #utils.template_candidates(cfg.template_file, ext) > 0 then
             utils.notify(
-                "temp: no template file exists for '" .. ext .. "', starting an empty scratch.",
+                "scratch: no template file exists for '" .. ext .. "', starting an empty scratch.",
                 "INFO"
             )
         end
@@ -270,7 +270,7 @@ local function start_over(path, ext, cfg)
     })
 end
 
----`:Tuna temp` — open the scratch solution. An existing one asks whether to resume it or
+---`:Tuna scratch` — open the scratch solution. An existing one asks whether to resume it or
 ---restart, with what it holds on show: picking up where a session left off and starting
 ---a fresh contest from a template are both what the command is for. Restarting, and a
 ---scratch with nothing in it, go to the template question.
@@ -315,7 +315,7 @@ function M.sync(bufnr)
     local name = vim.fs.normalize(vim.api.nvim_buf_get_name(bufnr))
     local ext = name ~= "" and vim.fn.fnamemodify(name, ":e") or ""
     if name == "" or name ~= vim.fs.normalize(scratch_path(ext, cfg)) then
-        utils.notify("temp: run ':Tuna download sync' from the scratch buffer (':Tuna temp' opens it).", "WARN")
+        utils.notify("scratch: run ':Tuna download sync' from the scratch buffer (':Tuna scratch' opens it).", "WARN")
         return
     end
 
@@ -326,7 +326,7 @@ function M.sync(bufnr)
         bufnr = bufnr,
     }
 
-    local mode = (cfg.temp or {}).download or "contest"
+    local mode = (cfg.scratch or {}).download or "contest"
     local err = require("tuna.download").start_downloading(
         mode,
         cfg.companion_port,
@@ -337,7 +337,7 @@ function M.sync(bufnr)
     )
     if err then
         M.pending = nil
-        utils.notify("temp: " .. err, "WARN")
+        utils.notify("scratch: " .. err, "WARN")
     end
 end
 
@@ -356,7 +356,7 @@ function M.absorb(filepath, cfg, template)
 
     local buf = vim.fn.bufnr(filepath)
     if buf == -1 or not vim.api.nvim_buf_is_valid(buf) then
-        utils.notify("temp: the downloaded problem is not open, so the scratch was left alone.", "WARN")
+        utils.notify("scratch: the downloaded problem is not open, so the scratch was left alone.", "WARN")
         return
     end
 
@@ -393,7 +393,7 @@ function M.absorb(filepath, cfg, template)
             pcall(vim.api.nvim_win_set_cursor, win, { math.min(row, vim.api.nvim_buf_line_count(buf)), 0 })
         end
     end
-    utils.notify("temp: scratch folded into " .. vim.fn.fnamemodify(filepath, ":~:.") .. ".", "INFO")
+    utils.notify("scratch: folded into " .. vim.fn.fnamemodify(filepath, ":~:.") .. ".", "INFO")
 end
 
 M._test = { template_choices = template_choices, resumable = resumable }

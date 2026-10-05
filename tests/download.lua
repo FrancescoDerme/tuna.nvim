@@ -143,7 +143,7 @@ t.eq(
 -- Which template paths a task-less caller can resolve
 --------------------------------------------------------------------------------
 
--- `:Tuna temp` and `:Tuna clean` read `template_file` with no task to hand. They ask
+-- `:Tuna scratch` and `:Tuna clean` read `template_file` with no task to hand. They ask
 -- this rather than evaluating and reporting a failure, so a per-judge template makes
 -- them step aside quietly instead of nagging.
 local u = require("tuna.utils")
@@ -298,6 +298,28 @@ do
     t.ok("a typed ~ path writes the source under the home directory", done and vim.fn.filereadable(home .. "/typed/sol.cpp") == 1)
     t.eq("with its testcases beside it", vim.fn.filereadable(home .. "/typed/sol_input0.txt"), 1)
     t.eq("and no directory called ~", vim.fn.isdirectory(cwd .. "/~"), 0)
+end
+-- By default a downloaded problem's template has its `$(…)` filled in, its header naming the
+-- problem and the URL a submit reads, rather than copied as it is.
+do
+    local dir = t.tempdir()
+    t.write(dir, "template.cpp", "// problem: $(PROBLEM)\n// submit at: $(URL)\nint main() {}\n")
+    widgets.input = function(_, _, on_submit)
+        on_submit(dir .. "/A/main.cpp")
+    end
+    require("tuna").setup({ template_file = dir .. "/template.cpp", open_downloaded_problems = false, cd_downloaded_problems = false })
+    local cfg = require("tuna.config").current_setup
+    d.store_single_problem(
+        { name = "A. Filled", group = "Codeforces - Round", url = "https://codeforces.com/contest/1/problem/A", tests = {}, languages = {}, batch = { id = "f", size = 1 } },
+        cfg,
+        function() end
+    )
+    t.eq("the template's header is filled in", vim.fn.readfile(dir .. "/A/main.cpp"), {
+        "// problem: A. Filled",
+        "// submit at: https://codeforces.com/contest/1/problem/A",
+        "int main() {}",
+    })
+    require("tuna").setup({})
 end
 widgets.menu, widgets.input = real_menu, real_input
 

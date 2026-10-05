@@ -167,7 +167,7 @@ end
 ---
 ---`template_file` is read in three places, and only one of them has a downloaded task
 ---to hand: a path like `~/cp/templates/$(JUDGE).cpp` is resolvable while a problem is
----being downloaded and by nothing else. `:Tuna temp` (a scratch written *before* the
+---being downloaded and by nothing else. `:Tuna scratch` (a scratch written *before* the
 ---problem exists) and `:Tuna clean` (which asks which template a file came from) have
 ---no task, so they use this to treat such a path as "no template here" — a quiet nil
 ---rather than an "unrecognized modifier" reported once per scanned file, for a

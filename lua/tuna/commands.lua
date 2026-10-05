@@ -614,9 +614,9 @@ function M.download(mode)
     local download = require("tuna.download")
     local err
     if mode == "sync" then
-        -- A download that folds the `:Tuna temp` scratch into the problem it opens:
-        -- `temp.sync` arms the merge and starts the download itself.
-        require("tuna.temp").sync(M.target_buffer())
+        -- A download that folds the `:Tuna scratch` file into the problem it opens:
+        -- `scratch.sync` arms the merge and starts the download itself.
+        require("tuna.scratch").sync(M.target_buffer())
     elseif mode == "stop" then
         download.stop_downloading()
     elseif mode == "status" then
@@ -790,8 +790,8 @@ M.subcommands = {
     end,
     -- The scratch itself. Folding it back into a real problem is a *download*
     -- (`:Tuna download sync`), since that is what it does — it downloads.
-    temp = function()
-        require("tuna.temp").start(M.target_buffer())
+    scratch = function()
+        require("tuna.scratch").start(M.target_buffer())
     end,
     pin = function()
         M.toggle_pin()

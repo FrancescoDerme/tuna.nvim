@@ -18,8 +18,13 @@ M.defaults = {
     local_config_file_name = ".tuna.lua",
 
     -- save behaviour before running
-    save_current_file = true,
-    save_all_files = false,
+    save_current_file = true, -- write the solution's buffer
+    save_all_files = false, -- write every modified buffer
+
+    -- `compile_command` and `run_command` are per filetype, `{ exec, args }`: the program and
+    -- its argument list, not a shell line, so nothing is word-split or glob-expanded. A
+    -- filetype with no `compile_command` entry is run without compiling (Python), and one
+    -- with no `run_command` entry is not run at all.
 
     -- compilation
     compile_directory = ".", -- relative to the source file's directory
@@ -196,11 +201,12 @@ M.defaults = {
     -- A format without `$(TCNUM)` (e.g. `out.txt`) names a single testcase (index 0),
     -- and a testcase may have only an output (it runs with empty stdin).
     testcases_input_file_format = { "$(FNOEXT)_input$(TCNUM).txt", "input$(TCNUM).txt", "in.txt" },
+    -- the answers, paired with the input formats by position
     testcases_output_file_format = { "$(FNOEXT)_output$(TCNUM).txt", "output$(TCNUM).txt", "out.txt" },
     -- "directory" mode: one sub-directory per testcase holding input/output files
     testcases_directory_format = "tests/$(TCNUM)",
-    testcases_directory_input = "input.txt",
-    testcases_directory_output = "output.txt",
+    testcases_directory_input = "input.txt", -- the input's file name in each testcase's directory
+    testcases_directory_output = "output.txt", -- the answer's
 
     -- `:Tuna testcase split <n> [marker]` — the marker a testcase's cases are bracketed
     -- with when you have marked them yourself. A line made only of this character (any
@@ -212,8 +218,9 @@ M.defaults = {
     testcases_split_markers = "-",
 
     -- download (Competitive Companion integration)
-    companion_port = 27121,
-    download_print_message = true,
+    companion_port = 27121, -- the port Competitive Companion posts to
+    download_print_message = true, -- report each problem as it is downloaded
+    -- open the listener at startup and leave it open (`:Tuna download persistently`)
     start_downloading_persistently_on_setup = false,
     -- Per-judge parsing of Competitive Companion's `task.group` ("Judge - Contest")
     -- into the $(JUDGE)/$(CONTEST) modifiers. Add a parser for a new judge, override
@@ -232,12 +239,15 @@ M.defaults = {
     --   template_file = { "~/cp/templates/$(JUDGE).cpp", "~/cp/templates/default.cpp" }
     -- The list is tried in order and the first that exists wins, so a judge you have
     -- not written a template for falls back to the general one. It is also what
-    -- `:Tuna temp` opens from, since a scratch has no problem to name a judge with.
+    -- `:Tuna scratch` opens from, since a scratch has no problem to name a judge with.
     template_file = false,
-    evaluate_template_modifiers = false,
+    -- Expand `$(…)` inside the template's contents too, not only in its path, so a header
+    -- line like `// problem: $(PROBLEM)` is filled in when a problem is downloaded (and its
+    -- `submit at: $(URL)` line is the problem's URL). false copies the template as it is.
+    evaluate_template_modifiers = true,
     -- Where the cursor lands when tuna opens a solution made from the template — a
     -- downloaded problem/contest, a problem stepped onto with `:Tuna next`/`prev`, or
-    -- the scratch file of `:Tuna temp`. Templates open on their header, which is never
+    -- the scratch file of `:Tuna scratch`. Templates open on their header, which is never
     -- where one starts typing.
     --   false                          leave the cursor at the top (default)
     --   <number>                       that line
@@ -255,13 +265,13 @@ M.defaults = {
     -- everything else — `:e`, a fuzzy finder, `:Tuna run all` from a scratch buffer —
     -- follows you to the problem too.
     cd_command = "cd",
-    -- `:Tuna temp` — a scratch solution to start writing in before the problem exists
+    -- `:Tuna scratch` — a scratch solution to start writing in before the problem exists
     -- (typing during the countdown, then folding the code into the real file with
     -- `:Tuna download sync` once the contest is downloaded). The scratch is the
     -- template minus its modifier header, since that header can only be filled in by
     -- a real problem. `file` is where it lives; `download` is what `sync` fetches.
-    temp = {
-        file = vim.fn.stdpath("cache") .. "/tuna_temp.$(FEXT)",
+    scratch = {
+        file = vim.fn.stdpath("cache") .. "/tuna_scratch.$(FEXT)",
         extension = "cpp", -- language of the scratch when no solution buffer says otherwise
         download = "contest", -- "contest" | "problem"
     },
@@ -301,14 +311,19 @@ M.defaults = {
         marker = "TUNALIB",
         depth = 3, -- how deep to search below each path
     },
-    date_format = "%c",
-    downloaded_files_extension = "cpp",
-    downloaded_problems_path = "$(CWD)/$(PROBLEM).$(FEXT)",
+    -- Where downloads land, as paths built from the modifiers ($(JUDGE), $(CONTEST),
+    -- $(PROBLEM), …, see the README's Modifiers section), evaluated per problem.
+    date_format = "%c", -- the os.date format of $(DATE)
+    downloaded_files_extension = "cpp", -- the language new solutions are created in
+    downloaded_problems_path = "$(CWD)/$(PROBLEM).$(FEXT)", -- where a single problem is written
+    -- ask before writing a problem, the computed path filled in to accept or edit
     downloaded_problems_prompt_path = true,
-    downloaded_contests_directory = "$(CWD)",
-    downloaded_contests_problems_path = "$(PROBLEM).$(FEXT)",
+    downloaded_contests_directory = "$(CWD)", -- a contest's own folder
+    downloaded_contests_problems_path = "$(PROBLEM).$(FEXT)", -- each problem, inside that folder
+    -- ask for a contest's directory, and for the language its files are created in
     downloaded_contests_prompt_directory = true,
     downloaded_contests_prompt_extension = true,
+    -- open what was written: the problem, or a contest's first problem
     open_downloaded_problems = true,
     open_downloaded_contests = true,
     -- Move Neovim into a freshly downloaded problem's / contest's directory (via
@@ -322,6 +337,9 @@ M.defaults = {
     -- `$(CWD)/$(PROBLEM).$(FEXT)` writes into the current directory, so nothing moves.)
     cd_downloaded_problems = true,
     cd_downloaded_contests = true,
+    -- Testcases downloaded into a solution that already has some (`:Tuna download
+    -- testcases`): true replaces them without asking, false asks whether to keep them
+    -- alongside the new ones, replace them, or stop.
     replace_downloaded_testcases = false,
 
     -- submit (:Tuna submit) — hand the current solution to an external submit tool.
@@ -501,8 +519,8 @@ M.defaults = {
         global = {},
     },
 
-    -- UI: native floats (no nui). Border is passed to nvim_open_win; the border
-    -- highlight is applied via the window's `winhighlight` (FloatBorder remap).
+    -- Every float's border, passed to nvim_open_win, and its highlight group, applied
+    -- through the window's `winhighlight` (FloatBorder remap).
     floating_border = "rounded",
     floating_border_highlight = "FloatBorder",
     -- Plugin-wide keys to move focus between panes in every multi-pane floating UI
@@ -524,11 +542,15 @@ M.defaults = {
         normal = { "<Esc>", "<C-c>" },
         insert = {},
     },
+    -- The standalone testcase editor (`:Tuna testcase add`/`edit`): input and expected
+    -- output side by side, each pane `width` × `height` of the editor. Its keys, in normal
+    -- and in insert mode: `switch_window` moves between the two panes, `save_and_close`
+    -- saves the testcase, `cancel` closes without saving (added to `cancel_keys`).
     editor_ui = {
         width = 0.4,
         height = 0.6,
-        show_nu = true,
-        show_rnu = false,
+        show_nu = true, -- line numbers
+        show_rnu = false, -- relative line numbers
         normal_mode_mappings = {
             switch_window = { "<C-h>", "<C-l>", "<C-i>" },
             save_and_close = "<C-s>",
@@ -572,6 +594,7 @@ M.defaults = {
         -- Borders and titles are a floating-window thing, so this has no effect with
         -- `interface = "split"`.
         editable_border_highlight = "TunaEditable",
+        -- Line numbers in the selector (the testcase list) and in the detail panes.
         selector_show_nu = false,
         selector_show_rnu = false,
         show_nu = true,
@@ -618,6 +641,8 @@ M.defaults = {
             undo_delete = { "u", "U" },
             help = "?",
         },
+        -- The full-screen view of one pane, opened by the `view_*` keys: its size as a share
+        -- of the editor, and its line numbers.
         viewer = {
             -- Large on purpose: the viewer exists to escape the cramped detail panes,
             -- so one that leaves a quarter of the grid showing around it has the same
@@ -629,6 +654,8 @@ M.defaults = {
             show_rnu = false,
         },
     },
+    -- The results UI as floats (`runner_ui.interface = "popup"`): the grid's share of the
+    -- editor, and its layout.
     popup_ui = {
         total_width = 0.8,
         total_height = 0.8,
@@ -647,6 +674,10 @@ M.defaults = {
             { 4, { { 1, "eo" }, { 1, "si" } } },
         },
     },
+    -- The results UI as real windows (`runner_ui.interface = "split"`): where the frame
+    -- opens, and its share of the editor, `total_width` beside it (left, right) or
+    -- `total_height` below it (top, bottom). `relative_to_editor` takes that share of the
+    -- whole editor, false of the window it opens from.
     split_ui = {
         position = "right", -- "top" | "bottom" | "left" | "right"
         relative_to_editor = true,

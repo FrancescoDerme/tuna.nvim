@@ -1,6 +1,6 @@
--- tests/temp.lua
+-- tests/scratch.lua
 --
--- `:Tuna temp`: the templates a scratch can start from, when a scratch is resumed rather
+-- `:Tuna scratch`: the templates a scratch can start from, when a scratch is resumed rather
 -- than started over, the template menu, and folding the scratch into a downloaded problem
 -- under the header of the template that problem was actually written from.
 
@@ -14,10 +14,10 @@ t.write(tdir, "template.py", "# $(PROBLEM)\nprint()\n")
 local sdir = t.tempdir()
 require("tuna").setup({
     template_file = { tdir .. "/template.$(JUDGE).$(FEXT)", tdir .. "/template.$(FEXT)" },
-    temp = { file = sdir .. "/scratch.$(FEXT)", extension = "cpp" },
+    scratch = { file = sdir .. "/scratch.$(FEXT)", extension = "cpp" },
 })
-local temp = require("tuna.temp")
-local T = temp._test
+local scratch = require("tuna.scratch")
+local T = scratch._test
 local cfg = require("tuna.config").current_setup
 
 --------------------------------------------------------------------------------
@@ -38,13 +38,13 @@ t.eq("none configured, none offered", T.template_choices("cpp", vim.tbl_extend("
 -- Resumed or started over
 --------------------------------------------------------------------------------
 
-local scratch = sdir .. "/scratch.cpp"
-t.eq("no scratch, nothing to resume", T.resumable(scratch), false)
+local scratch_file = sdir .. "/scratch.cpp"
+t.eq("no scratch, nothing to resume", T.resumable(scratch_file), false)
 t.write(sdir, "scratch.cpp", "  \n\n")
-t.eq("an empty scratch is started over", T.resumable(scratch), false)
+t.eq("an empty scratch is started over", T.resumable(scratch_file), false)
 t.write(sdir, "scratch.cpp", "int x;\n")
-t.eq("one with something written in it is resumed", T.resumable(scratch), true)
-os.remove(scratch)
+t.eq("one with something written in it is resumed", T.resumable(scratch_file), true)
+os.remove(scratch_file)
 
 --------------------------------------------------------------------------------
 -- The template menu
@@ -61,47 +61,47 @@ local function lines_of(path)
 end
 
 vim.cmd("enew")
-temp.start()
+scratch.start()
 t.eq("starting a scratch asks which template", asked and #asked.items, 4)
 t.eq("with an empty file as the last choice", asked and asked.items[4], "Empty file")
 t.eq("previewing the body the scratch would get", asked and asked.preview.content(2).lines, { "#define CF", "" })
 asked.dismiss()
-t.eq("dismissing it writes nothing", vim.uv.fs_stat(scratch), nil)
+t.eq("dismissing it writes nothing", vim.uv.fs_stat(scratch_file), nil)
 
-temp.start()
+scratch.start()
 asked.choose(2)
-t.eq("the chosen template's body becomes the scratch", lines_of(scratch), { "#define CF" })
-t.eq("and it is opened", vim.fn.resolve(vim.api.nvim_buf_get_name(0)), vim.fn.resolve(scratch))
+t.eq("the chosen template's body becomes the scratch", lines_of(scratch_file), { "#define CF" })
+t.eq("and it is opened", vim.fn.resolve(vim.api.nvim_buf_get_name(0)), vim.fn.resolve(scratch_file))
 
 -- An existing scratch asks whether to resume it or restart, showing what it holds.
 asked = nil
 vim.cmd("enew")
-temp.start()
+scratch.start()
 t.eq("an existing scratch asks whether to resume or restart", asked and asked.items, { "Resume", "Restart" })
 t.eq("showing what it holds", asked and asked.preview.lines, { "#define CF" })
 asked.dismiss()
-t.ok("dismissing it opens nothing", vim.fn.resolve(vim.api.nvim_buf_get_name(0)) ~= vim.fn.resolve(scratch))
+t.ok("dismissing it opens nothing", vim.fn.resolve(vim.api.nvim_buf_get_name(0)) ~= vim.fn.resolve(scratch_file))
 
-temp.start()
+scratch.start()
 asked.choose(1)
 t.eq(
     "resuming reopens it as it is",
     { vim.fn.resolve(vim.api.nvim_buf_get_name(0)), vim.api.nvim_buf_get_lines(0, 0, -1, false) },
-    { vim.fn.resolve(scratch), { "#define CF" } }
+    { vim.fn.resolve(scratch_file), { "#define CF" } }
 )
 
 -- Asked in the same step as the choice, not after a redraw with no dialog on screen.
 vim.cmd("enew")
-temp.start()
+scratch.start()
 asked.choose(2)
 t.eq("restarting goes straight on to the template question", asked and asked.items[#asked.items], "Empty file")
 asked.dismiss()
-t.eq("dismissing that leaves the scratch as it was", lines_of(scratch), { "#define CF" })
+t.eq("dismissing that leaves the scratch as it was", lines_of(scratch_file), { "#define CF" })
 
-temp.start()
+scratch.start()
 asked.choose(2)
 asked.choose(1)
-t.eq("choosing a template starts the scratch over from it", lines_of(scratch), { "#define AC" })
+t.eq("choosing a template starts the scratch over from it", lines_of(scratch_file), { "#define AC" })
 
 -- Emptied by hand, it is started over, and the blank buffer still loaded out of sight is
 -- replaced by what the new template writes rather than shown as it was.
@@ -109,7 +109,7 @@ vim.api.nvim_buf_set_lines(0, 0, -1, false, { "" })
 vim.cmd("silent write")
 vim.cmd("enew")
 asked = nil
-temp.start()
+scratch.start()
 t.eq("an emptied scratch goes straight to the template question", asked and asked.items[#asked.items], "Empty file")
 asked.choose(2)
 t.eq("and gets the newly chosen template", vim.api.nvim_buf_get_lines(0, 0, -1, false), { "#define CF" })
@@ -127,18 +127,18 @@ t.write(pdir, "main.cpp", "// problem: A\n// judge: codeforces\n\n#define CF\n")
 vim.cmd("edit " .. pdir .. "/main.cpp")
 local problem_buf = vim.api.nvim_get_current_buf()
 t.write(sdir, "scratch.cpp", "solve();\n")
-local scratch_buf = vim.fn.bufadd(scratch)
+local scratch_buf = vim.fn.bufadd(scratch_file)
 vim.fn.bufload(scratch_buf)
-temp.pending = { lines = { "solve();" }, row = 1, bufnr = scratch_buf }
+scratch.pending = { lines = { "solve();" }, row = 1, bufnr = scratch_buf }
 vim.api.nvim_set_current_buf(problem_buf)
-temp.absorb(pdir .. "/main.cpp", cfg, tdir .. "/template.codeforces.cpp")
+scratch.absorb(pdir .. "/main.cpp", cfg, tdir .. "/template.codeforces.cpp")
 t.eq("absorbing keeps the header of the template actually used", lines_of(pdir .. "/main.cpp"), {
     "// problem: A",
     "// judge: codeforces",
     "",
     "solve();",
 })
-t.eq("and removes the scratch", vim.uv.fs_stat(scratch), nil)
+t.eq("and removes the scratch", vim.uv.fs_stat(scratch_file), nil)
 
 vim.fn.delete(tdir, "rf")
 vim.fn.delete(sdir, "rf")

@@ -636,7 +636,7 @@ local function store_single_problem(task, cfg, finished)
                 if local_cfg.open_downloaded_problems then
                     vim.cmd.edit(vim.fn.fnameescape(filepath))
                     utils.place_cursor(local_cfg)
-                    require("tuna.temp").absorb(filepath, local_cfg, template)
+                    require("tuna.scratch").absorb(filepath, local_cfg, template)
                 end
                 -- After the open, so an `lcd` lands on the window the problem was just
                 -- opened in. Like the contest case, independent of whether it was
@@ -737,9 +737,9 @@ local function store_contest(tasks, cfg, finished)
                                 if local_cfg.open_downloaded_contests and not opened then
                                     vim.cmd.edit(vim.fn.fnameescape(t.filepath))
                                     utils.place_cursor(local_cfg)
-                                    -- A `:Tuna temp` scratch waiting for this contest
+                                    -- A `:Tuna scratch` file waiting for this contest
                                     -- folds into the first problem opened.
-                                    require("tuna.temp").absorb(t.filepath, local_cfg, t.template)
+                                    require("tuna.scratch").absorb(t.filepath, local_cfg, t.template)
                                     opened = true
                                 end
                             end

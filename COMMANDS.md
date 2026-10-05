@@ -62,7 +62,7 @@ Every command is a subcommand of `:Tuna` with tab-completion.
   <td>pin this problem to solve later, or unpin it</td>
 </tr>
 <tr>
-  <td><a href="#temp"><code>:Tuna temp</code></a></td>
+  <td><a href="#scratch"><code>:Tuna scratch</code></a></td>
   <td>drop in a scratch solution for before a contest opens</td>
 </tr>
 <tr>
@@ -216,8 +216,8 @@ Press the green plus in your browser and tuna does the rest.
 - `problem` writes a solution file from your template and its testcases.
 - `contest` does the same for every problem of a contest, each in its own place.
 - `testcases` adds only the testcases, to the solution you are in.
-- `sync` downloads like `contest` (or `problem`, see `temp.download`) and folds your
-  [`:Tuna temp`](#temp) scratch into the first problem it writes.
+- `sync` downloads like `contest` (or `problem`, see `scratch.download`) and folds your
+  [`:Tuna scratch`](#scratch) file into the first problem it writes.
 - `persistently` keeps the listener open for the whole session.
 - `status` says whether the listener is open, and `stop` closes it.
 
@@ -270,9 +270,9 @@ moves Neovim's directory there with you. Bare `:Tuna last` means the problem.
 back. Pinned problems wait in the [menu](#menu), most recently pinned first. A pin stays
 until you unpin it or delete the solution.
 
-## temp
+## scratch
 
-`:Tuna temp` opens a scratch solution for the minutes before a contest starts, when there is
+`:Tuna scratch` opens a scratch solution for the minutes before a contest starts, when there is
 no problem to download yet, asking which of your templates to start from. An existing
 scratch first asks whether to resume it or restart. [`:Tuna download sync`](#download) then
 folds what you wrote into the first problem it downloads.

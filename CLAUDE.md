@@ -49,10 +49,14 @@ library, contest navigation, a scratch file, an unused-file cleaner, a menu and
 **Docs**
 - Three user docs are kept in step: `README.md` (features and workflows), `COMMANDS.md` (the
   command reference) and `doc/tuna.txt`, which mirrors both. When user-visible behaviour
-  changes, update every one it touches, and update this file when the design changes. Every
-  option in `config.defaults` is documented in the README and the vimdoc (submit's in their
-  own table, `*tuna-submit-options*`), and so are the action names `keymaps` and
-  `runner_ui.mappings` take.
+  changes, update every one it touches, and update this file when the design changes.
+- **Options are documented where they are defined.** Every option in `config.defaults` has a
+  comment in `config.lua` saying what it does (a block comment may cover a group), and an
+  entry in the vimdoc (submit's under `*tuna-submit-options*`). The README has no option
+  tables: it points to `config.lua` and `:h tuna-configuration`, and its Configuration
+  section keeps only what takes more than a line (the modifiers, the setting layers,
+  keymaps, the action names `keymaps` and `runner_ui.mappings` take, highlight groups). A
+  new option gets its comment and its vimdoc entry, not a README row.
 - `COMMANDS.md` is an HTML table indexing every command, each linked to a `##` section of
   its own below it (plain headings, `## convert`, so the anchors stay `#convert`), where
   the detail goes. A new command gets a row and a section, and the vimdoc's `COMMANDS` entry.
@@ -101,7 +105,7 @@ lua/tuna/
   library.lua       snippet library
   navigate.lua      :Tuna next / prev
   recent.lua        :Tuna last problem / contest, pinned problems, cwd changes
-  temp.lua          scratch solution, folded into a download by `download sync`
+  scratch.lua       scratch solution, folded into a download by `download sync`
   scaffold.lua      helper-file starters (checker/generator/bruteforce/interactor)
   menu.lua          bare :Tuna menu
   keymaps.lua       opt-in keymaps and preset
@@ -141,13 +145,13 @@ tuna.nvim.json      package metadata
 `$(FABSPATH)`, `$(ABSDIR)`, `$(DIRNAME)`, `$(HOME)`, `$(CWD)`) resolves from a path via
 `utils.eval_string`/`buf_eval_string`, and a whole command through `utils.eval_command`. The *download* set (`$(JUDGE)`, `$(CONTEST)`,
 `$(PROBLEM)`, `$(URL)`…) exists only while a task is being written, in `download.lua`.
-`utils.only_file_modifiers(str)` tells them apart; `temp` and `clean` read `template_file`
+`utils.only_file_modifiers(str)` tells them apart; `scratch` and `clean` read `template_file`
 without a task and need it.
 
 **Paths.** `utils.expand_home` expands a bare `~` or a `~/` prefix (not `~user`), by
 concatenation rather than `gsub`. `utils.normalize_path` joins onto a base only when the path
 is relative. Every configured path goes through these: compile/running directories,
-`testcases_directory`, download paths, templates, `clean`, `temp`, `scaffold`.
+`testcases_directory`, download paths, templates, `clean`, `scratch`, `scaffold`.
 
 `utils.template_candidates` normalizes `template_file`'s five shapes (`false`, a path, a list,
 `{ [ext] = path }`, `{ [ext] = { path, … } }`) into an ordered list; the first that exists wins.
@@ -920,7 +924,7 @@ specific Vim error about a buffer the user never opened.
   - `change_dir` honours `cd_command` (`cd`/`tcd`/`lcd`/`false`). `snapshot()` returns the
     loaded state for the menu. `contest_problems` lists a contest's solutions in both
     layouts (plain files in the contest directory, and one per problem directory).
-- **`temp.lua`**: the scratch is a template minus its leading modifier header
+- **`scratch.lua`**: the scratch is a template minus its leading modifier header
   (`split_template`). A scratch with anything written in it (its loaded buffer, else its file)
   asks `Resume` / `Restart`, previewing what it holds. Restarting, and a missing or blank
   scratch, go to the template question, opened straight from the first menu's choice (which
@@ -1055,7 +1059,7 @@ specific Vim error about a buffer the user never opened.
     helpers offering their starters (Create writing and opening them, Stop writing nothing, a
     broken configured helper only reported), `clean`
     recognising an untouched scaffold, and completion of roles and languages;
-  - `temp.lua`: the templates a scratch can start from, when a scratch is resumed, the
+  - `scratch.lua`: the templates a scratch can start from, when a scratch is resumed, the
     resume/restart and template menus, and absorbing keeping the header of the template actually used;
   - `download.lua`: the listener's boundary, a request handled while its sender is still
     connected, and what is stored (an empty answer kept, no file refused, a typed `~` path);
@@ -1092,7 +1096,7 @@ specific Vim error about a buffer the user never opened.
     keeping an answer stored empty and leaving no layout behind (the store's root kept),
     and which testcase a command without a number acts on.
 - Modules expose file-local helpers to tests through `M._test` (`download`, `submit`, `clean`,
-  `interactive`, `temp`, `menu`). They are not public interface.
+  `interactive`, `scratch`, `menu`). They are not public interface.
 - **Mutation-check new tests**: break the rule each test describes and confirm it fails, and
   confirm a harmless edit doesn't.
 - The suite doesn't cover real processes, verdicts coming back, or most UI interaction. Verify

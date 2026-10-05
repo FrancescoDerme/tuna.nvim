@@ -14,7 +14,7 @@
 -- `BufEnter` autocmd records any solution buffer that *looks like a problem* — one
 -- whose directory holds testcases or a downloaded-problem sidecar — so opening a file
 -- by hand, or stepping to it with `:Tuna next`, counts just the same. Files with no
--- such evidence (your template, a library snippet, the `:Tuna temp` scratch) never
+-- such evidence (your template, a library snippet, the `:Tuna scratch` file) never
 -- overwrite it.
 --
 -- **Pinned** problems are the ones put aside to solve later (`:Tuna pin`): kept in the same

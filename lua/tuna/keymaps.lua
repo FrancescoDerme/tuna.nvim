@@ -41,8 +41,8 @@ M.actions = {
     prev_problem = "Tuna prev",
     last_problem = "Tuna last problem", -- back to the problem/contest last worked on
     last_contest = "Tuna last contest",
-    temp = "Tuna temp", -- scratch solution to write in before the problem exists
-    -- A download like the others, except it folds the `:Tuna temp` scratch into the
+    scratch = "Tuna scratch", -- scratch solution to write in before the problem exists
+    -- A download like the others, except it folds the `:Tuna scratch` file into the
     -- problem it opens — hence its name and its place in the download group.
     download_sync = "Tuna download sync",
     library = "Tuna lib", -- copy from your snippet library: file, then snippet
@@ -58,7 +58,7 @@ M.actions = {
 --   <leader>tte  Edit               <leader>tu  Show ui        <leader>tdp  Problem
 --   <leader>ttd  Delete             <leader>ts  Submit         <leader>tdc  Contest
 --   <leader>tn   Next problem       <leader>tm  Menu           <leader>tds  Sync
---   <leader>tp   Prev problem       <leader>tw  Temp
+--   <leader>tp   Prev problem       <leader>tw  Scratch
 --   <leader>tl   Library        <leader>tf  Pin
 --   <leader>tgp  Problem            <leader>tgc Contest
 --
@@ -93,7 +93,7 @@ M.preset = {
     },
     global = {
         menu = "m",
-        temp = "w", -- w for write-ahead: the scratch written before the problem exists
+        scratch = "w", -- w for write-ahead: the scratch written before the problem exists
         download_sync = "ds",
         download_problem = "dp",
         download_contest = "dc",

@@ -186,7 +186,7 @@ lowercase `:tuna` expands to it.
 :Tuna pin               Pin this problem to solve later, or unpin it. Pinned
                         problems wait in the menu; see |tuna-pinned|.
 
-:Tuna temp              A scratch solution, for before a contest opens.
+:Tuna scratch           A scratch solution, for before a contest opens.
 
 :Tuna lib [snippet/search]
                         Insert from your algorithm library; see
@@ -528,11 +528,11 @@ list scrolls within the menu. A pin stays until you unpin it or delete the
 solution, and `:Tuna clean` names a pinned file as pinned and starts its
 prompt on Keep.
 
-`:Tuna temp` opens a scratch solution for the minutes before a contest starts,
-when there is no problem to download yet. It asks which template to start
-from, per-judge templates included, and the scratch is that template minus
-its header, since `$(PROBLEM)` and friends cannot be filled in yet. When a
-scratch already exists it first asks whether to resume it or restart, and an
+`:Tuna scratch` opens a scratch solution for the minutes before a contest
+starts, when there is no problem to download yet. It asks which template to
+start from, per-judge templates included, and the scratch is that template
+minus its header, since `$(PROBLEM)` and friends cannot be filled in yet. When
+a scratch already exists it first asks whether to resume it or restart, and an
 empty one goes straight to the template question. `:Tuna download sync` then
 folds what you wrote into the first problem it downloads, header and all, and
 what remains is an ordinary downloaded problem.
@@ -780,8 +780,10 @@ DOWNLOAD OPTIONS                                        *tuna-config-download*
         directory.
 
 `replace_downloaded_testcases`
-        Overwrite existing testcases instead of appending. Default
-        `false`.
+        Testcases downloaded into a solution that already has some:
+        `true` replaces them without asking, `false` (default) asks
+        whether to keep them alongside the new ones, replace them, or
+        stop.
 
 `download_print_message`
         Report what was downloaded. Default `true`.
@@ -806,7 +808,8 @@ TEMPLATES                                              *tuna-config-templates*
 
 `evaluate_template_modifiers`
         Expand `$(...)` inside the template's contents, not just its
-        path. Default `false`.
+        path, so its header is filled in. Default `true`; `false`
+        copies the template as it is.
 
 `template_cursor`
         Where to put the cursor in a freshly created solution. Default
@@ -887,7 +890,7 @@ The actions, each running the `:Tuna` command it is named after: `menu`,
 `edit_testcase`, `delete_testcase`, `submit`, `submit_clear`,
 `download_testcases`, `download_problem`, `download_contest`, `download_sync`,
 `clean`, `pin`, `next_problem`, `prev_problem`, `last_problem`,
-`last_contest`, `temp`, `library`, `library_snippet` and `library_search`.
+`last_contest`, `scratch`, `library`, `library_snippet` and `library_search`.
 
 ------------------------------------------------------------------------------
 APPEARANCE                                            *tuna-config-appearance*
@@ -1019,14 +1022,14 @@ LIBRARY, SCRATCH, CLEAN                                     *tuna-config-misc*
 `library.depth`
         How deep to search below each path. Default `3`.
 
-`temp.file`
-        Where `:Tuna temp` writes its scratch. Default
-        `stdpath("cache") .. "/tuna_temp.$(FEXT)"`.
+`scratch.file`
+        Where `:Tuna scratch` writes its scratch. Default
+        `stdpath("cache") .. "/tuna_scratch.$(FEXT)"`.
 
-`temp.extension`
+`scratch.extension`
         The scratch's language. Default `"cpp"`.
 
-`temp.download`
+`scratch.download`
         What `:Tuna download sync` downloads. Default `"contest"`.
 
 `menu.header`
