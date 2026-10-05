@@ -11,7 +11,7 @@
 --
 -- The split is the point. The left column is *where you were*, the right is *what to
 -- do*, and both are lists you walk with `j`/`k` and act on with `<CR>` — so the board
--- reads as one thing rather than as a menu with a header. `switch_window_keys` (or Tab)
+-- reads as one thing rather than as a menu with a header. `switch_window_keys`
 -- moves between the columns, exactly as they move between the results UI's panes.
 --
 -- This module stays a presentation layer: every action it offers is an existing entry

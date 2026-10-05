@@ -94,7 +94,7 @@ contests, each with its judge and how many of its problems the judge
 accepted, and your recent problems, each with its verdict or how its last
 run went. On the right is everything tuna can do from the file you are in.
 All three are lists: `j`/`k` to move, `<CR>` to act, `<C-h>`/`<C-j>`/`<C-k>`/
-`<C-l>` or `<Tab>` to switch between them. A list too long for the screen
+`<C-l>` to switch between them. A list too long for the screen
 scrolls, and names too wide for it are shortened, never the verdicts.
 
 The loop it exists to serve:
@@ -812,7 +812,9 @@ TEMPLATES                                              *tuna-config-templates*
         copies the template as it is.
 
 `template_cursor`
-        Where to put the cursor in a freshly created solution. Default
+        Where to put the cursor when tuna opens a solution itself: a
+        download, `:Tuna next`/`prev`, `:Tuna last` and the menu's lists,
+        and the scratch. Default
         `false`. Takes a line number, a Lua pattern to search for, a
         pattern-and-offset pair for n lines below the match, or a
         function. A pattern that matches nothing leaves the cursor
@@ -993,13 +995,15 @@ APPEARANCE                                            *tuna-config-appearance*
 
 `editor_ui.normal_mode_mappings`
 `editor_ui.insert_mode_mappings`
-        `switch_window` (`<C-h>`, `<C-l>`, `<C-i>`), `save_and_close`
-        (`<C-s>`) and `cancel`, added to `cancel_keys` (`q` and `Q`, and
-        `<C-q>` while typing).
+        `save_and_close` (`<C-s>`) and `cancel`, added to `cancel_keys`
+        (`q` and `Q`, and `<C-q>` while typing). Moving between the two
+        panes is `switch_window_keys`, left and right.
 
 `picker_ui.mappings`
-        The keys of every list: `focus_next` and `focus_prev` (wrapping),
-        `submit`, and `close`, added to `cancel_keys`.
+        The keys of every list, the results UI's testcase list included:
+        `focus_next` and `focus_prev` (`j`/`<down>` and `k`/`<up>`; a count
+        moves that many, and the ends wrap around), `submit`, and `close`,
+        added to `cancel_keys`.
 
 Highlight groups: `TunaCorrect`, `TunaWrong`, `TunaWarning`, `TunaRunning`,
 `TunaDone`, `TunaEditable`, `TunaMenuTitle` (the menu's banner letters; the

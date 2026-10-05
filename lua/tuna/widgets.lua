@@ -122,7 +122,7 @@ end
 
 ---The plugin-wide pane keys (`switch_window_keys`, given as { left, down, up, right };
 ---default <C-hjkl>) as a walk through panes stacked top to bottom: down and right to the
----next, up and left to the previous, with Tab/S-Tab always accepted as well.
+---next, up and left to the previous.
 ---@param cfg table
 ---@return string[] next, string[] prev
 local function step_keys(cfg)
@@ -137,7 +137,7 @@ local function step_keys(cfg)
         end
         return out
     end
-    return keys("<Tab>", sw[2], sw[4]), keys("<S-Tab>", sw[3], sw[1])
+    return keys(sw[2], sw[4]), keys(sw[3], sw[1])
 end
 
 --------------------------------------------------------------------------------
@@ -235,11 +235,13 @@ local function fill_preview(bufnr, winid, data, defaults)
     end
 end
 
----Move the cursor by `delta` rows in a single-column chooser, wrapping around.
+---Move the cursor by `delta` rows in a list, `v:count1` times, wrapping around. What
+---`picker_ui.mappings.focus_next`/`focus_prev` do in every list tuna draws: its menus, the
+---form's and the `:Tuna` menu's lists, and the results UI's testcase list.
 ---@param winid integer
 ---@param count integer number of selectable rows
 ---@param delta integer -1 (previous) or +1 (next)
-local function move_cursor(winid, count, delta)
+function M.move_cursor(winid, count, delta)
     -- Clamp to what the buffer actually holds: a widget whose rows are being repaired
     -- (the form's edit guard) can briefly hold fewer lines than it has choices.
     count = math.min(count, api.nvim_buf_line_count(api.nvim_win_get_buf(winid)))
@@ -247,9 +249,10 @@ local function move_cursor(winid, count, delta)
         return
     end
     local row = api.nvim_win_get_cursor(winid)[1]
-    row = (row - 1 + delta) % count + 1
+    row = (row - 1 + delta * vim.v.count1) % count + 1
     pcall(api.nvim_win_set_cursor, winid, { row, 0 })
 end
+local move_cursor = M.move_cursor
 
 ---Read a whole buffer as a single newline-joined string.
 ---@param bufnr integer
@@ -508,16 +511,26 @@ function M.editor(bufnr, tcnum, input_content, output_content, callback, restore
         end
     end
 
-    ---Bind the configured mappings on both panes for one mode.
-    ---@param maps table switch_window / save_and_close / cancel specs
+    -- The panes sit side by side, so the plugin-wide pane keys move between them as they
+    -- move between any other panes: left to Input, right to Output, in normal and insert
+    -- mode alike. Up and down have no pane to go to.
+    local sw = cfg.switch_window_keys or {}
+    local function focus(win)
+        return function()
+            if api.nvim_win_is_valid(win) then
+                api.nvim_set_current_win(win)
+            end
+        end
+    end
+    for _, b in ipairs({ editor.input_buf, editor.output_buf }) do
+        map_keys(sw[1], { "n", "i" }, b, focus(editor.input_win))
+        map_keys(sw[4], { "n", "i" }, b, focus(editor.output_win))
+    end
+
+    ---Bind the save keys on both panes for one mode.
+    ---@param maps table save_and_close / cancel specs
     ---@param mode string "n" or "i"
     local function bind(maps, mode)
-        map_keys(maps.switch_window, mode, editor.input_buf, function()
-            api.nvim_set_current_win(editor.output_win)
-        end)
-        map_keys(maps.switch_window, mode, editor.output_buf, function()
-            api.nvim_set_current_win(editor.input_win)
-        end)
         for _, b in ipairs({ editor.input_buf, editor.output_buf }) do
             map_keys(maps.save_and_close, mode, b, function()
                 save()
@@ -998,8 +1011,8 @@ local function guard_section(i)
 end
 
 ---Open a vertical stack of single-choice lists, all visible at once. Move within a
----list with `j`/`k` (arrows), switch lists with the plugin-wide pane-navigation keys
----(`switch_window_keys`, default `<C-hjkl>`) or `<Tab>`/`<S-Tab>`,
+---list with `picker_ui.mappings.focus_next`/`focus_prev`, switch lists with the
+---plugin-wide pane-navigation keys (`switch_window_keys`, default `<C-hjkl>`),
 ---`<CR>` submits every list's current selection, Esc cancels. Unlike a chain of
 ---`menu`s, the user sees and sets all choices together. The focused section is the
 ---active window (cursor + cursorline), like every other multi-pane tuna float.
@@ -1211,10 +1224,10 @@ function M.form(sections, on_submit, restore_winid, on_close)
 
     for i, b in ipairs(form.bufs) do
         local s = form.sections[i]
-        map_keys({ "j", "<down>" }, "n", b, function()
+        map_keys(cfg.picker_ui.mappings.focus_next, "n", b, function()
             move_cursor(form.wins[i], form_rows(s), 1)
         end)
-        map_keys({ "k", "<up>" }, "n", b, function()
+        map_keys(cfg.picker_ui.mappings.focus_prev, "n", b, function()
             move_cursor(form.wins[i], form_rows(s), -1)
         end)
         map_keys(next_keys, "n", b, function()
@@ -1657,23 +1670,17 @@ function M.panels(sections, on_choice, restore_winid, on_close, header)
     end
 
     -- The plugin-wide pane keys, taken as { left, down, up, right }, move by position, the
-    -- way they move between the results UI's panes. Tab/S-Tab walk the lists in order.
+    -- way they move between the results UI's panes.
     local sw = cfg.switch_window_keys or {}
     local moves = { { -1, 0 }, { 0, 1 }, { 0, -1 }, { 1, 0 } }
 
     for i, b in ipairs(panels.bufs) do
         local sec = panels.sections[i]
-        map_keys({ "j", "<down>" }, "n", b, function()
+        map_keys(cfg.picker_ui.mappings.focus_next, "n", b, function()
             move_cursor(panels.wins[i], #sec.items, 1)
         end)
-        map_keys({ "k", "<up>" }, "n", b, function()
+        map_keys(cfg.picker_ui.mappings.focus_prev, "n", b, function()
             move_cursor(panels.wins[i], #sec.items, -1)
-        end)
-        map_keys({ "<Tab>" }, "n", b, function()
-            focus((i % n) + 1)
-        end)
-        map_keys({ "<S-Tab>" }, "n", b, function()
-            focus(((i - 2) % n) + 1)
         end)
         for k, move in ipairs(moves) do
             if sw[k] then

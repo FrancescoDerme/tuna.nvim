@@ -309,6 +309,13 @@ press("<C-l>")
 t.eq("right moves to the column beside", api.nvim_get_current_win(), b.Commands.win)
 press("<C-h>")
 t.eq("and left back to the list level with it", api.nvim_get_current_win(), b.Contests.win)
+press("<Tab>")
+t.eq("Tab moves nowhere", api.nvim_get_current_win(), b.Contests.win)
+press("<C-l>")
+api.nvim_win_set_cursor(0, { 2, 0 })
+press("j")
+t.eq("and a list's last entry wraps to its first", api.nvim_win_get_cursor(0)[1], 1)
+press("<C-h>")
 
 -- An editor too narrow for the board: the recent lists give way, the commands don't.
 local commands_width = b.Commands.width

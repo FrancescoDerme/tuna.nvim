@@ -1691,6 +1691,20 @@ function RunnerUI:show_ui()
                 end
             end
         end
+        -- The testcase list moves like every other list tuna draws, with the list keys,
+        -- wrapping at the ends.
+        if name == "tc" then
+            local picker = self.config.picker_ui.mappings
+            for delta, keys in pairs({ [1] = picker.focus_next, [-1] = picker.focus_prev }) do
+                for _, key in ipairs(as_list(keys)) do
+                    vim.keymap.set("n", key, function()
+                        if w.winid and api.nvim_win_is_valid(w.winid) then
+                            require("tuna.widgets").move_cursor(w.winid, api.nvim_buf_line_count(w.bufnr), delta)
+                        end
+                    end, { buffer = w.bufnr, nowait = true })
+                end
+            end
+        end
         -- A pane the layout left out has a buffer but no window, so there is nothing
         -- to watch for it (its content is still reachable through the viewer).
         if w.winid then

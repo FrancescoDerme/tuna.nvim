@@ -739,7 +739,10 @@ specific Vim error about a buffer the user never opened.
   prompts can't reliably start in insert. Like every widget it takes its border from the
   config; a caller that may skip the question (download's `prompt_*` options) decides that
   itself (`ask` in `download.lua`).
-- `editor`: a resize rebuilds both panes in the pane, cursor and mode the user was in;
+- `editor`: its two panes are moved between with `switch_window_keys` (left to Input, right
+  to Output, in insert mode too), like every other UI with panes: there is no
+  editor-only pane key, so one setting moves focus everywhere. A resize rebuilds both
+  panes in the pane, cursor and mode the user was in;
   `skip_close` keeps the panes' `WinClosed` from running the real close (which leaves insert
   mode) while they are replaced.
 - `menu`: optional `on_close`; `preview` (fixed lines or cursor-following `content(idx)`, colour
@@ -754,7 +757,7 @@ specific Vim error about a buffer the user never opened.
   `column` stacks it with others: a column is as wide as its widest list, its lists share the
   band's rows smallest first (a list given fewer rows than items scrolls, with the user's
   scrolloff), and `switch_window_keys` move by position (`neighbour`: within the stack, or to
-  the list level with this one in the next column). Tab/S-Tab walk the lists in order.
+  the list level with this one in the next column).
   A section's `format(width)` lays it out for a content width (nil: its natural one) in place
   of `items`, again on every build and resize. When the board is too wide, a column made
   only of such sections gives up width first, down to `FIT_MIN`, before the whole board
@@ -771,8 +774,13 @@ specific Vim error about a buffer the user never opened.
 - `open_float` sets what every widget float needs: `cursorline` with local scope (so the
   global value never leaks), `wrap`, `keep_scrolloff`. `step_keys` turns
   `switch_window_keys` into the next/previous keys of stacked panes (menu and preview,
-  form sections). `picker_ui.mappings` are the keys of every list; its `close` adds to
-  `cancel_keys` rather than repeating them.
+  form sections). **Panes move only with `switch_window_keys`, lists only with
+  `picker_ui.mappings.focus_next`/`focus_prev`, and Tab means nothing**, in every widget
+  and in the results UI alike: one setting per kind of move. Every list moves through
+  `widgets.move_cursor` (a count steps that many, the ends wrap), the menus, the form's
+  sections, the `:Tuna` menu's lists and the results UI's selector (bound on `tc` only, so
+  `j`/`k` in a detail pane still scroll it). `close` adds to `cancel_keys` rather than
+  repeating them.
 
 ## Download and judges
 

@@ -1264,7 +1264,7 @@ function M.clean(bufnr)
     end
 
     -- Directory, recursion depth and match threshold are chosen together, all three
-    -- lists visible at once (`switch_window_keys` or Tab switch lists, <CR> submits).
+    -- lists visible at once (`switch_window_keys` switch lists, <CR> submits).
     -- Each list ends in an empty `Custom:` row typed into in place, so customizing one
     -- costs no extra prompt and several can be set before submitting.
     widgets.form(

@@ -273,6 +273,21 @@ for _, interface in ipairs({ "split", "popup" }) do
 end
 vim.fn.delete(dir .. "/checker.cpp")
 
+-- The testcase list moves like every list tuna draws: the list keys step a row (a count
+-- steps that many) and wrap at the ends, and Tab does nothing.
+do
+    local br, ui, move, state, done = board("popup")
+    done()
+    local function press(k)
+        vim.api.nvim_set_current_win(ui.windows.tc.winid)
+        vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(k, true, false, true), "x", false)
+        return state().row
+    end
+    move(3)
+    t.eq("the testcase list wraps, counts, and ignores Tab", { press("j"), press("2j"), press("k"), press("<Tab>") }, { 1, 3, 2, 2 })
+    br:delete_ui()
+end
+
 -- `:w` in any pane saves the testcase the panes show, a read-only one included.
 do
     local br, ui, move, _, done = board("popup")

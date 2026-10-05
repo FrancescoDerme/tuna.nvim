@@ -265,9 +265,15 @@ require("lualine").setup({
 
 ## Configuration
 
-[This](https://github.com/FrancescoDerme/dotfiles/blob/master/nvim/.config/nvim/lua/plugins/tuna.lua) is an example of a good configuration.
-Everything is optional. `setup()` takes a table shaped like the defaults, and anything you
-leave out keeps its default:
+Settings come from three layers, each overriding the one before:
+
+1. the defaults;
+2. what you pass to `setup()`;
+3. a `.tuna.lua` anywhere above the file you are editing, returning a table, so a contest
+   folder can set a different time limit, template or testcase layout for everything under it
+   without touching your config.
+
+This means that everything is optional. The following is an example of a minimal configuration.
 
 ```lua
 require("tuna").setup({
@@ -281,13 +287,7 @@ require("tuna").setup({
 })
 ```
 
-Settings come from three layers, each overriding the one before:
-
-1. the defaults;
-2. what you pass to `setup()`;
-3. a `.tuna.lua` anywhere above the file you are editing, returning a table, so a contest
-   folder can set a different time limit, template or testcase layout for everything under it
-   without touching your config.
+[This](https://github.com/FrancescoDerme/dotfiles/blob/master/nvim/.config/nvim/lua/plugins/tuna.lua) is an example of a complete configuration.
 
 Every option, with its default and what it does, is commented in
 [`lua/tuna/config.lua`](lua/tuna/config.lua) and documented in `:h tuna-configuration`. The

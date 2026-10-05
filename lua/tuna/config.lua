@@ -245,10 +245,10 @@ M.defaults = {
     -- line like `// problem: $(PROBLEM)` is filled in when a problem is downloaded (and its
     -- `submit at: $(URL)` line is the problem's URL). false copies the template as it is.
     evaluate_template_modifiers = true,
-    -- Where the cursor lands when tuna opens a solution made from the template — a
-    -- downloaded problem/contest, a problem stepped onto with `:Tuna next`/`prev`, or
-    -- the scratch file of `:Tuna scratch`. Templates open on their header, which is never
-    -- where one starts typing.
+    -- Where the cursor lands whenever tuna opens a solution itself: a downloaded problem or
+    -- contest, a problem stepped onto with `:Tuna next`/`prev`, one reopened with
+    -- `:Tuna last` or from the menu's recent and pinned lists, and the scratch file of
+    -- `:Tuna scratch`. Templates open on their header, which is never where one starts typing.
     --   false                          leave the cursor at the top (default)
     --   <number>                       that line
     --   "<lua pattern>"                the first line matching it
@@ -523,11 +523,11 @@ M.defaults = {
     -- through the window's `winhighlight` (FloatBorder remap).
     floating_border = "rounded",
     floating_border_highlight = "FloatBorder",
-    -- Plugin-wide keys to move focus between panes in every multi-pane floating UI
-    -- (the results/runner UI and the `:Tuna clean` chooser form). Tuna handles this
-    -- itself so it works across floats, where the built-in `<C-w>hjkl` can't reach.
-    -- Given as { left, down, up, right }. (The testcase editor keeps its own 2-pane
-    -- `editor_ui.*_mappings.switch_window`, which also has an insert-mode variant.)
+    -- Plugin-wide keys to move focus between panes, in every UI with more than one: the
+    -- results UI, the testcase editor, a menu and its preview, the `:Tuna clean` form and
+    -- the `:Tuna` menu. Tuna handles this itself so it works across floats, where the
+    -- built-in `<C-w>hjkl` can't reach. Given as { left, down, up, right }, and they work
+    -- while typing too.
     switch_window_keys = { "<C-h>", "<C-j>", "<C-k>", "<C-l>" },
     -- Plugin-wide keys that dismiss a floating widget (prompt, menu, chooser form, the
     -- `:Tuna` menu's lists, testcase editor), bound in one place so the same press
@@ -543,31 +543,32 @@ M.defaults = {
         insert = {},
     },
     -- The standalone testcase editor (`:Tuna testcase add`/`edit`): input and expected
-    -- output side by side, each pane `width` × `height` of the editor. Its keys, in normal
-    -- and in insert mode: `switch_window` moves between the two panes, `save_and_close`
-    -- saves the testcase, `cancel` closes without saving (added to `cancel_keys`).
+    -- output side by side, each pane `width` × `height` of the editor, moved between with
+    -- `switch_window_keys` (left and right). Its own keys, in normal and in insert
+    -- mode: `save_and_close` saves the testcase, `cancel` closes without saving (added to
+    -- `cancel_keys`).
     editor_ui = {
         width = 0.4,
         height = 0.6,
         show_nu = true, -- line numbers
         show_rnu = false, -- relative line numbers
         normal_mode_mappings = {
-            switch_window = { "<C-h>", "<C-l>", "<C-i>" },
             save_and_close = "<C-s>",
             cancel = { "q", "Q" },
         },
         insert_mode_mappings = {
-            switch_window = { "<C-h>", "<C-l>", "<C-i>" },
             save_and_close = "<C-s>",
             cancel = "<C-q>",
         },
     },
-    -- The keys of every single-choice list: the menus tuna asks its questions in and the
-    -- lists of the `:Tuna` menu. `close` adds to `cancel_keys`.
+    -- The keys of every list: the menus tuna asks its questions in, the `:Tuna clean` form,
+    -- the `:Tuna` menu and the results UI's testcase list. `focus_next`/`focus_prev` move
+    -- one entry (a count moves that many), wrapping around at the ends, and `submit`/`close`
+    -- act in the menus and forms (`close` adds to `cancel_keys`).
     picker_ui = {
         mappings = {
-            focus_next = { "j", "<down>", "<Tab>" }, -- move to the next entry (wraps)
-            focus_prev = { "k", "<up>", "<S-Tab>" }, -- move to the previous entry (wraps)
+            focus_next = { "j", "<down>" },
+            focus_prev = { "k", "<up>" },
             close = { "q", "Q" },
             submit = "<cr>",
         },

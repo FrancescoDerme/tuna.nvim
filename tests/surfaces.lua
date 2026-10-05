@@ -271,6 +271,40 @@ do
     close_layer(80)
 end
 
+-- The editor's two panes are moved between with the plugin-wide pane keys, whatever they
+-- are set to, in normal and insert mode; it has no pane keys of its own, and Tab is not one.
+do
+    require("tuna").setup({ switch_window_keys = { "<A-h>", "<A-j>", "<A-k>", "<A-l>" } })
+    widgets.editor(api.nvim_get_current_buf(), 0, "1\n", "1\n", function() end, api.nvim_get_current_win())
+    settle(150)
+    local function pane()
+        local title = api.nvim_win_get_config(0).title
+        return title and vim.trim(title[1][1]):match("^%a+") or "?"
+    end
+    local function keys(k)
+        api.nvim_feedkeys(api.nvim_replace_termcodes(k, true, false, true), "x", false)
+    end
+    local seen = { pane() }
+    keys("<A-l>")
+    seen[#seen + 1] = pane()
+    keys("<A-h>")
+    seen[#seen + 1] = pane()
+    keys("i<A-l><Esc>")
+    seen[#seen + 1] = pane()
+    keys("<Tab>")
+    seen[#seen + 1] = pane()
+    keys("<C-l>")
+    seen[#seen + 1] = pane()
+    keys("<Tab>")
+    seen[#seen + 1] = pane()
+    keys("a<A-h><Esc>")
+    seen[#seen + 1] = pane()
+    ok("the pane keys move between the editor's panes, typing too, and Tab does not",
+        vim.deep_equal(seen, { "Input", "Output", "Input", "Output", "Output", "Output", "Output", "Input" }), vim.inspect(seen))
+    close_layer(80)
+    require("tuna").setup({})
+end
+
 -- A menu can start on a given row (a following preview with it), and a resize keeps the
 -- row the cursor is on rather than going back to the top.
 widgets.menu({ "one", "two", "three" }, "a menu", function() end, nil, nil, nil, nil, 2)

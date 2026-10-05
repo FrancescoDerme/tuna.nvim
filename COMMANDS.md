@@ -84,7 +84,7 @@ Every command is a subcommand of `:Tuna` with tab-completion.
 `:Tuna`, or `:Tuna menu`, opens the menu. On the left are your recent contests, your recent
 problems and your pinned problems, each with how it went. On the right is what tuna can do
 from the file you are on. `<CR>` acts on the list you are in, and `<C-h>`/`<C-j>`/`<C-k>`/
-`<C-l>` or Tab move between the lists.
+`<C-l>` move between the lists.
 
 ## run
 
