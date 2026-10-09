@@ -1063,7 +1063,10 @@ specific Vim error about a buffer the user never opened.
   via a `FileType` autocmd over `keymaps.filetypes`; `global` are global. `setup()` can be
   re-run (it tracks `applied_global` and clears the augroup). `preset` expands under a prefix
   with which-key groups (`tt`, `td`, `tg`); a key keeps its short label only while it stays in
-  its group. `clean` is not in the preset. `pin` is `f` ("flag it for later"), `p` being the
+  its group. tuna never names the groups in which-key itself: the
+  prefix is the user's choice and may already be a group of theirs, and two names for one
+  key are settled by whichever `wk.add` ran last, so the user names them (REFERENCE.md shows
+  how). `clean` is not in the preset. `pin` is `f` ("flag it for later"), `p` being the
   previous problem.
 - **`scaffold.lua`**: starter helper files. Templates are **plain files** named `<role>.<ext>`
   (the role words of `tools.ROLES`, the same as everywhere), looked up in

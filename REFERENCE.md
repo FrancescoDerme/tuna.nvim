@@ -102,7 +102,7 @@ A keyword forces that mode for the problem, and it is remembered across restarts
 - `all` runs every solution in the folder against every testcase.
 - `stress` hunts for an input where your solution and the bruteforce disagree, and saves it as a testcase.
   A number after it is how many inputs to try: `:Tuna run stress 500`.
-  Each run tries new inputs, and the Run pane shows the seed of the one being tried, which the generator turns back into that input.
+  Each run tries new inputs, and the runner UI shows the seed of the input being tried.
 - `interactive` lets your solution talk to something over stdin and stdout.
   A word after it picks the other side: `live` (you type), `feed` (the testcase input, a line at a time) or `interactor` (an interactor program).
 
@@ -381,22 +381,54 @@ A pattern that matches nothing leaves the cursor alone, so one written for C++ i
 
 ## Keymaps
 
-Nothing is mapped unless you ask:
+Nothing is mapped unless you ask.
+The preset maps some useful actions under one prefix:
 
 ```lua
 keymaps = {
-    preset = "<leader>t",              -- the whole set, under one prefix
-    filetypes = { "c", "cpp", "rust", "java", "python" },
-    mappings = { run = "<leader><leader>", delete_testcase = false },  -- move one, drop one
-    global = {},                       -- always available, not just in a solution
+    preset = "<leader>t",
 },
 ```
 
-`mappings` are buffer-local and set for `filetypes`, while `global` are set once.
-Both layer over `preset` rather than replacing it, so a single key can be moved or dropped without giving up the rest.
-The preset groups keys by subject, so which-key shows a `t` testcases group, a `d` downloads group and a `g` "go to" group.
+| Where         | Key                                         | Action                              |
+| ------------- | ------------------------------------------- | ----------------------------------- |
+| In a solution | `<leader>tta`, `<leader>tte`, `<leader>ttd` | add, edit, delete a testcase        |
+|               | `<leader>tr`                                | run                                 |
+|               | `<leader>tu`                                | show the runner UI                  |
+|               | `<leader>ts`                                | submit                              |
+|               | `<leader>tn`, `<leader>tp`                  | next, previous problem              |
+|               | `<leader>tf`                                | pin                                 |
+|               | `<leader>tl`                                | library                             |
+|               | `<leader>tdt`                               | download testcases                  |
+| Everywhere    | `<leader>tm`                                | menu                                |
+|               | `<leader>tw`                                | scratch                             |
+|               | `<leader>tdp`, `<leader>tdc`, `<leader>tds` | download a problem, a contest, sync |
+|               | `<leader>tgp`, `<leader>tgc`                | back to the last problem, contest   |
 
-The actions, each running the `:Tuna` command it is named after, are the following: `menu`, `run`, `run_all`, `run_stress`, `run_interactive`, `show_ui`, `add_testcase`, `edit_testcase`, `delete_testcase`, `submit`, `submit_clear`, `download_testcases`, `download_problem`, `download_contest`, `download_sync`, `clean`, `pin`, `next_problem`, `prev_problem`, `last_problem`, `last_contest`, `scratch`, `library`, `library_snippet` and `library_search`.
+The preset groups keys by subject: `t` for testcases, `d` for downloads and `g` for "go to".
+A key inside a group has a short label that leaves out the group's word (`<leader>tdp` is `Problem`), so if you use which-key, name the groups in your config:
+
+```lua
+require("which-key").add({
+    { "<leader>t", group = "Tuna" },
+    { "<leader>tt", group = "Testcases" },
+    { "<leader>td", group = "Download" },
+    { "<leader>tg", group = "Go to" },
+})
+```
+
+Your own keys layer over the preset rather than replacing it, so one can be moved, or dropped by mapping its action to `false`, without giving up the rest:
+
+```lua
+keymaps = {
+    preset = "<leader>t",
+    mappings = { run = "<leader><leader>", delete_testcase = false },
+},
+```
+
+`mappings` are buffer-local, set for the solution filetypes in `keymaps.filetypes`, and `global` are set once and always there.
+
+Every command can be mapped this way, each running the `:Tuna` command it is named after: `menu`, `run`, `run_all`, `run_stress`, `run_interactive`, `show_ui`, `add_testcase`, `edit_testcase`, `delete_testcase`, `submit`, `submit_clear`, `download_testcases`, `download_problem`, `download_contest`, `download_sync`, `clean`, `pin`, `next_problem`, `prev_problem`, `last_problem`, `last_contest`, `scratch`, `library`, `library_snippet` and `library_search`.
 
 ## Appearance and widgets
 

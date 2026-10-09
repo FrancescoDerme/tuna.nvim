@@ -53,7 +53,8 @@ REQUIREMENTS                                               *tuna-requirements*
 - Optional: the Competitive Companion browser extension, to download problems
   and contests: https://github.com/jmerle/competitive-companion
 - Optional: toggleterm.nvim for the submit terminal, lualine.nvim for the
-  download and verdict indicators, telescope.nvim for searching the library.
+  download and verdict indicators, telescope.nvim for searching the library,
+  which-key.nvim to see the keymaps as you type them.
 
 ==============================================================================
 INSTALLATION                                               *tuna-installation*
@@ -846,33 +847,61 @@ RUN MODES AND HELPERS                                  *tuna-config-run-modes*
 ------------------------------------------------------------------------------
 KEYMAPS                                                  *tuna-config-keymaps*
 
-Nothing is mapped unless you ask: >lua
+Nothing is mapped unless you ask. The preset maps what you reach for during a
+contest under one prefix: >lua
 
     keymaps = {
         preset = "<leader>t",
-        filetypes = { "c", "cpp", "rust", "java", "python" },
-        mappings = { run = "<leader><leader>", delete_testcase = false },
-        global = {},
     },
 <
-`mappings` are buffer-local and set for `filetypes`, so they follow you from
-solution to solution; `global` are set once. Both layer over `preset` rather
-than replacing it, so a single key can be moved — or dropped, by mapping its
-action to `false` — without giving up the rest.
+    In a solution
+    `<leader>tta`, `tte`, `ttd`    add, edit, delete a testcase
+    `<leader>tr`                   run
+    `<leader>tu`                   show the runner UI
+    `<leader>ts`                   submit
+    `<leader>tn`, `tp`             next, previous problem
+    `<leader>tf`                   pin
+    `<leader>tl`                   library
+    `<leader>tdt`                  download testcases
 
-With `preset = "<leader>t"` you get `<leader>tr` run, `<leader>tu` runner UI,
-`<leader>ts` submit, `<leader>tn` and `<leader>tp` problem navigation,
-`<leader>tta`, `tte` and `ttd` for testcases, `<leader>tdt`, `tdp` and `tdc`
-for downloads and `<leader>tds` to sync, `<leader>tgp` and `tgc` back to the
-last problem or contest, `<leader>tf` pin, `<leader>tl` the library,
-`<leader>tw` the scratch, and `<leader>tm` the menu.
+    Everywhere
+    `<leader>tm`                   menu
+    `<leader>tw`                   scratch
+    `<leader>tdp`, `tdc`, `tds`    download a problem, a contest, sync
+    `<leader>tgp`, `tgc`           back to the last problem, contest
 
-The actions, each running the `:Tuna` command it is named after: `menu`,
-`run`, `run_all`, `run_stress`, `run_interactive`, `show_ui`, `add_testcase`,
-`edit_testcase`, `delete_testcase`, `submit`, `submit_clear`,
-`download_testcases`, `download_problem`, `download_contest`, `download_sync`,
-`clean`, `pin`, `next_problem`, `prev_problem`, `last_problem`,
-`last_contest`, `scratch`, `library`, `library_snippet` and `library_search`.
+The preset groups keys by subject: `t` for testcases, `d` for downloads and
+`g` for "go to". A key inside a group has a short label that leaves out the
+group's word (`<leader>tdp` is `Problem`), so if you use which-key, name the
+groups in your config: >lua
+
+    require("which-key").add({
+        { "<leader>t", group = "Tuna" },
+        { "<leader>tt", group = "Testcases" },
+        { "<leader>td", group = "Download" },
+        { "<leader>tg", group = "Go to" },
+    })
+<
+
+Your own keys layer over the preset rather than replacing it, so one can be
+moved, or dropped by mapping its action to `false`, without giving up the
+rest: >lua
+
+    keymaps = {
+        preset = "<leader>t",
+        mappings = { run = "<leader><leader>", delete_testcase = false },
+    },
+<
+`mappings` are buffer-local, set for the solution filetypes in
+`keymaps.filetypes`, and `global` are set once and always there.
+
+Every action can be mapped this way, each running the `:Tuna` command it is
+named after: `menu`, `run`, `run_all`, `run_stress`, `run_interactive`,
+`show_ui`, `add_testcase`, `edit_testcase`, `delete_testcase`, `submit`,
+`submit_clear`, `download_testcases`, `download_problem`, `download_contest`,
+`download_sync`, `clean`, `pin`, `next_problem`, `prev_problem`,
+`last_problem`, `last_contest`, `scratch`, `library`, `library_snippet` and
+`library_search`.
 
 ------------------------------------------------------------------------------
 APPEARANCE                                            *tuna-config-appearance*

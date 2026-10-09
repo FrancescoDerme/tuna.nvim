@@ -51,8 +51,8 @@ M.actions = {
 }
 
 -- The ready-made preset, enabled with `keymaps.preset = "<leader>t"` (any prefix).
--- Suffixes are grouped by subject, so which-key shows one "Tuna" group with a
--- "testcases" and a "download" subgroup under it:
+-- Suffixes are grouped by subject, so which-key, with the groups named in the user's own
+-- config (REFERENCE.md shows how), shows one "Tuna" group with subgroups under it:
 --
 --   <leader>tta  Add                <leader>tr  Run            <leader>tdt  Testcases
 --   <leader>tte  Edit               <leader>tu  Show ui        <leader>tdp  Problem
