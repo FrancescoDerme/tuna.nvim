@@ -90,7 +90,7 @@ From the read-only panes you can:
 
 Each pane opens full-screen with the key in the pane's title, and `<C-hjkl>` move you between panes, also customizable.
 
-Comparison between Output and Expected Output is driven by `output_compare_method`: `"exact"`, `"squish"` (whitespace-insensitive, the default), `{ "float", tol = 1e-6 }` for problems with a tolerance, or a function of your own.
+Comparison between Output and Expected Output is driven by `output_compare_method`: `"exact"`, `"squish"` (whitespace-insensitive, the default), `{ "float", tol = 1e-6 }` for problems with a tolerance, or the name of a method of your own in `compare_methods`.
 [`:Tuna compare <method>`](REFERENCE.md#compare) overrides it for one problem.
 
 ### Run modes and scaffolding

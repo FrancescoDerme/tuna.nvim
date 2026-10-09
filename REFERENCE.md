@@ -28,8 +28,8 @@ Every command is a subcommand of `:Tuna` with tab-completion.
   <td>rewrite the testcases into another layout</td>
 </tr>
 <tr>
-  <td><a href="#compare"><code>:Tuna compare [exact|squish|float [tol]|default]</code></a></td>
-  <td>override the comparison for this problem</td>
+  <td><a href="#compare"><code>:Tuna compare [exact|squish|float [tol]|name]</code></a></td>
+  <td>set the comparison for this problem</td>
 </tr>
 <tr>
   <td><a href="#checker"><code>:Tuna checker [auto|off]</code></a></td>
@@ -159,16 +159,16 @@ The storage backends, chosen with `testcases_storage`:
 ## compare
 
 ```
-:Tuna compare [exact|squish|float [tol]|default]
+:Tuna compare [exact|squish|float [tol]|name]
 ```
 
-Overrides how the output is compared with the expected output, for this problem only.
+Sets how the output is compared with the expected output, for this problem only.
 It is remembered across restarts.
 
 - `exact` compares character for character.
 - `squish` ignores how the output is spaced: runs of whitespace and line breaks count as one space, and leading and trailing whitespace is dropped.
 - `float` compares token by token, accepting numbers within an absolute error of `tol` (`1e-6` when not given).
-- `default` goes back to `output_compare_method` from your config.
+- `name` is a method of your own, defined under that name in `compare_methods`.
 
 Without an argument it changes nothing and says which method is in use.
 

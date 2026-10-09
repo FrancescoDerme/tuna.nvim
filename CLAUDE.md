@@ -99,7 +99,7 @@ lua/tuna/
   testcases.lua     three storage backends, testcase semantics, split
   sidecar.lua       per-problem .tuna.json
   tools.lua         helper-program discovery/compilation, per-problem run state
-  compare.lua       exact/squish/float/custom verdict comparison
+  compare.lua       exact/squish/float and the user's named verdict comparisons
   diff.lua          positional diff marks for the results UI
   checker.lua       builtin vs external testlib-style checker
   runner/core.lua   RunnerCore: rows, process execution, UI plumbing, editing contract
@@ -257,9 +257,11 @@ is relative. Every configured path goes through these: compile/running directori
     the same way: a setting changes only when its new value is named (a keyword forces,
     `auto` hands back, no keyword switches), and a **bare** setting command changes nothing
     and says how it is set (`show_checker`, `show_compare`, the same sentence a change
-    ends with). `:Tuna checker` is `off`/`auto`; `:Tuna compare` clears with `default`
-    instead, since what it goes back to is the config's `output_compare_method`, not a
-    choice tuna makes. Switching and cycling with one keypress belong to the menu's
+    ends with). `:Tuna checker` is `off`/`auto`; `:Tuna compare` takes a
+    method, and every method simply becomes the problem's: there is no word for handing
+    back, and the configured `output_compare_method` is just one of the methods. Choosing it
+    keeps no override (`set_compare`, compared by `compare.method_name`), so a later change
+    to the config still reaches the problem. Switching and cycling with one keypress belong to the menu's
     "Checker:" and "Compare:" entries, which show the state they move from. Persisted in the sidecar with the compare
     override, loaded lazily, removed when nothing is forced.
   - **A build is reused while what it was made from is unchanged**, for the session only, in
@@ -295,7 +297,12 @@ is relative. Every configured path goes through these: compile/running directori
       `run_no_compile`-style command or flag (it runs a binary for code that is not on screen,
       and only ever fitted the normal mode).
   - Compare methods are stored **by name** (`{ method = "float", tol }`), because a mixed
-    array/hash table does not survive JSON. Every field is validated on read.
+    array/hash table does not survive JSON. Every field is validated on read. That is also
+    why a user's own method has a name (`compare_methods`) rather than being a function
+    given straight to `output_compare_method`: a name can be typed, completed
+    (`compare_names`), kept for a problem and shown, and `RunnerCore:effective_compare`
+    resolves it to `{ name, fn }` when judging, which `compare_output` runs. A bare
+    function is no method.
   - **A support file is never a solution**: `is_support` is a helper (by name, `is_helper`)
     or a header (by extension, `is_header`: `h`, `hpp`, `hh`, `hxx`, `h++`, `inl`, `ipp`,
     `tpp`, any case). Neovim gives a header its language's filetype, so having a
@@ -367,7 +374,8 @@ is relative. Every configured path goes through these: compile/running directori
   answer whether the step had anything to say and whether it is over, which is what decides
   if the cursor may be handed to the first testcase. Run-all has no build step: each
   solution's build is a row of its own.
-- `effective_compare()` returns the per-buffer override, else the config.
+- `effective_compare()` returns the per-buffer override, else the config, a name from
+  `compare_methods` resolved to `{ name, fn }`.
 - `M.time_limit(cfg)` and `M.parallelism(cfg, jobs)` are how every mode reads `maximum_time`
   and `multiple_testing`.
 - **One vocabulary for an ending**: `M.ending(how, timeout)` gives the status, colour and
@@ -1113,7 +1121,10 @@ specific Vim error about a buffer the user never opened.
     run-all honouring `checker off`, the Run pane's settings rows and which of them read as
     forced, `:Tuna compare` reaching an open board without taking its runner away,
     `:Tuna checker`'s and `:Tuna compare`'s words (`off`/`auto`, bare reporting and
-    changing nothing, no `toggle`) and the menu's Checker entry switching, old or
+    changing nothing, no `toggle`, no `default`: choosing the configured method, or a float of
+    its tolerance, keeps no override; a method of the user's own offered, kept and judged
+    with by its name, and unknown where it is not defined) and the menu's Checker
+    entry switching and Compare entry cycling back to the configured method, old or
     nonsense sidecar values reading as automatic, a configured command with no
     arguments getting its role's, and stress/interactor reruns offering the starter of a helper gone (Stop writing
     nothing, Create putting the board away and opening it in the editor);

@@ -3,7 +3,7 @@
 -- Decides a testcase's verdict. There are two kinds of checker:
 --
 --   * "builtin"  — plain output comparison via `compare.lua` (the
---     `output_compare_method`: exact / squish / custom function). This is the
+--     `output_compare_method`: exact / squish / float / one of your own). This is the
 --     default.
 --   * external   — a testlib-style checker program, invoked as
 --     `checker <input> <output> <answer>` (jury input, participant output, jury

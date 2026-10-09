@@ -150,9 +150,9 @@ Each pane opens full-screen with the key in the pane's title, and `<C-h>`,
 
 Comparison between Output and Expected Output is driven by
 `output_compare_method`: `"exact"`, `"squish"` (whitespace-insensitive, the
-default), `{ "float", tol = 1e-6 }` for problems with a tolerance, or a
-function of your own. `:Tuna compare {method}` overrides it for one problem,
-and remembers.
+default), `{ "float", tol = 1e-6 }` for problems with a tolerance, or the
+name of a method of your own in `compare_methods`. `:Tuna compare {method}`
+sets it for one problem, and remembers.
 
 ------------------------------------------------------------------------------
 RUN MODES AND SCAFFOLDING                                     *tuna-run-modes*
@@ -437,9 +437,9 @@ position. A lowercase `:tuna` expands to it.
             directory       one sub-directory per testcase,
                             `tests/0/input.txt` and `output.txt`
 
-:Tuna compare [exact/squish/float [tol]/default]
-        Override how the output is compared with the expected output, for
-        this problem only. It is remembered across restarts.
+:Tuna compare [exact/squish/float [tol]/name]
+        Set how the output is compared with the expected output, for this
+        problem only. It is remembered across restarts.
 
         - `exact` compares character for character.
         - `squish` ignores how the output is spaced: runs of whitespace and
@@ -447,7 +447,8 @@ position. A lowercase `:tuna` expands to it.
           whitespace is dropped.
         - `float` compares token by token, accepting numbers within an
           absolute or relative error of `tol` (`1e-6` when not given).
-        - `default` goes back to `output_compare_method` from your config.
+        - `name` is a method of your own, defined under that name in
+          `compare_methods`.
 
         Without an argument it changes nothing and says which method is in
         use.
@@ -654,7 +655,12 @@ COMPILING AND RUNNING                                    *tuna-config-compile*
 
 `output_compare_method`
         `"exact"`, `"squish"` (default), `{ "float", tol = 1e-6 }`, or
-        a function of output and expected returning a boolean.
+        the name of a method in `compare_methods`.
+
+`compare_methods`
+        Comparison methods of your own, by name: functions of output and
+        expected returning a boolean, used by name like the builtin ones.
+        Default none.
 
 `checker`
         A path to a testlib-style checker, or `{ exec, args }`, used

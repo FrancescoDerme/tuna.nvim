@@ -1,8 +1,9 @@
 -- lua/tuna/compare.lua
 --
 -- Decides whether a program's output matches the expected output. The runner
--- calls `compare_output`; the method is chosen by the `output_compare_method`
--- config option, which can be a builtin name or a user-supplied function.
+-- calls `compare_output`; the method is chosen by name, by the `output_compare_method`
+-- config option or `:Tuna compare`: a builtin one, or one of the user's own in
+-- `compare_methods`, which the runner resolves (`RunnerCore:effective_compare`).
 
 local utils = require("tuna.utils")
 
@@ -10,9 +11,10 @@ local M = {}
 
 ---@alias tuna.CompareMethod fun(output: string, expected: string, opts: table?): boolean
 ---@alias tuna.CompareBuiltin "exact" | "squish" | "float"
----A compare method: a builtin name, a `{ [1] = builtin, ... }` table carrying that
----builtin's options (e.g. `{ "float", tol = 1e-6 }`), or a custom function.
----@alias tuna.CompareSpec tuna.CompareBuiltin | tuna.CompareMethod | table
+---A compare method: a name, or a `{ [1] = name, ... }` table carrying that method's
+---options (`{ "float", tol = 1e-6 }`), or, once a runner has resolved one of the user's
+---own, the function it names (`{ name, fn = function }`).
+---@alias tuna.CompareSpec string | table
 
 ---The tolerance `float` uses when none is given.
 M.DEFAULT_FLOAT_TOL = 1e-6
@@ -90,9 +92,7 @@ M.methods = {
 ---@param method tuna.CompareSpec
 ---@return string
 function M.method_name(method)
-    if type(method) == "function" then
-        return "custom"
-    elseif type(method) == "table" then
+    if type(method) == "table" then
         local name = method[1] or "?"
         if name == "float" then
             return ("float, tol=%g"):format(method.tol or M.DEFAULT_FLOAT_TOL)
@@ -105,15 +105,15 @@ end
 ---Compare program output against expected output.
 ---@param output string program output (stdout)
 ---@param expected string? expected output, or `nil` when none was provided
----@param method tuna.CompareSpec builtin name, `{ builtin, opts... }` table, or custom fn
+---@param method tuna.CompareSpec
 ---@return boolean? # `true`/`false` if comparable, `nil` when `expected` is absent
 function M.compare_output(output, expected, method)
     if expected == nil then
         return nil
     end
 
-    if type(method) == "function" then
-        return method(output, expected)
+    if type(method) == "table" and type(method.fn) == "function" then
+        return method.fn(output, expected)
     elseif type(method) == "string" and M.methods[method] then
         return M.methods[method](output, expected)
     elseif type(method) == "table" and M.methods[method[1]] then

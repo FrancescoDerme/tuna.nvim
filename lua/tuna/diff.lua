@@ -54,8 +54,8 @@ M.DELETE = "TunaDiffDelete" -- a line the expected output has and yours does not
 ---@private
 ---How finely to compare, given the compare method in effect. Characters only for
 ---`exact` — every other method judges tokens, so highlighting characters would flag
----spacing the verdict itself ignores. A custom function can't be introspected, so it
----gets the token view (the useful default; it is a reading aid, not the verdict).
+---spacing the verdict itself ignores. A method of the user's own can't be introspected,
+---so it gets the token view (the useful default; it is a reading aid, not the verdict).
 ---@param method tuna.CompareSpec
 ---@return "chars" | "tokens" granularity
 ---@return number? tol float tolerance, when the method has one

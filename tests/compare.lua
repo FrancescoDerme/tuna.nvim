@@ -56,12 +56,16 @@ t.eq("float rejects a differing token count", compare.compare_output("1.0\n", "1
 t.eq("a looser tolerance accepts more", compare.compare_output("1.0\n", "1.05\n", { "float", tol = 0.1 }), true)
 
 --------------------------------------------------------------------------------
--- a custom function
+-- a method of your own
 --------------------------------------------------------------------------------
 
-t.eq("a custom method decides for itself", compare.compare_output("anything", "else", function()
-    return true
-end), true)
+-- Named in `compare_methods`, it reaches `compare_output` resolved by the runner.
+t.eq("a method of your own decides for itself", compare.compare_output("anything", "else", {
+    "lenient",
+    fn = function()
+        return true
+    end,
+}), true)
 
 --------------------------------------------------------------------------------
 -- how the method is named in the "Run" pane
@@ -69,7 +73,7 @@ end), true)
 
 t.eq("exact names itself", compare.method_name("exact"), "exact")
 t.has("float carries its tolerance", compare.method_name(float), "tol")
-t.eq("a function is 'custom'", compare.method_name(function() end), "custom")
+t.eq("a method of your own goes by its name", compare.method_name({ "lenient", fn = function() end }), "lenient")
 
 -- An unknown method judges nothing, and says so once rather than once per testcase.
 do

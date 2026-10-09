@@ -186,9 +186,52 @@ do
     commands.execute({ "compare" })
     t.eq("bare compare leaves the method alone", tools.get_compare(ksol), "exact")
     t.eq("and says what it is", said[#said], "Tuna: compare: exact for this problem.")
+    -- There is no word for "the configured one": naming the configured method is how a
+    -- problem goes back to it, so a later change to the config reaches it.
     commands.execute({ "compare", "default" })
-    commands.execute({ "compare" })
-    t.eq("down to the configured one", said[#said], "Tuna: compare: squish, the configured method.")
+    t.has("default is not a method", said[#said], "unknown method 'default' (exact | squish | float [tol])")
+    t.eq("and changes nothing", tools.get_compare(ksol), "exact")
+    commands.execute({ "compare", "squish" })
+    t.eq("naming the configured method keeps no override", tools.get_compare(ksol), nil)
+    t.eq("and says so", said[#said], "Tuna: compare: squish, the configured method.")
+    t.eq("completion offers the methods", commands.complete("", "Tuna compare ", 13), { "exact", "float", "squish" })
+
+    -- Configured as float, a float with the configured tolerance is it, another is not.
+    local fdir, fsol = problem({})
+    t.write(fdir, ".tuna.lua", 'return { output_compare_method = { "float", tol = 1e-3 } }')
+    open(fsol)
+    commands.execute({ "compare", "float", "1e-9" })
+    t.eq("a float of another tolerance is the problem's own", tools.get_compare(fsol), { "float", tol = 1e-9 })
+    commands.execute({ "compare", "float", "1e-3" })
+    t.eq("the configured one is no override", tools.get_compare(fsol), nil)
+
+    -- A method of the user's own has a name (`compare_methods`), and is used by it like any
+    -- other: offered, kept for the problem, and judged with.
+    local cdir, csol = problem({})
+    t.write(cdir, ".tuna.lua", "return { compare_methods = { lenient = function() return true end } }")
+    local cbuf = open(csol)
+    t.eq("a method of your own is offered by its name", commands.complete("", "Tuna compare ", 13), {
+        "exact", "float", "lenient", "squish",
+    })
+    commands.execute({ "compare", "lenient" })
+    t.eq("and kept for the problem by it", tools.get_compare(csol), "lenient")
+    local cr = require("tuna.runner").new(cbuf)
+    cr:refresh_judge(csol)
+    t.eq("a run judges with it", require("tuna.compare").compare_output("a", "b", cr:effective_compare()), true)
+    t.eq("and the Run pane names it", cr:judge_label(), "lenient")
+    open(fsol)
+    commands.execute({ "compare", "lenient" })
+    t.has("where it is not defined it is no method", said[#said], "unknown method 'lenient'")
+
+    -- The menu's "Compare:" entry steps through the methods from the one in use, and landing
+    -- on the configured one hands the problem back to it.
+    local kbuf = open(ksol)
+    local cycled = {}
+    for _ = 1, 3 do
+        commands.cycle_compare(kbuf)
+        cycled[#cycled + 1] = tools.get_compare(ksol) or "configured"
+    end
+    t.eq("the menu cycles from the configured method back to it", cycled, { { "float", tol = 1e-6 }, "exact", "configured" })
     vim.notify = quiet
 end
 
@@ -360,7 +403,7 @@ vim.notify = function() end
 commands.set_compare(pbuf, { "exact" })
 t.eq("`:Tuna compare` shows on the open board at once", { status()[2], status()[3] }, { "judge : exact", "forced: judge" })
 t.eq("and the buffer keeps the board's runner", commands.runners[pbuf], pr)
-commands.set_compare(pbuf, { "default" })
+commands.set_compare(pbuf, { "squish" })
 vim.notify = quiet
 t.eq("and so does handing it back", { status()[2], status()[3] }, { "judge : squish", "forced: none" })
 commands.runners[pbuf] = nil

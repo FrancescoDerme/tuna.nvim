@@ -23,7 +23,6 @@ local subcommand_args = {
     download = { "testcases", "problem", "contest", "sync", "persistently", "status", "stop" },
     scaffold = tools.ROLES,
     checker = { "auto", "off" },
-    compare = { "exact", "squish", "float", "default" },
     submit = { "clear" },
     lib = { "snippet", "search" },
     last = { "problem", "contest" },
@@ -479,30 +478,44 @@ function M.set_checker(bufnr, want)
     M.show_checker(bufnr)
 end
 
----Parse `:Tuna compare` args into a compare-method spec (or nil to clear the
----override back to the configured default). Notifies and returns false on a bad name.
----@param args string[] e.g. { "float", "1e-9" } or { "exact" } or { "default" }
----@return boolean ok, tuna.CompareSpec? method nil clears the override
-local function parse_compare(args)
+---The methods `:Tuna compare` and the menu's "Compare:" entry name, in the order the entry
+---cycles through them: the builtin ones, then the user's own (`compare_methods`) by name.
+---@param cfg table buffer configuration
+---@return string[]
+local function compare_names(cfg)
+    local names = { "exact", "squish", "float" }
+    local own = vim.tbl_keys(cfg.compare_methods or {})
+    table.sort(own)
+    for _, name in ipairs(own) do
+        if not vim.tbl_contains(names, name) then
+            names[#names + 1] = name
+        end
+    end
+    return names
+end
+
+---Parse `:Tuna compare` args into a compare-method spec. Notifies and returns false on a
+---name it does not know.
+---@param args string[] e.g. { "float", "1e-9" } or { "exact" }
+---@param cfg table buffer configuration
+---@return boolean ok, tuna.CompareSpec? method
+local function parse_compare(args, cfg)
     local name = args[1]
-    if name == "default" then
-        return true, nil
-    elseif name == "exact" or name == "squish" then
-        return true, name
-    elseif name == "float" then
+    local names = compare_names(cfg)
+    if name == "float" then
         local tol = args[2] and tonumber(args[2]) or nil
         if args[2] and not tol then
             utils.notify("compare: '" .. args[2] .. "' is not a valid tolerance.")
             return false, nil
         end
-        return true, { "float", tol = tol or 1e-6 }
+        return true, { "float", tol = tol or require("tuna.compare").DEFAULT_FLOAT_TOL }
+    elseif vim.tbl_contains(names, name) then
+        return true, name
     end
-    utils.notify("compare: unknown method '" .. tostring(name) .. "' (exact | squish | float [tol] | default).")
+    names[3] = "float [tol]"
+    utils.notify("compare: unknown method '" .. tostring(name) .. "' (" .. table.concat(names, " | ") .. ").")
     return false, nil
 end
-
--- Order the menu's "Compare" entry cycles through (default = clear the override).
-local COMPARE_CYCLE = { "default", "exact", "squish", "float" }
 
 -- The float tolerance each buffer last asked for (`:Tuna compare float 1e-9`), so
 -- cycling away from float and back does not silently reset it to 1e-6. Session-local
@@ -510,31 +523,30 @@ local COMPARE_CYCLE = { "default", "exact", "squish", "float" }
 ---@type table<string, number>
 local last_float_tol = {}
 
----The cycle token naming the buffer's current compare override (or "default").
----@param path string
+---The name a method goes by in `compare_names`: what the menu's entry cycles from.
+---@param method tuna.CompareSpec
 ---@return string
-local function compare_token(path)
-    local cur = tools.get_compare(path)
-    if type(cur) == "table" then
-        return cur[1]
-    end
-    return type(cur) == "string" and cur or "default"
+local function compare_token(method)
+    return tostring(type(method) == "table" and method[1] or method)
 end
 
----Advance the per-buffer compare method to the next one in `COMPARE_CYCLE` (used by
----the menu, where a click cycles rather than takes an argument).
+---Advance the problem's compare method to the next one `compare_names` lists, from the one
+---in use (used by the menu, where a click cycles rather than takes an argument). Landing on
+---the configured method hands the problem back to it.
 ---@param bufnr integer
 function M.cycle_compare(bufnr)
     local path = api.nvim_buf_get_name(bufnr)
-    local token = compare_token(path)
+    local cfg = config.get_buffer_config(bufnr)
+    local names = compare_names(cfg)
+    local token = compare_token(tools.get_compare(path) or cfg.output_compare_method)
     local i = 1
-    for k, t in ipairs(COMPARE_CYCLE) do
+    for k, t in ipairs(names) do
         if t == token then
             i = k
             break
         end
     end
-    local next_token = COMPARE_CYCLE[i % #COMPARE_CYCLE + 1]
+    local next_token = names[i % #names + 1]
     local args = { next_token }
     if next_token == "float" and last_float_tol[path] then
         args[2] = tostring(last_float_tol[path]) -- come back to the tolerance last set
@@ -542,18 +554,26 @@ function M.cycle_compare(bufnr)
     M.set_compare(bufnr, args)
 end
 
----Set (or clear) the problem's output-compare override. Its runners take it at once, so
----the Run pane's judge row says what the next run will judge with, as `set_checker` does.
+---Set the problem's output-compare method. The configured one is kept as no override at
+---all, so a later change to `output_compare_method` reaches the problem. Its runners take it
+---at once, so the Run pane's judge row says what the next run will judge with, as
+---`set_checker` does.
 ---@param bufnr integer
 ---@param args string[]
 function M.set_compare(bufnr, args)
-    local ok, method = parse_compare(args)
+    local cfg = config.get_buffer_config(bufnr)
+    local ok, method = parse_compare(args, cfg)
     if not ok then
         return
     end
+    ---@cast method -nil
     local path = api.nvim_buf_get_name(bufnr)
     if type(method) == "table" and method[1] == "float" then
         last_float_tol[path] = method.tol
+    end
+    local name = require("tuna.compare").method_name
+    if name(method) == name(cfg.output_compare_method) then
+        method = nil
     end
     tools.set_compare(path, method)
     for _, r in ipairs(runners_of(bufnr)) do
@@ -821,6 +841,8 @@ function M.complete(arg_lead, cmd_line, cursor_pos)
     local candidates
     if count == 1 or (count == 2 and not ending_space) then
         candidates = vim.tbl_keys(M.subcommands)
+    elseif (count == 2 or (count == 3 and not ending_space)) and words[2] == "compare" then
+        candidates = compare_names(config.get_buffer_config(M.target_buffer()))
     elseif count == 2 or (count == 3 and not ending_space) then
         candidates = subcommand_args[words[2]] or {}
     elseif (count == 3 or (count == 4 and not ending_space)) and words[2] == "run" and words[3] == "interactive" then
