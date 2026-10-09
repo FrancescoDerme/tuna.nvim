@@ -102,6 +102,7 @@ A keyword forces that mode for the problem, and it is remembered across restarts
 - `all` runs every solution in the folder against every testcase.
 - `stress` hunts for an input where your solution and the bruteforce disagree, and saves it as a testcase.
   A number after it is how many inputs to try: `:Tuna run stress 500`.
+  Each run tries new inputs, and the Run pane shows the seed of the one being tried, which the generator turns back into that input.
 - `interactive` lets your solution talk to something over stdin and stdout.
   A word after it picks the other side: `live` (you type), `feed` (the testcase input, a line at a time) or `interactor` (an interactor program).
 
@@ -287,6 +288,7 @@ Settings come from three layers, each overriding the one before:
 1. the defaults;
 2. what you pass to `setup()`;
 3. a `.tuna.lua` anywhere above the file you are editing, returning a table. This way a contest folder can set a different time limit, template or testcase layout for everything under it without touching your config.
+   It is read again whenever its text changes, so a saved edit applies to the next run, with no restart.
 
 Every option, with its default and what it does, is in [`lua/tuna/config.lua`](lua/tuna/config.lua) and documented in `:h tuna-configuration`.
 The sections below cover some details.
@@ -372,17 +374,9 @@ Download modifiers: additionally available in `downloaded_*` paths and in `templ
 
 Characters that cannot appear in a filename are replaced with `_` in every modifier that becomes part of a path.
 
-## Compiling and running
-
-`compile_command` and `run_command` are argv, not shell lines: `exec` is the program and `args` is a list, so nothing is word-split or glob-expanded behind your back.
-
-## Testcases
-
-A `testcases_*_file_format` without `$(TCNUM)` names a _single_ testcase, which is what makes a bare `in.txt` / `out.txt` pair work.
-
 ## Templates
 
-`template_cursor` takes a line number, a Lua pattern to search for, `{ pattern, offset }` for _n_ lines below the match, or a function.
+`template_cursor` takes a line number, a Lua pattern to search for (`{ pattern, offset }` for n lines below the match), or a function.
 A pattern that matches nothing leaves the cursor alone, so one written for C++ is harmless to a Python template.
 
 ## Keymaps
@@ -398,11 +392,11 @@ keymaps = {
 },
 ```
 
-`mappings` are buffer-local and set for `filetypes`, so they follow you from solution to solution; `global` are set once.
-Both layer over `preset` rather than replacing it, so a single key can be moved — or dropped, by mapping its action to `false` — without giving up the rest.
+`mappings` are buffer-local and set for `filetypes`, while `global` are set once.
+Both layer over `preset` rather than replacing it, so a single key can be moved or dropped without giving up the rest.
 The preset groups keys by subject, so which-key shows a `t` testcases group, a `d` downloads group and a `g` "go to" group.
 
-The actions, each running the `:Tuna` command it is named after: `menu`, `run`, `run_all`, `run_stress`, `run_interactive`, `show_ui`, `add_testcase`, `edit_testcase`, `delete_testcase`, `submit`, `submit_clear`, `download_testcases`, `download_problem`, `download_contest`, `download_sync`, `clean`, `pin`, `next_problem`, `prev_problem`, `last_problem`, `last_contest`, `scratch`, `library`, `library_snippet` and `library_search`.
+The actions, each running the `:Tuna` command it is named after, are the following: `menu`, `run`, `run_all`, `run_stress`, `run_interactive`, `show_ui`, `add_testcase`, `edit_testcase`, `delete_testcase`, `submit`, `submit_clear`, `download_testcases`, `download_problem`, `download_contest`, `download_sync`, `clean`, `pin`, `next_problem`, `prev_problem`, `last_problem`, `last_contest`, `scratch`, `library`, `library_snippet` and `library_search`.
 
 ## Appearance and widgets
 

@@ -382,7 +382,9 @@ position. A lowercase `:tuna` expands to it.
         - `all` runs every solution in the folder against every testcase.
         - `stress` hunts for an input where your solution and the
           bruteforce disagree, and saves it as a testcase. A number after
-          it is how many inputs to try: `:Tuna run stress 500`.
+          it is how many inputs to try: `:Tuna run stress 500`. Each run
+          tries new inputs, and the Run pane shows the seed of the one
+          being tried, which the generator turns back into that input.
         - `interactive` lets your solution talk to something over stdin
           and stdout. A word after it picks the other side: `live` (you
           type), `feed` (the testcase input, a line at a time) or
@@ -573,7 +575,8 @@ Three layers, each overriding the one before:
 1. the defaults;
 2. what you pass to `setup()`;
 3. a `.tuna.lua` anywhere above the file you are editing, returning a table
-   (the name is `local_config_file_name`).
+   (the name is `local_config_file_name`). It is read again whenever its text
+   changes, so a saved edit applies to the next run, with no restart.
 
 The third is per-directory, found by walking up from the buffer's own path, so
 a contest folder can set a different time limit, template or testcase layout
@@ -807,7 +810,9 @@ RUN MODES AND HELPERS                                  *tuna-config-run-modes*
         Iterations per run. Default `100`.
 
 `stress.pass_seed`
-        Pass the iteration number to the generator. Default `true`.
+        Pass the generator a seed as its last argument, new for every run
+        and one more for every input, so each run tries new inputs. The
+        Run pane shows the seed of the input being tried. Default `true`.
 
 `stress.saves_per_run`
         Stop after this many counterexamples. Default `1`.

@@ -409,6 +409,33 @@ t.eq("and so does handing it back", { status()[2], status()[3] }, { "judge : squ
 commands.runners[pbuf] = nil
 pr.ui:delete()
 
+-- A `.tuna.lua` is run again only when its text changes. Run again, every function in it is
+-- a new one, so a buffer's config would never equal its cached runner's and every run would
+-- build a new runner, and a new board.
+do
+    local commands = require("tuna.commands")
+    local config = require("tuna.config")
+    local ldir, lsol = problem({})
+    t.write(ldir, "sol_input0.txt", "1\n")
+    t.write(ldir, ".tuna.lua", "return { compare_methods = { lenient = function() return true end } }")
+    local lbuf = open(lsol)
+    t.eq("an unchanged .tuna.lua gives the same config", config.load_local_config(ldir), config.load_local_config(ldir))
+    local runners = {}
+    for i = 1, 2 do
+        commands.run_testcases(lbuf, nil, false)
+        settle()
+        runners[i] = commands.runners[lbuf]
+    end
+    t.ok("so a function in it keeps the runner from one run to the next", runners[1] ~= nil and runners[1] == runners[2])
+    local before = config.load_local_config(ldir)
+    t.write(ldir, ".tuna.lua", "return { compare_methods = { lenient = function() return false end } }")
+    t.ok("an edited one is run again", config.load_local_config(ldir) ~= before)
+    commands.run_testcases(lbuf, nil, false)
+    settle()
+    t.ok("and the runner follows it", commands.runners[lbuf] ~= runners[2])
+    commands.runners[lbuf]:delete_ui()
+end
+
 -- The interactive source is a setting like the others, so it is named the same way.
 local _, vsol = problem({ "interactor.py" })
 local vbuf = open(vsol)

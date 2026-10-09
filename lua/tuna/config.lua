@@ -83,14 +83,15 @@ M.defaults = {
     -- convention (gen.* / brute.*); set these to use your own instead: a path to
     -- a helper file (compiled and run by its language, or a prebuilt binary), or an
     -- { exec, args } command, expanded with the usual $(FNOEXT)/$(ABSDIR)/… modifiers.
-    -- The generator gets the iteration number appended as a seed (unless
-    -- pass_seed = false) so failures are reproducible.
+    -- The generator gets a seed appended (unless pass_seed = false): a number new for
+    -- every run plus the iteration, so each run tries new inputs, and the Run pane shows
+    -- the seed of the one being tried, to reproduce it.
     stress = {
         -- override discovery, e.g. { exec = "python3", args = { "$(ABSDIR)/gen.py" } }
         generator = nil,
         bruteforce = nil, -- override discovery: a correct-but-slow solution
         count = 100, -- maximum generator iterations before giving up
-        pass_seed = true, -- append the iteration seed as the generator's last argument
+        pass_seed = true, -- append the seed as the generator's last argument
         -- How many counterexamples a single `:Tuna run stress` may save before it
         -- stops, and the hard cap on the total number of testcases stress will let
         -- accumulate on disk. The search stops as soon as either is reached; each
@@ -743,6 +744,13 @@ function M.setup(opts)
     M.buffer_configs = {} -- invalidate caches so buffers re-resolve against new setup
 end
 
+-- Each `.tuna.lua` as it was last run, by path, with a hash of the text that ran. It is run
+-- again only when that text changes: every run makes its functions new ones, and a buffer's
+-- config holding a function that is not the one its cached runner holds never equals it
+-- (`vim.deep_equal`), so `commands` would build a new runner, and a new board, on every run.
+---@type table<string, { hash: string, config: table }>
+local local_configs = {}
+
 ---Find and load the nearest `.tuna.lua`, searching upward from `directory`.
 ---@param directory string directory to start the upward search from
 ---@return table? # the local configuration, or `nil` if absent or invalid
@@ -760,7 +768,20 @@ function M.load_local_config(directory)
         return nil
     end
 
-    local ok, local_config = pcall(dofile, found[1])
+    local text = utils.read_file(found[1], true)
+    if not text then
+        return nil
+    end
+    local hash = vim.fn.sha256(text)
+    local known = local_configs[found[1]]
+    if known and known.hash == hash then
+        return known.config
+    end
+    local chunk, err = load(text, "@" .. found[1])
+    local ok, local_config = false, err
+    if chunk then
+        ok, local_config = pcall(chunk)
+    end
     if not ok then
         utils.notify("'" .. found[1] .. "' has an error, so it is ignored:\n" .. tostring(local_config))
         return nil
@@ -769,6 +790,7 @@ function M.load_local_config(directory)
         utils.notify("'" .. found[1] .. "' did not return a table, so it is ignored.")
         return nil
     end
+    local_configs[found[1]] = { hash = hash, config = local_config }
     return local_config
 end
 

@@ -1172,7 +1172,7 @@ do
         hunt.status,
         hunt.hlgroup,
     }, { "TC 0", "SIG 6", "TunaWarning" })
-    t.has("and its Errors pane says which program failed, and on which seed", crashed:pane_content(hunt, "se"), "bruteforce was killed by signal 6 (seed 1)")
+    t.has("and its Errors pane says which program failed, and on which seed", crashed:pane_content(hunt, "se"), ("bruteforce was killed by signal 6 (seed %d)"):format(crashed:seed(1)))
 
     -- A bruteforce that ran out of its budget.
     local slow = search({ genx = seeded, solx = { stdout = "5\n" }, refx = { code = 124, signal = 15 } })
@@ -1197,7 +1197,13 @@ do
     local row = looking.search_entry
     t.ok("the search has a row of its own before it finds anything", row ~= nil, looking.tcdata)
     t.eq("numbered as the counterexample it is hunting for", { looking:row_label(row), row.status }, { "TC 0", "STRESS" })
-    t.eq("holding the input being tried", row.stdin, "in 1\n")
+    t.eq("holding the input being tried", row.stdin, ("in %d\n"):format(looking:seed(1)))
+    -- The generator is handed the run's own base plus the iteration, so a run after one that
+    -- found nothing tries new inputs, and the Run pane says which seed is being tried.
+    t.ok("every run searches from a seed of its own", looking.seed_base ~= crashed.seed_base, { looking.seed_base, crashed.seed_base })
+    t.ok("and the Run pane shows the one being tried", vim.tbl_contains(vim.tbl_map(function(r)
+        return r[1] .. "=" .. r[2]
+    end, looking:status_tail()), "seed=" .. looking:seed(1)), looking:status_tail())
     t.eq("last in the list, so a counterexample lands above it", looking.tcdata[#looking.tcdata], row)
     t.ok("and is no testcase, nothing on disk answers for it", not looking:row_editable(row), row)
     script.solx = { stdout = "5\n" }
@@ -1378,7 +1384,7 @@ do
     })
     local row = silent.tcdata[#silent.tcdata]
     t.eq("a checker that gives no verdict stops the search on that input", { silent.iter, row.status }, { 1, "FAILED" })
-    t.has("saying so on the search row", row.stderr or "", "checker gave no verdict (seed 1)")
+    t.has("saying so on the search row", row.stderr or "", ("checker gave no verdict (seed %d)"):format(silent:seed(1)))
 
     -- A restart judges with the checker as it is now, like every run.
     local judged = search({ ccx = {}, genx = seeded, solx = { stdout = "5\n" }, refx = { stdout = "6\n" } })

@@ -1,8 +1,9 @@
 -- lua/tuna/stress.lua
 --
 -- Stress testing: hunt for inputs on which the current solution disagrees with a
--- trusted bruteforce. A generator produces a random input (seeded by
--- the iteration number, so failures are reproducible); the solution and the
+-- trusted bruteforce. A generator produces a random input (seeded by a number new for
+-- every run plus the iteration, so each run tries new inputs and the seed shown
+-- reproduces one); the solution and the
 -- bruteforce both run on it; their outputs are judged with the same `checker` the
 -- runner uses (so checker-based problems with multiple correct answers work too).
 -- Every counterexample — a wrong answer, a crash, or a timeout — is appended as a
@@ -112,7 +113,7 @@ function StressRunner:legend_rows()
             { " ", "numbered as the counterexample it is looking for" },
             { "run again on it", "does nothing, it is not a testcase" },
             { "stop", "ends the search and the testcases re-running beside it" },
-            { "run all again", "searches again, from seed 1" },
+            { "run all again", "searches again, from a new seed" },
         },
     }
 end
@@ -121,11 +122,24 @@ end
 ---{ label, value } pairs (the UI aligns the colons), one per line.
 ---@return string[][]
 function StressRunner:status_tail()
-    return {
+    local rows = {
         { "iter", ("%d / %d"):format(self.iter, self.count) },
         { "saved", ("%d / %d"):format(self.saved_this_run, self.saves_per_run) },
         { "max", ("%d testcases"):format(self.max_saved) },
     }
+    if self.pass_seed then
+        -- The seed of the input being tried, the one to hand the generator to see it again.
+        table.insert(rows, 2, { "seed", self.iter > 0 and tostring(self:seed(self.iter)) or "—" })
+    end
+    return rows
+end
+
+---The seed the generator is handed for the `i`-th input of this run: the run's own base, so
+---every run tries new inputs, plus `i`.
+---@param i integer
+---@return integer
+function StressRunner:seed(i)
+    return (self.seed_base or 0) + i
 end
 
 ---Rows name themselves as they do everywhere else, except the search row, which
@@ -276,21 +290,21 @@ function StressRunner:execute_entry(idx, cb)
 end
 
 ---Save a counterexample as a new testcase and add it to the UI.
----@param seed integer generator seed that produced it
+---@param i integer the iteration that produced it
 ---@param input string
 ---@param expected string the bruteforce's (correct) output, stored as expected output
 ---@param sol_out string the solution's (wrong) output
 ---@param sol_err string the solution's stderr
 ---@param status string the verdict it earned, in a testcase's words (`WRONG`, `TIMEOUT`, `SIG n`…)
 ---@param hlgroup string? its colour
-function StressRunner:record_counterexample(seed, input, expected, sol_out, sol_err, status, hlgroup)
+function StressRunner:record_counterexample(i, input, expected, sol_out, sol_err, status, hlgroup)
     -- Don't save a counterexample whose input we already have (as a pre-existing
     -- testcase or one saved earlier this run); just keep searching. The search row
     -- is holding this very input, and is not a testcase.
     local norm = vim.trim(input)
     for _, tc in ipairs(self.tcdata) do
         if type(tc.tcnum) == "number" and tc.stdin and vim.trim(tc.stdin) == norm then
-            self:generation(seed + 1)
+            self:generation(i + 1)
             return
         end
     end
@@ -320,7 +334,7 @@ function StressRunner:record_counterexample(seed, input, expected, sol_out, sol_
     })
     self:update_ui(true)
     -- Keep searching; the thresholds are re-checked at the top of `generation`.
-    self:generation(seed + 1)
+    self:generation(i + 1)
 end
 
 ---A generator or bruteforce process failed at *runtime*. It is reported the way a testcase
@@ -330,13 +344,13 @@ end
 ---search meaningless rather than merely incomplete — and the row stays behind holding the
 ---seed's input, which is what there is to debug.
 ---@param label string "generator" | "bruteforce" | "solution"
----@param seed integer
+---@param i integer the iteration it failed on
 ---@param output string? the failing process's stderr/stdout
 ---@param reason string? how it failed, in words
 ---@param status string? the verdict for the selector (`core.ending`'s), else FAILED
 ---@param hlgroup string? its colour
-function StressRunner:helper_failed(label, seed, output, reason, status, hlgroup)
-    local what = ("%s %s (seed %d)"):format(label, reason or "failed", seed)
+function StressRunner:helper_failed(label, i, output, reason, status, hlgroup)
+    local what = ("%s %s (seed %d)"):format(label, reason or "failed", self:seed(i))
     local row = self.search_entry
     if row then
         row.status = status or "FAILED"
@@ -364,7 +378,7 @@ function StressRunner:finish(msg)
 end
 
 ---One generation iteration: generator → solution → bruteforce → judge.
----@param i integer iteration / seed
+---@param i integer iteration
 function StressRunner:generation(i)
     if self:aborted() then
         return
@@ -392,7 +406,7 @@ function StressRunner:generation(i)
 
     local gen_argv = vim.list_extend({ self.gen.exec }, vim.deepcopy(self.gen.args))
     if self.pass_seed then
-        table.insert(gen_argv, tostring(i))
+        table.insert(gen_argv, tostring(self:seed(i)))
     end
     self:spawn("generator", i, gen_argv, { timeout = self.timeout }, function(gres)
         local failed, hl, words = core.ending(gres, self.timeout)
@@ -466,11 +480,11 @@ end
 ---at all (a binary that is not there makes `vim.system` throw) ends the search, reported as
 ---that step's failure.
 ---@param label string "generator" | "solution" | "bruteforce"
----@param seed integer
+---@param i integer the iteration
 ---@param cmd string[]
 ---@param opts table `vim.system` options besides `cwd`
 ---@param cb fun(res: vim.SystemCompleted)
-function StressRunner:spawn(label, seed, cmd, opts, cb)
+function StressRunner:spawn(label, i, cmd, opts, cb)
     opts.cwd = self.rundir
     local ok, err = pcall(vim.system, cmd, opts, function(res)
         vim.schedule(function()
@@ -480,7 +494,7 @@ function StressRunner:spawn(label, seed, cmd, opts, cb)
         end)
     end)
     if not ok then
-        self:helper_failed(label, seed, tostring(err), "could not start")
+        self:helper_failed(label, i, tostring(err), "could not start")
     end
 end
 
@@ -589,6 +603,9 @@ function StressRunner:run_testcases()
     self.stopped = false
     self.finished = false
     self.iter = 0
+    -- A base new for every run, so a run after one that found nothing tries new inputs: the
+    -- clock's microseconds, kept small enough to read in the Run pane.
+    self.seed_base = math.floor(vim.uv.hrtime() / 1000) % 1000000
     self.saved_this_run = 0
     self:load_testcases()
     self:update_ui(true)

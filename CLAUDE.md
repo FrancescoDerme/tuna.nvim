@@ -141,9 +141,13 @@ tuna.nvim.json      package metadata
   would change the defaults.
 - `update_config_table` is plain `tbl_deep_extend`. Non-empty lists replace the default
   wholesale.
-- `.tuna.lua` is a plain `dofile` with no trust prompt, on purpose: users write one per contest
-  folder, so a prompt per contest costs more than it protects. It runs from `recent.lua`'s
-  `BufEnter` too, not only when tuna is invoked.
+- `.tuna.lua` is run with no trust prompt, on purpose: users write one per contest
+  folder, so a prompt per contest costs more than it protects. It is looked up from
+  `recent.lua`'s `BufEnter` too, not only when tuna is invoked, and is **run again only when
+  its text changes** (`local_configs`, by a hash of the text, which is what is loaded): run
+  again, every function in it would be a new one, a buffer's config would never
+  `deep_equal` its cached runner's, and `commands` would build a new runner, and board, on
+  every run.
 - `keymaps.setup()` runs on every `setup()`, outside the once-only guard.
 - `commands` drops a cached runner whose config no longer `deep_equal`s the buffer's current
   config.
@@ -473,6 +477,11 @@ is relative. Every configured path goes through these: compile/running directori
   said on the Compile row (`refresh_build_row`, FAILED) beside the pane holding what its
   compiler wrote. The floats that remain are about the mode, not a process: a configured
   helper that is broken, found on a rerun.
+- **Every run searches from a seed of its own** (`seed_base`, the clock's microseconds, kept
+  to six digits for the Run pane): the generator is handed `seed(i)`, the base plus the
+  iteration, and the Run pane's `seed` row and a helper's failure name it. A base fixed for
+  every run would repeat the same search after one that found nothing, and reproducing a
+  counterexample needs no seed, since it is saved as a testcase.
 - The bruteforce runs on `stress.bruteforce_time`, not `maximum_time`: it is slow by design,
   and the solution's limit is not a statement about it.
 - A counterexample whose bruteforce output is empty is saved with `expect_empty_output`, an
@@ -1120,7 +1129,8 @@ specific Vim error about a buffer the user never opened.
     giving way and coming back, old sidecar entries, runners refreshing the checker per run,
     run-all honouring `checker off`, the Run pane's settings rows and which of them read as
     forced, `:Tuna compare` reaching an open board without taking its runner away,
-    `:Tuna checker`'s and `:Tuna compare`'s words (`off`/`auto`, bare reporting and
+    a `.tuna.lua` holding a function keeping its runner from run to run until its text
+    changes, `:Tuna checker`'s and `:Tuna compare`'s words (`off`/`auto`, bare reporting and
     changing nothing, no `toggle`, no `default`: choosing the configured method, or a float of
     its tolerance, keeps no override; a method of the user's own offered, kept and judged
     with by its name, and unknown where it is not defined) and the menu's Checker
@@ -1158,7 +1168,8 @@ specific Vim error about a buffer the user never opened.
     saving an empty answer, the row the search is shown on, when it is listed and that it
     stays last and numbered past every testcase while the board is edited, a helper
     that failed reported on that row and on the Compile row rather than in a float, the search
-    running beside the testcases on disk rather than after them, a checker that did not build
+    running beside the testcases on disk rather than after them, every run searching from a
+    seed of its own and the Run pane showing the one being tried, a checker that did not build
     or gives no verdict stopping it and a restart judging with the checker as it is now, a
     failed build finishing it
     and spawning nothing behind it, in every mode that builds a solution of its own), a stop
