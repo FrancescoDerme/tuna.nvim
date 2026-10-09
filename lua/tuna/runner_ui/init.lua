@@ -27,7 +27,7 @@ local M = {}
 local BUILD_PANES = { "se", "so", "eo", "si" }
 
 -- The action that opens each detail pane full-screen. The keys are bound from it and, with
--- `runner_ui.title_keys`, the titles name its key from it, so the two cannot disagree.
+-- `runner_ui.show_title_keys`, the titles name its key from it, so the two cannot disagree.
 local VIEW_ACTIONS = { so = "view_stdout", eo = "view_expected", si = "view_input", se = "view_stderr" }
 
 -- On the build step each source is opened by the key of the pane its program is about when a
@@ -1351,7 +1351,7 @@ end
 
 ---@private
 ---Every pane's title on row `idx`: its own, a name the mode gives it (interactive's `Live`),
----the source it holds on the build step, and with `runner_ui.title_keys` the key that opens it.
+---the source it holds on the build step, and with `runner_ui.show_title_keys` the key that opens it.
 ---@param idx integer? the row (default: the row on screen)
 ---@return table<string, string>
 function RunnerUI:titles_for(idx)
@@ -1361,7 +1361,7 @@ function RunnerUI:titles_for(idx)
     if build then
         titles = vim.tbl_extend("force", titles, build.titles)
     end
-    if self.config.runner_ui.title_keys then
+    if self.config.runner_ui.show_title_keys then
         titles = self:titled_with_keys(titles, build)
     end
     return titles

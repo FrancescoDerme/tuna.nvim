@@ -371,7 +371,7 @@ end
 ---@return table<string, boolean>
 local function skip_set(cfg)
     local set = {}
-    for _, name in ipairs((cfg.clean or {}).skip_dirs or {}) do
+    for _, name in ipairs((cfg.clean or {}).skip_directories or {}) do
         set[name] = true
     end
     return set
@@ -611,12 +611,12 @@ end
 ---the working directory, the directory `:Tuna clean` was launched from, every root
 ---configured in `setup()`, the home directory with its standard sub-directories, and
 ---the system's own directories. These are places the user (or the OS) works in, not
----products of a run. Extra paths can be added through `clean.protected_dirs`.
+---products of a run. Extra paths can be added through `clean.protected_directories`.
 ---@param root string the directory being scanned
 ---@param cfg table
 ---@param bufnr integer?
 ---@return table<string, boolean>
-local function protected_dirs(root, cfg, bufnr)
+local function protected_directories(root, cfg, bufnr)
     local set = {}
     local function add(d)
         if d and d ~= "" then
@@ -633,7 +633,7 @@ local function protected_dirs(root, cfg, bufnr)
     for _, d in ipairs(SYSTEM_DIRS) do
         add(d)
     end
-    for _, d in ipairs((cfg.clean or {}).protected_dirs or {}) do
+    for _, d in ipairs((cfg.clean or {}).protected_directories or {}) do
         add(utils.normalize_path(utils.expand_home(d)))
     end
     local name = bufnr and api.nvim_buf_is_valid(bufnr) and api.nvim_buf_get_name(bufnr) or ""
@@ -1033,7 +1033,7 @@ local function prune_dirs(root, cfg, bufnr, restore, stats, depth, done)
     local found = {}
     local ctx = {
         pats = disposable_patterns(cfg),
-        protected = protected_dirs(root, cfg, bufnr),
+        protected = protected_directories(root, cfg, bufnr),
         skips = skip_set(cfg),
         budget = entry_budget(cfg),
         artifacts = stats.artifacts or {},

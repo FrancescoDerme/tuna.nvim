@@ -201,10 +201,10 @@ end
 -- What a scan walks, and how paths are read
 --------------------------------------------------------------------------------
 
--- A directory `clean.skip_dirs` names, and every dot-directory, is left alone at every
+-- A directory `clean.skip_directories` names, and every dot-directory, is left alone at every
 -- depth, not only at the top of the scan: an empty source file inside one is never offered.
 do
-    config.setup({ clean = { skip_dirs = { "node_modules" } } })
+    config.setup({ clean = { skip_directories = { "node_modules" } } })
     local root = t.tempdir()
     for _, sub in ipairs({ "contest/A", "contest/A/.git", "contest/node_modules", "node_modules" }) do
         vim.fn.mkdir(root .. "/" .. sub, "p")

@@ -677,7 +677,7 @@ TESTCASE OPTIONS                                       *tuna-config-testcases*
 `testcases_storage`
         `"files"` (default), `"single_file"` or `"directory"`.
 
-`testcases_auto_detect`
+`testcases_auto_detect_storage`
         If the configured backend finds none, try the others before
         giving up. Default `true`.
 
@@ -800,7 +800,7 @@ RUN MODES AND HELPERS                                  *tuna-config-run-modes*
 `stress.count`
         Iterations per run. Default `100`.
 
-`stress.seed_arg`
+`stress.pass_seed`
         Pass the iteration number to the generator. Default `true`.
 
 `stress.saves_per_run`
@@ -904,7 +904,7 @@ APPEARANCE                                            *tuna-config-appearance*
 `runner_ui.selector_show_rnu`
         Line numbers in the selector. Default `false` and `false`.
 
-`runner_ui.title_keys`
+`runner_ui.show_title_keys`
         End each pane's title with the key that opens it full-screen, like
         `Errors (e)`. Default `true`.
 
@@ -1022,11 +1022,11 @@ LIBRARY, SCRATCH, CLEAN                                     *tuna-config-misc*
         How much of a tree a scan may walk before reporting itself
         partial. Default `20000`.
 
-`clean.skip_dirs`
+`clean.skip_directories`
         Never descended into. Default node_modules, target, build,
         dist, vendor, __pycache__, venv.
 
-`clean.protected_dirs`
+`clean.protected_directories`
         Never offered for removal. Your home directory, its standard
         sub-directories and the system's own are protected already.
 ==============================================================================
@@ -1119,7 +1119,7 @@ challenge, click.
 5. Read the verdict
 
 With lualine configured (see |tuna-statusline|), the verdict sits in your
-statusline, coloured by `submit.verdict_hl`. If something goes wrong,
+statusline, coloured by `submit.verdict_highlight`. If something goes wrong,
 `submit.log_file` records each submission's raw output and the verdict tuna
 parsed from it, which is the fastest way to work out which pattern your tool
 needs.
@@ -1150,7 +1150,7 @@ All of them live under `submit`, and `submit.judges` overrides them per judge.
         through, nil falling through to the built-in rules, or `false` to
         submit through the problem URL as it is. Default `nil`.
 
-`mirror_ttl`
+`mirror_ttl_seconds`
         How long, in seconds, a problem downloaded from a Codeforces mirror
         is submitted through it. `false` never expires, `0` never uses a
         mirror. Default a day.
@@ -1176,7 +1176,7 @@ All of them live under `submit`, and `submit.judges` overrides them per judge.
         Stop watching after this many ms without a final verdict, `0`
         never. Default `120000`.
 
-`verdict_hl`
+`verdict_highlight`
         Per state, a highlight group or a colour table.
 
 `log_file`
@@ -1187,7 +1187,7 @@ All of them live under `submit`, and `submit.judges` overrides them per judge.
         With `watch = false`: `"toggleterm"`, `"split"`, or `"auto"`
         (default) for toggleterm when it is installed.
 
-`direction`
+`terminal_direction`
         The terminal's orientation, `"vertical"` (default) or
         `"horizontal"`.
 

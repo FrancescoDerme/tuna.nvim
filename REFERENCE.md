@@ -497,7 +497,7 @@ It opens the submit page with the task preselected and puts your source on the s
 
 ## 5. Read the verdict
 
-With [lualine configured](README.md#statusline), the verdict sits in your statusline, coloured by `submit.verdict_hl`.
+With [lualine configured](README.md#statusline), the verdict sits in your statusline, coloured by `submit.verdict_highlight`.
 It is per problem, so it follows you as you move between them; it lasts until you submit that problem again; it survives a restart; and it disappears the moment you edit the solution, because it described the source it was submitted from and no longer does.
 `:Tuna submit clear` dismisses it, and cancels a submission still being watched.
 

@@ -1552,7 +1552,7 @@ do
     end)
     t.ok("and goes again on the way back to the build step", not accented("eo"), "eo")
 
-    -- `title_keys` (on by default) writes the key that opens each pane full-screen at the end
+    -- `show_title_keys` (on by default) writes the key that opens each pane full-screen at the end
     -- of its title, and on the build step that is each source's own key.
     local function render()
         bui.update_windows, bui.update_details = true, true
@@ -1578,7 +1578,7 @@ do
         " Input (i) ",
         " Errors (e) ",
     })
-    bui.config = vim.tbl_deep_extend("force", bui.config, { runner_ui = { title_keys = false } })
+    bui.config = vim.tbl_deep_extend("force", bui.config, { runner_ui = { show_title_keys = false } })
     bui:select_row(1)
     render()
     bui:select_row(2)

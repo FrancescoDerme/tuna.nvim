@@ -721,7 +721,7 @@ the checker gives no verdict on, since searching on would end in "no counterexam
 - `RunnerUI:writable_pane` decides which panes are typed into. The legend (`?`, `show_help`)
   and messages render keys from the config.
 - The `view_*` keys (`view_input`, `view_expected`, `view_stdout`, `view_stderr`) are bound
-  from `VIEW_ACTIONS`, pane to action, and `runner_ui.title_keys` (on by default) names them
+  from `VIEW_ACTIONS`, pane to action, and `runner_ui.show_title_keys` (on by default) names them
   in the titles from the same maps (`titled_with_keys`), so the two cannot disagree. They open
   what the row actually holds, through `view_pane`: on a testcase row the pane they name; on
   the build step the source whose role the key stands for (`BUILD_ACTIONS`), which is the pane
@@ -838,6 +838,10 @@ specific Vim error about a buffer the user never opened.
 ## Download and judges
 
 **`download.lua`**
+- The option names keep competitest's shape (`downloaded_problems_path`,
+  `downloaded_contests_directory`, `downloaded_contests_problems_path`) on purpose: a path
+  is a file location tuna builds, folders included, and a directory a folder. Renaming
+  them to `_file` was weighed and left, so don't retry it.
 - Pipeline: `Listener` (TCP, `companion_port` 27121) → `TasksCollector` (groups by `batch`) →
   `BatchesSerialProcessor` (one batch handler at a time).
 - The listener handles a request, and answers it `200`, the moment its body is complete
@@ -887,7 +891,7 @@ specific Vim error about a buffer the user never opened.
 - URL candidates are validated (`is_valid_url`: http(s), no leftover `$(…)`). Invalid ones are
   skipped, and with none valid the submit aborts before any provider runs.
 - **Mirror routing** for Codeforces sends through the sidecar's `mirror` only within
-  `submit.mirror_ttl` of `mirror_at`. It is a clock because nothing can be probed: Codeforces
+  `submit.mirror_ttl_seconds` of `mirror_at`. It is a clock because nothing can be probed: Codeforces
   returns an identical challenge page either way, and a network lookup would block the
   synchronous path exactly when the site is struggling. Expired routing is pruned from the
   sidecar with one message.
@@ -937,16 +941,16 @@ specific Vim error about a buffer the user never opened.
     each starting on the answer last given (`ui.row`), and the same for directories. A
     pinned file (`scan` marks it) is titled `pinned, …` and starts on `Keep` whatever was
     answered last, so a run of Deletes cannot carry it along.
-  - **Scan cost is bounded**: pruning at traversal (`descend_into`, `clean.skip_dirs`,
+  - **Scan cost is bounded**: pruning at traversal (`descend_into`, `clean.skip_directories`,
     dot-directories, judged by the directory's own name at every depth: `vim.fs.dir` hands
     `skip` the path relative to the root), a shared `clean.max_entries` budget reported through the `notice` pane,
     early rejection on the line-count ceiling, and a 1 MiB size guard.
   - **Directory pass**: offers directories left empty apart from disposable files (testcases,
     the sidecar, and `is_artifact` build outputs of a solution *this run* removed). Directories
     are evaluated post-order, deepest first. Directories the run emptied are evaluated before
-    the general sweep, so the budget can't starve them. `protected_dirs` covers the scan root,
+    the general sweep, so the budget can't starve them. `protected_directories` covers the scan root,
     cwd, launch directory, configured roots, home and its XDG/standard subdirectories, system
-    directories and `clean.protected_dirs`.
+    directories and `clean.protected_directories`.
   - Every modified buffer is saved first (otherwise an open buffer rewrites a deleted file),
     and buffers of deleted files are wiped.
 - **`library.lua`**: snippets are regions between `library.marker` guard comments in plain

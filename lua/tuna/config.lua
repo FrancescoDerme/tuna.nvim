@@ -81,13 +81,13 @@ M.defaults = {
     -- a helper file (compiled and run by its language, or a prebuilt binary), or an
     -- { exec, args } command, expanded with the usual $(FNOEXT)/$(ABSDIR)/… modifiers.
     -- The generator gets the iteration number appended as a seed (unless
-    -- seed_arg = false) so failures are reproducible.
+    -- pass_seed = false) so failures are reproducible.
     stress = {
         -- override discovery, e.g. { exec = "python3", args = { "$(ABSDIR)/gen.py" } }
         generator = nil,
         bruteforce = nil, -- override discovery: a correct-but-slow solution
         count = 100, -- maximum generator iterations before giving up
-        seed_arg = true, -- append the iteration seed as the generator's last argument
+        pass_seed = true, -- append the iteration seed as the generator's last argument
         -- How many counterexamples a single `:Tuna run stress` may save before it
         -- stops, and the hard cap on the total number of testcases stress will let
         -- accumulate on disk. The search stops as soon as either is reached; each
@@ -158,7 +158,7 @@ M.defaults = {
         -- like hold no solutions and dwarf everything else. Dot-directories (`.git`,
         -- `.cache`, …) are always skipped as well, since their files are never
         -- candidates anyway.
-        skip_dirs = { "node_modules", "target", "build", "dist", "vendor", "__pycache__", "venv" },
+        skip_directories = { "node_modules", "target", "build", "dist", "vendor", "__pycache__", "venv" },
         -- Extra directories never offered for deletion, on top of the ones protected
         -- unconditionally: the scanned root, the cwd, the directory the command was
         -- launched from, every root configured here, the home directory with its
@@ -166,7 +166,7 @@ M.defaults = {
         -- `user-dirs.dirs` when present, so localized names count too) and the system's
         -- own directories (`/`, `/usr`, `/tmp`, …). An emptied protected directory is
         -- left alone, and so is every directory above it.
-        protected_dirs = {},
+        protected_directories = {},
     },
 
     -- The per-problem sidecar (`sidecar.lua`): what tuna knows about a problem and
@@ -187,7 +187,7 @@ M.defaults = {
     -- after the source, so problems sharing one directory overwrite each other.
     testcases_directory = ".",
     testcases_storage = "files", -- "files" | "single_file" | "directory"
-    testcases_auto_detect = true, -- if the chosen mode finds nothing, try the others
+    testcases_auto_detect_storage = true, -- if the chosen mode finds nothing, try the others
     -- "single_file" mode: one msgpack-encoded file
     testcases_single_file_format = "$(FNOEXT).testcases",
     -- "files" mode: a pair of text files per testcase. Either a single format
@@ -348,7 +348,7 @@ M.defaults = {
         -- The "command" provider expands this through the modifier engine (adds
         -- $(URL)/$(LANG) to the usual $(FABSPATH)/$(FNAME)/…) and runs it in a
         -- terminal. nil = submit is unconfigured (errors with a hint). Example:
-        --   command = 'subwithoutcred "$(URL)" "$(LANG)" "$(FABSPATH)"',
+        --   command = 'cf submit "$(URL)" "$(LANG)" "$(FABSPATH)"',
         command = nil,
         -- How to find the problem URL: a Lua pattern scanned over the first
         -- `url_scan_lines` header lines (first capture = URL), or a
@@ -380,7 +380,7 @@ M.defaults = {
         -- tells the two apart. Being wrong is cheap in the safe direction — the
         -- fallback is codeforces.com, which always works. false = never expire,
         -- 0 = never use a mirror.
-        mirror_ttl = 24 * 60 * 60,
+        mirror_ttl_seconds = 24 * 60 * 60,
         -- Optional header markers to backfill the sidecar's contest/name (like `url`
         -- above) when a problem was set up outside the download flow. Each is a Lua
         -- pattern scanned over the same header lines (first capture wins); nil to
@@ -392,7 +392,7 @@ M.defaults = {
         -- filetype -> the language name your submit tool expects
         languages = { cpp = "C++", c = "C", python = "Python 3", java = "Java", rust = "Rust" },
         terminal = "auto", -- "auto" (toggleterm if installed, else split) | "toggleterm" | "split"
-        direction = "vertical", -- terminal orientation: "vertical" | "horizontal"
+        terminal_direction = "vertical", -- terminal orientation: "vertical" | "horizontal"
         reuse_terminal = true, -- keep one cached submit terminal across submits
         -- Fire-and-forget path only (watch = false): whether to open and focus the
         -- terminal on submit. false runs the command in the background (toggleterm
@@ -467,7 +467,7 @@ M.defaults = {
         -- state -> lualine color for the verdict. Each value is either a highlight
         -- group name (its foreground is used; reuses tuna's runner groups) or a color
         -- table like `{ fg = "#ff6c6b" }` to match your statusline palette exactly.
-        verdict_hl = {
+        verdict_highlight = {
             pending = "TunaWarning",
             accepted = "TunaCorrect",
             partial = "TunaWarning",
@@ -585,7 +585,7 @@ M.defaults = {
         },
         -- Write the key that opens each pane full-screen at the end of its title, e.g.
         -- ` Errors (e) `. On the build row each source's pane shows its own key.
-        title_keys = true,
+        show_title_keys = true,
         interface = "popup", -- "popup" | "split"
         -- The border and title colour of the panes you can *type* into (Input and
         -- Expected Output), so they read as different from the ones you can only read.

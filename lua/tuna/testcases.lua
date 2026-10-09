@@ -659,7 +659,7 @@ end
 function M.get_testcases(filepath, cfg)
     local primary = M.backend(cfg.testcases_storage)
     local tctbl = primary.path_load(filepath, cfg)
-    if next(tctbl) == nil and cfg.testcases_auto_detect then
+    if next(tctbl) == nil and cfg.testcases_auto_detect_storage then
         for _, name in ipairs(M.BACKEND_ORDER) do
             local backend = M.backends[name]
             if backend ~= primary then

@@ -391,7 +391,7 @@ function StressRunner:generation(i)
     self:update_ui(false)
 
     local gen_argv = vim.list_extend({ self.gen.exec }, vim.deepcopy(self.gen.args))
-    if self.seed_arg then
+    if self.pass_seed then
         table.insert(gen_argv, tostring(i))
     end
     self:spawn("generator", i, gen_argv, { timeout = self.timeout }, function(gres)
@@ -665,7 +665,7 @@ function M.run(bufnr, count_override, opts)
         timeout = timeout,
         -- The bruteforce is slow on purpose, so it is not held to the solution's limit.
         ref_timeout = (scfg.bruteforce_time and scfg.bruteforce_time > 0) and scfg.bruteforce_time or nil,
-        seed_arg = scfg.seed_arg ~= false,
+        pass_seed = scfg.pass_seed ~= false,
         count = count_override or scfg.count or 100,
         saves_per_run = math.max(1, scfg.saves_per_run or 1),
         max_saved = scfg.max_saved or 10,

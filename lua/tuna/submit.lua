@@ -249,7 +249,7 @@ local MIRROR_TTL = 24 * 60 * 60 -- a round is hours; its mirror lasts a day or t
 ---honest option — and being wrong is cheap in the safe direction: the fallback is the
 ---main site, which always works.
 ---
----`submit.mirror_ttl` is the window in seconds (`false` never to expire, `0` never to
+---`submit.mirror_ttl_seconds` is the window in seconds (`false` never to expire, `0` never to
 ---use a mirror). A `mirror` with no `mirror_at` beside it counts as expired: the pair is
 ---written together, so one without the other is not a case to reason about.
 ---@param dir string problem directory
@@ -261,7 +261,7 @@ function live_mirror(dir, cfg)
     if type(mirror) ~= "string" or not mirror:match("^m%d+$") then
         return nil, false
     end
-    local ttl = cfg.submit and cfg.submit.mirror_ttl
+    local ttl = cfg.submit and cfg.submit.mirror_ttl_seconds
     if ttl == false then
         return mirror, false
     end
@@ -479,7 +479,7 @@ end
 ---@param scfg table
 local function run_native(cmd, scfg)
     local background = scfg.open_terminal == false
-    local split = scfg.direction == "horizontal" and "botright split" or "botright vsplit"
+    local split = scfg.terminal_direction == "horizontal" and "botright split" or "botright vsplit"
 
     if not scfg.reuse_terminal then
         if background then
@@ -556,7 +556,7 @@ end
 local function run_toggleterm(cmd, scfg, tt)
     if not cached.tt then
         cached.tt = tt.Terminal:new({
-            direction = scfg.direction == "horizontal" and "horizontal" or "vertical",
+            direction = scfg.terminal_direction == "horizontal" and "horizontal" or "vertical",
             close_on_exit = false,
         })
     end
@@ -735,7 +735,7 @@ local function hl_fg(group)
     return nil
 end
 
----lualine `color` for the current (or given) buffer's verdict, from `verdict_hl[state]`.
+---lualine `color` for the current (or given) buffer's verdict, from `verdict_highlight[state]`.
 ---That value may be a **color table** (e.g. `{ fg = "#ff6c6b" }`, returned as-is so it
 ---can match your palette exactly) or a **highlight-group name** (its foreground is
 ---resolved into a foreground-only `{ fg, gui = "bold" }` table — matching the download
@@ -747,7 +747,7 @@ function M.status_hl(bufnr)
     if not st then
         return nil
     end
-    local spec = (config.current_setup.submit.verdict_hl or {})[st.state]
+    local spec = (config.current_setup.submit.verdict_highlight or {})[st.state]
     if type(spec) == "table" then
         return spec
     end
