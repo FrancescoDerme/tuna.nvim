@@ -140,7 +140,7 @@ end
 
 -- A tuna window has to be recognisable the moment it is entered: `BufEnter` fires as the
 -- window opens, and plugins that leave tuna's windows alone by filetype read it then
--- (scrollEOF writes the global `scrolloff` from the focused window's height).
+-- (lualine's `ignore_focus`, which keeps the statusline on the file underneath).
 local entered_untagged = {}
 api.nvim_create_autocmd("BufEnter", {
     callback = function()

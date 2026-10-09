@@ -802,8 +802,8 @@ specific Vim error about a buffer the user never opened.
   e.g. lualine's `ignore_focus`), `buftype=acwrite` with a write handler (`nofile` gives E382 and
   never fires `BufWriteCmd`), `keep_clean` for prompts (watches `TextChanged*` and `on_lines`).
   Adopt a buffer **before** its window opens: entering fires `BufEnter`, and plugins that
-  skip tuna's windows by filetype read it right then (scrollEOF otherwise writes the global
-  `scrolloff` from a small float's height).
+  skip tuna's windows by filetype read it right then (lualine's `ignore_focus` would otherwise
+  describe the float instead of the file underneath).
 - `read_only(buf)`: unmodifiable, and `CHANGE_KEYS` mapped to `<Nop>` wherever nothing else
   claims them. Call it **after** binding real keys; claims are compared on terminal codes
   (`<C-R>` equals `<C-r>`).

@@ -64,7 +64,7 @@ function M.adopt(bufnr, kind, opts)
     -- aborts with E32 before `BufWriteCmd` without one.
     pcall(api.nvim_buf_set_name, bufnr, ("tuna://%s/%d/tuna"):format(kind, bufnr))
     -- Tagged so users (and other plugins) can target every tuna float at once — e.g.
-    -- lualine's `disabled_filetypes`, or scrollEOF's.
+    -- lualine's `ignore_focus` or `disabled_filetypes`.
     vim.bo[bufnr].filetype = "tuna"
     vim.bo[bufnr].buftype = "acwrite"
     api.nvim_create_autocmd("BufWriteCmd", {

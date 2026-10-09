@@ -46,8 +46,8 @@ local function open_float(bufnr, enter, opts)
     -- form's `Custom:` row is typed into inside an otherwise read-only list), and no
     -- widget reads `modified` for anything, there being nothing in a dialog to save.
     -- Adopted before the window opens: entering it fires `BufEnter`, and plugins that
-    -- leave tuna's windows alone by filetype read it right then (scrollEOF otherwise
-    -- writes the global `scrolloff` from a small float's height).
+    -- leave tuna's windows alone by filetype read it right then (lualine's `ignore_focus`,
+    -- which keeps the statusline describing the file underneath).
     surface.adopt(bufnr, opts.kind or "widget", { keep_clean = true })
     -- A widget is a dialog: always the thing the user is being asked to act on, so it is
     -- drawn above every layer the runner UI uses — including 50, Neovim's default for a
