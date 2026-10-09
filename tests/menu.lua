@@ -452,6 +452,20 @@ do
     t.ok("and an unpinned one to pin itself", vim.tbl_contains(cmds, "Pin this problem"), cmds)
     press("<Esc>")
 
+    -- A header with no solution beside it has the solution's filetype but nothing to run.
+    local lone = t.tempdir()
+    t.write(lone, "debug.h", "\n")
+    vim.cmd("edit " .. lone .. "/debug.h")
+    require("tuna.menu").open()
+    b = board()
+    cmds = b["Catch of the day"] and api.nvim_buf_get_lines(api.nvim_win_get_buf(b["Catch of the day"].win), 0, -1, false) or {}
+    t.ok("a header alone is offered nothing to run or pin", #cmds > 0 and not vim.iter(cmds):any(function(c)
+        return c:find("^Run") or c:find("Pin this problem")
+    end), cmds)
+    press("<Esc>")
+    vim.cmd("edit " .. pinned[30])
+    vim.fn.delete(lone, "rf")
+
     -- The Checker entry switches the setting each time it is chosen, which is the one place
     -- that happens: the command only changes it when told which way.
     local tools = require("tuna.tools")

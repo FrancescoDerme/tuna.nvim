@@ -27,7 +27,7 @@ local M = {}
 ---@field rc { exec: string, args: string[] } run command
 ---@field compile_directory string
 ---@field running_directory string
----@field compile boolean whether this run compiles first
+---@field compile boolean whether runs have a build step (a compiled language)
 ---@field next_tc integer index of the next unstarted testcase
 local TCRunner = core.extend()
 M.TCRunner = TCRunner
@@ -89,12 +89,8 @@ end
 ---`run_testcases` because the rows are also what the UI needs to *show* testcases that
 ---have not been run yet (see `load_testcases`).
 ---@param tctbl table<integer, tuna.StoredTestcase>
----@param do_compile boolean? whether the run will compile first (defaults to true)
-function TCRunner:build_rows(tctbl, do_compile)
-    if do_compile == nil then
-        do_compile = true
-    end
-    self.compile = do_compile and self.cc ~= nil
+function TCRunner:build_rows(tctbl)
+    self.compile = self.cc ~= nil
 
     self.tcdata = {}
     if self.compile then -- compilation is testcase #1
@@ -139,9 +135,8 @@ end
 ---built exactly as a run would build them (compile row included), so `R` on a row and
 ---`<C-r>` for all of them work straight from this view.
 ---@param tctbl table<integer, tuna.StoredTestcase>
----@param do_compile boolean? whether a run from here would compile first
-function TCRunner:load_testcases(tctbl, do_compile)
-    self:build_rows(tctbl, do_compile)
+function TCRunner:load_testcases(tctbl)
+    self:build_rows(tctbl)
     for _, tc in ipairs(self.tcdata) do
         self:reset_row(tc)
         tc.status = "NOT RUN"
@@ -166,8 +161,7 @@ end
 ---Run testcases. Pass a `tctbl` for a fresh run, or `nil` to re-run the testcases
 ---loaded by the previous call (keeping their inputs/expected outputs).
 ---@param tctbl table<integer, tuna.StoredTestcase>? testcases, or nil to re-run
----@param do_compile boolean? whether to compile first (defaults to true)
-function TCRunner:run_testcases(tctbl, do_compile)
+function TCRunner:run_testcases(tctbl)
     -- A fresh run saves its source; a re-run keeps the rows it has, and the file on disk,
     -- unless the rows were only listed and nothing has saved it yet.
     if tctbl then
@@ -181,7 +175,7 @@ function TCRunner:run_testcases(tctbl, do_compile)
     self:plan_builds({ self.checker })
     self:build_judge()
     if tctbl then
-        self:build_rows(tctbl, do_compile)
+        self:build_rows(tctbl)
     end
 
     -- Reset per-run state (so re-runs start clean).

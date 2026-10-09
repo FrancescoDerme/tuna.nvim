@@ -9,8 +9,11 @@
 -- `.tuna.lua`: what a problem does follows from the files it has and the mode it is run in.
 --
 --   * finding     — `helper(role, solution, cfg)`, the one rule for every role
---   * compiling   — `prepare(spec, cb)`, cached per source, mtime and command, with
---                   concurrent callers queued behind one compile
+--   * compiling   — `prepare(spec, cb)`, reusing a build of this session while its source,
+--                   the headers it includes and its command are unchanged (`build_stamp`,
+--                   C and C++ only, every other language building on every run), with
+--                   concurrent callers queued behind one compile; a solution's build is
+--                   reused the same way (`reuse_build`)
 --   * run state   — each problem's mode, interactive source, checker and compare override,
 --                   automatic until forced, kept in its sidecar
 
@@ -44,8 +47,8 @@ end
 
 ---Find a helper source file for `role` beside the solution.
 ---A candidate must match one of the role's base names (any extension) *and* have
----a `run_command` configured for its filetype — that filters out compiled
----artefacts (`checker.o`, `checker` binaries) and editor backups.
+---a `run_command` configured for its filetype, and not be a header — that filters out
+---compiled artefacts (`checker.o`, `checker` binaries), editor backups and a `checker.h`.
 ---@param dir string problem directory to search (non-recursive)
 ---@param role string "checker" | "generator" | "bruteforce" | "interactor"
 ---@param cfg table buffer configuration
@@ -56,7 +59,7 @@ function M.find(dir, role, cfg)
         table.sort(hits)
         for _, path in ipairs(hits) do
             local ft = filetype_of(path)
-            if ft ~= "" and cfg.run_command[ft] then
+            if ft ~= "" and cfg.run_command[ft] and not M.is_header(path) then
                 return path
             end
         end
@@ -81,9 +84,31 @@ function M.is_helper(path, cfg)
     return false
 end
 
+-- What a header is called, in the languages that have them. Neovim gives a header its
+-- language's filetype (a `.h` is C++), so the extension is the only thing that tells one
+-- from a source with a `main` of its own.
+local HEADER_EXTENSIONS = { h = true, hh = true, hpp = true, hxx = true, ["h++"] = true, inl = true, ipp = true, tpp = true }
+
+---Whether `path` is a header, code for a solution to include rather than a program.
+---@param path string
+---@return boolean
+function M.is_header(path)
+    return HEADER_EXTENSIONS[vim.fn.fnamemodify(path, ":e"):lower()] == true
+end
+
+---Whether `path` serves a solution rather than being one: a helper (by name) or a header
+---(by extension). None is ever taken for a solution (run-all, `:Tuna next`, a contest's
+---problems, the history), and a run started from one runs the solution beside it.
+---@param path string
+---@param cfg table buffer configuration
+---@return boolean
+function M.is_support(path, cfg)
+    return M.is_helper(path, cfg) or M.is_header(path)
+end
+
 ---Resolve the buffer a run should target. Normally that's `bufnr` itself, but if
----`bufnr` is a *helper* file (e.g. you're editing `checker.cpp`), redirect to the
----solution beside it so running/stress/etc. still work. The solution is a sibling
+---`bufnr` is a *helper* file (e.g. you're editing `checker.cpp`) or a header, redirect to
+---the solution beside it so running/stress/etc. still work. The solution is a sibling
 ---non-helper source of the same extension; when several exist, prefer a
 ---conventional name (`main`/`sol`/`solution`). The chosen solution is loaded into a
 ---(possibly hidden) buffer without stealing focus.
@@ -93,7 +118,7 @@ end
 ---@return string? # error message, or an info note when auto-picked from several
 function M.solution_bufnr(bufnr, cfg)
     local path = vim.api.nvim_buf_get_name(bufnr)
-    if path == "" or not M.is_helper(path, cfg) then
+    if path == "" or not M.is_support(path, cfg) then
         return bufnr
     end
 
@@ -111,7 +136,7 @@ function M.solution_bufnr(bufnr, cfg)
             and vim.fn.isdirectory(f) == 0
             and ft ~= ""
             and cfg.run_command[ft]
-            and not M.is_helper(f, cfg)
+            and not M.is_support(f, cfg)
         then
             cands[#cands + 1] = f
         end
@@ -326,21 +351,97 @@ function M.helper(role, solution, cfg)
 end
 
 --------------------------------------------------------------------------------
--- Compilation (compile cache, invalidated when the source changes)
+-- Compilation (builds reused while nothing they are made from changes)
 --------------------------------------------------------------------------------
 
----Last-modified time of `path` as a comparable number, or nil if unreadable.
----@param path string?
----@return number?
-local function source_mtime(path)
-    if not path then
+-- The compiler flags naming a directory headers are searched in, as `-Idir` or `-I dir`.
+local INCLUDE_FLAGS = { "-I", "-iquote", "-isystem", "-idirafter" }
+
+---The directories a compile command searches for headers, from its own flags. The compiler's
+---built-in search path (the system and standard library headers) is not among them: those
+---change only when the compiler does, and the first run of a session builds anyway.
+---@param compile { exec: string, args: string[]? }
+---@param cwd string? the directory the compiler runs in, which a relative one is under
+---@return string[]
+local function include_dirs(compile, cwd)
+    local dirs, args = {}, compile.args or {}
+    for i, arg in ipairs(args) do
+        for _, flag in ipairs(INCLUDE_FLAGS) do
+            local dir = arg == flag and args[i + 1] or (arg:sub(1, #flag) == flag and arg:sub(#flag + 1)) or nil
+            if dir and dir ~= "" then
+                dirs[#dirs + 1] = utils.normalize_path(dir, cwd)
+                break
+            end
+        end
+    end
+    return dirs
+end
+
+---Every file a build of `source` reads that can be found, as `path\0sha256`: the source,
+---and each header it includes, followed into the headers they include, looked for beside
+---the file including it and in `dirs`. An `#include` switched off by the preprocessor is
+---followed too, which can only cost a build that was not needed, never reuse one that is
+---stale.
+---@param source string
+---@param dirs string[]
+---@return string[]
+local function build_inputs(source, dirs)
+    local seen, found = {}, {}
+    local function visit(path)
+        path = vim.fs.normalize(path)
+        if seen[path] then
+            return
+        end
+        seen[path] = true
+        local f = io.open(path, "r")
+        if not f then
+            return
+        end
+        local text = f:read("*a") or ""
+        f:close()
+        found[#found + 1] = path .. "\0" .. vim.fn.sha256(text)
+        local here = vim.fs.dirname(path)
+        for name in ("\n" .. text):gmatch('\n[ \t]*#[ \t]*include[ \t]*["<]([^">\n]+)[">]') do
+            for _, dir in ipairs({ here, unpack(dirs) }) do
+                local candidate = dir .. "/" .. name
+                if vim.uv.fs_stat(candidate) then
+                    visit(candidate)
+                    break
+                end
+            end
+        end
+    end
+    visit(source)
+    return found
+end
+
+-- The languages whose builds tuna can see the whole of, by filetype: what they read besides
+-- the source is the headers its `#include` lines name, which `build_inputs` follows. Any
+-- other language may build from files tuna knows nothing of (a Rust `mod`, a Java class in
+-- a file of its own), so its builds are not reused across runs.
+local FOLLOWED_LANGUAGES = { c = true, cpp = true, objc = true, objcpp = true, cuda = true }
+
+---What a build of `source` is made from: the compile command, then every file it reads
+---(`build_inputs`) with a hash of its contents. Two builds with the same stamp make the same
+---program, so a source is rebuilt when it, a header it includes or its compile flags change,
+---and not otherwise. The contents decide, not the modification time: a save that leaves
+---the text as it was built (an edit a formatter undid, a `:w` with nothing changed) is no
+---change, and the files are read for their includes anyway. Nil when tuna can't see
+---everything the build reads (a language it does not follow, a source that can't be read),
+---and a build without a stamp is never reused by another run.
+---@param source string?
+---@param compile { exec: string, args: string[]? }
+---@param cwd string? the directory the compiler runs in
+---@return string?
+function M.build_stamp(source, compile, cwd)
+    if not (source and FOLLOWED_LANGUAGES[filetype_of(source)]) then
         return nil
     end
-    local st = vim.uv.fs_stat(path)
-    if not st or not st.mtime then
+    local inputs = build_inputs(source, include_dirs(compile, cwd))
+    if #inputs == 0 then
         return nil
     end
-    return st.mtime.sec + (st.mtime.nsec or 0) / 1e9
+    return table.concat({ compile.exec or "", table.concat(compile.args or {}, "\0"), unpack(inputs) }, "\n")
 end
 
 ---If `path` is open in a modified buffer, write it to disk. Running a helper must pick up
@@ -365,29 +466,79 @@ function M.flush_buffer(path)
     end
 end
 
----Persistent compile cache, keyed by absolute source path, so a *fresh* spec for
----the same unchanged source (e.g. `gen.cpp`/`brute.cpp` on a repeated `:Tuna run
----stress`) reuses the previous build instead of recompiling. Invalidated when the
----source's mtime or the exact compile command changes, so editing the source (or
----the compile flags) still rebuilds. This is what keeps the iterate-and-re-run
----loop fast when only the solution changed.
----@type table<string, { mtime: number?, cmdkey: string, compiled: boolean?, error: string?, output: string?, compiling: boolean?, waiters: (fun(ok: boolean, err: string?, output: string?))[]? }>
-local compile_cache = {}
+---The builds made this session, by source path: what each was made from (`stamp`) and how
+---it went, so a run reuses the build of a source nothing has changed (the solution in every
+---mode, `gen.cpp` and `brute.cpp` on every stress run) instead of compiling it again. It
+---lives for the session only: the first run after a restart builds, so a binary on disk is
+---never trusted to be what the current flags and headers would make. `spec` is the run a
+---helper's build was made or reused for: every run resolves its helpers anew, so the same
+---spec is the same run.
+---@type table<string, { stamp: string?, spec: table?, compiled: boolean?, error: string?, stdout: string?, stderr: string?, compiling: boolean?, waiters: (fun(ok: boolean, err: string?, output: string?))[]? }>
+local builds = {}
 
----A stable key for a compile command (exec + args), so a flag change invalidates.
----@param cmd { exec: string, args: string[]? }
----@return string
-local function command_key(cmd)
-    return (cmd.exec or "") .. "\0" .. table.concat(cmd.args or {}, "\0")
+---@param source string
+local function build_entry(source)
+    local key = vim.fs.normalize(source)
+    builds[key] = builds[key] or {}
+    return builds[key]
 end
 
----Ensure a spec produced by `program`/`helper` is compiled, then call `cb`.
----The result is cached (persistently, across specs) keyed by the source path +
----mtime + compile command, so a batch of parallel `judge`s compiles once
----(concurrent callers queue behind the in-flight compile) and repeated runs skip
----recompiling an unchanged source, yet **editing the source or flags and
----re-running recompiles it**. A spec without a `compile` step (interpreted
----language, or a prebuilt binary) is ready immediately.
+---Whether the program a build made is still there. Only a run command naming a path
+---(`./sol`) can be checked; one naming an interpreter (`java Sol`) is taken at its word.
+---@param exec string? the run command's program
+---@param cwd string? the directory it runs in
+---@return boolean
+local function program_exists(exec, cwd)
+    if not exec or not exec:find("/", 1, true) then
+        return true
+    end
+    return vim.uv.fs_stat(utils.normalize_path(exec, cwd)) ~= nil
+end
+
+---A successful build of `source` from this session that is still good: made from the same
+---stamp, with its program still there.
+---@param entry table?
+---@param stamp string?
+---@param exec string?
+---@param cwd string?
+---@return boolean
+local function still_good(entry, stamp, exec, cwd)
+    return stamp ~= nil and entry ~= nil and entry.compiled == true and entry.stamp == stamp and program_exists(exec, cwd)
+end
+
+---For a build made by its caller rather than `prepare` (the solution's, on the Compile row or
+---a run-all header): the build of `source` this session can reuse, with what its compiler
+---said, or nil and how to remember the one about to be made once it has succeeded. The
+---stamp is taken now, before the compiler starts, so an edit made while it runs is a change
+---the next run sees. A failure is not remembered: the next run builds again.
+---@param source string?
+---@param compile { exec: string, args: string[]? }
+---@param compile_dir string?
+---@param exec string? the run command's program
+---@param run_dir string? the directory it runs in
+---@return { stdout: string, stderr: string }? reused
+---@return fun(stdout: string?, stderr: string?) remember
+function M.reuse_build(source, compile, compile_dir, exec, run_dir)
+    local stamp = M.build_stamp(source, compile, compile_dir)
+    local entry = source and builds[vim.fs.normalize(source)]
+    if still_good(entry, stamp, exec, run_dir) then
+        ---@cast entry -nil
+        return { stdout = entry.stdout or "", stderr = entry.stderr or "" }, function() end
+    end
+    return nil, function(stdout, stderr)
+        if source and stamp then
+            local e = build_entry(source)
+            e.stamp, e.spec, e.compiled, e.error, e.stdout, e.stderr = stamp, nil, true, nil, stdout, stderr
+        end
+    end
+end
+
+---Ensure a spec produced by `program`/`helper` is compiled, then call `cb`. Within the run
+---that built it a build is answered as it is, failed or not, without reading anything again:
+---the checker is prepared for every testcase it judges. A new run reuses a successful build
+---while its stamp holds (`build_stamp`) and builds again otherwise, a failure included.
+---Concurrent callers queue behind the one compile. A spec without a `compile` step
+---(interpreted language, or a prebuilt binary) is ready immediately.
 ---@param spec table
 ---@param cb fun(ok: boolean, err: string?, output: string?) `output` is what the compiler
 ---said on a build that succeeded, warnings included, for the pane the build step gives it
@@ -401,41 +552,29 @@ function M.prepare(spec, cb)
         return
     end
 
-    local key = spec.source and vim.fs.normalize(spec.source) or command_key(spec.compile)
-    local cmdkey = command_key(spec.compile)
-    local entry = compile_cache[key]
-    if not entry or entry.cmdkey ~= cmdkey then
-        entry = { cmdkey = cmdkey } -- new source, or the compile command changed
-        compile_cache[key] = entry
-    end
-
-    local mtime = source_mtime(spec.source)
-    -- Reuse a cached result only if the source hasn't changed since we built it.
-    if entry.mtime == mtime and not entry.compiling then
-        if entry.compiled then
-            cb(true, nil, entry.output)
-            return
-        elseif entry.error then
-            cb(false, entry.error)
-            return
-        end
-    end
-
-    entry.waiters = entry.waiters or {}
-    table.insert(entry.waiters, cb)
+    local entry = build_entry(spec.source)
     if entry.compiling then
-        return -- a compile is already running; we'll be flushed when it lands
+        table.insert(entry.waiters, cb) -- answered when the compile running lands
+        return
     end
-    entry.compiling = true
+    if entry.spec == spec then
+        cb(entry.compiled == true, entry.error, entry.stderr)
+        return
+    end
+    local stamp = M.build_stamp(spec.source, spec.compile, spec.compile_dir)
+    if still_good(entry, stamp, spec.exec, spec.cwd) then
+        entry.spec = spec
+        cb(true, nil, entry.stderr)
+        return
+    end
+    entry.stamp, entry.spec, entry.compiled, entry.error, entry.stdout, entry.stderr = stamp, spec, nil, nil, nil, nil
+    entry.compiling, entry.waiters = true, { cb }
 
     utils.ensure_directory(spec.compile_dir)
     local argv = vim.list_extend({ spec.compile.exec }, vim.deepcopy(spec.compile.args or {}))
     local function settle(compiled, error_msg, output)
         entry.compiling = false
-        -- Re-read the mtime: capture what we actually compiled (the file may
-        -- have changed again while g++ was running).
-        entry.mtime = source_mtime(spec.source)
-        entry.compiled, entry.error, entry.output = compiled, error_msg, output
+        entry.compiled, entry.error, entry.stderr = compiled, error_msg, output
         local waiters = entry.waiters
         entry.waiters = nil
         for _, w in ipairs(waiters or {}) do
@@ -726,5 +865,13 @@ function M.set_compare(path, method)
     state_for(path).compare = method
     persist(path)
 end
+
+M._test = {
+    ---Forget every build of the session, for a test whose stubbed compiler answers
+    ---differently for a source that has not changed.
+    forget_builds = function()
+        builds = {}
+    end,
+}
 
 return M

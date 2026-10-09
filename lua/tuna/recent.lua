@@ -386,7 +386,7 @@ local function is_problem_buffer(bufnr, path)
     if not (cfg.run_command or {})[ft] then
         return false
     end
-    if require("tuna.tools").is_helper(path, cfg) then
+    if require("tuna.tools").is_support(path, cfg) then
         return false
     end
     if sidecar_group(vim.fs.dirname(vim.fs.normalize(path)), cfg) then
@@ -556,7 +556,7 @@ end
 ---Every problem of a contest, as the solution file it is judged by, in name order: each
 ---runnable file directly in the contest directory (problems as plain files), then the
 ---solution in each problem directory, `like` choosing among several there as `:Tuna next`
----does. Helper files are never problems.
+---does. Helper files and headers are never problems.
 ---@param dir string contest directory
 ---@param like string? a solution whose name to prefer inside problem directories
 ---@param cfg table
@@ -570,7 +570,7 @@ function M.contest_problems(dir, like, cfg)
             local path = dir .. "/" .. name
             if typ == "directory" then
                 subdirs[#subdirs + 1] = path
-            elseif not tools.is_helper(path, cfg) then
+            elseif not tools.is_support(path, cfg) then
                 local ft = vim.filetype.match({ filename = path }) or ""
                 if ft ~= "" and (cfg.run_command or {})[ft] then
                     files[#files + 1] = path

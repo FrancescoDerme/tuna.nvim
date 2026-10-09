@@ -12,10 +12,6 @@ Every command is a subcommand of `:Tuna` with tab-completion.
   <td>run, a mode keyword forces that mode and <code>auto</code> lets tuna figure out the mode by itself</td>
 </tr>
 <tr>
-  <td><a href="#run_no_compile"><code>:Tuna run_no_compile [n…]</code></a></td>
-  <td>run the existing build</td>
-</tr>
-<tr>
   <td><a href="#show_ui"><code>:Tuna show_ui</code></a></td>
   <td>open the runner UI</td>
 </tr>
@@ -96,6 +92,9 @@ On the right is what tuna can do from the file you are on.
 
 Compiles the solution, runs the testcases in parallel (as many at once as you have cores, by default) and opens the runner UI.
 
+> In C and C++ the build is skipped when nothing it uses has changed since the last build in this session: the solution, the compile command, and the headers it includes that tuna can find (beside the solution or in the compile command's `-I` directories).
+> Any other compiled language is built on every run, because its solution may be made from files tuna can't see, such as a Rust module or a Java class in a separate file.
+
 Without a mode keyword tuna picks the mode itself: `interactive` when an interactor sits beside the solution, `stress` when a generator and a bruteforce do, `normal` otherwise.
 A keyword forces that mode for the problem, and it is remembered across restarts until `auto` hands the choice back to tuna.
 
@@ -107,15 +106,6 @@ A keyword forces that mode for the problem, and it is remembered across restarts
   A word after it picks the other side: `live` (you type), `feed` (the testcase input, a line at a time) or `interactor` (an interactor program).
 
 In normal mode, trailing numbers run only those testcases: `:Tuna run 2 3`.
-
-## run_no_compile
-
-```
-:Tuna run_no_compile [n…]
-```
-
-Runs the existing build without compiling first.
-Numbers limit the run as in `:Tuna run`.
 
 ## show_ui
 
@@ -188,12 +178,13 @@ Without an argument it changes nothing and says which method is in use.
 :Tuna checker [auto|off]
 ```
 
-- `auto`, the default, judges with the problem's checker when there is one: a `checker.*` file beside the solution, or the `checker` option.
+- `auto`, the default, judges with the problem's checker when there is one: a `checker.*` file beside the solution, or the `checker` option in a `.tuna.lua` above the solution.
   It runs as `checker <input> <output> <answer>`, testlib's order, and exit code 0 means correct.
-- `off` ignores the checker and compares the outputs with the [compare](#compare) option.
+  If a checker isn't set, falls back to the [compare](#compare) option.
+- `off` ignores the checker and compares the outputs with the compare option.
 
 The choice is remembered for the problem.
-Without an argument it changes nothing and says which of the two is set, and which checker that finds.
+Without an argument it changes nothing and says which of the two is set, and which checker is found.
 
 ## download
 
@@ -207,12 +198,12 @@ Press the green plus in your browser and tuna does the rest.
 - `problem` writes a solution file from your template and its testcases.
 - `contest` does the same for every problem of a contest, each in its own place.
 - `testcases` adds only the testcases, to the solution you are in.
-- `sync` downloads like `contest` (or `problem`, see `scratch.download`) and folds your [`:Tuna scratch`](#scratch) file into the first problem it writes.
+- `sync` downloads like `contest` or `problem` and folds your [`:Tuna scratch`](#scratch) file into the first problem it writes.
 - `persistently` keeps the listener open for the whole session.
 - `status` says whether the listener is open, and `stop` closes it.
 
 Where everything lands is set by `downloaded_problems_path` and `downloaded_contests_directory`.
-A problem that already exists is asked about before it is overwritten, and a contest asks once for the whole batch, offering to write only the problems that are missing.
+A problem that already exists is asked about before it's overwritten, and a contest asks once for the whole batch, offering to write only the problems that are missing.
 
 ## scaffold
 
@@ -220,7 +211,7 @@ A problem that already exists is asked about before it is overwritten, and a con
 :Tuna scaffold <checker|generator|bruteforce|interactor> [ext]
 ```
 
-Drops a starter for a helper program beside the solution, named so that a run finds it (`gen.cpp`), in your solution's language, in `ext` when given, or in `scaffold.language`. tuna ships `cpp` and `py` starters, and a file called `<role>.<ext>` in your `scaffold.directory` is used instead, so replacing a starter or adding a language is dropping a file there.
+Drops a starter for a helper program beside the solution, named so that a run finds it, in your solution's language, in `ext` when given, or in `scaffold.language`. tuna ships `cpp` and `py` starters, and a file called `<role>.<ext>` in your `scaffold.directory` is used instead, so replacing a starter or adding a language is done by dropping a file there.
 
 ## submit
 
@@ -248,14 +239,14 @@ Bare `:Tuna last` means the problem.
 
 ## pin
 
-`:Tuna pin` puts the problem you are on aside to solve later, and running it again takes it back.
+`:Tuna pin` puts the problem you are on aside to solve later, and running it again undoes the pin.
 Pinned problems wait in the [menu](#menu), most recently pinned first.
 A pin stays until you unpin it or delete the solution.
 
 ## scratch
 
-`:Tuna scratch` opens a scratch solution for the minutes before a contest starts, when there is no problem to download yet, asking which of your templates to start from.
-An existing scratch first asks whether to resume it or restart.
+`:Tuna scratch` opens a scratch solution for when downloading a contest's first problem is slow, asking which of your templates to start from.
+If a scratch already exists tuna asks whether to resume it or restart.
 [`:Tuna download sync`](#download) then folds what you wrote into the first problem it downloads.
 
 ## lib
@@ -273,13 +264,13 @@ long long bexp(long long b, long long e, long long m) { ... }
 // TUNALIB: binary exp end
 ```
 
-Bare `:Tuna lib` picks a file, then a snippet in it.
-`snippet` lists every snippet at once, and `search` opens the same catalogue in telescope.
+Bare `:Tuna lib` first asks to pick a file, then a snippet in it.
+`snippet` directly lists the snippets, and `search` opens the same catalogue in telescope.
 Only files with the current file's extension are offered, and what is inserted is re-indented to where the cursor is.
 
 ## clean
 
-`:Tuna clean` removes files you created and never used, such as templated solutions still holding the template and scaffolds you never filled in, and then the directories they leave empty.
+`:Tuna clean` removes files you created and never used, such as unchanged template solutions and scaffolds, and then the directories they leave empty.
 You choose where to look, how deep, and how close to its template a file must still be.
 Every deletion is confirmed one at a time, with the file in front of you, and a pinned problem is named as pinned.
 
@@ -295,17 +286,17 @@ Settings come from three layers, each overriding the one before:
 
 1. the defaults;
 2. what you pass to `setup()`;
-3. a `.tuna.lua` anywhere above the file you are editing, returning a table, so a contest folder can set a different time limit, template or testcase layout for everything under it without touching your config.
+3. a `.tuna.lua` anywhere above the file you are editing, returning a table. This way a contest folder can set a different time limit, template or testcase layout for everything under it without touching your config.
 
-Every option, with its default and what it does, is commented in [`lua/tuna/config.lua`](lua/tuna/config.lua) and documented in `:h tuna-configuration`.
-The sections below cover what takes more than a line.
+Every option, with its default and what it does, is in [`lua/tuna/config.lua`](lua/tuna/config.lua) and documented in `:h tuna-configuration`.
+The sections below cover some details.
 
 ## Modifiers
 
-The `$(...)` placeholders that appear in commands, file formats and paths.
+Modifiers are the `$(...)` placeholders that appear in commands, file formats and paths.
 There are two sets, and which one applies depends on whether a downloaded problem is involved.
 
-**File modifiers** — available anywhere a path or command is evaluated:
+File modifiers: available anywhere a path or command is evaluated.
 
 <table>
 <tr>
@@ -330,11 +321,11 @@ There are two sets, and which one applies depends on whether a downloaded proble
 </tr>
 <tr>
   <td><code>$(DIRNAME)</code></td>
-  <td><code>A</code> — the <em>name</em> of the directory, which for a downloaded problem is the problem</td>
+  <td><code>A</code>, the name of the directory, which for a downloaded problem is the problem's name</td>
 </tr>
 <tr>
   <td><code>$(HOME)</code>, <code>$(CWD)</code></td>
-  <td>your home directory, the current directory</td>
+  <td>your home and current directories</td>
 </tr>
 <tr>
   <td><code>$(TCNUM)</code></td>
@@ -346,7 +337,7 @@ There are two sets, and which one applies depends on whether a downloaded proble
 </tr>
 </table>
 
-**Download modifiers** — additionally available in `downloaded_*` paths and in `template_file`, because they only exist while a problem is being downloaded:
+Download modifiers: additionally available in `downloaded_*` paths and in `template_file`, because they only exist while a problem is being downloaded.
 
 <table>
 <tr>
@@ -355,7 +346,7 @@ There are two sets, and which one applies depends on whether a downloaded proble
 </tr>
 <tr>
   <td><code>$(JUDGE)</code>, <code>$(CONTEST)</code></td>
-  <td>as parsed from what the extension sent (see <code>judge_parsers</code>)</td>
+  <td>problem's judge and contest, as parsed from what the extension sent (see <code>judge_parsers</code>)</td>
 </tr>
 <tr>
   <td><code>$(GROUP)</code></td>

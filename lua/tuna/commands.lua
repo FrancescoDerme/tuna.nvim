@@ -210,9 +210,8 @@ end
 ---Run testcases (or a subset), and show the results UI.
 ---@param bufnr integer the solution buffer to run
 ---@param list string[]? testcase numbers to run, or nil for all
----@param compile boolean compile before running
 ---@param only_show boolean just (re)open the UI without running
-function M.run_testcases(bufnr, list, compile, only_show)
+function M.run_testcases(bufnr, list, only_show)
     config.load_buffer_config(bufnr)
     local tctbl = testcases.buf_get_testcases(bufnr)
 
@@ -280,7 +279,7 @@ function M.run_testcases(bufnr, list, compile, only_show)
     else
         r:kill_all_processes()
         r:choose_row_again()
-        r:run_testcases(tctbl, compile)
+        r:run_testcases(tctbl)
     end
     r:show_ui()
 end
@@ -288,9 +287,8 @@ end
 ---Run a buffer in a given mode (dispatching to the right engine).
 ---@param mode string "normal" | "all" | "stress" | "interactive"
 ---@param args string[] mode arguments (testcase numbers, or a stress count)
----@param compile boolean compile before running (normal mode only)
 ---@param bufnr integer
-function M.dispatch_mode(mode, args, compile, bufnr)
+function M.dispatch_mode(mode, args, bufnr)
     M.settle_results(bufnr, { run = true, keep = mode == "normal" and M.runners[bufnr] or nil }, function()
         M.last_mode[bufnr] = mode
         if mode == "all" then
@@ -300,7 +298,7 @@ function M.dispatch_mode(mode, args, compile, bufnr)
         elseif mode == "interactive" then
             require("tuna.interactive").run(bufnr, #args > 0 and args or nil)
         else -- "normal"
-            M.run_testcases(bufnr, #args > 0 and args or nil, compile, false)
+            M.run_testcases(bufnr, #args > 0 and args or nil, false)
         end
     end)
 end
@@ -418,7 +416,7 @@ function M.show_results_ui(bufnr)
             -- run, as the normal runner's does, and the run keys start it.
             require(mod).show(bufnr)
         else
-            M.run_testcases(bufnr, nil, false, true)
+            M.run_testcases(bufnr, nil, true)
         end
     end)
 end
@@ -445,7 +443,7 @@ function M.run_mode(args)
     if note then
         utils.notify("run: " .. note .. ".", "INFO")
     end
-    M.dispatch_mode(mode, args, true, bufnr)
+    M.dispatch_mode(mode, args, bufnr)
 end
 
 ---Say how the problem's checker is set: off, or automatic and which checker that finds. The
@@ -592,7 +590,12 @@ function M.toggle_pin(bufnr)
     local cfg = config.get_buffer_config(bufnr)
     local sol = tools.solution_bufnr(bufnr, cfg) or bufnr
     local path = api.nvim_buf_get_name(sol)
-    if path == "" or not utils.file_exists(path) or not (cfg.run_command or {})[vim.bo[sol].filetype] then
+    if
+        path == ""
+        or not utils.file_exists(path)
+        or not (cfg.run_command or {})[vim.bo[sol].filetype]
+        or tools.is_support(path, cfg)
+    then
         utils.notify("pin: this is not a solution file tuna can run, so there is no problem to pin.", "WARN")
         return
     end
@@ -685,15 +688,6 @@ M.subcommands = {
     end,
     run = function(args)
         M.run_mode(args)
-    end,
-    run_no_compile = function(args)
-        local bufnr = M.solution_bufnr()
-        if bufnr then
-            M.settle_results(bufnr, { run = true, keep = M.runners[bufnr] }, function()
-                M.last_mode[bufnr] = "normal"
-                M.run_testcases(bufnr, #args > 0 and args or nil, false, false)
-            end)
-        end
     end,
     show_ui = function()
         local bufnr = M.solution_bufnr()

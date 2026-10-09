@@ -254,7 +254,9 @@ function MultiRunner:set_cases(sol, status, hl)
 end
 
 ---Compile one solution (no-op for interpreted languages), reporting via `cb(ok)`.
----A failure becomes a `CE` header row (cases marked `—`) shown in the UI.
+---A failure becomes a `CE` header row (cases marked `—`) shown in the UI. A build this
+---session already made from the same source, headers and command is reused, as in every
+---mode (`tools.reuse_build`).
 ---@param sol table
 ---@param cb fun(ok: boolean)
 function MultiRunner:compile_solution(sol, cb)
@@ -262,6 +264,11 @@ function MultiRunner:compile_solution(sol, cb)
         return cb(true)
     end
     local hrow = self.tcdata[sol.header_idx]
+    local reused, remember = tools.reuse_build(sol.path, sol.cc, self.compdir, sol.rc and sol.rc.exec, self.rundir)
+    if reused then
+        hrow.compile_output = reused.stdout .. reused.stderr
+        return cb(true)
+    end
     hrow.status, hrow.hlgroup = "compiling", "TunaRunning"
     self:update_ui(true)
     utils.ensure_directory(self.compdir)
@@ -280,6 +287,7 @@ function MultiRunner:compile_solution(sol, cb)
                     self:update_ui(true)
                     return cb(false)
                 end
+                remember(res.stdout, res.stderr)
                 cb(true)
             end)
         end
@@ -536,10 +544,10 @@ function M.run(bufnr, opts)
 
     -- Discover every runnable sibling *source* file, of any language — so run_all
     -- can compare, say, a C++ and a Python attempt side by side. A file qualifies
-    -- when its filetype has a run_command and it isn't a helper (checker/gen/…).
+    -- when its filetype has a run_command and it isn't a helper (checker/gen/…) or a header.
     local paths = {}
     for _, f in ipairs(vim.fn.globpath(dir, "*", false, true)) do
-        if vim.fn.isdirectory(f) == 0 and not tools.is_helper(f, cfg) then
+        if vim.fn.isdirectory(f) == 0 and not tools.is_support(f, cfg) then
             local ft = candidate_filetype(f)
             if ft ~= "" and cfg.run_command[ft] then
                 paths[#paths + 1] = { path = f, ft = ft }

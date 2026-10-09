@@ -255,7 +255,7 @@ end
 local function runnable(bufnr)
     local ft = vim.bo[bufnr].filetype
     local cfg = config.get_buffer_config(bufnr)
-    return ft ~= "" and (cfg.run_command or {})[ft] ~= nil
+    return ft ~= "" and (cfg.run_command or {})[ft] ~= nil and not tools.is_support(api.nvim_buf_get_name(bufnr), cfg)
 end
 
 ---The commands offered, in the order they are reached for. The solution-only half is
@@ -284,16 +284,16 @@ local function command_entries(sol, cur)
         local function switch(m)
             return function()
                 tools.set_mode(path, m)
-                commands.dispatch_mode(m, {}, true, sol)
+                commands.dispatch_mode(m, {}, sol)
             end
         end
         add(("Run  (%s, %s)"):format(mode, forced == mode and "forced" or "automatic"), function()
-            commands.dispatch_mode(mode, {}, true, sol)
+            commands.dispatch_mode(mode, {}, sol)
         end)
         if forced then
             add("Make the run mode automatic", function()
                 tools.set_mode(path, nil)
-                commands.dispatch_mode((tools.resolve_mode(path, cfg)), {}, true, sol)
+                commands.dispatch_mode((tools.resolve_mode(path, cfg)), {}, sol)
             end)
         end
         add("Run all versions", switch("all"))

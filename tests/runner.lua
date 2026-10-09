@@ -75,7 +75,7 @@ local function check_spawns(what, run_exec)
     t.ok(what .. ": a solution was actually run", runs > 0, spawns)
 end
 
-local FINAL = { CORRECT = true, WRONG = true, DONE = true, TIMEOUT = true, FAILED = true, CE = true }
+local FINAL = { CORRECT = true, WRONG = true, DONE = true, CACHED = true, TIMEOUT = true, FAILED = true, CE = true }
 local function settled(runner)
     vim.wait(5000, function()
         if not runner or not runner.tcdata or #runner.tcdata == 0 then
@@ -96,7 +96,7 @@ end
 
 local function rows_of(tctbl)
     local r = require("tuna.runner").new(buf)
-    r:load_testcases(tctbl, true)
+    r:load_testcases(tctbl)
     return r
 end
 
@@ -139,7 +139,7 @@ t.eq("narrower than the columns themselves, it splits what there is", { columns(
 
 stub_system()
 r = require("tuna.runner").new(buf)
-r:run_testcases({ [0] = { output = "42\n" }, [1] = { input = "hi\n" } }, true)
+r:run_testcases({ [0] = { output = "42\n" }, [1] = { input = "hi\n" } })
 settled(r)
 vim.system = real_system
 check_spawns("run", r.rc.exec)
@@ -153,22 +153,210 @@ local sidecar = require("tuna.sidecar")
 t.eq("a finished run saves its local verdict, over the testcases it judged", { core.local_verdict(dir .. "/sol.cpp") }, { 0, 1 })
 sidecar.set_entry(dir .. "/sol.cpp", "results", nil)
 
--- A run that does not compile (`:Tuna run_no_compile`) has no Compile row, and spawns the
--- solution on every testcase and nothing else.
-stub_system()
-r = require("tuna.runner").new(buf)
-r:run_testcases({ [0] = { input = "1\n" }, [1] = { input = "2\n" } }, false)
-settled(r)
-vim.system = real_system
-t.eq("a run that does not compile spawns only the solution", vim.tbl_map(function(s)
-    return s.argv[1]
-end, spawns), { r.rc.exec, r.rc.exec })
-
 -- How many run at once: `multiple_testing`, where 0 is all of them and -1 one per core.
 t.eq("multiple_testing is how many run at once", core.parallelism({ multiple_testing = 2 }, 5), 2)
 t.eq("0 runs every one at once", core.parallelism({ multiple_testing = 0 }, 5), 5)
 t.eq("-1 runs one per core", core.parallelism({ multiple_testing = -1 }, 5), vim.uv.available_parallelism())
 t.eq("and never fewer than one", core.parallelism({ multiple_testing = 0 }, 0), 1)
+
+--------------------------------------------------------------------------------
+-- Reusing a build
+--------------------------------------------------------------------------------
+
+-- A build is reused while what it was made from is unchanged: the compile command, the
+-- source, and every header the source includes that can be found, beside the file
+-- including it or in the command's include directories. The compiler's own (system)
+-- headers are not followed.
+do
+    local tools = require("tuna.tools")
+    local bdir, idir = t.tempdir(), t.tempdir()
+    t.write(bdir, "sol.cpp", '#include <vector>\n#include "local.h"\n  #  include <lib.h>\nint main(){}\n')
+    t.write(bdir, "local.h", '#include "local.h"\n#include "deeper.h"\n') -- includes itself: a cycle
+    t.write(bdir, "deeper.h", "\n")
+    t.write(idir, "lib.h", "\n")
+    local edits = 0
+    ---Change a file's contents.
+    local function edit(path)
+        edits = edits + 1
+        local f = assert(io.open(path, "a"))
+        f:write("// edit " .. edits .. "\n")
+        f:close()
+    end
+    ---Change a file's modification time and nothing else.
+    local function touch(path)
+        local st = assert(vim.uv.fs_stat(path))
+        vim.uv.fs_utime(path, st.atime.sec, st.mtime.sec + 10)
+    end
+    local cmd = { exec = "g++", args = { "-I", idir, "sol.cpp", "-o", "sol" } }
+    ---The files a stamp is made from, by name.
+    local function inputs(c)
+        local files = {}
+        for line in (tools.build_stamp(bdir .. "/sol.cpp", c, bdir) or ""):gmatch("[^\n]+") do
+            local path = line:match("^(/.-)%z")
+            files[#files + 1] = path and vim.fs.basename(path) or nil
+        end
+        return files
+    end
+    local stamp = tools.build_stamp(bdir .. "/sol.cpp", cmd, bdir)
+    t.ok("a source has a stamp, its include cycle notwithstanding", stamp ~= nil)
+    t.eq("it reads the source and every header found, and no system header", inputs(cmd), { "sol.cpp", "local.h", "deeper.h", "lib.h" })
+    t.eq("and the same files make the same stamp", tools.build_stamp(bdir .. "/sol.cpp", cmd, bdir), stamp)
+    for _, edited in ipairs({ bdir .. "/sol.cpp", bdir .. "/deeper.h", idir .. "/lib.h" }) do
+        local before = tools.build_stamp(bdir .. "/sol.cpp", cmd, bdir)
+        edit(edited)
+        t.ok("editing " .. vim.fs.basename(edited) .. " changes it", tools.build_stamp(bdir .. "/sol.cpp", cmd, bdir) ~= before)
+    end
+    -- The contents decide, not the modification time: a save that leaves the text as it was
+    -- (an edit a formatter undid on save) is no change.
+    local before = tools.build_stamp(bdir .. "/sol.cpp", cmd, bdir)
+    touch(bdir .. "/sol.cpp")
+    touch(idir .. "/lib.h")
+    t.eq("a file saved unchanged leaves it as it was", tools.build_stamp(bdir .. "/sol.cpp", cmd, bdir), before)
+    local text = vim.fn.readfile(bdir .. "/deeper.h", "b")
+    edit(bdir .. "/deeper.h")
+    vim.fn.writefile(text, bdir .. "/deeper.h", "b")
+    t.eq("and so does an edit undone", tools.build_stamp(bdir .. "/sol.cpp", cmd, bdir), before)
+    local joined = { exec = "g++", args = { "-I" .. idir, "sol.cpp", "-o", "sol" } }
+    t.eq("-Idir is read like -I dir", inputs(joined), inputs(cmd))
+    local flagged = { exec = "g++", args = { "-I", idir, "-O2", "sol.cpp", "-o", "sol" } }
+    t.ok("a flag changes it", tools.build_stamp(bdir .. "/sol.cpp", flagged, bdir) ~= tools.build_stamp(bdir .. "/sol.cpp", cmd, bdir))
+    t.eq("a source that can't be read has none, so is never reused", tools.build_stamp(bdir .. "/gone.cpp", cmd, bdir), nil)
+
+    -- The solution's build, run after run. The compiler is stubbed and says something, so the
+    -- reused build can be seen to keep its words.
+    t.write(bdir, "sol.cpp", '#include "local.h"\nint main(){}\n')
+    t.write(bdir, "sol_input0.txt", "1\n")
+    vim.cmd("edit " .. bdir .. "/sol.cpp")
+    vim.bo.filetype = "cpp"
+    local bbuf = vim.api.nvim_get_current_buf()
+    local function run_once(compiler_code)
+        spawns = {}
+        vim.system = function(argv, opts, on_exit)
+            spawns[#spawns + 1] = { argv = argv, stdin = opts and opts.stdin }
+            local building = argv[1] == "g++"
+            vim.schedule(function()
+                on_exit({ code = building and compiler_code or 0, signal = 0, stdout = "", stderr = building and "sol.cpp:1: warning\n" or "" })
+            end)
+            return { kill = function() end, wait = function() return { code = 0 } end, pid = 0 }
+        end
+        local br = require("tuna.runner").new(bbuf)
+        br:run_testcases({ [0] = { input = "1\n" } })
+        settled(br)
+        vim.system = real_system
+        local built = false
+        for _, s in ipairs(spawns) do
+            built = built or s.argv[1] == "g++"
+        end
+        return built, br.tcdata[1]
+    end
+    t.ok("the first run builds", (run_once(0)))
+    local built, row = run_once(0)
+    t.ok("with no program to run, the next one builds again", built)
+    t.write(bdir, "sol", "") -- what the compiler would have written
+    run_once(0)
+    built, row = run_once(0)
+    t.eq("an unchanged solution is not built again", built, false)
+    t.eq("its row says the build was reused", { row.status, row.exit_code }, { "CACHED", 0 })
+    t.eq("and keeps what its compiler said", row.stderr, "sol.cpp:1: warning\n")
+    touch(bdir .. "/sol.cpp")
+    t.eq("a solution saved with nothing changed is not built again either", (run_once(0)), false)
+    edit(bdir .. "/local.h")
+    t.ok("a header it includes edited, it is built again", (run_once(0)))
+    edit(bdir .. "/sol.cpp")
+    built, row = run_once(1)
+    t.ok("a build that fails", built and row.status == "RET 1", row)
+    t.ok("is never reused", (run_once(0)))
+    os.remove(bdir .. "/sol")
+    t.ok("nor is one whose program is gone", (run_once(0)))
+
+    -- Run-all and the helpers go by the same rule, and share the builds.
+    t.write(bdir, "sol", "")
+    run_once(0)
+    stub_system()
+    require("tuna.multi").run(bbuf)
+    local mr = require("tuna.multi").active[bbuf]
+    settled(mr)
+    vim.system = real_system
+    t.eq("run-all reuses the build a run made", vim.tbl_filter(function(s)
+        return vim.tbl_contains(s.argv, "sol.cpp")
+    end, spawns), {})
+    mr:kill_all_processes()
+    mr:delete_ui()
+    t.write(bdir, "gen.cpp", '#include "local.h"\nint main(){}\n')
+    t.write(bdir, "gen", "")
+    local gen = { exec = "./gen", args = {}, cwd = bdir, source = bdir .. "/gen.cpp", compile = { exec = "g++", args = { "gen.cpp", "-o", "gen" } }, compile_dir = bdir }
+    ---Prepare `spec` as a run would, and count the compiles. A run resolves its helpers
+    ---anew, so a new run is a copy of the spec, and the same table is the same run.
+    local function prepared(spec, code)
+        spawns = {}
+        vim.system = function(argv, _, on_exit)
+            spawns[#spawns + 1] = { argv = argv }
+            vim.schedule(function()
+                on_exit({ code = code or 0, signal = 0, stdout = "", stderr = "" })
+            end)
+            return { kill = function() end, wait = function() return { code = 0 } end, pid = 0 }
+        end
+        local done
+        tools.prepare(spec or vim.deepcopy(gen), function(ok)
+            done = ok
+        end)
+        vim.wait(1000, function()
+            return done ~= nil
+        end, 10)
+        vim.system = real_system
+        return #spawns, done
+    end
+    prepared()
+    t.eq("a helper unchanged is not built again", prepared(), 0)
+    edit(bdir .. "/local.h")
+    t.eq("and is when a header it includes is edited", prepared(), 1)
+    -- Within the run that built it, a build is answered as it is, without reading anything
+    -- again: the checker is prepared for every testcase it judges.
+    local run = vim.deepcopy(gen)
+    prepared(run)
+    os.rename(bdir .. "/gen.cpp", bdir .. "/gen.away")
+    t.eq("within its run a build is answered without its sources being read", prepared(run), 0)
+    os.rename(bdir .. "/gen.away", bdir .. "/gen.cpp")
+    -- A failure is answered within its run, and built again by the next one.
+    local broken = vim.deepcopy(gen)
+    edit(bdir .. "/gen.cpp")
+    prepared(broken, 1)
+    t.eq("a failed build is answered as failed within its run", { prepared(broken) }, { 0, false })
+    t.eq("and built again by the next run", { prepared() }, { 1, true })
+
+    -- A language whose includes tuna does not follow may build from files it can't see (a
+    -- Rust `mod`), so its builds are not reused across runs: a helper is built once per run
+    -- (a run resolves its specs anew, and a checker is prepared for every testcase), and a
+    -- solution on every run.
+    t.write(bdir, "gen.rs", "fn main(){}\n")
+    t.write(bdir, "gen_rs", "")
+    local rs = { exec = "./gen_rs", args = {}, cwd = bdir, source = bdir .. "/gen.rs", compile = { exec = "rustc", args = { "gen.rs" } }, compile_dir = bdir }
+    t.eq("a Rust source has no stamp", tools.build_stamp(rs.source, rs.compile, bdir), nil)
+    prepared(rs)
+    t.eq("its build is reused within the run that made it", prepared(rs), 0)
+    t.eq("and made again by the next run", prepared(vim.deepcopy(rs)), 1)
+    t.write(bdir, "rsol.rs", "fn main(){}\n")
+    t.write(bdir, "rsol", "")
+    vim.cmd("edit " .. bdir .. "/rsol.rs")
+    vim.bo.filetype = "rust"
+    local rbuf = vim.api.nvim_get_current_buf()
+    local builds = 0
+    for _ = 1, 2 do
+        stub_system()
+        local rr = require("tuna.runner").new(rbuf)
+        rr:run_testcases({ [0] = { input = "1\n" } })
+        settled(rr)
+        vim.system = real_system
+        for _, sp in ipairs(spawns) do
+            builds = builds + (sp.argv[1] == "rustc" and 1 or 0)
+        end
+        t.eq("a Rust solution's row never reads CACHED", rr.tcdata[1].status, "DONE")
+    end
+    t.eq("and it is built on every run", builds, 2)
+    vim.cmd("silent! bwipeout!")
+    vim.fn.delete(bdir, "rf")
+    vim.fn.delete(idir, "rf")
+end
 
 -- An interface that does not exist is said once and the results open as a popup, the same
 -- board as ever.
@@ -179,7 +367,7 @@ do
     r.config = vim.deepcopy(r.config)
     r.config.runner_ui.interface = "tabs"
     stub_system()
-    r:run_testcases({ [0] = { input = "1\n" } }, true)
+    r:run_testcases({ [0] = { input = "1\n" } })
     r:show_ui()
     settled(r)
     vim.system = real_system
@@ -211,7 +399,7 @@ local function board(interface, bad_layout)
         br.config.split_ui.vertical_layout = { { 1, "tc" }, { 1, "nope" } }
     end
     stub_system()
-    br:run_testcases({ [0] = { input = "1\n" }, [1] = { input = "2\n" } }, true)
+    br:run_testcases({ [0] = { input = "1\n" }, [1] = { input = "2\n" } })
     br:show_ui()
     settled(br)
     vim.wait(300, function()
@@ -326,7 +514,7 @@ end
 -- with nothing to say why, an interpreted one only warned, and neither ran anything.
 stub_system()
 r = require("tuna.runner").new(buf)
-r:run_testcases({}, true)
+r:run_testcases({})
 settled(r)
 vim.system = real_system
 t.eq("a run with nothing to test still builds a row for it", #r.tcdata, 2)
@@ -935,6 +1123,7 @@ do
     ---starts from a solution with no testcases beside it, so the row a search is caught
     ---on can only be its own.
     local function search(spec)
+        require("tuna.tools")._test.forget_builds() -- each search scripts its own compiler
         for _, f in ipairs(vim.fn.globpath(sdir2, "main_*.txt", false, true)) do
             vim.fn.delete(f)
         end
@@ -1494,6 +1683,7 @@ do
         run_command = { cpp = { exec = solx } },
     })
     local release
+    require("tuna.tools")._test.forget_builds() -- the checker built cleanly in the searches above
     vim.system = function(argv, _, on_exit)
         local function answer(code, said)
             on_exit({ code = code, signal = 0, stdout = "", stderr = said or "" })
@@ -1511,7 +1701,7 @@ do
     end
     local late = require("tuna.runner").new(bbuf)
     late:show_ui()
-    late:run_testcases({ [0] = { input = "1\n" } }, true)
+    late:run_testcases({ [0] = { input = "1\n" } })
     vim.wait(5000, function()
         return release ~= nil and (late.builds[1] or {}).output ~= nil
     end, 10)
@@ -1530,7 +1720,7 @@ do
     local obuf = vim.api.nvim_get_current_buf()
     local onl = require("tuna.runner").new(obuf)
     onl:show_ui()
-    onl:run_testcases({ [0] = { input = "1\n" } }, true)
+    onl:run_testcases({ [0] = { input = "1\n" } })
     settled(onl)
     t.eq("one source alone keeps the build step's configured grid", onl.ui:grid(1), {
         { 3, "tc" },
@@ -1627,6 +1817,59 @@ vim.go.swapfile = false
 vim.fn.delete(sdir, "rf")
 vim.fn.delete(hdir, "rf")
 
+-- A header beside a solution has the solution's filetype (Neovim calls a `.h` C++), but it
+-- is code to include, not a program: nothing takes it for a solution, and a run started
+-- from it runs the solution beside it, as from a helper.
+do
+    local hd = t.tempdir()
+    t.write(hd, "debug.h", "#pragma once\n") -- sorts before main.cpp
+    t.write(hd, "main.cpp", '#include "debug.h"\nint main(){}\n')
+    t.write(hd, "checker.h", "\n")
+    t.write(hd, "main_input0.txt", "1\n")
+    t.eq("headers are told by extension", vim.tbl_map(tools.is_header, { "a.h", "a.hpp", "a.HPP", "a.hh", "a.cpp", "a.c", "a.py" }), {
+        true, true, true, true, false, false, false,
+    })
+    vim.cmd("edit " .. hd .. "/debug.h")
+    local hb = vim.api.nvim_get_current_buf()
+    local hcfg = require("tuna.config").get_buffer_config(hb)
+    t.eq("a run from a header runs the solution beside it", vim.api.nvim_buf_get_name(tools.solution_bufnr(hb, hcfg) or hb), hd .. "/main.cpp")
+    t.eq("a header is never a helper either", tools.find(hd, "checker", hcfg), nil)
+    local only = t.tempdir()
+    t.write(only, "debug.h", "\n")
+    t.eq("the solution of a problem directory is never its header", require("tuna.navigate").solution_in(only, nil, hcfg), nil)
+    vim.fn.delete(only, "rf")
+    t.write(hd, "lib.hpp", "\n")
+    t.eq("nor a contest's problem", vim.tbl_map(vim.fs.basename, require("tuna.recent").contest_problems(hd, nil, hcfg)), { "main.cpp" })
+    local sol = tools.solution_bufnr(hb, hcfg)
+    stub_system()
+    require("tuna.multi").run(sol)
+    local mr = require("tuna.multi").active[sol]
+    vim.system = real_system
+    t.eq("nor one of run-all's solutions", mr and vim.tbl_map(function(f)
+        return f.name
+    end, mr.files), { "main.cpp" })
+    if mr then
+        mr:kill_all_processes()
+        mr:delete_ui()
+    end
+    vim.cmd("silent! %bwipeout!")
+    -- A header with no solution beside it (a `debug.h` kept in an include directory) is
+    -- nothing tuna can run.
+    local lone = t.tempdir()
+    t.write(lone, "debug.h", "\n")
+    vim.cmd("edit " .. lone .. "/debug.h")
+    vim.bo.filetype = "cpp"
+    local quiet = vim.notify
+    local said = t.capture_notifications()
+    require("tuna.commands").toggle_pin()
+    vim.notify = quiet
+    t.has("and a header alone is no problem to pin", table.concat(said, "\n"), "not a solution file tuna can run")
+    t.eq("so nothing is pinned", require("tuna.recent").is_pinned(lone .. "/debug.h"), false)
+    vim.cmd("silent! %bwipeout!")
+    vim.fn.delete(hd, "rf")
+    vim.fn.delete(lone, "rf")
+end
+
 --------------------------------------------------------------------------------
 -- Where a run compiles and runs
 --------------------------------------------------------------------------------
@@ -1680,7 +1923,8 @@ local gtcs = require("tuna.testcases")
 -- an undoable one — so a save never leaves the row standing for something that is not
 -- there, which is what `bare` would have to mean afterwards.
 local gr = require("tuna.runner").new(gbuf)
-gr:load_testcases({ [0] = { input = "x\n" } }, false)
+gr.cc = nil -- rows only, no build step, so testcase 0 is row 1
+gr:load_testcases({ [0] = { input = "x\n" } })
 gr:save_testcase(0, "x\n", "y\n")
 t.eq("a save clears bare", gr.tcdata[1].bare, nil)
 t.eq("and the testcase is on disk", gtcs.buf_get_testcases(gbuf)[0], { input = "x\n", output = "y\n" })
@@ -1709,7 +1953,8 @@ for i = 0, 2 do
 end
 stub_system()
 gr = require("tuna.runner").new(gbuf)
-gr:run_testcases(gtcs.buf_get_testcases(gbuf), false)
+gr.cc = nil
+gr:run_testcases(gtcs.buf_get_testcases(gbuf))
 settled(gr)
 vim.system = real_system
 gr:show_ui()
@@ -2114,7 +2359,7 @@ do
             end
             return { kill = function() end, wait = function() return { code = code } end, pid = 0 }
         end
-        C.run_testcases(rbuf, nil, true, true)
+        C.run_testcases(rbuf, nil, true)
         return C.runners[rbuf]
     end
     local function commands_run()
@@ -2149,7 +2394,7 @@ do
     vim.bo.filetype = "python"
     local pybuf = vim.api.nvim_get_current_buf()
     stub_system()
-    C.run_testcases(pybuf, nil, true, true)
+    C.run_testcases(pybuf, nil, true)
     vim.api.nvim_buf_set_lines(pybuf, 0, -1, false, { "print(2)" })
     C.runners[pybuf]:run_single(1)
     settle_ms(300)
@@ -2208,7 +2453,7 @@ local boards = {
         run = function()
             local r = require("tuna.runner").new(wbuf)
             r:show_ui()
-            r:run_testcases(wtcs, true)
+            r:run_testcases(wtcs)
             return r
         end,
     },
@@ -2603,8 +2848,15 @@ vim.system = real_system
 -- compile by hand rather than through a testcase row, and a row that is building has to say so
 -- or the board moves off it before there is anything to move to.
 local held_exit
-vim.system = function(_, _, on_exit)
-    held_exit = on_exit
+vim.system = function(argv, _, on_exit)
+    -- The helpers' builds answer at once: the build being held is the solution's.
+    if vim.tbl_contains(argv, "gen.cpp") or vim.tbl_contains(argv, "brute.cpp") then
+        vim.schedule(function()
+            on_exit({ code = 0, signal = 0, stdout = "", stderr = "" })
+        end)
+    else
+        held_exit = on_exit
+    end
     return {
         kill = function() end,
         wait = function()
@@ -2662,7 +2914,7 @@ vim.system = function(argv, _, on_exit)
 end
 local noisy = require("tuna.runner").new(wbuf)
 noisy:show_ui()
-noisy:run_testcases(wtcs, true)
+noisy:run_testcases(wtcs)
 vim.wait(2000, function()
     return noisy.completed
 end, 20)

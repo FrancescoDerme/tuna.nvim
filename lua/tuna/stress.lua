@@ -594,9 +594,9 @@ function StressRunner:run_testcases()
     self:update_ui(true)
     -- All three compile at once, as every run of the whole set builds. The testcases on disk
     -- go through the solution the moment *it* is built, in a lane of their own, and the search
-    -- starts when the last of the three lands: the hunt is what the run is for. The helpers'
-    -- compile cache makes an unchanged one free, an edited one rebuilds, and one whose first
-    -- compile failed is retried instead of the search spawning a binary never produced.
+    -- starts when the last of the three lands: the hunt is what the run is for. An unchanged
+    -- helper's build is reused, and an edited one, or one that failed, is built again
+    -- instead of the search spawning a binary never produced.
     self:build_all(self:search_helpers(), function()
         if not self:aborted() then
             self:generation(1)

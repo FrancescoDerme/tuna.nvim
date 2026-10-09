@@ -364,6 +364,13 @@ position. A lowercase `:tuna` expands to it.
 :Tuna run [auto/normal/all/stress/interactive] [n...]
         Compile the solution, run the testcases in parallel (as many at
         once as you have cores, `multiple_testing`) and open the runner UI.
+        In C and C++ the build is skipped when nothing it is made from
+        has changed since the last build in this session: the solution,
+        the compile command, and the headers it includes that tuna can
+        find (beside the solution or in the compile command's `-I`
+        directories). Any other compiled language is built on every run,
+        because its solution may be made from files tuna can't see, such
+        as a Rust module or a Java class in a file of its own.
 
         Without a mode keyword tuna picks the mode itself: `interactive`
         when an interactor sits beside the solution, `stress` when a
@@ -383,10 +390,6 @@ position. A lowercase `:tuna` expands to it.
 
         In normal mode, trailing numbers run only those testcases:
         `:Tuna run 2 3`.
-
-:Tuna run_no_compile [n...]
-        Run the existing build without compiling first. Numbers limit the
-        run as in `:Tuna run`.
 
 :Tuna show_ui
         Re-open the runner UI in the mode the problem is set to. Before any

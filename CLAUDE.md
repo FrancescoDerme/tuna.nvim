@@ -262,12 +262,50 @@ is relative. Every configured path goes through these: compile/running directori
     choice tuna makes. Switching and cycling with one keypress belong to the menu's
     "Checker:" and "Compare:" entries, which show the state they move from. Persisted in the sidecar with the compare
     override, loaded lazily, removed when nothing is forced.
-  - `prepare` caches builds session-wide, keyed by path + mtime + compile command, and queues
-    concurrent callers. It reports `(ok, err, output)`: the compiler's words on a build that
-    *succeeded* too, since a helper that only warned still has something to say on its pane.
+  - **A build is reused while what it was made from is unchanged**, for the session only, in
+    every mode and for every source (the solution, the helpers, each of run-all's solutions).
+    - `build_stamp` is the compile command plus every file the build reads with the SHA-256
+      of its contents: the source and each header it includes, found beside the file
+      including it or in the command's `-I`/`-iquote`/`-isystem`/`-idirafter` directories,
+      followed recursively, the compiler's own search path not followed. Contents, not
+      mtimes: a save that leaves the text as built (an edit a formatter undid) is no change,
+      and the scan reads the files anyway. The stamp is taken before the compiler starts, so
+      an edit made while it runs is a change.
+    - Only the languages whose `#include` lines the scan reads have a stamp
+      (`FOLLOWED_LANGUAGES`: C, C++, Objective-C, CUDA). Any other language may build from
+      files tuna can't see (a Rust `mod`, a Java class in a file of its own), so it has none
+      and is built by every run: correctness over speed.
+    - A new run reuses a *successful* build whose stamp matches and whose program still
+      exists (`still_good`; `program_exists` checks a run command naming a path). A failure
+      is built again by the next run.
+    - Within the run that built it, a helper's build is answered as it is, failed or not,
+      without reading anything (`prepare` matches the `spec`, which every run resolves anew):
+      the checker is prepared once per testcase, and stamping a testlib checker costs
+      milliseconds each time.
+    - `prepare` does this for helpers and queues concurrent callers. A build made by its
+      caller (`build_solution`, run-all's `compile_solution`) goes through `reuse_build`,
+      which returns the reusable build or how to remember the one about to be made.
+      `prepare` reports `(ok, err, output)`: the compiler's words on a build that
+      *succeeded* too, since a helper that only warned still has something to say on its
+      pane.
+    - Not done, on purpose: hashing the preprocessor's output (`-E` ignores a precompiled
+      header, so it costs a large part of the build it would skip, and building from the
+      `.ii` is slower than from the source with the PCH; it is also per-compiler), trusting a
+      binary on disk across sessions (it may come from other flags), and a
+      `run_no_compile`-style command or flag (it runs a binary for code that is not on screen,
+      and only ever fitted the normal mode).
   - Compare methods are stored **by name** (`{ method = "float", tol }`), because a mixed
     array/hash table does not survive JSON. Every field is validated on read.
-  - `solution_bufnr` redirects a run started from a helper file to the sibling solution. Loading
+  - **A support file is never a solution**: `is_support` is a helper (by name, `is_helper`)
+    or a header (by extension, `is_header`: `h`, `hpp`, `hh`, `hxx`, `h++`, `inl`, `ipp`,
+    `tpp`, any case). Neovim gives a header its language's filetype, so having a
+    `run_command` does not tell one from a solution. Every place that picks solutions asks
+    it (`solution_bufnr`, run-all, `navigate.solution_in`, `recent`'s `BufEnter` and
+    `contest_problems`, the menu's command list, `:Tuna pin`), and `find` never takes a
+    header for a helper. Only C-family headers are known: a module file of another
+    language beside a solution (a Rust `mod`, a Python import) still reads as one, since
+    competitive solutions in those languages are single files.
+  - `solution_bufnr` redirects a run started from a support file to the sibling solution. Loading
     a buffer the user never opened must not leave a swapfile: `swapfile` is turned off *before*
     `bufload`, only for buffers tuna loads itself, and restored with a one-shot `BufWinEnter`
     that reads `vim.go.swapfile`.
@@ -305,7 +343,9 @@ is relative. Every configured path goes through these: compile/running directori
 - **One build, for every mode.** `build_solution` spawns the compiler for the Compile row
   through `execute_process`, with the runner's own commands in normal mode and those of the
   normal runner a mode holds (`r`) otherwise, so a build reads the same everywhere: the same
-  verdicts, the same timing, the same answer when a helper beside it failed. `build_all` starts it and the mode's helpers (`build_helpers`) **at once**, each
+  verdicts, the same timing, the same answer when a helper beside it failed. A build reused
+  (see `tools.lua`) reads `CACHED` on the row, with the words its compiler said then.
+  `build_all` starts it and the mode's helpers (`build_helpers`) **at once**, each
   being its own program with its own compiler: queued one behind another they are most of
   what a run waits for, and the cursor is held on the build step until the last of them
   lands. Its `on_solution` is for what needs only the solution (stress starts the testcases
@@ -339,8 +379,8 @@ is relative. Every configured path goes through these: compile/running directori
   starting anything, kills what runs, marks the rows still waiting (`status == ""`)
   `NOT RUN`, and the run then settles as idle. Every start of a run clears `stopped`: the
   UI's `<C-r>` and `:Tuna run` stop first and then run.
-- **A run of the whole set builds**, in every mode, the solution included: `run_testcases` is
-  the first run and `<C-r>` alike (the stress and interactive `M.run` end in it). A listed
+- **A run of the whole set builds what changed**, in every mode, the solution included:
+  `run_testcases` is the first run and `<C-r>` alike (the stress and interactive `M.run` end in it). A listed
   runner's first such run goes through `claim_listed`, which saves the sources and drops the
   build it kept, since the run builds anyway; a single row's run key goes through
   `built_first`, which builds first.
@@ -383,9 +423,9 @@ is relative. Every configured path goes through these: compile/running directori
 - Helpers come from `stress_helpers` (`tools.helper` for both roles), resolved again by every
   run: missing ones stop the run (a rerun keeps its mode) and, when they are simply absent,
   are offered as starters (`scaffold.create_missing`), see below.
-  Every run builds them through `build_helpers` (the cache makes an unchanged one free, an
-  edited one rebuilds, and one whose first compile failed is retried rather than the search
-  spawning a binary that was never produced). Each step of the search goes through `spawn`,
+  Every run builds them through `build_helpers` (an unchanged one is reused, and an edited
+  one, or one that failed, is built again, rather than the search spawning a binary that
+  was never produced). Each step of the search goes through `spawn`,
   which `pcall`s `vim.system` (a missing binary makes it throw), reports a failed start as that
   step's failure, and drops a result that lands after a stop.
 - **Two lanes.** The testcases already on disk re-run through the solution as soon as it is
@@ -482,7 +522,7 @@ is relative. Every configured path goes through these: compile/running directori
 - `M._test` exposes `log_append` and `conversation`.
 
 **Run-all (`multi.lua`)**
-- Solutions are every runnable non-helper sibling source, of any language, each with its own
+- Solutions are every runnable sibling source that is not a support file (`tools.is_support`), of any language, each with its own
   filetype's commands. The directory is the buffer's parent, or the cwd for a scratch buffer.
 - `MultiRunner` is a flattened matrix: solution header rows (`row_label`, live `correct/total`)
   above indented testcase rows.
@@ -920,7 +960,7 @@ specific Vim error about a buffer the user never opened.
   the sorter).
 - **`navigate.lua`**: the next or previous sibling problem directory in name order.
   `solution_in` prefers the same file name, then the same extension, then any runnable
-  non-helper file. The ends of a contest warn instead of wrapping.
+  file that is not a support file (`tools.is_support`). The ends of a contest warn instead of wrapping.
 - **`recent.lua`**: `stdpath("state")/tuna/recent.json`, written with a debounce and flushed on
   `VimLeavePre`, read once per session. It holds `problems` and `contests`, most recent first
   and capped by `recent.problems`/`recent.contests` (read from `config.current_setup` when
@@ -935,8 +975,8 @@ specific Vim error about a buffer the user never opened.
     answers false for it meanwhile, so deleting a problem by any means unpins it;
     `clean` also unpins what it deletes. `open_pinned(i)` opens one the way
     `open_problem` does (`open_remembered`).
-  - A `BufEnter` records a buffer only when it looks like a problem (runnable, non-helper,
-    with testcases or a sidecar beside it).
+  - A `BufEnter` records a buffer only when it looks like a problem (runnable, not a support
+    file, with testcases or a sidecar beside it).
   - Recording a problem inside a remembered contest moves that contest to the top with the
     problem as its `problem`, even when the problem was already on top. A contest is
     otherwise recorded by downloads, or inferred when a sibling problem shares the sidecar
@@ -1109,7 +1149,14 @@ specific Vim error about a buffer the user never opened.
     and spawning nothing behind it, in every mode that builds a solution of its own), a stop
     in every mode (nothing started after it, the rows it had not reached `NOT RUN`, a stopped
     session `KILLED`, the board idle), `<C-r>` building the solution again and running after
-    a stop, the ending vocabulary, and run-all's headers counting judged rows only,
+    a stop, reusing a build (the files its stamp reads: headers beside it and through `-I`
+    and `-Idir`, none of the compiler's own, an include cycle; a flag changing it; a file
+    touched or an edit undone being no change; a reused row reading `CACHED` with its
+    compiler's words; a missing program or a failed build never reused by another run;
+    run-all and the helpers going by the same rule; a helper's build answered within its
+    run without its sources read, a failure included; Rust never reused across runs), headers never taken for
+    a solution or a helper (a run from one running the solution beside it, run-all,
+    `solution_in`, a contest's problems, `:Tuna pin` and, in `menu.lua`, the command list), the ending vocabulary, and run-all's headers counting judged rows only,
     using real UI windows, in both interfaces where the grid changes (focus, the selector's
     row and line numbers, titles and a bad grid said once as the board re-tiles, and `:w`
     from a read-only pane). `testcases.lua` also covers the
@@ -1117,7 +1164,8 @@ specific Vim error about a buffer the user never opened.
     keeping an answer stored empty and leaving no layout behind (the store's root kept),
     and which testcase a command without a number acts on.
 - Modules expose file-local helpers to tests through `M._test` (`download`, `submit`, `clean`,
-  `interactive`, `scratch`, `menu`). They are not public interface.
+  `interactive`, `scratch`, `menu`), and `tools` a way to forget the session's builds, for
+  a test whose stubbed compiler answers differently for a source that has not changed. They are not public interface.
 - **Mutation-check new tests**: break the rule each test describes and confirm it fails, and
   confirm a harmless edit doesn't.
 - The suite doesn't cover real processes, verdicts coming back, or most UI interaction. Verify

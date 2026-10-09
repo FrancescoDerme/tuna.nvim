@@ -53,7 +53,7 @@ function M.solution_in(dir, like, cfg)
 
     local by_name, by_ext, any
     for _, path in ipairs(vim.fn.globpath(dir, "*", false, true)) do
-        if vim.fn.isdirectory(path) == 0 and not tools.is_helper(path, cfg) then
+        if vim.fn.isdirectory(path) == 0 and not tools.is_support(path, cfg) then
             local ft = vim.filetype.match({ filename = path }) or ""
             if ft ~= "" and (cfg.run_command or {})[ft] then
                 local name = vim.fn.fnamemodify(path, ":t")

@@ -109,6 +109,7 @@ do
         args = {},
         cwd = vim.fn.getcwd(),
         role = "checker",
+        source = vim.fn.tempname() .. "/checker.cpp",
         compile = { exec = "/nonexistent/compiler", args = {} },
         compile_dir = vim.fn.tempname(),
     }, "exact", function(correct, message)

@@ -284,6 +284,10 @@ function RunnerCore:on_build_failed() end
 ---reads the same everywhere: the same verdicts, the same timing, and the same answer when a
 ---helper beside it failed (`refresh_build_row`). The commands are the runner's own for the
 ---normal mode and those of the normal runner it holds (`r`) for the others.
+---
+---A build this session already made from the same source, headers and command is reused
+---(`tools.reuse_build`): the row reads `CACHED` and shows what that build's compiler
+---said, so its warnings stay where they were.
 ---@param cont fun() run only when the build succeeded
 function RunnerCore:build_solution(cont)
     local tc, r = self.tcdata[1], self.r or self
@@ -292,8 +296,19 @@ function RunnerCore:build_solution(cont)
         return
     end
     self:reset_row(tc)
+    local source = api.nvim_buf_is_valid(r.bufnr) and api.nvim_buf_get_name(r.bufnr) or nil
+    local reused, remember = tools.reuse_build(source, r.cc, r.compile_directory, r.rc.exec, r.running_directory)
+    if reused then
+        tc.exit_code, tc.stdout, tc.stderr = 0, reused.stdout, reused.stderr
+        tc.status, tc.hlgroup = "CACHED", "TunaDone"
+        self:refresh_build_row()
+        self:update_ui(true)
+        cont()
+        return
+    end
     self:execute_process(1, r.cc, r.compile_directory, { judge = false }, function()
         if tc.exit_code == 0 then
+            remember(tc.stdout, tc.stderr)
             cont()
         else
             self:on_build_failed()
@@ -529,7 +544,7 @@ end
 ---solution's own failure is the more specific answer, and keeps its exit code.
 function RunnerCore:refresh_build_row()
     local tc = self.tcdata[1]
-    if not (tc and tc.compile and tc.status == "DONE") then
+    if not (tc and tc.compile and (tc.status == "DONE" or tc.status == "CACHED")) then
         return
     end
     for _, step in ipairs(self.builds or {}) do

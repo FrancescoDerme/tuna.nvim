@@ -195,9 +195,10 @@ end
 local rdir, rsol = problem({ "checker.py" })
 local rbuf = open(rsol)
 local r = require("tuna.runner").new(rbuf)
+r.cc = nil -- no build step: these runs are about the judge
 t.eq("a runner starts with the checker beside the solution", type(r.checker), "table")
 os.remove(rdir .. "/checker.py")
-r:run_testcases({ [0] = { input = "1\n", output = "1\n" } }, false)
+r:run_testcases({ [0] = { input = "1\n", output = "1\n" } })
 settle()
 t.eq("a run after the checker is deleted compares outputs", r.checker, "builtin")
 t.write(rdir, "checker.py", "print()\n")
@@ -296,8 +297,9 @@ t.eq("and the forcing is still remembered for this session", tools.get_mode("tun
 local pdir, psol = problem({ "checker.py" })
 local pbuf = open(psol)
 local pr = require("tuna.runner").new(pbuf)
+pr.cc = nil -- no build step: the Run pane is the subject
 local ptcs = { [0] = { input = "1\n", output = "1\n" } }
-pr:run_testcases(ptcs, false)
+pr:run_testcases(ptcs)
 settle()
 pr:show_ui()
 local function status()
@@ -312,12 +314,12 @@ t.eq("nothing forced: the mode stands alone, and the row says so", status(), {
 })
 
 tools.set_mode(psol, "normal")
-pr:run_testcases(ptcs, false)
+pr:run_testcases(ptcs)
 settle()
 t.eq("a forced mode is named there, the mode row unchanged", { status()[1], status()[3] }, { "mode  : normal", "forced: mode" })
 
 tools.set_checker(psol, "off")
-pr:run_testcases(ptcs, false)
+pr:run_testcases(ptcs)
 settle()
 t.eq("a checker forced off forces the judge, which then reads as the comparison", { status()[2], status()[3] }, { "judge : squish", "forced: mode, judge" })
 
@@ -328,20 +330,20 @@ tools.set_checker(psol, "auto")
 -- reaches the runner that is already open.
 tools.set_compare(psol, "exact")
 os.remove(pdir .. "/checker.py")
-pr:run_testcases(ptcs, false)
+pr:run_testcases(ptcs)
 settle()
 t.eq("an overridden comparison forces the judge on its own", { status()[2], status()[3] }, { "judge : exact", "forced: judge" })
 
 tools.set_compare(psol, nil)
 t.write(pdir, "checker.py", "print()\n")
-pr:run_testcases(ptcs, false)
+pr:run_testcases(ptcs)
 settle()
 t.eq("handing it back, with a checker of its own, is no forcing", { status()[2], status()[3] }, { "judge : checker.py", "forced: none" })
 
 -- An override the checker makes no use of is not what the judge row shows, so it forces
 -- nothing: a checker is only ever found.
 tools.set_compare(psol, "exact")
-pr:run_testcases(ptcs, false)
+pr:run_testcases(ptcs)
 settle()
 t.eq("an override a checker overrules forces nothing", { status()[2], status()[3] }, { "judge : checker.py", "forced: none" })
 tools.set_compare(psol, nil)
@@ -349,7 +351,7 @@ tools.set_compare(psol, nil)
 -- `:Tuna compare` reaches the board that is open before any run, and leaves the buffer its
 -- runner: a board whose runner the buffer no longer knows is one no later run hides.
 os.remove(pdir .. "/checker.py")
-pr:run_testcases(ptcs, false)
+pr:run_testcases(ptcs)
 settle()
 local commands = require("tuna.commands")
 commands.runners[pbuf] = pr
