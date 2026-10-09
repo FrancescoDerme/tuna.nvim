@@ -562,6 +562,25 @@ for _, row in ipairs(mr and mr.tcdata or {}) do
 end
 check_spawns("run all", run_exec)
 
+-- Trailing numbers pick the testcases, as in normal mode: a missing one is reported, and
+-- with none left nothing runs.
+do
+    local quiet = vim.notify
+    local said = t.capture_notifications()
+    stub_system()
+    require("tuna.multi").run(buf, { list = { "0", "7" } })
+    local picked = require("tuna.multi").active[buf]
+    settled(picked)
+    t.eq("run all with numbers runs only those testcases", picked and picked.nums, { 0 })
+    t.has("and reports one that doesn't exist", table.concat(said, "\n"), "run: testcase 7 doesn't exist.")
+    require("tuna.multi").run(buf, { list = { "7" } })
+    vim.system = real_system
+    vim.notify = quiet
+    t.ok("and with none that exist runs nothing", require("tuna.multi").active[buf] == picked)
+    picked:kill_all_processes()
+    picked:delete_ui()
+end
+
 --------------------------------------------------------------------------------
 -- Stress and interactive build their rows from the same testcases
 --------------------------------------------------------------------------------

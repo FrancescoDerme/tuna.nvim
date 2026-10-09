@@ -433,6 +433,8 @@ function M.editor(bufnr, tcnum, input_content, output_content, callback, restore
         editor.restore_winid = restore_winid
         input_lines = vim.split(input_content or "", "\n", { plain = true })
         output_lines = vim.split(output_content or "", "\n", { plain = true })
+        -- What a close is compared with to tell whether anything would be lost.
+        editor.saved = { input = input_content or "", output = output_content or "" }
     end
 
     local cfg = config.get_buffer_config(editor.bufnr)
@@ -484,12 +486,11 @@ function M.editor(bufnr, tcnum, input_content, output_content, callback, restore
 
     ---Send the edited content back through the callback and clear modified flags.
     local function save()
+        local content = { input = get_buf_text(editor.input_buf), output = get_buf_text(editor.output_buf) }
         if editor.callback then
-            editor.callback({
-                input = get_buf_text(editor.input_buf),
-                output = get_buf_text(editor.output_buf),
-            })
+            editor.callback(content)
         end
+        editor.saved = content
         vim.bo[editor.input_buf].modified = false
         vim.bo[editor.output_buf].modified = false
     end
@@ -527,28 +528,45 @@ function M.editor(bufnr, tcnum, input_content, output_content, callback, restore
         map_keys(sw[4], { "n", "i" }, b, focus(editor.output_win))
     end
 
-    ---Bind the save keys on both panes for one mode.
-    ---@param maps table save_and_close / cancel specs
-    ---@param mode string "n" or "i"
-    local function bind(maps, mode)
-        for _, b in ipairs({ editor.input_buf, editor.output_buf }) do
-            map_keys(maps.save_and_close, mode, b, function()
-                save()
-                close()
-            end)
+    ---Close, asking first when the panes hold text not saved, as the results UI does: the
+    ---same three answers, and dismissing the question keeps editing, the safe answer a
+    ---stray `<Esc>` gives. Text typed back to what was saved is nothing to lose.
+    local function request_close()
+        local now = { input = get_buf_text(editor.input_buf), output = get_buf_text(editor.output_buf) }
+        local saved = editor.saved or {}
+        if now.input == saved.input and now.output == saved.output then
+            close()
+            return
         end
+        local back_to = api.nvim_get_current_win()
+        local label = vim.trim(editor.tcnum)
+        M.menu(
+            { "Save and close", "Discard and close", "Keep editing" },
+            "Unsaved testcase" .. (label ~= "" and (" " .. label) or ""),
+            function(idx)
+                if idx == 1 then
+                    save()
+                    close()
+                elseif idx == 2 then
+                    close()
+                elseif api.nvim_win_is_valid(back_to) then
+                    api.nvim_set_current_win(back_to)
+                end
+            end,
+            back_to,
+            function()
+                if api.nvim_win_is_valid(back_to) then
+                    api.nvim_set_current_win(back_to)
+                end
+            end
+        )
     end
 
-    bind(ui.normal_mode_mappings, "n")
-    bind(ui.insert_mode_mappings, "i")
-    -- Cancelling goes through the shared contract, on top of the editor's own keys
-    -- (`q`/`Q`, and `<C-q>` while inserting). Discarding a testcase being written is
-    -- the costliest cancellation in the plugin, which is exactly what the two-press
-    -- default protects: the first `<Esc>` only leaves insert mode.
-    map_cancel({ editor.input_buf, editor.output_buf }, close, {
-        normal = ui.normal_mode_mappings.cancel,
-        insert = ui.insert_mode_mappings.cancel,
-    })
+    -- Saving is Neovim's own: `:w` saves the testcase, `:wq` and `:x` save and close, as
+    -- in the results UI. Closing goes through the shared contract plus `q`/`Q`, in normal
+    -- mode only, so the first `<Esc>` only leaves insert mode, and asks before throwing
+    -- an edit away.
+    map_cancel({ editor.input_buf, editor.output_buf }, request_close, { normal = { "q", "Q" } })
 
     for _, b in ipairs({ editor.input_buf, editor.output_buf }) do
         -- `:w` / `:wq` save the testcase; closing either window tears down both.

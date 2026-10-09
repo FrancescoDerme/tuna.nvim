@@ -305,6 +305,84 @@ do
     require("tuna").setup({})
 end
 
+-- The editor saves the Neovim way, `:w`, and `:wq` to save and close, with no key of its
+-- own for it, and asks before an edit is thrown away, in the results UI's words.
+do
+    local saved, asked, answer
+    local real_menu = widgets.menu
+    widgets.menu = function(items, title, on_choice)
+        asked = { title = title, items = items }
+        on_choice(answer)
+    end
+    local function open()
+        saved, asked = nil, nil
+        widgets.editor(api.nvim_get_current_buf(), 3, "1\n", "1\n", function(c)
+            saved = c
+        end, api.nvim_get_current_win())
+        settle(150)
+    end
+    local function press(k)
+        api.nvim_feedkeys(api.nvim_replace_termcodes(k, true, false, true), "x", false)
+        settle(50)
+    end
+    local function edit()
+        api.nvim_buf_set_lines(0, 0, -1, false, { "2" })
+    end
+
+    open()
+    press("q")
+    ok("an untouched editor closes without asking", asked == nil and #floats() == 0, vim.inspect(asked))
+    open()
+    edit()
+    api.nvim_buf_set_lines(0, 0, -1, false, { "1", "" })
+    press("q")
+    ok("nor does one whose text was typed back to what was saved", asked == nil and #floats() == 0, vim.inspect(asked))
+
+    open()
+    edit()
+    answer = 3
+    press("q")
+    ok("an edit is asked about, in the results UI's words", vim.deep_equal(asked, {
+        title = "Unsaved testcase 3",
+        items = { "Save and close", "Discard and close", "Keep editing" },
+    }), vim.inspect(asked))
+    ok("keeping it keeps the editor", #floats() == 2, #floats() .. " floats")
+    answer = 2
+    press("q")
+    ok("discarding closes without saving", #floats() == 0 and saved == nil, vim.inspect(saved))
+
+    open()
+    edit()
+    answer = 1
+    press("<Esc>")
+    ok("saving closes with the edit saved", #floats() == 0 and saved ~= nil and saved.input:match("^2") ~= nil, vim.inspect(saved))
+
+    open()
+    edit()
+    vim.cmd("write")
+    ok(":w saves and keeps the editor open", saved ~= nil and #floats() == 2, vim.inspect(saved))
+    asked = nil
+    press("q")
+    ok("after which closing asks nothing", asked == nil and #floats() == 0, vim.inspect(asked))
+    open()
+    edit()
+    vim.cmd("wq")
+    settle(100)
+    ok(":wq saves and closes", saved ~= nil and #floats() == 0, #floats() .. " floats")
+
+    open()
+    local own = {}
+    for _, mode in ipairs({ "n", "i" }) do
+        for _, m in ipairs(api.nvim_buf_get_keymap(0, mode)) do
+            own[#own + 1] = mode .. m.lhs
+        end
+    end
+    ok("<C-s> and <C-q> are not the editor's", not vim.tbl_contains(own, "n<C-S>") and not vim.tbl_contains(own, "i<C-S>")
+        and not vim.tbl_contains(own, "i<C-Q>"), vim.inspect(own))
+    close_layer(80)
+    widgets.menu = real_menu
+end
+
 -- A menu can start on a given row (a following preview with it), and a resize keeps the
 -- row the cursor is on rather than going back to the top.
 widgets.menu({ "one", "two", "three" }, "a menu", function() end, nil, nil, nil, nil, 2)

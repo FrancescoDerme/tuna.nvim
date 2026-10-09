@@ -291,7 +291,7 @@ function M.dispatch_mode(mode, args, bufnr)
     M.settle_results(bufnr, { run = true, keep = mode == "normal" and M.runners[bufnr] or nil }, function()
         M.last_mode[bufnr] = mode
         if mode == "all" then
-            require("tuna.multi").run(bufnr)
+            require("tuna.multi").run(bufnr, { list = #args > 0 and args or nil })
         elseif mode == "stress" then
             require("tuna.stress").run(bufnr, tonumber(args[1]))
         elseif mode == "interactive" then
@@ -430,14 +430,28 @@ function M.run_mode(args)
         return
     end
     local path = api.nvim_buf_get_name(bufnr)
-    local mode, note
+    local mode, note, chosen
     if args[1] and MODE_SET[args[1]] then
-        local chosen = table.remove(args, 1)
+        chosen = table.remove(args, 1)
         tools.set_mode(path, chosen ~= "auto" and chosen or nil)
         mode = chosen ~= "auto" and chosen or nil
     end
     if not mode then
         mode, note = tools.resolve_mode(path, config.get_buffer_config(bufnr))
+    end
+    -- Trailing numbers name testcases. Stress runs none by number, and its count follows
+    -- only a typed `stress`: taken as a count here, `:Tuna run 5` would mean testcase 5 or
+    -- five inputs depending on the files beside the solution.
+    if mode == "stress" and chosen ~= "stress" and #args > 0 then
+        utils.notify(
+            ("run: this problem runs as stress, which takes no testcase numbers, try `:Tuna run normal %s`, or `:Tuna run stress %s` for %s inputs."):format(
+                args[1],
+                args[1],
+                args[1]
+            ),
+            "WARN"
+        )
+        return
     end
     if note then
         utils.notify("run: " .. note .. ".", "INFO")

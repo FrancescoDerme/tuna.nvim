@@ -27,7 +27,9 @@ M.defaults = {
     -- with no `run_command` entry is not run at all.
 
     -- compilation
-    compile_directory = ".", -- relative to the source file's directory
+    -- where the compiler runs: relative to the source file's directory, or absolute to keep
+    -- binaries out of the problem folder
+    compile_directory = ".",
     compile_command = {
         c = { exec = "gcc", args = { "-Wall", "$(FNAME)", "-o", "$(FNOEXT)" } },
         cpp = { exec = "g++", args = { "-Wall", "$(FNAME)", "-o", "$(FNOEXT)" } },
@@ -36,7 +38,7 @@ M.defaults = {
     },
 
     -- running
-    running_directory = ".", -- relative to the source file's directory
+    running_directory = ".", -- where the solution runs, read like `compile_directory`
     run_command = {
         c = { exec = "./$(FNOEXT)" },
         cpp = { exec = "./$(FNOEXT)" },
@@ -60,7 +62,8 @@ M.defaults = {
     --   a path string        -> a checker file, compiled and run by its language, or a
     --                           prebuilt binary
     --   { exec, args } table -> a command; args expand $(FNOEXT) etc. and keep
-    --                           $(INPUT)/$(OUTPUT)/$(ANSWER) for each testcase
+    --                           $(INPUT)/$(OUTPUT)/$(ANSWER) for each testcase, and a
+    --                           command with no args is handed those three
     -- Checkers are testlib-style, `checker <input> <output> <answer>`, exit 0 meaning
     -- correct, which is how problems with several valid outputs are judged.
     -- `:Tuna checker off` compares outputs for one problem regardless.
@@ -83,6 +86,7 @@ M.defaults = {
     -- convention (gen.* / brute.*); set these to use your own instead: a path to
     -- a helper file (compiled and run by its language, or a prebuilt binary), or an
     -- { exec, args } command, expanded with the usual $(FNOEXT)/$(ABSDIR)/… modifiers.
+    -- A helper set here counts as present, as a file beside the solution does.
     -- The generator gets a seed appended (unless pass_seed = false): a number new for
     -- every run plus the iteration, so each run tries new inputs, and the Run pane shows
     -- the seed of the one being tried, to reproduce it.
@@ -103,7 +107,8 @@ M.defaults = {
         -- It has its own budget because a bruteforce is slow on purpose, and every
         -- verdict is read off its output, so `maximum_time` (what the solution is
         -- held to) would stop the search on inputs the bruteforce simply needs
-        -- longer for. `false` (or 0) lets it run as long as it likes.
+        -- longer for. Running past it stops the search. `false` (or 0) lets it run as
+        -- long as it likes.
         bruteforce_time = 20000,
     },
 
@@ -175,7 +180,7 @@ M.defaults = {
 
     -- The per-problem sidecar (`sidecar.lua`): what tuna knows about a problem and
     -- can't recover from the source — the downloaded task's url/name/group, the last
-    -- submit verdict per file, and the per-file run state (`:Tuna compare`, the
+    -- submit verdict and the last run's local verdict per file, and the per-file run state (`:Tuna compare`, the
     -- checker setting, the chosen run mode / interactive source). Written beside the
     -- solution so it travels with the problem and `:Tuna clean` disposes of it along
     -- with it.
@@ -316,7 +321,7 @@ M.defaults = {
         depth = 3, -- how deep to search below each path
     },
     -- Where downloads land, as paths built from the modifiers ($(JUDGE), $(CONTEST),
-    -- $(PROBLEM), …, see the README's Modifiers section), evaluated per problem.
+    -- $(PROBLEM), …, see REFERENCE.md's Modifiers section), evaluated per problem.
     date_format = "%c", -- the os.date format of $(DATE)
     downloaded_files_extension = "cpp", -- the language new solutions are created in
     downloaded_problems_path = "$(CWD)/$(PROBLEM).$(FEXT)", -- where a single problem is written
@@ -348,7 +353,9 @@ M.defaults = {
 
     -- submit (:Tuna submit) — hand the current solution to an external submit tool.
     submit = {
-        provider = "command", -- entry in submit.providers (see submit.lua)
+        -- "command" runs your submit tool; "browser" opens the judge's submit page and
+        -- copies the source to the clipboard (see `judges` below)
+        provider = "command",
         -- The "command" provider expands this through the modifier engine (adds
         -- $(URL)/$(LANG) to the usual $(FABSPATH)/$(FNAME)/…) and runs it in a
         -- terminal. nil = submit is unconfigured (errors with a hint). Example:
@@ -540,7 +547,7 @@ M.defaults = {
     -- cancelling something being typed into takes a second, deliberate press. Put
     -- `"<Esc>"` in `insert` to have it cancel straight from insert mode instead.
     -- (`<C-c>` is not worth listing under `insert`: Neovim handles `i_CTRL-C` itself
-    -- and never runs a mapping for it.) Per-widget keys (`editor_ui.*_mappings.cancel`,
+    -- and never runs a mapping for it.) Per-widget keys (the testcase editor's `q`,
     -- `picker_ui.mappings.close`) are added to these rather than replacing them.
     cancel_keys = {
         normal = { "<Esc>", "<C-c>" },
@@ -548,22 +555,14 @@ M.defaults = {
     },
     -- The standalone testcase editor (`:Tuna testcase add`/`edit`): input and expected
     -- output side by side, each pane `width` × `height` of the editor, moved between with
-    -- `switch_window_keys` (left and right). Its own keys, in normal and in insert
-    -- mode: `save_and_close` saves the testcase, `cancel` closes without saving (added to
-    -- `cancel_keys`).
+    -- `switch_window_keys` (left and right). As in the results UI, `:w` saves, `:wq` and
+    -- `:x` save and close, and `q` or `cancel_keys` close, asking first about an edit not
+    -- saved.
     editor_ui = {
         width = 0.4,
         height = 0.6,
         show_nu = true, -- line numbers
         show_rnu = false, -- relative line numbers
-        normal_mode_mappings = {
-            save_and_close = "<C-s>",
-            cancel = { "q", "Q" },
-        },
-        insert_mode_mappings = {
-            save_and_close = "<C-s>",
-            cancel = "<C-q>",
-        },
     },
     -- The keys of every list: the menus tuna asks its questions in, the `:Tuna clean` form,
     -- the `:Tuna` menu and the results UI's testcase list. `focus_next`/`focus_prev` move

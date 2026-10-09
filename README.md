@@ -66,7 +66,8 @@ testcases_input_file_format = { "$(FNOEXT)_input$(TCNUM).txt", "input$(TCNUM).tx
 
 Where the testcases are stored can be set in `testcases_directory`: it's relative to the source by default, but can be an absolute path unrelated to the problem.
 
-Add, edit, and delete testcases with [`:Tuna testcase add|edit|delete`](REFERENCE.md#testcase). This can also be done in place in the runner UI, which is usually where you want to be.
+Add, edit, and delete testcases with [`:Tuna testcase add|edit|delete`](REFERENCE.md#testcase).
+This can also be done in place in the runner UI, which is usually where you want to be.
 [`:Tuna testcase split`](REFERENCE.md#testcase-split) breaks one testcase into several: mark the cases inside it with a line of `-`, and each bracketed region becomes a testcase of its own.
 
 ### Running and the runner UI
@@ -111,13 +112,13 @@ Every helper is found the same way: a file named after it beside your solution (
 The run mode, interactive's source and the checker are decided based on the helpers present until you force them: `:Tuna run <mode>` forces a mode, `:Tuna run interactive <source>` a source, [`:Tuna checker off`](REFERENCE.md#checker) plain comparison, and `auto` hands any of them back.
 
 [`:Tuna scaffold checker|generator|bruteforce|interactor`](REFERENCE.md#scaffold) drops in a starter file, named as `tool_names` says, in your solution's language, or in the language configured at `scaffold.language` (for example, you may want to have a `py` bruteforce even if you are coding in `cpp`).
-Tuna ships `cpp` and `py` starters in its `scaffolds/` folder, and a file of the same name in your `scaffold.directory` (by default `tuna/scaffolds` in your Neovim config) is used instead, so you can customize a starter or add a new language by simply dropping a file there.
+tuna ships `cpp` and `py` starters in its `scaffolds/` folder, and a file of the same name in your `scaffold.directory` (by default `tuna/scaffolds` in your Neovim config) is used instead, so you can customize a starter or add a new language by simply dropping a file there.
 
 Finally, when several solutions are present in one folder, `:Tuna run all` runs every one of them against the same testcases.
 
 ### Downloading and scratch
 
-With [Competitive Companion](https://github.com/jmerle/competitive-companion) installed, `:Tuna download problem` (or `contest`, or `testcases`) opens a listener, pressing the green plus in the browser does the rest.
+With [Competitive Companion](https://github.com/jmerle/competitive-companion) installed, `:Tuna download problem` (or `contest`, or `testcases`) opens a listener, and pressing the green plus in the browser does the rest.
 `:Tuna download persistently` leaves the listener open for a whole session.
 
 Where things land is decided by a path template, evaluated per problem:
@@ -182,7 +183,7 @@ A step-by-step guide on setting this up, from pointing tuna at your tool to read
 
 ### Cleaning
 
-`:Tuna clean` removes files you created and never used (or the ones you only slighly modified, with a tolerance the command asks for when you run it), and then the directories they leave empty.
+`:Tuna clean` removes files you created and never used (or the ones you only slightly modified, with a tolerance the command asks for when you run it), and then the directories they leave empty.
 Every deletion is confirmed one at a time, with the file in front of you.
 
 <img width="1920" height="1080" alt="clean" src="https://github.com/user-attachments/assets/de4f558c-9fe4-41e5-a002-70031b36f2d2" />
@@ -204,7 +205,7 @@ Only files matching the current buffer's extension are offered.
 ### Keymaps
 
 Keymaps make the tuna experience much better.
-You can opt-in to the default keymaps with one line: `keymaps = { preset = "<leader>t" }` gives `<leader>tr` run, `<leader>tu` runner UI, `<leader>ts` submit, `<leader>tn`/`<leader>tp` problem navigation, `<leader>tdc` download a contest and `<leader>tds` sync, `<leader>tf` pin, `<leader>tl` the library, `<leader>tw` the scratch, `<leader>tm` the menu, and more.
+You can opt in to the default keymaps with one line: `keymaps = { preset = "<leader>t" }` gives `<leader>tr` run, `<leader>tu` runner UI, `<leader>ts` submit, `<leader>tn`/`<leader>tp` problem navigation, `<leader>tdc` download a contest and `<leader>tds` sync, `<leader>tf` pin, `<leader>tl` the library, `<leader>tw` the scratch, `<leader>tm` the menu, and more.
 You can edit or drop any of them without giving up the rest.
 
 ### Statusline

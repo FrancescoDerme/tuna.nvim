@@ -508,7 +508,8 @@ end
 
 ---Run every sibling solution version against the testcases, in a matrix UI.
 ---@param bufnr integer? defaults to the current buffer
----@param opts { show_only: boolean? }? open the UI with the rows listed and nothing run
+---@param opts { show_only: boolean?, list: string[]? }? `show_only` opens the UI with the rows
+---listed and nothing run; `list` runs only those testcases, as in normal mode
 function M.run(bufnr, opts)
     opts = opts or {}
     bufnr = bufnr or vim.api.nvim_get_current_buf()
@@ -589,6 +590,24 @@ function M.run(bufnr, opts)
     if #nums == 0 then
         utils.notify("run_all: no testcases to run (looked in " .. dir .. ").", "WARN")
         return
+    end
+    if opts.list then
+        -- Named testcases, as `:Tuna run 2 3` names them in normal mode: each missing one
+        -- is reported, and with none left there is nothing to run.
+        local chosen = {}
+        for _, s in ipairs(opts.list) do
+            local n = tonumber(s)
+            if n and tctbl[n] then
+                chosen[n] = true
+            else
+                utils.notify("run: testcase " .. s .. " doesn't exist.")
+            end
+        end
+        nums = vim.tbl_keys(chosen)
+        table.sort(nums)
+        if #nums == 0 then
+            return
+        end
     end
 
     -- Resolve each solution's run/compile commands from *its own* filetype, and the

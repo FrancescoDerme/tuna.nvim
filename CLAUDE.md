@@ -48,29 +48,33 @@ library, contest navigation, a scratch file, an unused-file cleaner, a menu and
 
 **Docs**
 - Three user docs are kept in step: `README.md` (what a beginner needs: install, quick start,
-  the feature tour), `REFERENCE.md` (the reference: `# Commands`, `# Configuration`, and
-  `# Submitting`, the step-by-step submit setup the README's submit feature links to) and
-  `doc/tuna.txt`, which mirrors both. When user-visible behaviour
+  the feature tour), `REFERENCE.md` (the reference: `# Commands` and `# Configuration`, whose
+  last section, `## Submitting`, is the step-by-step submit setup the README's submit
+  feature links to) and `doc/tuna.txt`, which is **the other two in help form and nothing
+  more**: the README's sections, then REFERENCE.md's, in their order and their wording, links
+  turned into `|tags|` and tables into aligned text. Don't give it per-option entries or
+  detail the other two lack: that costs too much readability, and `config.lua` is on disk
+  wherever tuna is installed, so the vimdoc points there as REFERENCE.md does. When user-visible behaviour
   changes, update every one it touches, and update this file when the design changes.
 - **Useful before complete.** The docs a user starts from (the README, and the vimdoc's
   introduction and feature sections) aim to be useful, not complete: they say what a user
   needs in order to use the plugin well, and leave out behaviour that is intuitive or that
   a user would expect or easily find out by themselves (a key that does what Vim's would,
   a prompt that explains itself, a default that is what anyone would pick). Completeness
-  lives in the reference (`REFERENCE.md`, the vimdoc's reference sections) and in
-  `config.lua`'s comments, and even there what a reader would assume goes unsaid.
+  lives in the reference (`REFERENCE.md`, and so the vimdoc's commands and configuration)
+  and in `config.lua`'s comments, and even there what a reader would assume goes unsaid.
 - **Options are documented where they are defined.** Every option in `config.defaults` has a
-  comment in `config.lua` saying what it does (a block comment may cover a group), and an
-  entry in the vimdoc (submit's under `*tuna-submit-options*`). No doc has option tables:
-  the README's Configuration section is a minimal example, `.tuna.lua`, and a link to
-  `REFERENCE.md#configuration`, which keeps only what takes more than a line (the setting
-  layers, the modifiers, keymaps, the action names `keymaps` and `runner_ui.mappings`
-  take, highlight groups) and points to `config.lua` and `:h tuna-configuration` for the
-  rest. A new option gets its comment and its vimdoc entry, not a table row.
+  comment in `config.lua` saying what it does (a block comment may cover a group), and that
+  comment is its documentation: no doc lists options. The README's Configuration section is
+  a minimal example, `.tuna.lua`, and a link to `REFERENCE.md#configuration`, which keeps
+  only what takes more than a line (the setting layers, the modifiers, keymaps and the
+  action names `keymaps` takes, the highlight groups, the submit guide) and points to
+  `config.lua` for the rest. A new option gets its comment, not a doc entry.
 - `REFERENCE.md`'s `# Commands` is an HTML table indexing every command, each linked to a
   `##` section of its own below it (plain headings, `## convert`, so the anchors stay
   `#convert`), where the detail goes; `# Configuration` follows, its `##` headings named so
-  they never take a command's anchor (`## Downloading` beside `## download`). A new command gets a row and a section, and the vimdoc's `COMMANDS` entry.
+  they never take a command's anchor (`## Downloading` beside `## download`). A new command gets a row and a
+  section, and its entry in the vimdoc's `COMMANDS`.
   The README links the **first** mention of each command to its section
   (`[`:Tuna run`](REFERENCE.md#run)`) and does not repeat the reference.
 - The maintainer edits the README and `REFERENCE.md` by hand: read them before editing and
@@ -78,7 +82,8 @@ library, contest navigation, a scratch file, an unused-file cleaner, a menu and
   (a list item's further sentences indented under it), so a diff shows the sentence that
   changed; code blocks, tables and HTML are left as they are.
 - The vimdoc is `doc/tuna.txt` (`:helptags` only indexes `*.txt`). Lines are at most 78
-  columns, tags look like `*tuna-…*`, and `|` is only a link delimiter, so alternatives are
+  columns, a `code` span is never split across two lines (it loses its highlighting), tags
+  look like `*tuna-…*`, and `|` is only a link delimiter, so alternatives are
   written `[add/edit/delete]`. Check tags with `:helptags doc`. `doc/tags` is gitignored,
   because plugin managers regenerate it.
 - This file is `export-ignore`d (`.gitattributes`). Keep it dry and current: no roadmap and no
@@ -417,6 +422,10 @@ is relative. Every configured path goes through these: compile/running directori
   answer (so `DONE`) and editable; saving it creates the testcase. `n` in the UI reuses an
   untouched bare row. An explicit `:Tuna run 5` for a missing testcase reports it and stops
   instead of falling through to a bare run.
+- **Trailing numbers always name testcases** (normal, interactive, run-all). Stress runs
+  none by number, and its count follows only a typed `stress`: `commands.run_mode` refuses
+  numbers on a stress run it resolved itself, or `:Tuna run 5` would mean testcase 5 or five
+  inputs depending on the files beside the solution.
 - `load_testcases` builds the same rows as `NOT RUN` with `preloaded = true` (`:Tuna show_ui`
   before any run) and keeps the build (`defer_build`), so `run_single` builds first through
   `built_first` as in every mode, and `run_testcases(nil)` claims it (`claim_listed`). The Compile
@@ -543,6 +552,8 @@ is relative. Every configured path goes through these: compile/running directori
   filetype's commands. The directory is the buffer's parent, or the cwd for a scratch buffer.
 - `MultiRunner` is a flattened matrix: solution header rows (`row_label`, live `correct/total`)
   above indented testcase rows.
+- `opts.list` (`:Tuna run all 2 3`) runs every solution on those testcases alone, a missing
+  one reported as normal mode reports it.
 - All solutions compile first, then everything runs in one shared pool of `multiple_testing`.
   A compile failure is a `CE` row.
 - The pool, `run_single` and `rerun_solution` all settle through `settle`, once nothing runs
@@ -811,7 +822,13 @@ specific Vim error about a buffer the user never opened.
   itself (`ask` in `download.lua`).
 - `editor`: its two panes are moved between with `switch_window_keys` (left to Input, right
   to Output, in insert mode too), like every other UI with panes: there is no
-  editor-only pane key, so one setting moves focus everywhere. A resize rebuilds both
+  editor-only pane key, so one setting moves focus everywhere. It saves and closes the way
+  the results UI does, with no keys of its own for it: `:w` saves (`BufWriteCmd`), `:wq`
+  and `:x` save and close, and `q` or `cancel_keys` go through `request_close`, which
+  compares the panes with what was last saved (`editor.saved`) and asks
+  `Save and close` / `Discard and close` / `Keep editing` (also what dismissal gives) only
+  when something would be lost. A `<C-s>` there would mean the opposite of the results
+  UI's `stop_all`. A resize rebuilds both
   panes in the pane, cursor and mode the user was in;
   `skip_close` keeps the panes' `WinClosed` from running the real close (which leaves insert
   mode) while they are replaced.
@@ -1110,7 +1127,8 @@ specific Vim error about a buffer the user never opened.
     tagged before it is entered, no float drawing a statusline of its own unless the
     statusline is global (read off the screen), every `runner_ui.mappings` key still
     resolving to an action, a menu's starting row and preview, and the editor rebuilt by a resize in the
-    pane, cursor and insert mode it was in;
+    pane, cursor and insert mode it was in, and saving with `:w`/`:wq` and asking before an
+    unsaved edit is closed away;
   - `menu.lua`: the contest summary over both layouts, counting current judge verdicts
     only, a problem's judge verdict beating its local one and either lapsing with an edit,
     which rows a local verdict counts, statuses in the results grid's words and colours with
@@ -1133,7 +1151,8 @@ specific Vim error about a buffer the user never opened.
     run-all honouring `checker off`, the Run pane's settings rows and which of them read as
     forced, `:Tuna compare` reaching an open board without taking its runner away,
     a `.tuna.lua` holding a function keeping its runner from run to run until its text
-    changes, `:Tuna checker`'s and `:Tuna compare`'s words (`off`/`auto`, bare reporting and
+    changes, numbers on a stress run tuna picked refused while a typed `stress` takes one as
+    its count, `:Tuna run all 1` running that testcase alone, `:Tuna checker`'s and `:Tuna compare`'s words (`off`/`auto`, bare reporting and
     changing nothing, no `toggle`, no `default`: choosing the configured method, or a float of
     its tolerance, keeps no override; a method of the user's own offered, kept and judged
     with by its name, and unknown where it is not defined) and the menu's Checker

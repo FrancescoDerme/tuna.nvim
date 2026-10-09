@@ -272,6 +272,50 @@ settle()
 t.eq(":Tuna run auto makes the mode automatic", tools.get_mode(ksol), nil)
 C.settle_results(kbuf, { run = true }, function() end)
 
+-- Trailing numbers name testcases. A problem that runs as stress without the mode being
+-- typed takes none, since `:Tuna run 5` would otherwise mean five inputs here and testcase
+-- 5 everywhere else; the count follows only a typed `stress`.
+do
+    local _, ssol = problem({ "gen.py", "brute.py" })
+    local sbuf = open(ssol)
+    local quiet = vim.notify
+    local said = t.capture_notifications()
+    C.execute({ "run", "5" })
+    settle()
+    vim.notify = quiet
+    t.has("numbers on a stress run tuna picked are refused", table.concat(said, "\n"), "takes no testcase numbers")
+    t.eq("and nothing runs", require("tuna.stress").active[sbuf], nil)
+    vim.api.nvim_set_current_buf(sbuf)
+    C.execute({ "run", "stress", "5" })
+    settle()
+    local sr = require("tuna.stress").active[sbuf]
+    t.eq("after a typed stress a number is the count", sr and sr.count, 5)
+    if sr then
+        sr:kill_all_processes()
+        sr:delete_ui()
+    end
+    tools.set_mode(ssol, nil)
+    C.settle_results(sbuf, { run = true }, function() end)
+end
+
+-- Run-all takes numbers as normal mode does: `:Tuna run all 1` runs every solution on
+-- testcase 1 alone.
+do
+    local adir, asol = problem({})
+    t.write(adir, "sol_input0.txt", "1\n")
+    t.write(adir, "sol_input1.txt", "2\n")
+    local abuf = open(asol)
+    C.execute({ "run", "all", "1" })
+    settle()
+    local ar = require("tuna.multi").active[abuf]
+    t.eq(":Tuna run all with a number runs that testcase alone", ar and ar.nums, { 1 })
+    if ar then
+        ar:kill_all_processes()
+        ar:delete_ui()
+    end
+    tools.set_mode(asol, nil)
+end
+
 -- A rerun keeps its mode, so a helper that mode needs being gone stops it, and nothing runs:
 -- the run offers to write the missing starter instead, and Stop writes nothing.
 local function rerun_after_deleting(open_mode, file, answer)

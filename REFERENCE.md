@@ -1,6 +1,6 @@
 # Commands
 
-Every command is a subcommand of `:Tuna` with tab-completion.
+Every command is a subcommand of `:Tuna` with tab-completion, and a lowercase `:tuna` works too.
 
 <table>
 <tr>
@@ -61,7 +61,7 @@ Every command is a subcommand of `:Tuna` with tab-completion.
 </tr>
 <tr>
   <td><a href="#scratch"><code>:Tuna scratch</code></a></td>
-  <td>drop in a scratch file to solve the first contest's problem before syncing</td>
+  <td>drop in a scratch file to solve a contest's first problem before syncing</td>
 </tr>
 <tr>
   <td><a href="#lib"><code>:Tuna lib [snippet|search]</code></a></td>
@@ -73,7 +73,7 @@ Every command is a subcommand of `:Tuna` with tab-completion.
 </tr>
 <tr>
   <td><a href="#checkhealth"><code>:checkhealth tuna</code></a></td>
-  <td>check Neovim version, compilers on <code>PATH</code>, the listener port, and optional integrations</td>
+  <td>check Neovim version, compilers on <code>PATH</code>, the listener port, your submit setup, and optional integrations</td>
 </tr>
 </table>
 
@@ -106,7 +106,8 @@ A keyword forces that mode for the problem, and it is remembered across restarts
 - `interactive` lets your solution talk to something over stdin and stdout.
   A word after it picks the other side: `live` (you type), `feed` (the testcase input, a line at a time) or `interactor` (an interactor program).
 
-In normal mode, trailing numbers run only those testcases: `:Tuna run 2 3`.
+In normal, interactive and run-all modes, trailing numbers run only those testcases: `:Tuna run 2 3`, `:Tuna run all 2 3`.
+A problem that runs as stress takes no testcase numbers because a number after `:Tuna run stress` counts how many inputs to try.
 
 ## show_ui
 
@@ -124,7 +125,7 @@ Opens the runner UI in the mode the problem is set to.
 - `delete` removes testcase `n`, after asking.
 
 Without a number, `edit` and `delete` act on the only testcase when there is one, and ask which when there are several.
-The editor shows the input and the expected output side by side: `<C-s>` saves and closes, `q` closes without saving.
+The editor shows the input and the expected output side by side: `:w` saves, `:wq` saves and closes, and `q` closes, asking first about an edit not saved.
 
 ## testcase split
 
@@ -168,7 +169,7 @@ It is remembered across restarts.
 
 - `exact` compares character for character.
 - `squish` ignores how the output is spaced: runs of whitespace and line breaks count as one space, and leading and trailing whitespace is dropped.
-- `float` compares token by token, accepting numbers within an absolute error of `tol` (`1e-6` when not given).
+- `float` compares token by token, accepting numbers within an absolute or relative error of `tol` (`1e-6` when not given), as judges do.
 - `name` is a method of your own, defined under that name in `compare_methods`.
 
 Without an argument it changes nothing and says which method is in use.
@@ -181,7 +182,7 @@ Without an argument it changes nothing and says which method is in use.
 
 - `auto`, the default, judges with the problem's checker when there is one: a `checker.*` file beside the solution, or the `checker` option in a `.tuna.lua` above the solution.
   It runs as `checker <input> <output> <answer>`, testlib's order, and exit code 0 means correct.
-  If a checker isn't set, falls back to the [compare](#compare) option.
+  If a checker isn't set, it falls back to the [compare](#compare) option.
 - `off` ignores the checker and compares the outputs with the compare option.
 
 The choice is remembered for the problem.
@@ -199,7 +200,7 @@ Press the green plus in your browser and tuna does the rest.
 - `problem` writes a solution file from your template and its testcases.
 - `contest` does the same for every problem of a contest, each in its own place.
 - `testcases` adds only the testcases, to the solution you are in.
-- `sync` downloads like `contest` or `problem` and folds your [`:Tuna scratch`](#scratch) file into the first problem it writes.
+- `sync` downloads like `contest`, or like `problem` when `scratch.download` says so, and folds your [`:Tuna scratch`](#scratch) file into the first problem it writes.
 - `persistently` keeps the listener open for the whole session.
 - `status` says whether the listener is open, and `stop` closes it.
 
@@ -212,7 +213,8 @@ A problem that already exists is asked about before it's overwritten, and a cont
 :Tuna scaffold <checker|generator|bruteforce|interactor> [ext]
 ```
 
-Drops a starter for a helper program beside the solution, named so that a run finds it, in your solution's language, in `ext` when given, or in `scaffold.language`. tuna ships `cpp` and `py` starters, and a file called `<role>.<ext>` in your `scaffold.directory` is used instead, so replacing a starter or adding a language is done by dropping a file there.
+Drops a starter for a helper program beside the solution, named so that a run finds it, in the language `ext` names, else in `scaffold.language`, else in your solution's.
+tuna ships `cpp` and `py` starters, and a file called `<role>.<ext>` in your `scaffold.directory` is used instead, so replacing a starter or adding a language is done by dropping a file there.
 
 ## submit
 
@@ -287,10 +289,11 @@ Settings come from three layers, each overriding the one before:
 
 1. the defaults;
 2. what you pass to `setup()`;
-3. a `.tuna.lua` anywhere above the file you are editing, returning a table. This way a contest folder can set a different time limit, template or testcase layout for everything under it without touching your config.
+3. a `.tuna.lua` anywhere above the file you are editing, returning a table.
+   This way a contest folder can set a different time limit, template or testcase layout for everything under it without touching your config.
    It is read again whenever its text changes, so a saved edit applies to the next run, with no restart.
 
-Every option, with its default and what it does, is in [`lua/tuna/config.lua`](lua/tuna/config.lua) and documented in `:h tuna-configuration`.
+Every option, with its default and what it does, is commented in [`lua/tuna/config.lua`](lua/tuna/config.lua).
 The sections below cover some details.
 
 ## Modifiers
@@ -352,7 +355,7 @@ Download modifiers: additionally available in `downloaded_*` paths and in `templ
 </tr>
 <tr>
   <td><code>$(GROUP)</code></td>
-  <td>the raw, unparsed group</td>
+  <td>the judge and contest, e.g. <code>Codeforces - Codeforces Round 1000 (Div. 2)</code>, which <code>$(JUDGE)</code> and <code>$(CONTEST)</code> are parsed from</td>
 </tr>
 <tr>
   <td><code>$(URL)</code></td>
@@ -373,11 +376,7 @@ Download modifiers: additionally available in `downloaded_*` paths and in `templ
 </table>
 
 Characters that cannot appear in a filename are replaced with `_` in every modifier that becomes part of a path.
-
-## Templates
-
-`template_cursor` takes a line number, a Lua pattern to search for (`{ pattern, offset }` for n lines below the match), or a function.
-A pattern that matches nothing leaves the cursor alone, so one written for C++ is harmless to a Python template.
+A leading `~` is expanded in every option that holds a path.
 
 ## Keymaps
 
@@ -428,22 +427,25 @@ keymaps = {
 
 `mappings` are buffer-local, set for the solution filetypes in `keymaps.filetypes`, and `global` are set once and always there.
 
-Every command can be mapped this way, each running the `:Tuna` command it is named after: `menu`, `run`, `run_all`, `run_stress`, `run_interactive`, `show_ui`, `add_testcase`, `edit_testcase`, `delete_testcase`, `submit`, `submit_clear`, `download_testcases`, `download_problem`, `download_contest`, `download_sync`, `clean`, `pin`, `next_problem`, `prev_problem`, `last_problem`, `last_contest`, `scratch`, `library`, `library_snippet` and `library_search`.
+Every action can be mapped this way. An action is a name for a `:Tuna` command with its arguments fixed. Actions are defined in `M.actions` in [`lua/tuna/keymaps.lua`](lua/tuna/keymaps.lua): `menu`, `run`, `run_all`, `run_stress`, `run_interactive`, `show_ui`, `add_testcase`, `edit_testcase`, `delete_testcase`, `submit`, `submit_clear`, `download_testcases`, `download_problem`, `download_contest`, `download_sync`, `clean`, `pin`, `next_problem`, `prev_problem`, `last_problem`, `last_contest`, `scratch`, `library`, `library_snippet` and `library_search`.
 
-## Appearance and widgets
+## Highlights
 
-`runner_ui.mappings` names its actions `run_again`, `run_all_again`, `stop`, `stop_all`, `toggle_diff`, `view_input`, `view_expected`, `view_stdout`, `view_stderr`, `add_testcase`, `delete_testcase`, `undo_delete`, `split_testcase`, `close` and `help`, each taking a key or a list of them.
+tuna colours its windows with these highlight groups:
 
-Highlight groups: `TunaCorrect`, `TunaWrong`, `TunaWarning`, `TunaRunning`, `TunaDone`, `TunaEditable`, `TunaMenuTitle` (the menu's banner letters; the banner has no background of its own, so what is behind it shows between them), and `TunaDiffChange` / `TunaDiffText` / `TunaDiffAdd` / `TunaDiffDelete`.
-Override any of them with `:hi` after startup — they are re-applied on `ColorScheme`, so they follow your theme.
+- `TunaCorrect`, `TunaWrong`, `TunaWarning`, `TunaRunning` and `TunaDone`: the verdicts.
+- `TunaEditable`: the border of the panes you can type into.
+- `TunaMenuTitle`: the letters of the menu's banner.
+- `TunaDiffChange`, `TunaDiffText`, `TunaDiffAdd` and `TunaDiffDelete`: the diff view.
 
-# Submitting
+tuna's colours are only defaults: define any of these groups yourself, or in your colorscheme, and yours win.
+tuna sets its defaults again after every colorscheme change, so the groups you leave alone follow your theme.
 
-tuna does not talk to judges itself.
-Owning a judge's protocol means owning its login, its cookies, its CSRF tokens and its rate limits, and re-owning them every time it changes a page — once per judge.
-So `:Tuna submit` drives whichever command-line submitter you already trust, and concentrates on the part an editor is actually good at: knowing _which_ problem you are on, and putting the verdict where you can see it.
+## Submitting
 
-## 1. Point it at your tool
+tuna does not talk to judges itself, so `:Tuna submit` drives whichever command-line submitter you already use.
+
+### 1. Point it at your tool
 
 ```lua
 require("tuna").setup({
@@ -456,34 +458,34 @@ require("tuna").setup({
 
 `command` is expanded with the file modifiers plus three of its own:
 
-- **`$(URL)`** — what to submit _through_.
-- **`$(PROBLEM_URL)`** — the problem's own address, always, never reshaped for a tool.
-- **`$(LANG)`** — `submit.languages[filetype]`, the name _your tool_ uses for the language.
+- `$(URL)`: what to submit through.
+- `$(PROBLEM_URL)`: the problem's address.
+- `$(LANG)`: `submit.languages[filetype]`, the name your tool uses for the language.
 
 The two URLs exist separately because the address that identifies a problem is not always the one you submit through.
-Use `$(URL)` unless your tool needs the literal problem page.
+Use `$(URL)` unless your tool needs the problem page.
 
-## 2. Make sure it knows which problem
+### 2. Make sure it knows which problem
 
 The URL is resolved in three steps, first hit wins:
 
-1. `submit.url` as a **function** `(ctx) -> string`, if you set one;
-2. the **header marker** — a Lua pattern scanned over the first `url_scan_lines` (10) lines of the file.
+1. `submit.url` as a function `(ctx) -> string`, if you set one.
+2. The header marker: a Lua pattern scanned over the first `url_scan_lines` (10, by default) lines of the file.
    The default is `"submit at:%s*(%S+)"`, which matches a header line like this one, written by hand or by a template carrying `// submit at: $(URL)`:
    ```cpp
    // submit at: https://codeforces.com/contest/2250/problem/A
    ```
-3. the **sidecar** (`.tuna.json`) the download wrote beside the file.
+3. The sidecar (`.tuna.json`) the download wrote beside the file.
 
 So a downloaded problem is submittable with no markers at all, and a hand-made one becomes submittable the moment you paste its URL into the header.
-Whichever way it resolves, the first submit backfills the sidecar — including the contest and problem name, if your template marks them with `submit.group` and `submit.name` — so the verdict can persist.
+Whichever way it resolves, the first submit records the URL in the sidecar, so a problem you set up by hand behaves like a downloaded one from then on.
 
-A URL that still contains an unexpanded `$(...)` is rejected rather than handed to the tool, which is what stops `:Tuna submit` on a raw template from submitting garbage.
+A URL that still contains an unexpanded `$(...)` is rejected rather than handed to the tool, which stops `:Tuna submit` on a raw template.
 
-## 3. Decide how the verdict comes back
+### 3. Decide how the verdict comes back
 
-By default tuna runs the tool as a background job and reads its output (`submit.watch`).
-`submit.verdicts` is an ordered list of `{ lua_pattern, state }` rules matched against that output — the shipped set is the judges' own vocabulary, so most tools need no changes:
+By default tuna runs the tool as a background job and reads its output (`submit.watch = true`).
+`submit.verdicts` is an ordered list of `{ lua_pattern, state }` rules matched against that output, most tools need no changes:
 
 ```lua
 verdicts = {
@@ -493,20 +495,20 @@ verdicts = {
 },
 ```
 
-`pending` keeps watching; `accepted`, `rejected` and `partial` are final and stop it.
-A final verdict wins over a pending one in the same output, which matters for the submitters that redraw their status in place rather than printing a line per poll.
+`pending` keeps watching, while `accepted`, `rejected` and `partial` are final and stop watching.
 
-What if your tool prints nothing tuna recognises?
-Then **nothing is claimed**: a clean exit clears the indicator, and only a non-zero exit is reported as a failure — with the tool's own error line, its credentials blanked out of it first.
+If your tool prints nothing tuna recognises then nothing is claimed: a clean exit clears the indicator, and a non-zero exit is reported as a failure with the tool's own error line and its credentials blanked out.
 
 Two cases want the other path, `submit.watch = false`, which runs the tool in a terminal:
 
-- your tool **asks you something** (kattis-cli prompts to confirm unless you pass `-f`) — watch mode gives the child no stdin, so a prompt there gets EOF;
-- you would simply rather watch it work, in which case `open_terminal` decides whether the terminal opens in front of you or stays in the background.
+- your tool asks you something;
+- you would rather read what the tool prints as it runs.
 
-## 4. Different judges, different tools
+`open_terminal` then decides whether the terminal opens in front of you, or runs in the background for you to open when you want.
 
-`submit.judges.<judge>` is a partial override folded over everything above, keyed on the URL's host:
+### 4. Different judges, different tools
+
+`submit.judges.<judge>` is folded over everything above, keyed on the URL's host:
 
 ```lua
 submit = {
@@ -518,18 +520,18 @@ submit = {
 },
 ```
 
-The **`browser`** provider is the answer for a judge you cannot submit to headlessly at all — AtCoder gates submission behind a challenge no CLI can solve.
-It opens the submit page with the task preselected and puts your source on the system clipboard, so submitting is paste, solve the challenge, click.
+The `browser` provider is for a judge you cannot submit to headlessly at all, because you don't have a tool for it.
+It opens the submit page with the task preselected and puts your source on the system clipboard.
 
-## 5. Read the verdict
+### 5. Read the verdict
 
 With [lualine configured](README.md#statusline), the verdict sits in your statusline, coloured by `submit.verdict_highlight`.
-It is per problem, so it follows you as you move between them; it lasts until you submit that problem again; it survives a restart; and it disappears the moment you edit the solution, because it described the source it was submitted from and no longer does.
+It is per problem, lasts until you submit that problem again, survives a restart, and disappears the moment you edit the solution.
 `:Tuna submit clear` dismisses it, and cancels a submission still being watched.
 
-If something goes wrong, `submit.log_file` records each submission's raw output and the verdict tuna parsed from it, which is the fastest way to work out which pattern your tool needs.
+If something goes wrong, `submit.log_file` records each submission's raw output and the verdict tuna parsed from it, which is useful to work out which pattern your tool needs.
 
-## Every submit option
+### Every submit option
 
-All of them live under `submit`, and `submit.judges` overrides them per judge.
+Every submit option lives under `submit`, and `submit.judges` overrides them per judge.
 Each one, with its default and what it does, is commented in the `submit` block of [`lua/tuna/config.lua`](lua/tuna/config.lua).
