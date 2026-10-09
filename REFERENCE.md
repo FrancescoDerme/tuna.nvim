@@ -65,7 +65,7 @@ Every command is a subcommand of `:Tuna` with tab-completion.
 </tr>
 <tr>
   <td><a href="#scratch"><code>:Tuna scratch</code></a></td>
-  <td>drop in a scratch solution for before a contest opens</td>
+  <td>drop in a scratch file to solve the first contest's problem before syncing</td>
 </tr>
 <tr>
   <td><a href="#lib"><code>:Tuna lib [snippet|search]</code></a></td>
@@ -84,9 +84,9 @@ Every command is a subcommand of `:Tuna` with tab-completion.
 ## menu
 
 `:Tuna`, or `:Tuna menu`, opens the menu.
-On the left are your recent contests, your recent problems and your pinned problems, each with how it went.
+On the left are recent contests, recent problems and pinned problems.
 On the right is what tuna can do from the file you are on.
-`<CR>` acts on the list you are in, and `<C-h>`/`<C-j>`/`<C-k>`/ `<C-l>` move between the lists.
+`<CR>` acts on the list you are in, and `<C-hjkl>` (by default) move between the lists.
 
 ## run
 
@@ -94,10 +94,10 @@ On the right is what tuna can do from the file you are on.
 :Tuna run [auto|normal|all|stress|interactive] [n…]
 ```
 
-Compiles the solution, runs the testcases in parallel (as many at once as you have cores, `multiple_testing`) and opens the runner UI.
+Compiles the solution, runs the testcases in parallel (as many at once as you have cores, by default) and opens the runner UI.
 
 Without a mode keyword tuna picks the mode itself: `interactive` when an interactor sits beside the solution, `stress` when a generator and a bruteforce do, `normal` otherwise.
-A keyword forces that mode for the problem, and it is remembered across restarts until `auto` hands the choice back.
+A keyword forces that mode for the problem, and it is remembered across restarts until `auto` hands the choice back to tuna.
 
 - `normal` runs the testcases.
 - `all` runs every solution in the folder against every testcase.
@@ -119,8 +119,7 @@ Numbers limit the run as in `:Tuna run`.
 
 ## show_ui
 
-Re-opens the runner UI in the mode the problem is set to.
-Before any run it lists the testcases without running them, so it doubles as a viewer.
+Opens the runner UI in the mode the problem is set to.
 
 ## testcase
 
@@ -143,11 +142,10 @@ The editor shows the input and the expected output side by side: `<C-s>` saves a
 ```
 
 Breaks one testcase into several.
-Mark the cases inside it with a line of `-` (the `testcases_split_markers` character, or the marker you type), in the input and the expected output alike.
-Markers come in pairs: one opens a case, the next closes it, and what a pair brackets becomes a testcase of its own, with a verdict of its own.
+Mark the cases inside it with a line of the `testcases_split_markers` character (`-`, by default) or the marker you type, in the input and the expected output alike.
+Markers come in pairs: one opens a case, the next closes it, and what a pair brackets becomes a testcase of its own.
 Everything outside every pair stays in the testcase you split.
 
-The split is deliberately mechanical: where a case ends depends on the problem's input format, so the boundaries are yours to place.
 It refuses, leaving the testcase untouched, when a pair is left open, when a pair brackets nothing, when the expected output brackets a different number of cases, or when a non-empty expected output has no markers at all.
 If the input starts with a case count, tuna then offers to fix it.
 
@@ -179,7 +177,7 @@ It is remembered across restarts.
 
 - `exact` compares character for character.
 - `squish` ignores how the output is spaced: runs of whitespace and line breaks count as one space, and leading and trailing whitespace is dropped.
-- `float` compares token by token, accepting numbers within an absolute or relative error of `tol` (`1e-6` when not given).
+- `float` compares token by token, accepting numbers within an absolute error of `tol` (`1e-6` when not given).
 - `default` goes back to `output_compare_method` from your config.
 
 Without an argument it changes nothing and says which method is in use.
@@ -192,7 +190,7 @@ Without an argument it changes nothing and says which method is in use.
 
 - `auto`, the default, judges with the problem's checker when there is one: a `checker.*` file beside the solution, or the `checker` option.
   It runs as `checker <input> <output> <answer>`, testlib's order, and exit code 0 means correct.
-- `off` ignores the checker and compares the outputs (see [compare](#compare)).
+- `off` ignores the checker and compares the outputs with the [compare](#compare) option.
 
 The choice is remembered for the problem.
 Without an argument it changes nothing and says which of the two is set, and which checker that finds.
