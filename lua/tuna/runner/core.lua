@@ -386,13 +386,11 @@ end
 
 ---The effective output-compare method: a per-buffer runtime override
 ---(`:Tuna compare …`, carried on the runner as `compare_method`) if set, else the
----configured `output_compare_method`. A name from `compare_methods` comes back with the
----function it stands for (`{ name, fn = function }`), which `compare_output` runs.
+---configured `output_compare_method`, a name from `compare_methods` resolved to its function
+---(`compare.resolve`).
 ---@return tuna.CompareSpec
 function RunnerCore:effective_compare()
-    local spec = self.compare_method or self.config.output_compare_method
-    local own = type(spec) == "string" and (self.config.compare_methods or {})[spec]
-    return own and { spec, fn = own } or spec
+    return compare.resolve(self.compare_method or self.config.output_compare_method, self.config.compare_methods)
 end
 
 ---A short human label for how verdicts are decided, shown in the "Run" pane.

@@ -453,6 +453,11 @@ function M.run_mode(args)
         )
         return
     end
+    -- After a typed `stress`, one number, the count: anything else would be dropped unseen.
+    if chosen == "stress" and (#args > 1 or (args[1] and not tonumber(args[1]))) then
+        utils.notify("run: stress takes one number, how many inputs to try, as in `:Tuna run stress 500`.", "WARN")
+        return
+    end
     if note then
         utils.notify("run: " .. note .. ".", "INFO")
     end

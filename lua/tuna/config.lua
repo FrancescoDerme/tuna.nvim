@@ -38,7 +38,7 @@ M.defaults = {
     },
 
     -- running
-    running_directory = ".", -- where the solution runs, read like `compile_directory`
+    running_directory = ".", -- where the solution and its helpers run, read like `compile_directory`
     run_command = {
         c = { exec = "./$(FNOEXT)" },
         cpp = { exec = "./$(FNOEXT)" },
@@ -54,7 +54,8 @@ M.defaults = {
     -- problems with floating-point answers, no custom checker needed.
     output_compare_method = "squish",
     -- Comparison methods of your own, by name: { name = function(output, expected) ->
-    -- boolean }. A name is used like a builtin one, here and in `:Tuna compare`.
+    -- boolean }. A name is used like a builtin one, here and in `:Tuna compare`; a
+    -- builtin's own name always means the builtin.
     compare_methods = {},
     -- Special judge. Like every helper, discovered by default: a sibling `checker.*` file
     -- (see tool_names) judges when there is one, plain comparison via

@@ -350,7 +350,9 @@ end
 ---@param status string? the verdict for the selector (`core.ending`'s), else FAILED
 ---@param hlgroup string? its colour
 function StressRunner:helper_failed(label, i, output, reason, status, hlgroup)
-    local what = ("%s %s (seed %d)"):format(label, reason or "failed", self:seed(i))
+    -- The seed is what reproduces the input, when the generator was handed one.
+    local which = self.pass_seed and ("seed %d"):format(self:seed(i)) or ("input %d"):format(i)
+    local what = ("%s %s (%s)"):format(label, reason or "failed", which)
     local row = self.search_entry
     if row then
         row.status = status or "FAILED"

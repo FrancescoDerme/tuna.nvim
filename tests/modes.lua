@@ -31,6 +31,11 @@ local _, all = problem({ "checker.py", "gen.py", "brute.py", "interactor.py" })
 for _, role in ipairs({ "checker", "generator", "bruteforce", "interactor" }) do
     t.ok("a sibling file is the " .. role, tools.helper(role, all, cfg) ~= nil)
 end
+-- A compiled helper runs where the solution runs, so its program is looked for there too.
+do
+    local gen = tools.helper("generator", all, with({ running_directory = "out" }))
+    t.eq("a helper runs in running_directory", gen and gen.cwd, vim.fs.dirname(all) .. "/out")
+end
 local _, bare = problem()
 t.eq("no file and nothing configured is no helper, and nothing to report", { tools.helper("checker", bare, cfg) }, {})
 
@@ -215,6 +220,8 @@ do
     })
     commands.execute({ "compare", "lenient" })
     t.eq("and kept for the problem by it", tools.get_compare(csol), "lenient")
+    tools._test.forget_run_state()
+    t.eq("and still after a restart, read back from the sidecar", tools.get_compare(csol), "lenient")
     local cr = require("tuna.runner").new(cbuf)
     cr:refresh_judge(csol)
     t.eq("a run judges with it", require("tuna.compare").compare_output("a", "b", cr:effective_compare()), true)
@@ -222,6 +229,20 @@ do
     open(fsol)
     commands.execute({ "compare", "lenient" })
     t.has("where it is not defined it is no method", said[#said], "unknown method 'lenient'")
+
+    -- A built-in's name always means the built-in, and one of yours with it is said once.
+    local xdir, xsol = problem({})
+    t.write(xdir, ".tuna.lua", "return { compare_methods = { exact = function() return true end } }")
+    local xbuf = open(xsol)
+    local xr = require("tuna.runner").new(xbuf)
+    xr.compare_method = "exact"
+    t.eq("a method of yours named like a built-in is never used", xr:effective_compare(), "exact")
+    xr:effective_compare()
+    settle()
+    local warned = vim.tbl_filter(function(m)
+        return m:find("exact is a built-in method", 1, true) ~= nil
+    end, said)
+    t.eq("and is reported once", #warned, 1)
 
     -- The menu's "Compare:" entry steps through the methods from the one in use, and landing
     -- on the configured one hands the problem back to it.
@@ -293,6 +314,17 @@ do
     if sr then
         sr:kill_all_processes()
         sr:delete_ui()
+    end
+    for _, extra in ipairs({ { "5", "6" }, { "lots" } }) do
+        local quiet2 = vim.notify
+        local heard = t.capture_notifications()
+        vim.api.nvim_set_current_buf(sbuf)
+        local before = require("tuna.stress").active[sbuf]
+        C.execute(vim.list_extend({ "run", "stress" }, extra))
+        settle()
+        vim.notify = quiet2
+        t.has("after a typed stress, `" .. table.concat(extra, " ") .. "` is refused", table.concat(heard, "\n"), "stress takes one number")
+        t.ok("and nothing runs", require("tuna.stress").active[sbuf] == before)
     end
     tools.set_mode(ssol, nil)
     C.settle_results(sbuf, { run = true }, function() end)

@@ -253,7 +253,9 @@ is relative. Every configured path goes through these: compile/running directori
     A spec carries its role's run arguments (`ROLE_ARGS`: a checker's
     `$(INPUT) $(OUTPUT) $(ANSWER)`, an interactor's `$(INPUT) $(ANSWER)`), a configured
     command given no `args` included, so no caller keeps a default of its own;
-    `expand_args(args, files)` fills them per spawn. The role names live only in the
+    `expand_args(args, files)` fills them per spawn. A compiled helper runs, and its program
+    is looked for, in `running_directory` (`program`'s `cwd`), as the solution's is, in every
+    mode. The role names live only in the
     config's `tool_names`.
   - The run settings, mode, interactive source and checker, are each **automatic until
     forced** (`get_mode`/`set_mode`, `get_source`/`set_source`, `checker_setting`/
@@ -310,8 +312,10 @@ is relative. Every configured path goes through these: compile/running directori
     why a user's own method has a name (`compare_methods`) rather than being a function
     given straight to `output_compare_method`: a name can be typed, completed
     (`compare_names`), kept for a problem and shown, and `RunnerCore:effective_compare`
-    resolves it to `{ name, fn }` when judging, which `compare_output` runs. A bare
-    function is no method.
+    resolves it to `{ name, fn }` when judging (`compare.resolve`), which `compare_output`
+    runs. A bare function is no method, and a built-in's name always means the built-in:
+    `float` parses a tolerance no function could take, so a user's method could take over
+    `exact` and `squish` and never `float`; one named so is reported once and never used.
   - **A support file is never a solution**: `is_support` is a helper (by name, `is_helper`)
     or a header (by extension, `is_header`: `h`, `hpp`, `hh`, `hxx`, `h++`, `inl`, `ipp`,
     `tpp`, any case). Neovim gives a header its language's filetype, so having a
@@ -425,7 +429,8 @@ is relative. Every configured path goes through these: compile/running directori
 - **Trailing numbers always name testcases** (normal, interactive, run-all). Stress runs
   none by number, and its count follows only a typed `stress`: `commands.run_mode` refuses
   numbers on a stress run it resolved itself, or `:Tuna run 5` would mean testcase 5 or five
-  inputs depending on the files beside the solution.
+  inputs depending on the files beside the solution, and after a typed `stress` it refuses
+  anything but one number rather than dropping it unseen.
 - `load_testcases` builds the same rows as `NOT RUN` with `preloaded = true` (`:Tuna show_ui`
   before any run) and keeps the build (`defer_build`), so `run_single` builds first through
   `built_first` as in every mode, and `run_testcases(nil)` claims it (`claim_listed`). The Compile
@@ -488,7 +493,8 @@ is relative. Every configured path goes through these: compile/running directori
   helper that is broken, found on a rerun.
 - **Every run searches from a seed of its own** (`seed_base`, the clock's microseconds, kept
   to six digits for the Run pane): the generator is handed `seed(i)`, the base plus the
-  iteration, and the Run pane's `seed` row and a helper's failure name it. A base fixed for
+  iteration, and the Run pane's `seed` row and a helper's failure name it (the input's number instead
+  when `pass_seed` is off and the generator was handed none). A base fixed for
   every run would repeat the same search after one that found nothing, and reproducing a
   counterexample needs no seed, since it is saved as a testcase.
 - The bruteforce runs on `stress.bruteforce_time`, not `maximum_time`: it is slow by design,

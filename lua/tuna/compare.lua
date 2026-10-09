@@ -88,6 +88,37 @@ M.methods = {
     end,
 }
 
+-- Built-in names a user's `compare_methods` defined anyway, already reported.
+local shadowed = {}
+
+---The method a run judges with: a name from `own` (the user's `compare_methods`) comes back
+---with the function it stands for, `{ name, fn = function }`, which `compare_output` runs. A
+---built-in's name always means the built-in: `float` parses a tolerance no method of the
+---user's could take, so letting one take over a built-in name would hold for `exact` and
+---`squish` and not for `float`. One that tries is reported once and never used.
+---@param spec tuna.CompareSpec
+---@param own table<string, function>? the user's `compare_methods`
+---@return tuna.CompareSpec
+function M.resolve(spec, own)
+    own = own or {}
+    for name in pairs(own) do
+        if M.methods[name] and not shadowed[name] then
+            shadowed[name] = true
+            -- Scheduled, as every message here: runs judge inside libuv callbacks.
+            vim.schedule(function()
+                utils.notify(
+                    ("compare: %s is a built-in method, so the one of yours with that name is never used, rename it."):format(
+                        name
+                    ),
+                    "WARN"
+                )
+            end)
+        end
+    end
+    local fn = type(spec) == "string" and not M.methods[spec] and own[spec]
+    return fn and { spec, fn = fn } or spec
+end
+
 ---A human-readable label for a compare method (for the results-UI status pane).
 ---@param method tuna.CompareSpec
 ---@return string

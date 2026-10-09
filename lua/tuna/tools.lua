@@ -200,7 +200,7 @@ end
 ---Turn a helper source path into a runnable spec, resolving its compile/run
 ---commands from the config by the file's own filetype (so a Python helper beside
 ---a C++ solution still works). `compile` is present only for compiled languages.
----`cwd` is the problem directory, so a relative run exec like `./gen` resolves.
+---`cwd` is `running_directory`, as for the solution, so a relative run exec like `./gen` resolves.
 ---@param path string
 ---@param cfg table buffer configuration
 ---@return { exec: string, args: string[], compile: { exec: string, args: string[] }?, compile_dir: string?, cwd: string, source: string }?
@@ -217,7 +217,14 @@ local function program(path, cfg)
     end
 
     local dir = vim.fn.fnamemodify(path, ":p:h")
-    local spec = { exec = run.exec, args = run.args, cwd = dir, source = vim.fn.fnamemodify(path, ":p") }
+    -- A helper runs where the solution runs, `running_directory`, which is also where the
+    -- build's program is looked for before it is reused.
+    local spec = {
+        exec = run.exec,
+        args = run.args,
+        cwd = utils.normalize_path(cfg.running_directory or ".", dir),
+        source = vim.fn.fnamemodify(path, ":p"),
+    }
 
     if cfg.compile_command[ft] then
         local compile = utils.eval_command(path, cfg.compile_command[ft])
@@ -871,6 +878,11 @@ M._test = {
     ---differently for a source that has not changed.
     forget_builds = function()
         builds = {}
+    end,
+    ---Forget every problem's run state, so the next read comes from its sidecar, as after a
+    ---restart.
+    forget_run_state = function()
+        state = {}
     end,
 }
 

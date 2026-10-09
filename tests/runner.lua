@@ -1192,6 +1192,11 @@ do
         hunt.hlgroup,
     }, { "TC 0", "SIG 6", "TunaWarning" })
     t.has("and its Errors pane says which program failed, and on which seed", crashed:pane_content(hunt, "se"), ("bruteforce was killed by signal 6 (seed %d)"):format(crashed:seed(1)))
+    -- Without a seed handed to the generator, the input is named by its number instead.
+    crashed.pass_seed = false
+    crashed.search_entry = hunt
+    crashed:helper_failed("generator", 2, nil, "failed")
+    t.has("and by its number when no seed was handed over", hunt.stderr or "", "generator failed (input 2)")
 
     -- A bruteforce that ran out of its budget.
     local slow = search({ genx = seeded, solx = { stdout = "5\n" }, refx = { code = 124, signal = 15 } })
