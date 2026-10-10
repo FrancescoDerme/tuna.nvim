@@ -15,7 +15,7 @@ tuna.nvim is a competitive programming plugin that integrates with [Competitive 
 - Neovim 0.10+
 - A compiler or interpreter for the languages you use
 - Optional: the [Competitive Companion](https://github.com/jmerle/competitive-companion) browser extension, to download problems and contests
-- Optional: one or more command-line submit tools for your judges, such as [submitter](https://github.com/EgorKulikov/submitter), to submit your solution and get the verdict in your statusline
+- Optional: one or more command-line submit tools for your judges, such as [submitter](https://github.com/EgorKulikov/submitter), to submit your solutions and get the verdicts in your statusline
 - Optional: [toggleterm.nvim](https://github.com/akinsho/toggleterm.nvim) for the submit terminal, [lualine.nvim](https://github.com/nvim-lualine/lualine.nvim) for the download and verdict indicators, [telescope.nvim](https://github.com/nvim-telescope/telescope.nvim) for searching the library, [which-key.nvim](https://github.com/folke/which-key.nvim) to see the keymaps as you type them
 
 ## Installation

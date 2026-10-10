@@ -47,8 +47,8 @@ REQUIREMENTS                                               *tuna-requirements*
 - Optional: the Competitive Companion browser extension, to download problems
   and contests: https://github.com/jmerle/competitive-companion
 - Optional: one or more command-line submit tools for your judges, such as
-  submitter, to submit your solution and get the verdict in your statusline:
-  https://github.com/EgorKulikov/submitter
+  submitter, to submit your solutions and get the verdicts in your
+  statusline: https://github.com/EgorKulikov/submitter
 - Optional: toggleterm.nvim for the submit terminal, lualine.nvim for the
   download and verdict indicators, telescope.nvim for searching the library,
   which-key.nvim to see the keymaps as you type them
