@@ -468,7 +468,7 @@ local function warn_if_shared(raw, expanded)
     if warned_shared[raw] or has_scoping_modifier(raw) or not utils.is_absolute(expanded) then
         return
     end
-    if raw ~= (config.current_setup or config.defaults).testcases_directory then
+    if raw ~= config.current_setup.testcases_directory then
         return -- a local config's value: scoped to its own tree by construction
     end
     warned_shared[raw] = true

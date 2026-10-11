@@ -23,20 +23,17 @@ tuna.nvim is a competitive programming plugin that integrates with [Competitive 
 With [lazy.nvim](https://github.com/folke/lazy.nvim):
 
 ```lua
-{
-    "FrancescoDerme/tuna.nvim",
-    config = function()
-        require("tuna").setup({})
-    end,
-}
+{ "FrancescoDerme/tuna.nvim" }
 ```
 
 With [vim.pack](https://neovim.io/doc/user/pack/):
 
 ```lua
 vim.pack.add({ "https://github.com/FrancescoDerme/tuna.nvim" })
-require("tuna").setup({})
 ```
+
+tuna works as soon as it is installed, and calling `setup()` is only needed to change its defaults (see [Configuration](#configuration)).
+It loads the rest of itself only when you use it, so there is no need to lazy-load it from your plugin manager.
 
 ## Quick start
 
@@ -240,6 +237,7 @@ require("lualine").setup({
 ## Configuration
 
 Everything is optional: `setup()` takes a table shaped like the defaults, and anything you leave out keeps its default.
+With lazy.nvim, the same table can go in the spec's `opts`.
 
 ```lua
 require("tuna").setup({

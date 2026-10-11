@@ -62,7 +62,7 @@ local timer = nil
 ---@param kind "problems"|"contests"
 ---@return integer
 local function capacity(kind)
-    local n = ((config.current_setup or config.defaults).recent or {})[kind]
+    local n = (config.current_setup.recent or {})[kind]
     return (type(n) == "number" and n >= 1) and math.floor(n) or 1
 end
 
@@ -396,32 +396,20 @@ local function is_problem_buffer(bufnr, path)
     return ok and next(tctbl) ~= nil
 end
 
----Install the tracking autocmds: remember the problem buffer you are in, and make
----sure the last change reaches disk when Neovim exits.
-function M.setup()
-    local group = api.nvim_create_augroup("TunaRecent", { clear = true })
-    local last_checked -- cheap guard: BufEnter fires a lot, paths repeat
+local last_checked -- cheap guard: BufEnter fires a lot, paths repeat
 
-    api.nvim_create_autocmd("BufEnter", {
-        group = group,
-        callback = function(ev)
-            local path = api.nvim_buf_get_name(ev.buf)
-            if path == "" or path == last_checked then
-                return
-            end
-            last_checked = path
-            if is_problem_buffer(ev.buf, path) then
-                M.record_problem(path)
-            end
-        end,
-        desc = "Remember the problem Tuna should return to with `:Tuna last problem`",
-    })
-
-    api.nvim_create_autocmd("VimLeavePre", {
-        group = group,
-        callback = M.flush,
-        desc = "Persist Tuna's recent problems and contests",
-    })
+---Remember the buffer just entered if it is a problem (`plugin/tuna.lua`'s `BufEnter`,
+---which also saves the state on `VimLeavePre` through `flush`).
+---@param bufnr integer
+function M.track(bufnr)
+    local path = api.nvim_buf_get_name(bufnr)
+    if path == "" or path == last_checked then
+        return
+    end
+    last_checked = path
+    if is_problem_buffer(bufnr, path) then
+        M.record_problem(path)
+    end
 end
 
 --------------------------------------------------------------------------------

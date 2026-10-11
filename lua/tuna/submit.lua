@@ -798,7 +798,7 @@ function M.reports_verdict(path)
     if type(path) ~= "string" or path == "" then
         return false
     end
-    local cfg = config.current_setup or {}
+    local cfg = config.current_setup
     local store = sidecar.read_or_nil(vim.fn.fnamemodify(path, ":h"), cfg) or {}
     local scfg = judge_scfg(cfg.submit or {}, store.url)
     if (scfg.provider or "command") ~= "command" then

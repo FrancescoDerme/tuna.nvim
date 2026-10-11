@@ -39,19 +39,19 @@ local function check_neovim()
     end
 end
 
----@return table cfg the effective configuration (setup's, else defaults)
+---@return table cfg the effective configuration
 local function check_setup()
     health.start("tuna: setup")
     local config = require("tuna.config")
-    if config.current_setup then
+    if config.configured then
         health.ok("require('tuna').setup() has been called")
-        return config.current_setup
+    else
+        health.ok("require('tuna').setup() has not been called, so tuna runs on its defaults")
     end
-    health.warn(
-        "require('tuna').setup() has not been called, reporting against defaults",
-        { "call require('tuna').setup({ ... }) in your config" }
-    )
-    return config.defaults
+    if vim.fn.exists(":Tuna") ~= 2 then
+        health.error("the :Tuna command is not defined", { "make sure tuna's plugin/ directory is loaded" })
+    end
+    return config.current_setup
 end
 
 local function check_toolchains(cfg)

@@ -177,7 +177,7 @@ end
 local function map_cancel(bufs, cancel, opts)
     opts = opts or {}
     local list = type(bufs) == "table" and bufs or { bufs --[[@as integer]] }
-    local shared = (config.current_setup or config.defaults or {}).cancel_keys or {}
+    local shared = config.current_setup.cancel_keys or {}
     local normal = vim.list_extend(vim.list_extend({}, to_list(shared.normal)), to_list(opts.normal))
     local insert = vim.list_extend(vim.list_extend({}, to_list(shared.insert)), to_list(opts.insert))
     for _, b in ipairs(list) do

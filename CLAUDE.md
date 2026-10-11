@@ -20,8 +20,13 @@ library, contest navigation, a scratch file, an unused-file cleaner, a menu and
 
 **Code**
 - Use current APIs (`vim.system`, `vim.uv`, `vim.fs`). Spawn processes and do I/O
-  asynchronously. There is no `plugin/` directory: every module loads on `require`, and
-  nothing heavy may run at require time.
+  asynchronously. tuna lazy-loads itself, as `:h lua-plugin-lazy` asks, so no plugin
+  manager has to: `plugin/tuna.lua` defines `:Tuna`, the highlight groups and the
+  autocmds and loads only `tuna` (the module holding the highlight groups, which
+  requires nothing at load time); the command and each autocmd require what they need
+  when they run, an autocmd only once its event concerns tuna; and nothing heavy may run
+  at require time. `setup()` only configures (`:h lua-plugin-init`): tuna works without
+  it, on the defaults. `tests/startup.lua` holds all of this.
 - Style: 4-space indentation, LuaCATS annotations (`---@param`), a header comment in each file
   (`-- lua/tuna/x.lua`) saying what the module is for.
 - Comments explain the design the code has, and motivating a choice is welcome. They carry no
@@ -94,8 +99,9 @@ library, contest navigation, a scratch file, an unused-file cleaner, a menu and
 ## Repository layout
 
 ```
+plugin/tuna.lua     run at startup: :Tuna + completion, the highlight groups applied, autocmds
 lua/tuna/
-  init.lua          setup(), :Tuna command + completion, highlight groups, VimResized, autocmds
+  init.lua          setup() (options and keymaps only), highlight groups, resize, lualine component
   config.lua        defaults, setup layering, per-directory .tuna.lua, per-buffer config cache
   commands.lua      subcommand dispatch and completion; per-buffer runner cache
   utils.lua         notify, modifier engine, filesystem helpers, float geometry, place_cursor
@@ -137,8 +143,8 @@ tuna.nvim.json      package metadata
 
 ## Configuration
 
-- Layers: defaults → `setup()` opts (`current_setup`) → the nearest `.tuna.lua` found by
-  walking **up** from the buffer's file. `get_buffer_config(bufnr)` resolves and caches per
+- Layers: defaults → `setup()` opts (`current_setup`, the defaults until a `setup()`, which
+  is optional) → the nearest `.tuna.lua` found by walking **up** from the buffer's file. `get_buffer_config(bufnr)` resolves and caches per
   buffer.
 - `setup()` **rebuilds from `vim.deepcopy(defaults)`** on every call. Rebuilding means a key
   removed from the user's config actually goes away when the config is re-sourced. The copy
@@ -153,7 +159,8 @@ tuna.nvim.json      package metadata
   again, every function in it would be a new one, a buffer's config would never
   `deep_equal` its cached runner's, and `commands` would build a new runner, and board, on
   every run.
-- `keymaps.setup()` runs on every `setup()`, outside the once-only guard.
+- `keymaps.setup()` runs on every `setup()`: keymaps are opt-in configuration, so a
+  session that never calls `setup()` has none.
 - `commands` drops a cached runner whose config no longer `deep_equal`s the buffer's current
   config.
 - `commands.target_buffer(bufnr?)` is the buffer every `:Tuna` subcommand acts on (and bare
@@ -1019,8 +1026,9 @@ specific Vim error about a buffer the user never opened.
     answers false for it meanwhile, so deleting a problem by any means unpins it;
     `clean` also unpins what it deletes. `open_pinned(i)` opens one the way
     `open_problem` does (`open_remembered`).
-  - A `BufEnter` records a buffer only when it looks like a problem (runnable, not a support
-    file, with testcases or a sidecar beside it).
+  - `plugin/tuna.lua`'s `BufEnter` hands a file buffer to `track`, which records it only when
+    it looks like a problem (runnable, not a support file, with testcases or a sidecar
+    beside it); its `VimLeavePre` flushes only a session that loaded `recent`.
   - Recording a problem inside a remembered contest moves that contest to the top with the
     problem as its `problem`, even when the problem was already on top. A contest is
     otherwise recorded by downloads, or inferred when a sibling problem shares the sidecar
@@ -1118,15 +1126,18 @@ specific Vim error about a buffer the user never opened.
     one is not a run asking for the mode, and offers nothing.
 - **`health.lua`**: read-only checks for Neovim version, setup, the executables named by
   compile/run commands, Competitive Companion, submit providers and optional plugins.
-- **`init.lua`** also wires `recent.setup()`, `submit.restore` on `BufReadPost`, and a
-  `cnoreabbrev` so lowercase `:tuna` works.
+- **`plugin/tuna.lua`** also wires `submit.restore` on `BufReadPost` (only for a file with a
+  sidecar beside it, looked for with a stat, under the default name while `setup()` has not
+  loaded `config`, so other files don't load `submit`), `VimResized` (a no-op while neither
+  `widgets` nor the results UI is loaded), and a `cnoreabbrev` so lowercase `:tuna` works.
 
 ## Testing
 
 - Run `tests/run.sh` (all files, one headless nvim each, non-zero exit on failure) or
   `tests/run.sh runner`. Keep it passing: it ships with the plugin. Each file gets a throwaway
   `XDG_STATE_HOME` (tests open problems, which tuna records into `recent.json` on exit) and
-  the plugin on the runtimepath by absolute path (a test may change directory). Each file prints
+  the plugin on the runtimepath by absolute path (a test may change directory), with
+  `plugin/tuna.lua` sourced by hand, since `-u NONE` sources no plugin files. Each file prints
   `N checks, M failures` through `tests/harness.lua` (`ok`/`eq`/`has`/`report`).
 - Files:
   - `surfaces.lua`: conformance of every surface to the `surface.lua` contract, every float
@@ -1177,6 +1188,11 @@ specific Vim error about a buffer the user never opened.
     resume/restart and template menus, and absorbing keeping the header of the template actually used;
   - `download.lua`: the listener's boundary, a request handled while its sender is still
     connected, and what is stored (an empty answer kept, no file refused, a typed `~` path);
+  - `startup.lua`: what a session that never uses tuna pays and that it works without
+    `setup()`: `tuna` alone loaded at startup with `:Tuna` and the highlight groups
+    defined, a verdict restored for the first file read (before anything loads `config`),
+    entering any other file loading only what deciding whether it is a problem takes, and
+    `setup()` adding only the keymaps;
   - `testcases.lua`, `compare.lua`, `judges.lua`, `clean.lua`, `submit.lua`:
     unit tests of pure rules (`compare.lua` also: an unknown method reported once, diff marks
     following the verdict, a checker that did not build giving no verdict and no

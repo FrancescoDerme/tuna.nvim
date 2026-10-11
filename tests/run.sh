@@ -18,14 +18,15 @@ fi
 # Tests open solutions beside testcases, which tuna records as recent problems and saves
 # under stdpath("state") on exit: a throwaway state directory keeps them out of yours. The
 # plugin goes on the runtimepath by absolute path, so a test that changes directory (as
-# `:Tuna last` does) still finds its modules.
+# `:Tuna last` does) still finds its modules, and its `plugin/tuna.lua` is sourced by hand,
+# as `-u NONE` sources no plugin files.
 state=$(mktemp -d)
 trap 'rm -rf "$state"' EXIT
 
 failed=0
 total_checks=0
 for f in "${files[@]}"; do
-    out=$(XDG_STATE_HOME="$state" nvim --headless -u NONE --cmd "set noswapfile" -c "set rtp+=$PWD" -c "luafile $f" -c "qa!" 2>&1)
+    out=$(XDG_STATE_HOME="$state" nvim --headless -u NONE --cmd "set noswapfile" -c "set rtp+=$PWD" -c "runtime plugin/tuna.lua" -c "luafile $f" -c "qa!" 2>&1)
     status=$?
     summary=$(printf '%s' "$out" | grep -Eo '[0-9]+ checks, [0-9]+ failures' | tail -1)
     checks=${summary%% *}

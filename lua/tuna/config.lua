@@ -3,8 +3,8 @@
 -- Configuration layering:
 --   defaults  →  user opts (passed to setup())  →  local per-directory config
 --
--- `setup()` merges defaults with the user's options once, producing
--- `current_setup`. Local configuration (a `.tuna.lua` file found by walking up
+-- `current_setup` is the defaults until `setup()`, which is optional, merges the user's
+-- options over them. Local configuration (a `.tuna.lua` file found by walking up
 -- the directory tree from a buffer's file) is applied lazily, per buffer, on
 -- top of `current_setup` and cached in `buffer_configs`.
 
@@ -703,9 +703,13 @@ M.defaults = {
     },
 }
 
----Configuration produced by `setup()` (defaults + user opts).
----@type table?
-M.current_setup = nil
+---The configuration in force: the defaults, with the last `setup()`'s options laid over
+---them once one is called. A copy, for the reason `setup()` gives.
+---@type table
+M.current_setup = vim.deepcopy(M.defaults)
+
+---Whether `setup()` has been called, for `:checkhealth`: tuna runs on the defaults without it.
+M.configured = false
 
 ---Per-buffer resolved configuration (current_setup + local config), cached.
 ---@type table<integer, table>
@@ -741,6 +745,7 @@ function M.setup(opts)
     -- `current_setup` **by reference** — a later write through it would quietly
     -- poison `M.defaults` for the rest of the session.
     M.current_setup = M.update_config_table(vim.deepcopy(M.defaults), opts)
+    M.configured = true
     M.buffer_configs = {} -- invalidate caches so buffers re-resolve against new setup
 end
 

@@ -38,9 +38,7 @@ local function store_file(cfg)
     if cfg and cfg.problem_store_file then
         return cfg.problem_store_file
     end
-    local config = require("tuna.config")
-    local setup = config.current_setup or config.defaults
-    return setup.problem_store_file or ".tuna.json"
+    return require("tuna.config").current_setup.problem_store_file or ".tuna.json"
 end
 
 ---The sidecar's path for a problem directory.

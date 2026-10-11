@@ -288,7 +288,7 @@ Every deletion is confirmed one at a time, with the file in front of you, and a 
 Settings come from three layers, each overriding the one before:
 
 1. the defaults;
-2. what you pass to `setup()`;
+2. what you pass to `setup()`, if you call it;
 3. a `.tuna.lua` anywhere above the file you are editing, returning a table.
    This way a contest folder can set a different time limit, template or testcase layout for everything under it without touching your config.
    It is read again whenever its text changes, so a saved edit applies to the next run, with no restart.

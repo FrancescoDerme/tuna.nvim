@@ -1,13 +1,13 @@
 -- lua/tuna/init.lua
 --
--- The entry point: `setup()`, the `:Tuna` command and its completion, the highlight
--- groups, and the autocmds that keep things in step (resizing the UI, restoring a
--- submit verdict, recording recent problems).
-local config = require("tuna.config")
+-- The entry point: `setup()`, which only configures (the command and the autocmds are
+-- `plugin/tuna.lua`'s), the highlight groups, the resize every UI follows, and the lualine
+-- component. `plugin/tuna.lua` loads it at startup for the highlight groups, so it
+-- requires nothing at load time.
 
 local M = {}
 
-local loaded = false
+local download_started = false
 
 ---@private
 ---Lay `fg` over `bg` at `alpha` opacity, both 24-bit RGB. Used to tint a highlight
@@ -81,6 +81,11 @@ end
 ---Resize Tuna's user interface (widgets + any open results UIs) after the
 ---window geometry changes. Scheduled so it runs once Neovim has settled.
 function M.resize_ui()
+    -- Every float tuna shows is drawn by `widgets` or the results UI, so with neither
+    -- loaded there is nothing on screen to resize.
+    if not (package.loaded["tuna.widgets"] or package.loaded["tuna.runner_ui"]) then
+        return
+    end
     vim.schedule(function()
         require("tuna.widgets").resize_widgets()
         for _, r in ipairs(require("tuna.commands").all_runners()) do
@@ -89,74 +94,23 @@ function M.resize_ui()
     end)
 end
 
+---Change tuna's defaults: `opts` is laid over them, and calling it again replaces what an
+---earlier call set rather than adding to it. tuna works without it (`plugin/tuna.lua`).
+---@param user_opts table?
 function M.setup(user_opts)
+    local config = require("tuna.config")
     config.setup(user_opts)
 
-    -- Re-applied on every setup(), to match config's own contract: re-sourcing a
-    -- config that changed `keymaps` takes effect like every other option, instead of
-    -- silently waiting for a restart. Everything below the guard is config-independent
-    -- and installed once.
+    -- Keymaps are opt-in configuration, so they are applied here, on every call:
+    -- re-sourcing a config that changed `keymaps` takes effect like every other option.
     require("tuna.keymaps").setup()
 
-    if loaded then
-        return
-    end
-    loaded = true
-
-    vim.api.nvim_create_user_command("Tuna", function(opts)
-        if #opts.fargs == 0 then
-            -- Bare `:Tuna` opens the menu, for the solution behind a results pane when
-            -- that is where it is typed.
-            require("tuna.menu").open(require("tuna.commands").target_buffer())
-            return
-        end
-        require("tuna.commands").execute(opts.fargs)
-    end, {
-        nargs = "*",
-        desc = "Tuna",
-        complete = function(...)
-            return require("tuna.commands").complete(...)
-        end,
-    })
-
-    -- Let a lowercase `:tuna …` work too: expand `tuna` to `Tuna` when it's the
-    -- command word (so completion and dispatch behave identically).
-    vim.cmd(
-        [[cnoreabbrev <expr> tuna (getcmdtype() == ':' && getcmdline() =~# '^\s*tuna$') ? 'Tuna' : 'tuna']]
-    )
-
-    local augroup = vim.api.nvim_create_augroup("Tuna", { clear = true })
-
-    M.setup_highlight_groups()
-    vim.api.nvim_create_autocmd("ColorScheme", {
-        group = augroup,
-        callback = M.setup_highlight_groups,
-        desc = "Re-apply Tuna highlight groups after a colorscheme change",
-    })
-
-    vim.api.nvim_create_autocmd("VimResized", {
-        group = augroup,
-        callback = M.resize_ui,
-        desc = "Resize Tuna's UI when the window geometry changes",
-    })
-
-    -- Track the problem/contest to come back to with `:Tuna last …`.
-    require("tuna.recent").setup()
-
-    vim.api.nvim_create_autocmd("BufReadPost", {
-        group = augroup,
-        callback = function(ev)
-            require("tuna.submit").restore(ev.buf)
-        end,
-        desc = "Restore a persisted Tuna submit verdict for a solution buffer",
-    })
-
-    if config.current_setup.start_downloading_persistently_on_setup then
+    if config.current_setup.start_downloading_persistently_on_setup and not download_started then
+        download_started = true
         if vim.v.vim_did_enter == 1 then
             require("tuna.commands").download("persistently")
         else
             vim.api.nvim_create_autocmd("VimEnter", {
-                group = augroup,
                 once = true,
                 callback = function()
                     require("tuna.commands").download("persistently")

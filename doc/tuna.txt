@@ -58,18 +58,17 @@ INSTALLATION                                               *tuna-installation*
 
 With lazy.nvim: >lua
 
-    {
-        "FrancescoDerme/tuna.nvim",
-        config = function()
-            require("tuna").setup({})
-        end,
-    }
+    { "FrancescoDerme/tuna.nvim" }
 <
 With vim.pack: >lua
 
     vim.pack.add({ "https://github.com/FrancescoDerme/tuna.nvim" })
-    require("tuna").setup({})
 <
+tuna works as soon as it is installed, and calling `setup()` is only needed to
+change its defaults (see |tuna-configuration|). It loads the rest of itself
+only when you use it, so there is no need to lazy-load it from your plugin
+manager.
+
 ==============================================================================
 QUICK START                                                  *tuna-quickstart*
 
@@ -564,7 +563,8 @@ Every command is a subcommand of `:Tuna` with tab-completion, and a lowercase
 CONFIGURATION                                             *tuna-configuration*
 
 Everything is optional: `setup()` takes a table shaped like the defaults, and
-anything you leave out keeps its default. >lua
+anything you leave out keeps its default. With lazy.nvim, the same table can
+go in the spec's `opts`. >lua
 
     require("tuna").setup({
         compile_command = {
@@ -589,7 +589,7 @@ WHERE SETTINGS COME FROM                                  *tuna-config-layers*
 Settings come from three layers, each overriding the one before:
 
 1. the defaults;
-2. what you pass to `setup()`;
+2. what you pass to `setup()`, if you call it;
 3. a `.tuna.lua` anywhere above the file you are editing, returning a table.
    This way a contest folder can set a different time limit, template or
    testcase layout for everything under it without touching your config. It is
