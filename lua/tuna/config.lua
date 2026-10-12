@@ -300,9 +300,9 @@ M.defaults = {
         problems = 5,
         contests = 3,
         -- Directories (absolute or `~/…` paths) whose files are never remembered as
-        -- problems or contests, however they are opened or downloaded: a snippet library
-        -- tested with tuna, a folder of experiments. `:Tuna pin` still works there, a pin
-        -- being asked for.
+        -- problems or contests, however they are opened or downloaded, and forgotten if
+        -- they were before: a snippet library tested with tuna, a folder of experiments.
+        -- `:Tuna pin` still works there, a pin being asked for.
         ignored_directories = {},
     },
 

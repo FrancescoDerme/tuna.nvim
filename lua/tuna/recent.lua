@@ -170,6 +170,30 @@ local function prune_pinned()
     return false
 end
 
+---Drop the remembered problems and contests under `recent.ignored_directories`: one
+---recorded before its directory was ignored would otherwise still be offered.
+---@return boolean dropped
+local function forget_ignored()
+    local dropped = false
+    for _, key in ipairs({ "problems", "contests" }) do
+        local list = M.state[key]
+        if list then
+            local kept = {}
+            for _, e in ipairs(list) do
+                local path = type(e) == "table" and (e.file or e.dir)
+                if not (type(path) == "string" and ignored(vim.fs.normalize(path))) then
+                    kept[#kept + 1] = e
+                end
+            end
+            if #kept ~= #list then
+                M.state[key] = #kept > 0 and kept or nil
+                dropped = true
+            end
+        end
+    end
+    return dropped
+end
+
 ---The recent problems and contests, most recent first (the first of each being what
 ---`:Tuna last problem` and `last contest` return to), and the pinned problems, most recently
 ---pinned first, hydrated from disk if this session has not read them yet. Exported so the menu
@@ -178,7 +202,8 @@ end
 ---@return { problems: tuna.RecentProblem[]?, contests: tuna.RecentContest[]?, pinned: tuna.RecentProblem[]? }
 function M.snapshot()
     load()
-    if prune_pinned() then
+    local pruned = prune_pinned()
+    if forget_ignored() or pruned then
         persist()
     end
     return M.state
@@ -512,6 +537,9 @@ end
 ---@param index integer? which recent problem, 1 (the default) being the most recent
 function M.open_problem(index)
     load()
+    if forget_ignored() then
+        persist()
+    end
     local p = (M.state.problems or {})[index or 1]
     if not p then
         utils.notify("last: no problem visited yet, download one or open a solution with its testcases.", "WARN")
@@ -605,6 +633,9 @@ end
 ---@param index integer? which recent contest, 1 (the default) being the most recent
 function M.open_contest(index)
     load()
+    if forget_ignored() then
+        persist()
+    end
     local c = (M.state.contests or {})[index or 1]
     if not c then
         utils.notify("last: no contest visited yet, get one with `:Tuna download contest`.", "WARN")

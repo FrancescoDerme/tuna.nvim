@@ -1033,7 +1033,9 @@ specific Vim error about a buffer the user never opened.
     beside it); its `VimLeavePre` flushes only a session that loaded `recent`.
   - Nothing under `recent.ignored_directories` is ever recorded (`ignored`, checked in
     `record_problem` and `record_contest`, which every way in goes through, and first in
-    `track`), so a snippet library can be tested with tuna. It is a list of
+    `track`), so a snippet library can be tested with tuna. What was remembered there before
+    is forgotten wherever the history is read (`forget_ignored`, in `snapshot`,
+    `open_problem` and `open_contest`), or adding the option would leave it offered. It is a list of
     paths rather than a rule about `library.path`, because a library may hold real
     solutions (unguarded files are offered whole). Pinning is not affected.
   - Recording a problem inside a remembered contest moves that contest to the top with the
@@ -1166,7 +1168,9 @@ specific Vim error about a buffer the user never opened.
     bringing its contest back, contests named by the judge and contest recorded with them,
     dropping deleted directories, reading the state file back, opening any entry, what is
     written, nothing under `ignored_directories` remembered, at any depth, through `~`, as a
-    contest or on entering it, while a directory merely sharing its name as a prefix is) and the pins (most recent first, uncapped, toggling, a deleted solution
+    contest or on entering it, while a directory merely sharing its name as a prefix is, and
+    what was remembered there before forgotten by `:Tuna last problem`, `last contest` and the
+    menu each) and the pins (most recent first, uncapped, toggling, a deleted solution
     unpinned, `:Tuna pin` refusing a non-solution and pinning a helper's solution);
   - `library.lua`: the files listed for a language (no dotfiles at any depth, `~` in
     `library.path`), guarded snippets, and an unclosed guard warned about once per picker;

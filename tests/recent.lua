@@ -193,7 +193,31 @@ do
     end
     local real_home = vim.env.HOME
     vim.env.HOME = home
-    require("tuna").setup({ recent = { problems = 2, contests = 1, ignored_directories = { lib, "~/snip" } } })
+    local function ignoring(on)
+        require("tuna").setup({ recent = { problems = 2, contests = 1, ignored_directories = on and { lib, "~/snip" } or {} } })
+    end
+    -- Remembered while its directory was not ignored yet, then ignored: each way of reading
+    -- the history forgets it on its own.
+    recent.record_problem(lib .. "/fenwick.cpp")
+    t.eq("before it is ignored, a library file is remembered like any other", recent.state.problems[1].file, norm(lib .. "/fenwick.cpp"))
+    ignoring(true)
+    recent.open_problem(1)
+    t.ok("once ignored, :Tuna last problem does not go back to it", not vim.startswith(vim.api.nvim_buf_get_name(0), lib))
+    ignoring(false)
+    recent.record_problem(lib .. "/fenwick.cpp")
+    ignoring(true)
+    t.ok("nor does the menu list it", not vim.tbl_contains(files(), norm(lib .. "/fenwick.cpp")))
+    ignoring(false)
+    recent.record_contest(lib, "Lib", lib .. "/fenwick.cpp", "judge")
+    ignoring(true)
+    local notify = vim.notify
+    vim.notify = function() end
+    recent.open_contest(1)
+    vim.notify = notify
+    t.ok("and :Tuna last contest forgets a contest there", not vim.tbl_contains(vim.tbl_map(function(c)
+        return c.dir
+    end, recent.state.contests or {}), norm(lib)))
+    recent.record_contest(outside, "Outside", nil, "judge") -- the history is not left empty
     local before_files, before_contests = files(), contests()
 
     recent.record_problem(lib .. "/fenwick.cpp")
