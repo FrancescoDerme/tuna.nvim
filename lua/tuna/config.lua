@@ -299,6 +299,11 @@ M.defaults = {
     recent = {
         problems = 5,
         contests = 3,
+        -- Directories (absolute or `~/…` paths) whose files are never remembered as
+        -- problems or contests, however they are opened or downloaded: a snippet library
+        -- tested with tuna, a folder of experiments. `:Tuna pin` still works there, a pin
+        -- being asked for.
+        ignored_directories = {},
     },
 
     -- `:Tuna lib` — copy a piece of your own algorithm library into the current file.

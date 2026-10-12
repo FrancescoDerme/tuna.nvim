@@ -271,6 +271,9 @@ Bare `:Tuna lib` first asks to pick a file, then a snippet in it.
 `snippet` directly lists the snippets, and `search` opens the same catalogue in telescope.
 Only files with the current file's extension are offered, and what is inserted is re-indented to where the cursor is.
 
+Since only the marked parts are copied, a library file can be a whole program whose `main` exercises its snippets, tested with [`:Tuna run`](#run) against testcases like any problem.
+A `.tuna.lua` in the library folder can keep every file's testcases in one shared folder, with `testcases_directory = "tests"`, and listing the library in `recent.ignored_directories` keeps its files out of your recent problems.
+
 ## clean
 
 `:Tuna clean` removes files you created and never used, such as unchanged template solutions and scaffolds, and then the directories they leave empty.

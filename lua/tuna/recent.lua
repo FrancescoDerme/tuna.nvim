@@ -66,6 +66,20 @@ local function capacity(kind)
     return (type(n) == "number" and n >= 1) and math.floor(n) or 1
 end
 
+---Whether `path` (absolute, normalized) lies under one of `recent.ignored_directories`,
+---whose files are never remembered.
+---@param path string
+---@return boolean
+local function ignored(path)
+    for _, dir in ipairs(config.current_setup.recent.ignored_directories or {}) do
+        dir = (vim.fs.normalize(utils.expand_home(dir)):gsub("/$", ""))
+        if dir ~= "" and (path == dir or path:sub(1, #dir + 1) == dir .. "/") then
+            return true
+        end
+    end
+    return false
+end
+
 ---Put `entry` at the top of a most-recent-first list, keeping the rest in order but dropping
 ---its older copy (`same` says which) and any entry whose directory is gone, up to `limit`.
 ---@param list table[]?
@@ -237,8 +251,11 @@ end
 ---@param file string path to a solution file
 ---@param cfg table? resolved config (looked up from the file's directory if omitted)
 function M.record_problem(file, cfg)
-    load()
     file = vim.fs.normalize(vim.fn.fnamemodify(file, ":p"))
+    if ignored(file) then
+        return
+    end
+    load()
     local dir = vim.fs.dirname(file)
     cfg = cfg or config.load_local_config_and_extend(dir)
 
@@ -283,8 +300,11 @@ end
 ---@param problem string? the problem opened inside it
 ---@param judge string? the judge it is on
 function M.record_contest(dir, name, problem, judge)
-    load()
     dir = vim.fs.normalize(vim.fn.fnamemodify(dir, ":p")):gsub("/$", "")
+    if ignored(dir) then
+        return
+    end
+    load()
     local entry = {
         dir = dir,
         name = (name and name ~= "" and name) or vim.fn.fnamemodify(dir, ":t"),
@@ -407,6 +427,10 @@ function M.track(bufnr)
         return
     end
     last_checked = path
+    -- Checked first: deciding whether a file is a problem reads the disk.
+    if ignored(vim.fs.normalize(vim.fn.fnamemodify(path, ":p"))) then
+        return
+    end
     if is_problem_buffer(bufnr, path) then
         M.record_problem(path)
     end

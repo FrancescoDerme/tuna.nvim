@@ -305,7 +305,9 @@ the parts worth copying marked in place: >cpp
 <
 Only files matching the current buffer's extension are offered.
 `:Tuna lib snippet` lists every snippet at once, `:Tuna lib search` opens the
-same catalogue in telescope.
+same catalogue in telescope. Since only the marked parts are copied, each
+library file can also be a program that tests its snippets against testcases,
+as `:Tuna lib` in |tuna-commands| explains.
 
 ------------------------------------------------------------------------------
 KEYMAPS                                                         *tuna-keymaps*
@@ -545,6 +547,14 @@ Every command is a subcommand of `:Tuna` with tab-completion, and a lowercase
         catalogue in telescope. Only files with the current file's extension
         are offered, and what is inserted is re-indented to where the cursor
         is.
+
+        Since only the marked parts are copied, a library file can be a whole
+        program whose `main` exercises its snippets, tested with `:Tuna run`
+        against testcases like any problem. A `.tuna.lua` in the library
+        folder can keep every file's testcases in one shared folder, with
+        `testcases_directory = "tests"`, and listing the library in
+        `recent.ignored_directories` keeps its files out of your recent
+        problems.
 
 :Tuna clean
         Remove files you created and never used, such as unchanged template

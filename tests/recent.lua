@@ -177,6 +177,44 @@ t.eq("recent.problems sets how many problems are kept", files(), { file_of(6), c
 recent.record_problem(cs[1] .. "/A/main.cpp", cfg)
 t.eq("and recent.contests how many contests", contests(), { cs[1] })
 
+--------------------------------------------------------------------------------
+-- Ignored directories
+--------------------------------------------------------------------------------
+
+do
+    local home = t.tempdir()
+    local lib = t.tempdir()
+    local outside = lib .. "x" -- shares the ignored directory's name as a prefix
+    vim.fn.mkdir(outside, "p")
+    vim.fn.mkdir(home .. "/snip", "p")
+    for _, dir in ipairs({ lib, outside }) do
+        t.write(dir, "fenwick.cpp", "int main() {}\n")
+        t.write(dir, "fenwick_input0.txt", "1\n")
+    end
+    local real_home = vim.env.HOME
+    vim.env.HOME = home
+    require("tuna").setup({ recent = { problems = 2, contests = 1, ignored_directories = { lib, "~/snip" } } })
+    local before_files, before_contests = files(), contests()
+
+    recent.record_problem(lib .. "/fenwick.cpp")
+    recent.record_problem(lib .. "/sub/deeper.cpp")
+    recent.record_problem(home .. "/snip/rng.cpp")
+    recent.record_contest(lib, "Lib", lib .. "/fenwick.cpp", "judge")
+    t.eq("a file under an ignored directory, at any depth or through ~, is never remembered", files(), before_files)
+    t.eq("nor is an ignored directory as a contest", contests(), before_contests)
+
+    vim.cmd.edit(vim.fn.fnameescape(lib .. "/fenwick.cpp"))
+    t.eq("entering one, testcases beside it, records nothing", files(), before_files)
+    vim.cmd.edit(vim.fn.fnameescape(outside .. "/fenwick.cpp"))
+    t.eq("a directory merely named like an ignored one is not ignored", files()[1], norm(outside .. "/fenwick.cpp"))
+
+    t.eq("a file under an ignored directory can still be pinned", recent.toggle_pin(lib .. "/fenwick.cpp"), true)
+    recent.toggle_pin(lib .. "/fenwick.cpp")
+
+    vim.env.HOME = real_home
+    require("tuna").setup({ recent = { problems = 2, contests = 1 } })
+end
+
 recent.flush()
 local written = vim.json.decode(table.concat(vim.fn.readfile(store_dir .. "/recent.json"), "\n"))
 t.eq("the histories and the pins are what gets written, in order", {

@@ -199,6 +199,7 @@ long long bexp(long long b, long long e, long long m) { ... }
 
 Only files matching the current buffer's extension are offered.
 `:Tuna lib snippet` lists every snippet at once, `:Tuna lib search` opens the same catalogue in telescope.
+Since only the marked parts are copied, each library file can also be a program that tests its snippets against testcases, as the [reference](REFERENCE.md#lib) explains.
 
 ### Keymaps
 

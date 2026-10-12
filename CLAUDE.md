@@ -180,7 +180,8 @@ without a task and need it.
 **Paths.** `utils.expand_home` expands a bare `~` or a `~/` prefix (not `~user`), by
 concatenation rather than `gsub`. `utils.normalize_path` joins onto a base only when the path
 is relative. Every configured path goes through these: compile/running directories,
-`testcases_directory`, download paths, templates, `clean`, `scratch`, `scaffold`.
+`testcases_directory`, download paths, templates, `clean`, `scratch`, `scaffold`,
+`recent.ignored_directories`.
 
 `utils.template_candidates` normalizes `template_file`'s five shapes (`false`, a path, a list,
 `{ [ext] = path }`, `{ [ext] = { path, … } }`) into an ordered list; the first that exists wins.
@@ -1029,6 +1030,11 @@ specific Vim error about a buffer the user never opened.
   - `plugin/tuna.lua`'s `BufEnter` hands a file buffer to `track`, which records it only when
     it looks like a problem (runnable, not a support file, with testcases or a sidecar
     beside it); its `VimLeavePre` flushes only a session that loaded `recent`.
+  - Nothing under `recent.ignored_directories` is ever recorded (`ignored`, checked in
+    `record_problem` and `record_contest`, which every way in goes through, and first in
+    `track`), so a snippet library can be tested with tuna. It is a list of
+    paths rather than a rule about `library.path`, because a library may hold real
+    solutions (unguarded files are offered whole). Pinning is not affected.
   - Recording a problem inside a remembered contest moves that contest to the top with the
     problem as its `problem`, even when the problem was already on top. A contest is
     otherwise recorded by downloads, or inferred when a sibling problem shares the sidecar
@@ -1158,7 +1164,8 @@ specific Vim error about a buffer the user never opened.
   - `recent.lua`: both histories (default and configured sizes, move to top, a problem
     bringing its contest back, contests named by the judge and contest recorded with them,
     dropping deleted directories, reading the state file back, opening any entry, what is
-    written) and the pins (most recent first, uncapped, toggling, a deleted solution
+    written, nothing under `ignored_directories` remembered, at any depth, through `~`, as a
+    contest or on entering it, while a directory merely sharing its name as a prefix is) and the pins (most recent first, uncapped, toggling, a deleted solution
     unpinned, `:Tuna pin` refusing a non-solution and pinning a helper's solution);
   - `library.lua`: the files listed for a language (no dotfiles at any depth, `~` in
     `library.path`), guarded snippets, and an unclosed guard warned about once per picker;
