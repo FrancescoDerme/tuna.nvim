@@ -78,7 +78,7 @@ M.defaults = {
     tool_names = {
         checker = { "checker", "check" },
         generator = { "gen", "generator" },
-        bruteforce = { "brute", "reference" },
+        bruteforce = { "brute", "bruteforce", "reference" },
         interactor = { "interactor", "interact" },
     },
 

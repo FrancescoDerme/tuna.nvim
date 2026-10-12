@@ -31,6 +31,12 @@ local _, all = problem({ "checker.py", "gen.py", "brute.py", "interactor.py" })
 for _, role in ipairs({ "checker", "generator", "bruteforce", "interactor" }) do
     t.ok("a sibling file is the " .. role, tools.helper(role, all, cfg) ~= nil)
 end
+-- The role's own word, the one `:Tuna scaffold` takes, names its file too.
+for _, role in ipairs({ "checker", "generator", "bruteforce", "interactor" }) do
+    local _, sol = problem({ role .. ".py" })
+    t.ok("a file named " .. role .. " is the " .. role, tools.helper(role, sol, cfg) ~= nil)
+    t.ok("and not a solution", tools.is_support(vim.fs.dirname(sol) .. "/" .. role .. ".py", cfg))
+end
 -- A compiled helper runs where the solution runs, so its program is looked for there too.
 do
     local gen = tools.helper("generator", all, with({ running_directory = "out" }))
