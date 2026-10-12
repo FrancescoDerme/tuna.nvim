@@ -526,7 +526,8 @@ local ARTIFACT_EXTS = { exe = true, out = true, o = true, obj = true, class = tr
 ---caught by it. That is enough for the case it exists for — the run removes `main.cpp`,
 ---the `main` beside it keeps the directory alive, and the testcases and sidecar are then
 ---stranded there with it while the directory pass declines to offer a directory that is
----not empty.
+---not empty. A build written hidden (`-o .$(FNOEXT)`, keeping solution folders tidy) is
+---the same output, so one leading dot is ignored.
 ---@param dir string
 ---@param name string basename
 ---@param ctx { artifacts: table<string, table<string, boolean>>? } scan context, whose
@@ -537,6 +538,7 @@ local function is_artifact(dir, name, ctx)
     if not stems then
         return false
     end
+    name = name:match("^%.(.+)$") or name
     local stem, ext = name:match("^(.*)%.([^.]+)$")
     if not stem then
         return stems[name] == true

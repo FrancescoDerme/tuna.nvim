@@ -117,6 +117,9 @@ t.ok("and its .o", clean.is_artifact("/p", "main.o", art))
 t.ok("and a Java .class", clean.is_artifact("/p", "main.class", art))
 -- macOS leaves a *directory* beside a debug build; it goes with the rest of them.
 t.ok("and macOS's .dSYM bundle", clean.is_artifact("/p", "main.dSYM", art))
+t.ok("a build written hidden is one too", clean.is_artifact("/p", ".main", art))
+t.ok("and so is a hidden one's .o", clean.is_artifact("/p", ".main.o", art))
+t.ok("but not a hidden file no solution was removed for", not clean.is_artifact("/p", ".helper", art))
 
 -- Nothing else, in either direction.
 t.ok("a source file is not an artifact of itself", not clean.is_artifact("/p", "main.cpp", art))

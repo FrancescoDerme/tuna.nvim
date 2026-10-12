@@ -994,7 +994,8 @@ specific Vim error about a buffer the user never opened.
     `skip` the path relative to the root), a shared `clean.max_entries` budget reported through the `notice` pane,
     early rejection on the line-count ceiling, and a 1 MiB size guard.
   - **Directory pass**: offers directories left empty apart from disposable files (testcases,
-    the sidecar, and `is_artifact` build outputs of a solution *this run* removed). Directories
+    the sidecar, and `is_artifact` build outputs of a solution *this run* removed, a hidden
+    one, `.main`, included). Directories
     are evaluated post-order, deepest first. Directories the run emptied are evaluated before
     the general sweep, so the budget can't starve them. `protected_directories` covers the scan root,
     cwd, launch directory, configured roots, home and its XDG/standard subdirectories, system
