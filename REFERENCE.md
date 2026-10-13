@@ -267,8 +267,9 @@ long long bexp(long long b, long long e, long long m) { ... }
 // TUNALIB: binary exp end
 ```
 
-It lists every snippet, and every file with no snippets marked in it whole, in files with the current file's extension.
-Typing narrows the list: names and file names match fuzzily, the words in any order, and then come the snippets whose code contains what you typed, however it is spaced.
+It lists every snippet in files with the current file's extension.
+If a file has no marked snippet, it is offered whole.
+Typing narrows the list: name and file name matches show up first, and then the snippets whose code is matched.
 `<Down>` and `<Up>` move through the list as you type, `<CR>` inserts the highlighted snippet, and the pane keys (`switch_window_keys`) step into the list and into the preview below it, which reads like any buffer.
 What is inserted is re-indented to where the cursor is.
 
