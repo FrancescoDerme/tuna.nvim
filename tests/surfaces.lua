@@ -409,6 +409,82 @@ end
 ok("a following preview starts on that row too", previewed == "row 2", previewed)
 close_layer(80)
 
+-- A menu with a search: focused on the search pane and typing, the list narrowed by what is
+-- typed, even when the keys come faster than the change events (`et<CR>` in one go), and
+-- a choice still named by its index among all the items. While typing j/k type, and
+-- <Down>/<Up> move the list. The pane keys walk search, list, preview, and arriving back
+-- in the search pane types again. A resize keeps the search, and a search that finds
+-- nothing leaves nothing to choose.
+do
+    local items = { "jam", "ajar", "beta" }
+    local chosen
+    -- Opened from a key, as a command is, so its start in insert mode is applied.
+    function _G.tuna_open_search()
+        chosen = nil
+        widgets.menu(items, "a search", function(i)
+            chosen = i
+        end, nil, nil, {
+            width = 40,
+            content = function(i)
+                return { title = items[i], lines = { "about " .. items[i] } }
+            end,
+        }, nil, nil, function(q)
+            local out = {}
+            for i, item in ipairs(items) do
+                if item:find(q, 1, true) then
+                    out[#out + 1] = i
+                end
+            end
+            return out
+        end)
+    end
+    -- One scenario is one key sequence, since `x` ends insert mode when its keys run
+    -- out; `<Cmd>` probes along it record what was on screen at that point.
+    local function keys(k)
+        api.nvim_feedkeys(api.nvim_replace_termcodes(k, true, false, true), "x", false)
+    end
+    local function lines_of(title)
+        for _, f in ipairs(floats()) do
+            local t = api.nvim_win_get_config(f.win).title
+            if t and vim.trim(t[1][1]) == title then
+                return api.nvim_buf_get_lines(f.buf, 0, -1, false)
+            end
+        end
+    end
+    function _G.tuna_note()
+        local title = api.nvim_win_get_config(0).title
+        tuna_probe[#tuna_probe + 1] = (title and vim.trim(title[1][1]) or "?") .. " " .. api.nvim_get_mode().mode
+    end
+    local OPEN, NOTE = "<Cmd>lua tuna_open_search()<CR>", "<Cmd>lua tuna_note()<CR>"
+
+    _G.tuna_probe = {}
+    keys(OPEN .. NOTE .. "<Esc>")
+    ok("a search menu opens on its search pane, typing", tuna_probe[1] == "Search i", tuna_probe[1])
+    conforms("widgets.menu with a search")
+    close_layer(80)
+
+    keys(OPEN .. "et<CR>")
+    ok("what is typed narrows the list before <CR> reads it, and the choice is the item's index", chosen == 3, chosen)
+
+    keys(OPEN .. "j<Down><CR>")
+    ok("while typing, j is typed and <Down> moves the list", chosen == 2, chosen)
+
+    _G.tuna_probe = {}
+    keys(OPEN .. NOTE .. "<C-j>" .. NOTE .. "<C-j>" .. NOTE .. "<C-k><C-k>" .. NOTE .. "be<Esc>")
+    ok("the pane keys walk search, list and preview, and arriving back in the search pane types",
+        vim.deep_equal(tuna_probe, { "Search i", "a search n", "jam n", "Search i" }), vim.inspect(tuna_probe))
+
+    widgets.menu(nil)
+    settle(100)
+    ok("a resize keeps the search and the list it found", vim.deep_equal({ lines_of("Search"), lines_of("a search") }, { { "be" }, { "beta" } }),
+        vim.inspect({ lines_of("Search"), lines_of("a search") }))
+
+    chosen = nil
+    keys("Szzz<CR><Esc>")
+    ok("nothing found, nothing to choose", chosen == nil and lines_of("No match") ~= nil, vim.inspect({ chosen, #floats() }))
+    close_layer(80)
+end
+
 -- With a global statusline a float starts from the bar of the window it opens over: a
 -- statusline plugin that renders into each window (lualine) otherwise blanks the one bar
 -- whenever a float takes focus.

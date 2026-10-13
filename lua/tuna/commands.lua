@@ -24,7 +24,6 @@ local subcommand_args = {
     scaffold = tools.ROLES,
     checker = { "auto", "off" },
     submit = { "clear" },
-    lib = { "snippet", "search" },
     last = { "problem", "contest" },
 }
 
@@ -808,18 +807,8 @@ M.subcommands = {
             recent.open_problem()
         end
     end,
-    -- Two ways into the snippet library, because two things happen in practice: you
-    -- remember the file it is in, or you remember the snippet.
-    lib = function(args)
-        local library = require("tuna.library")
-        local bufnr = M.target_buffer()
-        if args[1] == "snippet" then
-            library.pick(bufnr)
-        elseif args[1] == "search" then
-            library.search(bufnr) -- telescope, when installed
-        else
-            library.browse(bufnr)
-        end
+    lib = function()
+        require("tuna.library").open(M.target_buffer())
     end,
     -- The scratch itself. Folding it back into a real problem is a *download*
     -- (`:Tuna download sync`), since that is what it does — it downloads.

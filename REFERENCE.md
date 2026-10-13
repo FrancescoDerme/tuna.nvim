@@ -64,7 +64,7 @@ Every command is a subcommand of `:Tuna` with tab-completion, and a lowercase `:
   <td>drop in a scratch file to solve a contest's first problem before syncing</td>
 </tr>
 <tr>
-  <td><a href="#lib"><code>:Tuna lib [snippet|search]</code></a></td>
+  <td><a href="#lib"><code>:Tuna lib</code></a></td>
   <td>insert code from your algorithms library</td>
 </tr>
 <tr>
@@ -255,7 +255,7 @@ If a scratch already exists tuna asks whether to resume it or restart.
 ## lib
 
 ```
-:Tuna lib [snippet|search]
+:Tuna lib
 ```
 
 Copies a piece of your own library into the file you are writing.
@@ -267,9 +267,10 @@ long long bexp(long long b, long long e, long long m) { ... }
 // TUNALIB: binary exp end
 ```
 
-Bare `:Tuna lib` first asks to pick a file, then a snippet in it.
-`snippet` directly lists the snippets, and `search` opens the same catalogue in telescope.
-Only files with the current file's extension are offered, and what is inserted is re-indented to where the cursor is.
+It lists every snippet, and every file with no snippets marked in it whole, in files with the current file's extension.
+Typing narrows the list: names and file names match fuzzily, the words in any order, and then come the snippets whose code contains what you typed, however it is spaced.
+`<Down>` and `<Up>` move through the list as you type, `<CR>` inserts the highlighted snippet, and the pane keys (`switch_window_keys`) step into the list and into the preview below it, which reads like any buffer.
+What is inserted is re-indented to where the cursor is.
 
 Since only the marked parts are copied, a library file can be a whole program whose `main` exercises its snippets, tested with [`:Tuna run`](#run) against testcases like any problem.
 A `.tuna.lua` in the library folder can keep every file's testcases in one shared folder, with `testcases_directory = "tests"`, and listing the library in `recent.ignored_directories` keeps its files out of your recent problems.
@@ -430,7 +431,7 @@ keymaps = {
 
 `mappings` are buffer-local, set for the solution filetypes in `keymaps.filetypes`, and `global` are set once and always there.
 
-Every action can be mapped this way. An action is a name for a `:Tuna` command with its arguments fixed. Actions are defined in `M.actions` in [`lua/tuna/keymaps.lua`](lua/tuna/keymaps.lua): `menu`, `run`, `run_all`, `run_stress`, `run_interactive`, `show_ui`, `add_testcase`, `edit_testcase`, `delete_testcase`, `submit`, `submit_clear`, `download_testcases`, `download_problem`, `download_contest`, `download_sync`, `clean`, `pin`, `next_problem`, `prev_problem`, `last_problem`, `last_contest`, `scratch`, `library`, `library_snippet` and `library_search`.
+Every action can be mapped this way. An action is a name for a `:Tuna` command with its arguments fixed. Actions are defined in `M.actions` in [`lua/tuna/keymaps.lua`](lua/tuna/keymaps.lua): `menu`, `run`, `run_all`, `run_stress`, `run_interactive`, `show_ui`, `add_testcase`, `edit_testcase`, `delete_testcase`, `submit`, `submit_clear`, `download_testcases`, `download_problem`, `download_contest`, `download_sync`, `clean`, `pin`, `next_problem`, `prev_problem`, `last_problem`, `last_contest`, `scratch` and `library`.
 
 ## Highlights
 

@@ -167,9 +167,8 @@ end
 
 local function check_integrations()
     health.start("tuna: optional integrations")
-    -- telescope only powers `:Tuna lib search`; the other two library routes need
-    -- nothing, so its absence is information, not a problem.
-    for _, plugin in ipairs({ "toggleterm", "lualine", "telescope" }) do
+    -- Neither is needed, so an absence is information, not a problem.
+    for _, plugin in ipairs({ "toggleterm", "lualine" }) do
         if pcall(require, plugin) then
             health.ok(("`%s` installed"):format(plugin))
         else

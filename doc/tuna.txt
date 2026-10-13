@@ -50,8 +50,8 @@ REQUIREMENTS                                               *tuna-requirements*
   submitter, to submit your solutions and get the verdicts in your
   statusline: https://github.com/EgorKulikov/submitter
 - Optional: toggleterm.nvim for the submit terminal, lualine.nvim for the
-  download and verdict indicators, telescope.nvim for searching the library,
-  which-key.nvim to see the keymaps as you type them
+  download and verdict indicators, which-key.nvim to see the keymaps as you
+  type them
 
 ==============================================================================
 INSTALLATION                                               *tuna-installation*
@@ -304,10 +304,12 @@ the parts worth copying marked in place: >cpp
     // TUNALIB: binary exp end
 <
 Only files matching the current buffer's extension are offered.
-`:Tuna lib snippet` lists every snippet at once, `:Tuna lib search` opens the
-same catalogue in telescope. Since only the marked parts are copied, each
-library file can also be a program that tests its snippets against testcases,
-as `:Tuna lib` in |tuna-commands| explains.
+It lists every snippet in files matching the current buffer's extension, and
+narrows the list as you type, matching a snippet's name, its file or a piece
+of its code. The highlighted snippet is shown below the list, where you can
+step in to read it before inserting it. Since only the marked parts are
+copied, each library file can also be a program that tests its snippets
+against testcases, as `:Tuna lib` in |tuna-commands| explains.
 
 ------------------------------------------------------------------------------
 KEYMAPS                                                         *tuna-keymaps*
@@ -537,16 +539,20 @@ Every command is a subcommand of `:Tuna` with tab-completion, and a lowercase
         `:Tuna download sync` then folds what you wrote into the first problem
         it downloads.
 
-:Tuna lib [snippet/search]
+:Tuna lib
         Copy a piece of your own library into the file you are writing. The
         library is plain source files under `library.path`, with the parts
         worth copying marked in place, see |tuna-library|.
 
-        Bare `:Tuna lib` first asks to pick a file, then a snippet in it.
-        `snippet` directly lists the snippets, and `search` opens the same
-        catalogue in telescope. Only files with the current file's extension
-        are offered, and what is inserted is re-indented to where the cursor
-        is.
+        It lists every snippet, and every file with no snippets marked in it
+        whole, in files with the current file's extension. Typing narrows the
+        list: names and file names match fuzzily, the words in any order, and
+        then come the snippets whose code contains what you typed, however it
+        is spaced. `<Down>` and `<Up>` move through the list as you type,
+        `<CR>` inserts the highlighted snippet, and the pane keys
+        (`switch_window_keys`) step into the list and into the preview below
+        it, which reads like any buffer. What is inserted is re-indented to
+        where the cursor is.
 
         Since only the marked parts are copied, a library file can be a whole
         program whose `main` exercises its snippets, tested with `:Tuna run`
@@ -704,8 +710,8 @@ with its arguments fixed. Actions are defined in `M.actions` in
 `run_interactive`, `show_ui`, `add_testcase`, `edit_testcase`,
 `delete_testcase`, `submit`, `submit_clear`, `download_testcases`,
 `download_problem`, `download_contest`, `download_sync`, `clean`, `pin`,
-`next_problem`, `prev_problem`, `last_problem`, `last_contest`, `scratch`,
-`library`, `library_snippet` and `library_search`.
+`next_problem`, `prev_problem`, `last_problem`, `last_contest`, `scratch`
+and `library`.
 
 ------------------------------------------------------------------------------
 HIGHLIGHTS                                                   *tuna-highlights*

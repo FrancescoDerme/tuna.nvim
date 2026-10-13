@@ -8,7 +8,7 @@ are easy to undo by accident, and the rules for changing it.
 ## What it is
 
 tuna.nvim is a competitive-programming plugin for Neovim 0.10+, written in pure Lua with no
-required dependencies (toggleterm, lualine and telescope are optional). It is a rewrite of
+required dependencies (toggleterm and lualine are optional). It is a rewrite of
 competitest.nvim, not a port. Everything is reached through one user command,
 `:Tuna <subcommand>`: testcase storage and inline editing, compile/run with verdicts in a
 floating results UI, run modes (normal, run-all, stress, interactive), checkers, Competitive
@@ -847,9 +847,18 @@ specific Vim error about a buffer the user never opened.
   `skip_close` keeps the panes' `WinClosed` from running the real close (which leaves insert
   mode) while they are replaced.
 - `menu`: optional `on_close`; `preview` (fixed lines or cursor-following `content(idx)`, colour
-  via `'syntax'` not `'filetype'`, list capped at `MENU_LIST_SHARE` of the height); `notice`
-  pane above the menu, outside the focus cycle; `row` to start the cursor on (a resize keeps
-  the row it is on).
+  via `'syntax'` not `'filetype'`, list capped at `MENU_LIST_SHARE` of the height, read-only
+  and never left modified); `notice` pane above the menu, outside the focus cycle; `row` to
+  start the cursor on (a resize keeps the row it is on); `search(query)`, a one-row pane
+  above the list, opened focused and typing, whose text the list is narrowed to (`shown`,
+  indices into `items`, which `on_choice` and `content` still get). The list keeps the height
+  of the whole, so it does not resize as it narrows. The change events (`TextChangedI`) are
+  not the only reader: `refilter` runs again before `<CR>` or a list key reads the list, and
+  a resize reads the pane itself, since keys arriving together (`fen<CR>`) run before the
+  event is delivered. While typing, only the list keys that type nothing (`<Down>`/`<Up>`)
+  move the list, so `j` and `k` can be searched for; the pane keys walk search, list and
+  preview, and arriving back in the search pane types again. A resize keeps the search, the
+  pane focused and whether it was typing.
 - `panels`: lists in columns where `<CR>` acts on the focused list only (the `:Tuna` menu).
   `form`: stacked lists where `<CR>` submits every selection (clean). A `panels` section may
   carry `highlights`, byte-range spans drawn as extmarks in `tuna_panels`. They differ in what
@@ -874,8 +883,8 @@ specific Vim error about a buffer the user never opened.
   `bufhidden = wipe`.
 - `open_float` sets what every widget float needs: `cursorline` with local scope (so the
   global value never leaks), `wrap`, `keep_scrolloff`. `step_keys` turns
-  `switch_window_keys` into the next/previous keys of stacked panes (menu and preview,
-  form sections). **Panes move only with `switch_window_keys`, lists only with
+  `switch_window_keys` into the next/previous keys of stacked panes (search, menu and
+  preview, form sections). **Panes move only with `switch_window_keys`, lists only with
   `picker_ui.mappings.focus_next`/`focus_prev`, and Tab means nothing**, in every widget
   and in the results UI alike: one setting per kind of move. Every list moves through
   `widgets.move_cursor` (a count steps that many, the ends wrap), the menus, the form's
@@ -1006,11 +1015,15 @@ specific Vim error about a buffer the user never opened.
   source files; files without guards are offered whole. Only files with the current buffer's
   extension are shown, dotfiles and dot-directories left out at every depth, and
   `library.path` goes through `expand_home`/`normalize_path`. Snippets are inserted dedented
-  and re-indented to the cursor line. A picker parses each file once (`parsed_once`), since
-  its preview is drawn on every cursor move, so an unclosed guard warns once.
-  `:Tuna lib search` uses telescope when present, fuzzy-matching `name + file` only; a body
-  match is appended to the ordinal so it ranks below name matches (fuzzy-matching bodies swamps
-  the sorter).
+  and re-indented to the cursor line. `:Tuna lib` is one picker, a `widgets.menu` with a
+  `search` (`open`): the `catalogue` is read once when it opens, so an unclosed guard warns
+  once, and `rank` orders a search: `matchfuzzy` over `name file` (case-insensitive for a
+  lowercase query, words in any order), then the entries whose whitespace-free, lowercased
+  body contains the whitespace-free query. Fuzzy matching stops at names, because nearly
+  anything typed is scattered somewhere in a body. Don't add a file-then-snippet route or a
+  telescope picker beside it: the search covers a file (its name finds its snippets), and
+  telescope's preview cannot be entered to read the code. Arguments after `:Tuna lib` are
+  ignored, so a mapping written with `snippet` or `search` still opens it.
 - **`navigate.lua`**: the next or previous sibling problem directory in name order.
   `solution_in` prefers the same file name, then the same extension, then any runnable
   file that is not a support file (`tools.is_support`). The ends of a contest warn instead of wrapping.
@@ -1152,7 +1165,9 @@ specific Vim error about a buffer the user never opened.
   - `surfaces.lua`: conformance of every surface to the `surface.lua` contract, every float
     tagged before it is entered, no float drawing a statusline of its own unless the
     statusline is global (read off the screen), every `runner_ui.mappings` key still
-    resolving to an action, a menu's starting row and preview, and the editor rebuilt by a resize in the
+    resolving to an action, a menu's starting row and preview, a menu's search (opened
+    typing, narrowing the list before `<CR>` reads it, `j` typed and `<Down>` moving, the
+    pane walk, a resize keeping the search, nothing found choosing nothing), and the editor rebuilt by a resize in the
     pane, cursor and insert mode it was in, and saving with `:w`/`:wq` and asking before an
     unsaved edit is closed away;
   - `menu.lua`: the contest summary over both layouts, counting current judge verdicts
@@ -1173,7 +1188,9 @@ specific Vim error about a buffer the user never opened.
     menu each) and the pins (most recent first, uncapped, toggling, a deleted solution
     unpinned, `:Tuna pin` refusing a non-solution and pinning a helper's solution);
   - `library.lua`: the files listed for a language (no dotfiles at any depth, `~` in
-    `library.path`), guarded snippets, and an unclosed guard warned about once per picker;
+    `library.path`), guarded snippets, what the picker lists and how a search orders it
+    (names and files fuzzily in either case and word order, then code however it is
+    spaced), and an unclosed guard warned about once;
   - `modes.lua`: the helper and run-setting rule end to end: availability (files, configured
     paths and commands, missing ones), automatic choices, forcing and `auto`, forced settings
     giving way and coming back, old sidecar entries, runners refreshing the checker per run,

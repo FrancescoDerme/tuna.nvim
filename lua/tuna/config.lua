@@ -318,9 +318,8 @@ M.defaults = {
     --
     -- Everything outside the guards (includes, `main`, scratch code) is ignored, and
     -- the guards work in any language since they are recognized anywhere in a line.
-    -- Three ways in: `:Tuna lib` (file, then snippet), `:Tuna lib snippet` (straight
-    -- from every snippet) and `:Tuna lib search` (the same catalogue in telescope,
-    -- matching names first and code second — needs telescope, the others do not).
+    -- `:Tuna lib` lists every snippet, and every file with no guards whole, and narrows
+    -- the list as you type: names and files first, then snippets whose code contains it.
     library = {
         path = false, -- false | "~/cp/snippets" | { dir, dir, … }
         marker = "TUNALIB",

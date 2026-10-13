@@ -16,7 +16,7 @@ tuna.nvim is a competitive programming plugin that integrates with [Competitive 
 - A compiler or interpreter for the languages you use
 - Optional: the [Competitive Companion](https://github.com/jmerle/competitive-companion) browser extension, to download problems and contests
 - Optional: one or more command-line submit tools for your judges, such as [submitter](https://github.com/EgorKulikov/submitter), to submit your solutions and get the verdicts in your statusline
-- Optional: [toggleterm.nvim](https://github.com/akinsho/toggleterm.nvim) for the submit terminal, [lualine.nvim](https://github.com/nvim-lualine/lualine.nvim) for the download and verdict indicators, [telescope.nvim](https://github.com/nvim-telescope/telescope.nvim) for searching the library, [which-key.nvim](https://github.com/folke/which-key.nvim) to see the keymaps as you type them
+- Optional: [toggleterm.nvim](https://github.com/akinsho/toggleterm.nvim) for the submit terminal, [lualine.nvim](https://github.com/nvim-lualine/lualine.nvim) for the download and verdict indicators, [which-key.nvim](https://github.com/folke/which-key.nvim) to see the keymaps as you type them
 
 ## Installation
 
@@ -197,8 +197,8 @@ long long bexp(long long b, long long e, long long m) { ... }
 // TUNALIB: binary exp end
 ```
 
-Only files matching the current buffer's extension are offered.
-`:Tuna lib snippet` lists every snippet at once, `:Tuna lib search` opens the same catalogue in telescope.
+It lists every snippet in files matching the current buffer's extension, and narrows the list as you type, matching a snippet's name, its file or a piece of its code.
+The highlighted snippet is shown below the list, where you can step in to read it before inserting it.
 Since only the marked parts are copied, each library file can also be a program that tests its snippets against testcases, as the [reference](REFERENCE.md#lib) explains.
 
 ### Keymaps

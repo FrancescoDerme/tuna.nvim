@@ -16,15 +16,13 @@
 -- tested with) is ignored. The marker word is `library.marker`, and the guards are
 -- recognized anywhere in a line, so the comment syntax of any language works.
 --
--- Two ways in, because two things happen in practice — you remember *the file*
--- ("it's in fenwick.cpp"), or you remember *the snippet* ("I need the 2D one"):
---
---   * `:Tuna lib`         — pick a file, then a snippet inside it
---   * `:Tuna lib snippet` — pick straight from every snippet in the library
---
--- Both list only files with the current file's extension (a C++ problem gets the C++
--- library), preview the code under the cursor before it is inserted, and paste it
--- below the cursor re-indented to the current line.
+-- One picker holds the whole library: every snippet, and every file with no guards in it
+-- whole, listed by name beside its file. Typing narrows it, matching what you remember
+-- of a snippet, its name, its file ("it's in fenwick.cpp") or a piece of its code
+-- ("the one with `parent[`"), and the code under the cursor is previewed in a pane that
+-- can be entered and read like a buffer before it is inserted. Only files with the
+-- current file's extension are listed (a C++ problem gets the C++ library), and a snippet
+-- is pasted below the cursor re-indented to the current line.
 
 local utils = require("tuna.utils")
 local config = require("tuna.config")
@@ -129,8 +127,8 @@ function M.parse(lines, marker)
     return out, unclosed and ("unclosed '" .. unclosed .. "' guard") or nil
 end
 
----The snippets of one library file, warning about an unclosed guard in it. A picker reads a
----file through `parsed_once`, so the warning comes once however often its preview is drawn.
+---The snippets of one library file, warning about an unclosed guard in it. The picker reads
+---every file once, when it opens, so the warning comes once however often it is searched.
 ---@param file { path: string, rel: string }
 ---@param cfg table
 ---@return tuna.Snippet[]
@@ -148,18 +146,6 @@ local function snippets_of(file, cfg)
         s.path = file.path
     end
     return snips
-end
-
----`snippets_of` for one picker, each file parsed once: its preview is drawn on every move
----of the cursor.
----@param cfg table
----@return fun(file: { path: string, rel: string }): tuna.Snippet[]
-local function parsed_once(cfg)
-    local seen = {}
-    return function(file)
-        seen[file.path] = seen[file.path] or snippets_of(file, cfg)
-        return seen[file.path]
-    end
 end
 
 --------------------------------------------------------------------------------
@@ -235,13 +221,12 @@ end
 -- Pickers
 --------------------------------------------------------------------------------
 
--- How wide the pickers are. Height is left to the menu: it caps the list and gives the
+-- How wide the picker is. Height is left to the menu: it caps the list and gives the
 -- rest to the preview, so a library of thirty files still shows a screenful of code.
 local PREVIEW_WIDTH = 0.6
 
----Menu geometry shared by both pickers. `filetype` is the default colouring for every
----row's content, so only a pane showing something *other* than code (the snippet-name
----list) has to say otherwise.
+---The picker's preview: as wide as `PREVIEW_WIDTH` of the editor, coloured as the
+---language of `ext`.
 ---@param ext string extension whose language colours the preview
 ---@param content fun(idx: integer): table
 ---@return table preview
@@ -264,33 +249,7 @@ local function buffer_ext(bufnr)
     return ext ~= "" and ext or nil
 end
 
----Choose among a file's snippets, then insert.
----@param snips table[]
----@param bufnr integer
----@param restore integer?
----@param label fun(s: table): string
-local function choose_snippet(snips, bufnr, restore, label)
-    local items = {}
-    for i, s in ipairs(snips) do
-        items[i] = label(s)
-    end
-    require("tuna.widgets").menu(
-        items,
-        "Snippet",
-        function(idx)
-            M.insert(snips[idx], bufnr)
-        end,
-        restore,
-        nil,
-        preview_opts(buffer_ext(bufnr) or "txt", function(idx)
-            local s = snips[idx]
-            return s and { title = s.file .. ":" .. s.first, lines = s.lines } or { lines = {} }
-        end)
-    )
-end
-
----The shared preamble of every picker: resolve the config, the buffer's extension
----and check the library is configured at all.
+---Resolve the config and the buffer's extension, and check the library is configured.
 ---@param bufnr integer
 ---@return table? cfg, string? ext
 local function picker_context(bufnr)
@@ -308,97 +267,20 @@ local function picker_context(bufnr)
     return cfg, ext
 end
 
----`:Tuna lib` — pick a library file, then a snippet inside it.
----@param bufnr integer? defaults to the current buffer
-function M.browse(bufnr)
-    bufnr = bufnr or vim.api.nvim_get_current_buf()
-    local restore = vim.api.nvim_get_current_win()
-    local cfg, ext = picker_context(bufnr)
-    if not (cfg and ext) then
-        return
-    end
-    local snippets_in = parsed_once(cfg)
-
-    local files = M.files(cfg, ext)
-    if #files == 0 then
-        utils.notify("library: no ." .. ext .. " files in the library.", "WARN")
-        return
-    end
-
-    local items = {}
-    for i, f in ipairs(files) do
-        items[i] = f.rel
-    end
-    require("tuna.widgets").menu(
-        items,
-        "Library",
-        function(idx)
-            local file = files[idx]
-            local snips = snippets_in(file)
-            if #snips == 0 then
-                -- Nothing is marked up, so there is nothing to pick from — but the file is
-                -- still a perfectly good thing to copy whole, which is what the library was
-                -- before any guards were added to it.
-                local content = utils.read_file(file.path) or ""
-                choose_snippet(
-                    {
-                        {
-                            name = file.rel,
-                            file = file.rel,
-                            path = file.path,
-                            first = 1,
-                            lines = vim.split(content, "\n", { plain = true }),
-                        },
-                    },
-                    bufnr,
-                    restore,
-                    function(s)
-                        return s.name .. "   (whole file, no guards in it)"
-                    end
-                )
-                return
-            end
-            choose_snippet(snips, bufnr, restore, function(s)
-                return s.name
-            end)
-        end,
-        restore,
-        nil,
-        preview_opts(ext, function(idx)
-            local f = files[idx]
-            if not f then
-                return { lines = {} }
-            end
-            -- Preview the file's snippet names when it has any, the file itself when not:
-            -- the question at this step is "is what I want in here?".
-            local snips = snippets_in(f)
-            if #snips == 0 then
-                return { title = f.rel, lines = vim.split(utils.read_file(f.path) or "", "\n", { plain = true }) }
-            end
-            local lines = {}
-            for _, s in ipairs(snips) do
-                lines[#lines + 1] = ("%s   (%d lines)"):format(s.name, #s.lines)
-            end
-            return { title = f.rel .. ", snippets", lines = lines, filetype = "text" }
-        end)
-    )
-end
-
----Everything insertable in the library for `ext`, sorted by name: every guarded
----snippet, and — when `whole_files` is set — every file with no guards as a single
----whole-file entry, so a library that hasn't been marked up yet is still searchable by
----file name.
+---Everything insertable in the library for `ext`, sorted by name: every guarded snippet,
+---and every file with no guards as a single whole-file entry, so a library that hasn't
+---been marked up yet can still be picked from. Each entry carries its `body` for the
+---search.
 ---@param cfg table
 ---@param ext string
----@param whole_files boolean? include unguarded files as one entry each
----@return table[] entries
-local function catalogue(cfg, ext, whole_files)
+---@return tuna.Snippet[]
+local function catalogue(cfg, ext)
     local all = {}
     for _, f in ipairs(M.files(cfg, ext)) do
         local snips = snippets_of(f, cfg)
         if #snips > 0 then
             vim.list_extend(all, snips)
-        elseif whole_files then
+        else
             all[#all + 1] = {
                 name = f.rel,
                 file = f.rel,
@@ -409,6 +291,11 @@ local function catalogue(cfg, ext, whole_files)
             }
         end
     end
+    -- Lowercase and without whitespace, so a search for code matches however it was
+    -- spaced: `bit[idx]+=delta` finds a line written with spaces around the operators.
+    for _, e in ipairs(all) do
+        e.body = table.concat(e.lines, "\n"):lower():gsub("%s+", "")
+    end
     table.sort(all, function(a, b)
         if a.name ~= b.name then
             return a.name < b.name
@@ -418,9 +305,43 @@ local function catalogue(cfg, ext, whole_files)
     return all
 end
 
----`:Tuna lib snippet` — pick straight from every snippet in the library.
+---The entries a search shows, in order, as indices into `all`. Nothing typed shows them
+---all. Otherwise the entries whose name and file fuzzy-match come first, best match
+---first, the words typed matched in any order; then the entries whose code contains what
+---was typed. Fuzzy matching stops at the name and file: a body is thousands of characters,
+---in which nearly anything typed is scattered somewhere, so it would match every entry.
+---@param all tuna.Snippet[]
+---@param query string
+---@return integer[]
+local function rank(all, query)
+    local out = {}
+    local needle = query:lower():gsub("%s+", "")
+    if needle == "" then
+        for i = 1, #all do
+            out[i] = i
+        end
+        return out
+    end
+    local keyed = {}
+    for i, e in ipairs(all) do
+        keyed[i] = { text = e.name .. " " .. e.file, idx = i }
+    end
+    local named = {}
+    for _, k in ipairs(vim.fn.matchfuzzy(keyed, vim.trim(query:lower()), { key = "text" })) do
+        out[#out + 1] = k.idx
+        named[k.idx] = true
+    end
+    for i, e in ipairs(all) do
+        if not named[i] and e.body:find(needle, 1, true) then
+            out[#out + 1] = i
+        end
+    end
+    return out
+end
+
+---`:Tuna lib` — search the library and insert what is picked.
 ---@param bufnr integer? defaults to the current buffer
-function M.pick(bufnr)
+function M.open(bufnr)
     bufnr = bufnr or vim.api.nvim_get_current_buf()
     local restore = vim.api.nvim_get_current_win()
     local cfg, ext = picker_context(bufnr)
@@ -430,158 +351,41 @@ function M.pick(bufnr)
 
     local all = catalogue(cfg, ext)
     if #all == 0 then
-        utils.notify(
-            ("library: no %s: … start/end guards in the .%s files, use ':Tuna lib' to browse them whole."):format(
-                (cfg.library or {}).marker or "TUNALIB",
-                ext
-            ),
-            "WARN"
-        )
+        utils.notify("library: no ." .. ext .. " files in the library.", "WARN")
         return
     end
 
     -- The file is shown after the name, aligned, so the list reads as a snippet index
-    -- rather than a list of paths.
+    -- rather than a list of paths. A whole-file entry is already named after its file.
     local width = 0
-    for _, s in ipairs(all) do
-        width = math.max(width, #s.name)
+    for _, e in ipairs(all) do
+        width = math.max(width, #e.name)
     end
     local items = {}
-    for i, s in ipairs(all) do
-        items[i] = ("%-" .. width .. "s   %s"):format(s.name, s.file)
+    for i, e in ipairs(all) do
+        items[i] = ("%-" .. width .. "s   %s"):format(e.name, e.whole and "(whole file)" or e.file)
     end
 
     require("tuna.widgets").menu(
         items,
-        "Snippets",
+        "Library",
         function(idx)
             M.insert(all[idx], bufnr)
         end,
         restore,
         nil,
         preview_opts(ext, function(idx)
-            local s = all[idx]
-            return s and { title = s.file .. ":" .. s.first, lines = s.lines } or { lines = {} }
-        end)
+            local e = all[idx]
+            return { title = e.whole and e.file or (e.file .. ":" .. e.first), lines = e.lines }
+        end),
+        nil,
+        nil,
+        function(query)
+            return rank(all, query)
+        end
     )
 end
 
----`:Tuna lib search` — the same catalogue in **telescope**, when the user has it.
----
----The reason to reach for telescope here is *typing*: the native pickers are lists you
----move through, while this one narrows as you type, and it matches a snippet's **name,
----its file name and its code** at once (all three go into the entry's `ordinal`). So
----"fenwick 2d" and "sync_with_stdio" both find their way to something, without having
----to remember which file it lives in. Files with no guards are included whole, so the
----search covers a library that has not been marked up yet.
----
----Selecting inserts through the same `M.insert` as the other two routes.
----@param bufnr integer? defaults to the current buffer
-function M.search(bufnr)
-    bufnr = bufnr or vim.api.nvim_get_current_buf()
-    local ok, pickers = pcall(require, "telescope.pickers")
-    if not ok then
-        utils.notify("library: telescope isn't installed, use ':Tuna lib' or ':Tuna lib snippet' instead.", "WARN")
-        return
-    end
-    local finders = require("telescope.finders")
-    local conf = require("telescope.config").values
-    local previewers = require("telescope.previewers")
-    local actions = require("telescope.actions")
-    local action_state = require("telescope.actions.state")
-
-    local cfg, ext = picker_context(bufnr)
-    if not (cfg and ext) then
-        return
-    end
-
-    local all = catalogue(cfg, ext, true)
-    if #all == 0 then
-        utils.notify("library: no ." .. ext .. " files in the library.", "WARN")
-        return
-    end
-    local filetype = vim.filetype.match({ filename = "x." .. ext }) or ext
-    -- Whitespace-free lowercase body, so the code tier matches how one types a search:
-    -- `bit[idx]+=delta` finds a line written with spaces around the operators.
-    for _, s in ipairs(all) do
-        s.body = table.concat(s.lines, "\n"):lower():gsub("%s+", "")
-    end
-
-    local width = 0
-    for _, s in ipairs(all) do
-        width = math.max(width, #s.name)
-    end
-
-    pickers
-        .new({}, {
-            prompt_title = "Tuna library (." .. ext .. ")",
-            -- Two tiers, rebuilt on every keystroke. Fuzzy matching runs over
-            -- `name + file` only: with whole file bodies every entry carries thousands of
-            -- characters, the length penalty swamps the signal, and typing a snippet's
-            -- own name lands on something else. An entry whose
-            -- *code* contains what was typed has the prompt appended to its ordinal
-            -- instead, which keeps it in the list while its greater length ranks it
-            -- below the name matches. So: type a name to get that snippet, type an
-            -- identifier to find the code that uses it.
-            finder = finders.new_dynamic({
-                fn = function(prompt)
-                    local needle = (prompt or ""):lower():gsub("%s+", "")
-                    local out = {}
-                    for _, s in ipairs(all) do
-                        out[#out + 1] = {
-                            snippet = s,
-                            prompt = prompt or "",
-                            code_hit = needle ~= "" and s.body:find(needle, 1, true) ~= nil,
-                        }
-                    end
-                    return out
-                end,
-                entry_maker = function(item)
-                    local s = item.snippet
-                    -- A whole-file entry is already named after its file, so say
-                    -- "(whole file)" instead of repeating the name.
-                    local right = s.whole and "(whole file)" or s.file
-                    local ordinal = s.name .. " " .. s.file
-                    if item.code_hit then
-                        ordinal = ordinal .. " " .. item.prompt
-                    end
-                    return {
-                        value = s,
-                        display = ("%-" .. width .. "s   %s"):format(s.name, right),
-                        ordinal = ordinal,
-                    }
-                end,
-            }),
-            sorter = conf.generic_sorter({}),
-            previewer = previewers.new_buffer_previewer({
-                title = "Snippet",
-                define_preview = function(self, entry)
-                    vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, entry.value.lines)
-                    -- Telescope's own highlighter when it's there (treesitter-aware),
-                    -- plain syntax otherwise; either way a preview must not fire
-                    -- FileType autocmds on a throwaway buffer.
-                    local hok, putils = pcall(require, "telescope.previewers.utils")
-                    if hok then
-                        pcall(putils.highlighter, self.state.bufnr, filetype)
-                    else
-                        pcall(function()
-                            vim.bo[self.state.bufnr].syntax = filetype
-                        end)
-                    end
-                end,
-            }),
-            attach_mappings = function(prompt_bufnr)
-                actions.select_default:replace(function()
-                    local entry = action_state.get_selected_entry()
-                    actions.close(prompt_bufnr)
-                    if entry then
-                        M.insert(entry.value, bufnr)
-                    end
-                end)
-                return true
-            end,
-        })
-        :find()
-end
+M._test = { rank = rank, catalogue = catalogue }
 
 return M

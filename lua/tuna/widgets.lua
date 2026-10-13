@@ -6,7 +6,8 @@
 --   * `input`  — a single-line prompt (download's paths)
 --   * `editor` — side-by-side input/output buffers for editing a testcase
 --   * `menu`   — a single-choice list (confirmations, templates, the testcase to act
---                on), with an optional read-only preview beneath it and notice above it
+--                on), with an optional read-only preview beneath it and notice above it,
+--                and optionally a search pane that narrows it as you type (the library)
 --   * `form`   — several single-choice lists answered together (clean's directory,
 --                depth and match threshold)
 --   * `panels` — lists in columns, each acted on alone (the `:Tuna` menu)
@@ -220,6 +221,7 @@ local function fill_preview(bufnr, winid, data, defaults)
     vim.bo[bufnr].modifiable = true
     api.nvim_buf_set_lines(bufnr, 0, -1, false, data.lines or {})
     vim.bo[bufnr].modifiable = false
+    vim.bo[bufnr].modified = false
 
     local ft = data.filetype or defaults.filetype
     if ft then
@@ -606,7 +608,15 @@ end
 ---@field notice { title: string?, lines: string[] }?
 ---@field notice_win integer?
 ---@field notice_buf integer?
-local menu = { ui_visible = false }
+---@field search (fun(query: string): integer[])?
+---@field query string what the search pane holds
+---@field shown integer[] the items listed, in order, as indices into `items`
+---@field search_win integer?
+---@field search_buf integer?
+---@field focus_pane "search"|"list"|"preview"? the pane a resize puts focus back in
+---@field inserting boolean? whether a resize goes back to typing in the search pane
+---@field rebuilding boolean the windows are being closed to be opened again
+local menu = { ui_visible = false, query = "", shown = {}, rebuilding = false }
 
 ---Open a generic single-choice menu. `on_choice`
 ---receives the 1-based index of the picked item. An optional `preview` renders a
@@ -627,21 +637,40 @@ local menu = { ui_visible = false }
 ---  for something the user needs to know before choosing (e.g. that a scan was partial)
 ---@param row integer? the row the cursor starts on (default 1), so a caller asking the same
 ---  question over and over can leave the answer last given under the cursor
-function M.menu(items, title, on_choice, restore_winid, on_close, preview, notice, row)
+---@param search (fun(query: string): integer[])? adds a search pane above the list, focused
+---  and typing: on every change the list shows the items `search` returns for what is typed,
+---  in its order (indices into `items`, which `on_choice` and `preview.content` still get)
+function M.menu(items, title, on_choice, restore_winid, on_close, preview, notice, row, search)
+    ---Close every window of the open menu without it counting as a dismissal.
+    local function take_down()
+        -- The list's WinClosed is told by `skip_close`, the search pane's by `rebuilding`.
+        menu.skip_close = true
+        menu.rebuilding = true
+        close_win(menu.winid)
+        close_win(menu.preview_win)
+        close_win(menu.notice_win)
+        close_win(menu.search_win)
+        menu.rebuilding = false
+    end
     if items == nil then -- resize
         if not menu.ui_visible then
             return
         end
-        -- Rebuilt on the row the cursor is on, not back at the top.
+        -- Rebuilt on the row the cursor is on, not back at the top, with focus in the pane
+        -- it was in, typing again if it was typing.
         if menu.winid and api.nvim_win_is_valid(menu.winid) then
             menu.row = api.nvim_win_get_cursor(menu.winid)[1]
         end
+        -- The search as typed, which the change events may not have reported yet.
+        if menu.search_buf and api.nvim_buf_is_valid(menu.search_buf) then
+            menu.query = table.concat(api.nvim_buf_get_lines(menu.search_buf, 0, -1, false), " ")
+        end
+        local cur = api.nvim_get_current_win()
+        menu.focus_pane = (cur == menu.search_win and "search") or (cur == menu.preview_win and "preview") or "list"
+        menu.inserting = menu.focus_pane == "search" and vim.fn.mode() == "i"
         -- A resize closes and rebuilds the windows; keep that self-inflicted
         -- WinClosed from being mistaken for a user cancellation (firing on_close).
-        menu.skip_close = true
-        close_win(menu.winid)
-        close_win(menu.preview_win)
-        close_win(menu.notice_win)
+        take_down()
     else
         if #items == 0 then
             return
@@ -650,10 +679,7 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
             -- A menu opened over a menu: the singleton state is about to be
             -- repointed, and the windows it points at now would be left open with
             -- nothing left knowing about them.
-            menu.skip_close = true
-            close_win(menu.winid)
-            close_win(menu.preview_win)
-            close_win(menu.notice_win)
+            take_down()
             menu.skip_close = false
         end
         menu.items = items
@@ -664,24 +690,57 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
         menu.preview = preview
         menu.notice = notice
         menu.row = row
+        menu.search = search
+        menu.query = ""
+        menu.focus_pane = search and "search" or "list"
+        menu.inserting = search ~= nil
     end
 
     local cfg = config.get_buffer_config(api.nvim_get_current_buf())
     local vim_width = utils.get_ui_size()
     local pv = menu.preview
+    local sr = menu.search
+
+    ---The items the list shows for the search as it stands: all of them without a search.
+    local function listed()
+        if not sr then
+            local all = {}
+            for i = 1, #menu.items do
+                all[i] = i
+            end
+            return all
+        end
+        local ok, found = pcall(sr, menu.query)
+        return ok and type(found) == "table" and found or {}
+    end
+    menu.shown = listed()
+
+    ---The labels of the listed items, the list buffer's lines.
+    local function labels()
+        local out = {}
+        for i, idx in ipairs(menu.shown) do
+            out[i] = menu.items[idx]
+        end
+        return out
+    end
 
     -- A `preview.content(idx)` callback makes the pane follow the highlighted row
     -- instead of showing one fixed thing: what a chooser of *things to look at* needs
     -- (the snippet library shows the code under the cursor before it is inserted).
     -- Such a preview should pin `width`/`height`, or the float resizes on every j/k.
-    local function preview_data(idx)
+    ---@param row integer a row of the list
+    local function preview_data(row)
         if pv and pv.content then
+            local idx = menu.shown[row]
+            if not idx then
+                return { title = "No match", lines = {} }
+            end
             local ok, data = pcall(pv.content, idx)
             return (ok and type(data) == "table") and data or { lines = {} }
         end
         return pv
     end
-    local start_row = math.min(math.max(menu.row or 1, 1), #menu.items)
+    local start_row = math.min(math.max(menu.row or 1, 1), math.max(#menu.shown, 1))
     local shown = preview_data(start_row)
     -- The user's cursorline, captured before opening any of our floats, so the
     -- preview (read like a normal buffer) can honour it.
@@ -724,6 +783,10 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
     -- down to a 12-row editor.
     local band_row, band_h = utils.float_band()
     local budget = band_h
+    -- The search pane is one row, and is never what gives way.
+    if sr then
+        budget = budget - (1 + PANE_STEP)
+    end
     if nt then
         -- The notice wraps, so its height is counted in *screen* rows, not lines.
         nt_h = 0
@@ -741,7 +804,8 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
     local list_max = pv and math.max(MENU_MIN_ROWS, math.floor(band_h * MENU_LIST_SHARE)) or (band_h - 2)
     menu_h = math.max(1, math.min(#menu.items, list_max, budget - 2 - pv_min))
 
-    if nt or pv then
+    local sr_row
+    if nt or pv or sr then
         local used = menu_h + 2
         if pv then
             -- Fixed `height` for a pane that must not resize between items; a
@@ -751,14 +815,18 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
             local avail = math.max(1, budget - used - PANE_STEP)
             pv_h = math.max(1, math.min(pv.height or (pv.content and avail) or #shown.lines, avail))
         end
-        local total = (nt and (nt_h + PANE_STEP) or 0) + used + (pv and (pv_h + PANE_STEP) or 0)
+        local total = (nt and (nt_h + PANE_STEP) or 0)
+            + (sr and (1 + PANE_STEP) or 0)
+            + used
+            + (pv and (pv_h + PANE_STEP) or 0)
         -- A bordered float's `row` is the top of its *footprint* — the border is drawn
         -- there, content one row below — so a stack of `total` rows starting at `first`
         -- ends exactly at `first + total - 1`, and no offset is wanted. (Adding one
         -- pushed the bottom border onto the statusline.)
         local first = band_row + math.max(0, math.floor((band_h - total) / 2))
         nt_row = nt and first or nil
-        menu_row = first + (nt and (nt_h + PANE_STEP) or 0)
+        sr_row = sr and (first + (nt and (nt_h + PANE_STEP) or 0)) or nil
+        menu_row = first + (nt and (nt_h + PANE_STEP) or 0) + (sr and (1 + PANE_STEP) or 0)
         pv_row = pv and (menu_row + menu_h + PANE_STEP) or nil
     else
         menu_row = band_row + math.max(0, math.floor((band_h - menu_h - 2) / 2))
@@ -786,10 +854,12 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
     end
 
     menu.menu_buf = api.nvim_create_buf(false, true)
-    api.nvim_buf_set_lines(menu.menu_buf, 0, -1, false, menu.items)
+    api.nvim_buf_set_lines(menu.menu_buf, 0, -1, false, labels())
     vim.bo[menu.menu_buf].modifiable = false
 
-    menu.winid = open_float(menu.menu_buf, true, {
+    -- With a search, the list is as tall as the whole of it would be, so it does not
+    -- resize as the search narrows it.
+    menu.winid = open_float(menu.menu_buf, not sr, {
         width = width,
         height = menu_h,
         row = menu_row,
@@ -805,8 +875,24 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
     })
     api.nvim_win_set_cursor(menu.winid, { start_row, 0 })
 
+    ---Show the preview of the list's row `row`, unless it shows that item already.
+    ---@param row integer
+    local function preview_row(row)
+        if not (pv and pv.content and menu.preview_buf) then
+            return
+        end
+        local idx = menu.shown[row]
+        if idx == menu.preview_idx then
+            return
+        end
+        menu.preview_idx = idx
+        fill_preview(menu.preview_buf, menu.preview_win, preview_data(row), pv)
+    end
+
     if pv then
         menu.preview_buf = api.nvim_create_buf(false, true)
+        -- Read-only from the start, so its change keys are made inert as it opens.
+        vim.bo[menu.preview_buf].modifiable = false
         menu.preview_win = open_float(menu.preview_buf, false, {
             width = width,
             height = pv_h,
@@ -824,24 +910,36 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
         if pv.content then
             -- Follow the selection. Only the border title is reconfigured (not the
             -- geometry), so the float doesn't repaint as the cursor moves.
-            menu.preview_idx = start_row
+            menu.preview_idx = menu.shown[start_row]
             api.nvim_create_autocmd("CursorMoved", {
                 buffer = menu.menu_buf,
                 callback = function()
                     if not menu.ui_visible or not api.nvim_win_is_valid(menu.winid) then
                         return
                     end
-                    local idx = api.nvim_win_get_cursor(menu.winid)[1]
-                    if idx == menu.preview_idx then
-                        return
-                    end
-                    menu.preview_idx = idx
-                    fill_preview(menu.preview_buf, menu.preview_win, preview_data(idx), pv)
+                    preview_row(api.nvim_win_get_cursor(menu.winid)[1])
                 end,
             })
         end
     else
         menu.preview_win, menu.preview_buf = nil, nil
+    end
+
+    if sr then
+        menu.search_buf = api.nvim_create_buf(false, true)
+        api.nvim_buf_set_lines(menu.search_buf, 0, -1, false, { menu.query })
+        -- Opened last and entered, so typing starts in it.
+        menu.search_win = open_float(menu.search_buf, menu.focus_pane == "search", {
+            width = width,
+            height = 1,
+            row = sr_row,
+            col = col,
+            border = cfg.floating_border,
+            border_highlight = cfg.floating_border_highlight,
+            title = " Search ",
+        })
+    else
+        menu.search_win, menu.search_buf = nil, nil
     end
     menu.ui_visible = true
 
@@ -851,6 +949,10 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
             return
         end
         menu.ui_visible = false
+        if vim.fn.mode() == "i" then
+            vim.cmd.stopinsert()
+        end
+        close_win(menu.search_win)
         close_win(menu.winid)
         close_win(menu.preview_win)
         close_win(menu.notice_win)
@@ -864,18 +966,63 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
         end
     end
 
-    map_keys(cfg.picker_ui.mappings.focus_next, "n", menu.menu_buf, function()
-        move_cursor(menu.winid, #menu.items, 1)
+    ---Narrow the list to what the search pane holds now, from its first row. Run on every
+    ---change, and again before anything reads the list: keys typed faster than
+    ---`TextChangedI` is delivered (`fen<CR>` in one go) would otherwise act on the list
+    ---as it was before the last of them.
+    local function refilter()
+        if not (sr and menu.search_buf and api.nvim_buf_is_valid(menu.search_buf)) then
+            return
+        end
+        local query = table.concat(api.nvim_buf_get_lines(menu.search_buf, 0, -1, false), " ")
+        if query == menu.query then
+            return
+        end
+        menu.query = query
+        menu.shown = listed()
+        vim.bo[menu.menu_buf].modifiable = true
+        api.nvim_buf_set_lines(menu.menu_buf, 0, -1, false, labels())
+        vim.bo[menu.menu_buf].modifiable = false
+        api.nvim_win_set_cursor(menu.winid, { 1, 0 })
+        preview_row(1)
+    end
+
+    ---Choose the item on the list's highlighted row, if there is one.
+    local function submit()
+        refilter()
+        local idx = menu.shown[api.nvim_win_get_cursor(menu.winid)[1]]
+        if idx then
+            close(idx)
+        end
+    end
+
+    ---Move the list's highlight, from whichever pane the key was pressed in.
+    ---@param delta integer
+    local function step(delta)
+        refilter()
+        move_cursor(menu.winid, #menu.shown, delta)
+        preview_row(api.nvim_win_get_cursor(menu.winid)[1])
+    end
+
+    local mappings = cfg.picker_ui.mappings
+    map_keys(mappings.focus_next, "n", menu.menu_buf, function()
+        step(1)
     end)
-    map_keys(cfg.picker_ui.mappings.focus_prev, "n", menu.menu_buf, function()
-        move_cursor(menu.winid, #menu.items, -1)
+    map_keys(mappings.focus_prev, "n", menu.menu_buf, function()
+        step(-1)
     end)
-    map_keys(cfg.picker_ui.mappings.submit, "n", menu.menu_buf, function()
-        close(api.nvim_win_get_cursor(menu.winid)[1])
-    end)
-    map_cancel(menu.menu_buf, function()
-        close(nil)
-    end, { normal = cfg.picker_ui.mappings.close })
+
+    -- Every pane submits and closes, acting on the list's highlighted row: the search pane
+    -- while typing too, since <CR> there has nothing else to do.
+    local panes = vim.tbl_filter(function(b)
+        return b ~= nil
+    end, { menu.search_buf, menu.menu_buf, menu.preview_buf })
+    for _, b in ipairs(panes) do
+        map_keys(mappings.submit, b == menu.search_buf and { "n", "i" } or "n", b, submit)
+        map_cancel(b, function()
+            close(nil)
+        end, { normal = mappings.close })
+    end
 
     if pv then
         -- Scroll the preview without leaving the menu.
@@ -886,38 +1033,96 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
                 end)
             end
         end
-        map_keys("<C-d>", "n", menu.menu_buf, function()
-            scroll("<C-d>")
-        end)
-        map_keys("<C-u>", "n", menu.menu_buf, function()
-            scroll("<C-u>")
-        end)
+        for _, b in ipairs({ menu.search_buf, menu.menu_buf }) do
+            map_keys("<C-d>", "n", b, function()
+                scroll("<C-d>")
+            end)
+            map_keys("<C-u>", "n", b, function()
+                scroll("<C-u>")
+            end)
+        end
+    end
 
-        -- The pane keys move between the menu and the preview beneath it. With focus in
-        -- the preview, j/k and <C-d>/<C-u> scroll it natively, and the menu's own
-        -- submit/close keys still act on the highlighted menu row.
-        local function focus(win)
-            if win and api.nvim_win_is_valid(win) then
-                api.nvim_set_current_win(win)
+    -- The pane keys walk the stack, search pane, list, preview, and stop at either end.
+    -- With focus in the preview, j/k and <C-d>/<C-u> scroll it natively. Arriving in the
+    -- search pane starts typing, which is what it is there for.
+    if #panes > 1 then
+        local wins = vim.tbl_filter(function(w)
+            return w ~= nil
+        end, { menu.search_win, menu.winid, menu.preview_win })
+        local function go(from, delta)
+            local to = wins[from + delta]
+            if not (to and api.nvim_win_is_valid(to)) then
+                return
+            end
+            vim.cmd.stopinsert()
+            api.nvim_set_current_win(to)
+            if to == menu.search_win then
+                vim.cmd("startinsert!")
             end
         end
-        local to_preview, to_menu = step_keys(cfg)
-        for _, b in ipairs({ menu.menu_buf, menu.preview_buf }) do
-            map_keys(to_preview, "n", b, function()
-                focus(menu.preview_win)
+        local to_next, to_prev = step_keys(cfg)
+        for i, b in ipairs(panes) do
+            local modes = b == menu.search_buf and { "n", "i" } or "n"
+            map_keys(to_next, modes, b, function()
+                go(i, 1)
             end)
-            map_keys(to_menu, "n", b, function()
-                focus(menu.winid)
+            map_keys(to_prev, modes, b, function()
+                go(i, -1)
             end)
         end
+    end
 
-        -- Submit/close from the preview too, acting on the highlighted menu row.
-        map_keys(cfg.picker_ui.mappings.submit, "n", menu.preview_buf, function()
-            close(api.nvim_win_get_cursor(menu.winid)[1])
+    if sr then
+        local sb = menu.search_buf
+        -- From the search pane the list keys move the list, j/k with them while not
+        -- typing; while typing only the keys that type nothing (<down>/<up>), so j and k
+        -- can be searched for.
+        local function untyped(keys)
+            return vim.tbl_filter(function(k)
+                return k:sub(1, 1) == "<"
+            end, to_list(keys))
+        end
+        map_keys(mappings.focus_next, "n", sb, function()
+            step(1)
         end)
-        map_cancel(menu.preview_buf, function()
-            close(nil)
-        end, { normal = cfg.picker_ui.mappings.close })
+        map_keys(mappings.focus_prev, "n", sb, function()
+            step(-1)
+        end)
+        map_keys(untyped(mappings.focus_next), "i", sb, function()
+            step(1)
+        end)
+        map_keys(untyped(mappings.focus_prev), "i", sb, function()
+            step(-1)
+        end)
+
+        api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
+            buffer = sb,
+            callback = function()
+                if menu.ui_visible then
+                    refilter()
+                end
+            end,
+        })
+        -- Closing the search pane by hand closes the menu, as closing the list does.
+        api.nvim_create_autocmd("WinClosed", {
+            buffer = sb,
+            callback = function()
+                if not menu.rebuilding then
+                    close(nil)
+                end
+            end,
+        })
+    end
+
+    -- A resize puts focus back where it was.
+    if menu.focus_pane == "preview" and menu.preview_win then
+        api.nvim_set_current_win(menu.preview_win)
+    elseif menu.focus_pane == "list" and sr then
+        api.nvim_set_current_win(menu.winid)
+    end
+    if sr and menu.focus_pane == "search" and menu.inserting then
+        vim.cmd("startinsert!")
     end
 
     api.nvim_create_autocmd("WinClosed", {

@@ -45,9 +45,7 @@ M.actions = {
     -- A download like the others, except it folds the `:Tuna scratch` file into the
     -- problem it opens — hence its name and its place in the download group.
     download_sync = "Tuna download sync",
-    library = "Tuna lib", -- copy from your snippet library: file, then snippet
-    library_snippet = "Tuna lib snippet", -- … or straight from every snippet in it
-    library_search = "Tuna lib search", -- … or fuzzily, over names and code, via telescope
+    library = "Tuna lib", -- search your snippet library and copy from it
 }
 
 -- The ready-made preset, enabled with `keymaps.preset = "<leader>t"` (any prefix).
@@ -86,8 +84,7 @@ M.preset = {
         prev_problem = "p",
         pin = "f", -- f for "flag it for later": `p` is the previous problem
         -- The library inserts into the file you are in, so it is buffer-local like the
-        -- rest of the editing actions. Only the file→snippet route is bound; the flat
-        -- `library_snippet` one is there to map if it suits you better.
+        -- rest of the editing actions.
         library = "l",
         download_testcases = "dt",
     },
