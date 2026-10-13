@@ -119,6 +119,44 @@ function M.judged(status)
         or status:match("^SIG ") ~= nil
 end
 
+-- The buffers each runner registry already watches for unloading, so a buffer run a
+-- hundred times holds one autocmd per registry rather than a hundred.
+local watched = {}
+
+---Keep `runner` in `registry` (a mode's runners by buffer) until the buffer unloads.
+---@param registry table<integer, table>
+---@param bufnr integer
+---@param runner table
+function M.register(registry, bufnr, runner)
+    registry[bufnr] = runner
+    watched[registry] = watched[registry] or {}
+    if watched[registry][bufnr] then
+        return
+    end
+    watched[registry][bufnr] = true
+    vim.api.nvim_create_autocmd("BufUnload", {
+        buffer = bufnr,
+        once = true,
+        callback = function()
+            registry[bufnr] = nil
+            watched[registry][bufnr] = nil
+        end,
+    })
+end
+
+---The verdict a judged row wears, and its colour: what a comparison or a checker answered,
+---`nil` being no answer to judge against.
+---@param correct boolean?
+---@return string status, string hlgroup
+function M.verdict(correct)
+    if correct == true then
+        return "CORRECT", "TunaCorrect"
+    elseif correct == false then
+        return "WRONG", "TunaWrong"
+    end
+    return "DONE", "TunaDone"
+end
+
 ---How a process that did not exit cleanly ended: the verdict a row wears for it, its colour,
 ---and the same in words, or nil for a clean exit. One vocabulary for every mode and every
 ---process, a testcase, a session or a stress helper alike. `vim.system` marks its own timeout
@@ -795,13 +833,7 @@ function RunnerCore:finish_process(tc, run_id, timer, res, opts, on_done)
             end
             tc.judging = false
             tc.checker_message = message
-            if correct == true then
-                tc.status, tc.hlgroup = "CORRECT", "TunaCorrect"
-            elseif correct == false then
-                tc.status, tc.hlgroup = "WRONG", "TunaWrong"
-            else
-                tc.status, tc.hlgroup = "DONE", "TunaDone"
-            end
+            tc.status, tc.hlgroup = M.verdict(correct)
             finalize()
         end)
     end

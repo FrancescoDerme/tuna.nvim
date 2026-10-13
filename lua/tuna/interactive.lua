@@ -751,18 +751,12 @@ function InteractiveRunner:run_feed(idx, on_done)
                 checker.judge(tc, self.checker, self:effective_compare(), function(correct, message)
                     tc.judging = false
                     tc.checker_message = message
-                    if correct == true then
-                        tc.status, tc.hlgroup = "CORRECT", "TunaCorrect"
-                    elseif correct == false then
-                        tc.status, tc.hlgroup = "WRONG", "TunaWrong"
-                    else
-                        tc.status, tc.hlgroup = "DONE", "TunaDone"
-                    end
+                    tc.status, tc.hlgroup = core.verdict(correct)
                     self:update_ui(true)
                     on_done()
                 end)
             else
-                tc.status, tc.hlgroup = "DONE", "TunaDone"
+                tc.status, tc.hlgroup = core.verdict(nil)
                 self:update_ui(true)
                 on_done()
             end
@@ -831,12 +825,8 @@ function InteractiveRunner:run_interactor(idx, on_done)
                 tc.status, tc.hlgroup = "KILLED", "TunaWarning"
             elseif status then
                 tc.status, tc.hlgroup = status, hl
-            elseif verdict == true then
-                tc.status, tc.hlgroup = "CORRECT", "TunaCorrect"
-            elseif verdict == false then
-                tc.status, tc.hlgroup = "WRONG", "TunaWrong"
             else
-                tc.status, tc.hlgroup = "DONE", "TunaDone"
+                tc.status, tc.hlgroup = core.verdict(verdict)
             end
             self:update_ui(true)
             on_done()
@@ -1133,15 +1123,7 @@ function M.run(bufnr, args, opts)
         tcdata = {},
         completed = false,
     }, InteractiveRunner)
-    M.active[bufnr] = ir
-
-    api.nvim_create_autocmd("BufUnload", {
-        buffer = bufnr,
-        once = true,
-        callback = function()
-            M.active[bufnr] = nil
-        end,
-    })
+    core.register(M.active, bufnr, ir)
 
     -- What this run compiles, declared before the board opens so the build step is laid out
     -- once: the solution is the Compile row itself, the interactor is one when it plays the

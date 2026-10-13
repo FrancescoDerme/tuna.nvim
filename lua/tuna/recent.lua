@@ -577,14 +577,7 @@ local function contest_entry(contest, cfg)
         return flat
     end
     -- One directory per problem: the first in name order that holds a solution.
-    local names = {}
-    for name, typ in vim.fs.dir(contest.dir) do
-        if typ == "directory" and name:sub(1, 1) ~= "." then
-            names[#names + 1] = name
-        end
-    end
-    table.sort(names)
-    for _, name in ipairs(names) do
+    for _, name in ipairs(utils.subdirectories(contest.dir)) do
         local file = navigate.solution_in(contest.dir .. "/" .. name, like, cfg)
         if file then
             return file
@@ -604,24 +597,9 @@ end
 function M.contest_problems(dir, like, cfg)
     local tools = require("tuna.tools")
     local navigate = require("tuna.navigate")
-    local files, subdirs = {}, {}
-    for name, typ in vim.fs.dir(dir) do
-        if name:sub(1, 1) ~= "." then
-            local path = dir .. "/" .. name
-            if typ == "directory" then
-                subdirs[#subdirs + 1] = path
-            elseif not tools.is_support(path, cfg) then
-                local ft = vim.filetype.match({ filename = path }) or ""
-                if ft ~= "" and (cfg.run_command or {})[ft] then
-                    files[#files + 1] = path
-                end
-            end
-        end
-    end
-    table.sort(files)
-    table.sort(subdirs)
-    for _, sub in ipairs(subdirs) do
-        local file = navigate.solution_in(sub, like, cfg)
+    local files = tools.solutions_in(dir, cfg)
+    for _, name in ipairs(utils.subdirectories(dir)) do
+        local file = navigate.solution_in(dir .. "/" .. name, like, cfg)
         if file then
             files[#files + 1] = file
         end

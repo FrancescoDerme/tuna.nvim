@@ -398,7 +398,7 @@ end
 -- solution there has some under names carrying its own, renaming them to the first format
 -- every solution there reads. Never for a folder of several problems, nor where no format
 -- is shared (the formats, or `testcases_directory`, carry the file's name), nor to a name
--- without a number for more than testcase 0.
+-- without a number, which holds testcase 0 alone.
 do
     local cfg0 = vim.deepcopy(require("tuna.config").current_setup)
     local function cfg(extra)
@@ -430,9 +430,11 @@ do
         d .. "/main.cpp",
         { { "main_input0.txt", "input0.txt" }, { "main_input1.txt", "input1.txt" }, { "main_output0.txt", "output0.txt" } },
     })
-    t.ok("sharing renames them", tc.share(plan))
+    for _, move in ipairs(plan and plan.moves or {}) do
+        vim.uv.fs_rename(move.from, move.to)
+    end
     local both = { tc.get_testcases(d .. "/main.cpp", cfg()), tc.get_testcases(d .. "/main2.cpp", cfg()) }
-    t.eq("and both solutions read the same testcases, an empty answer kept", both[2], both[1])
+    t.eq("renamed, both solutions read the same testcases, an empty answer kept", both[2], both[1])
     t.eq("as they were", both[1], { [0] = { input = "1\n", output = "" }, [1] = { input = "2\n" } })
     t.eq("and once shared there is nothing left to offer", plan_for(d, { "main.cpp", "main2.cpp" }), nil)
 
@@ -451,10 +453,7 @@ do
 
     local numberless = { testcases_input_file_format = { "$(FNOEXT)_input$(TCNUM).txt", "in.txt" }, testcases_output_file_format = { "$(FNOEXT)_output$(TCNUM).txt", "out.txt" } }
     local one = folder({ ["main.cpp"] = "", ["main2.cpp"] = "", ["main_input0.txt"] = "1\n" })
-    local p1 = plan_for(one, { "main.cpp", "main2.cpp" }, numberless)
-    t.eq("a name without a number takes testcase 0", p1 and vim.fs.basename(p1.moves[1].to), "in.txt")
-    local two = folder({ ["main.cpp"] = "", ["main2.cpp"] = "", ["main_input0.txt"] = "1\n", ["main_input1.txt"] = "2\n" })
-    t.eq("and nothing more", plan_for(two, { "main.cpp", "main2.cpp" }, numberless), nil)
+    t.eq("nor to a name without a number", plan_for(one, { "main.cpp", "main2.cpp" }, numberless), nil)
 end
 
 -- The question before a run: asked once a session per solution, whatever the answer, saying

@@ -277,6 +277,23 @@ function M.directory_exists(path)
     return stat ~= nil and stat.type == "directory"
 end
 
+---The names of the directories in `dir`, in name order, dot-directories left out: a contest's
+---problems, or a judge's contests.
+---@param dir string
+---@return string[]
+function M.subdirectories(dir)
+    local names = {}
+    if M.directory_exists(dir) then
+        for name, typ in vim.fs.dir(dir) do
+            if typ == "directory" and name:sub(1, 1) ~= "." then
+                names[#names + 1] = name
+            end
+        end
+    end
+    table.sort(names)
+    return names
+end
+
 ---Create `path` (and any missing parents) if it doesn't already exist.
 ---@param path string
 ---@return boolean # whether the directory exists after the call
@@ -333,13 +350,30 @@ function M.delete_file(path)
     return vim.uv.fs_unlink(path) ~= nil
 end
 
+-- Hashes already taken this session, by path, with the file's identity when they were taken.
+-- The menu asks for every remembered problem's hash each time it opens, and a source whose
+-- size, modification time and inode are unchanged has the same contents: the hash is what a
+-- verdict is kept against, and the stat only spares reading and hashing the file again.
+local hashes = {}
+
 ---The SHA-256 of a file's contents, or nil when it can't be read. What a saved verdict is
 ---recorded against, so it describes exactly the source it was about.
 ---@param path string
 ---@return string?
 function M.file_hash(path)
+    local st = vim.uv.fs_stat(path)
+    if not st then
+        return nil
+    end
+    local stamp = table.concat({ st.size, st.mtime.sec, st.mtime.nsec, st.ino }, ":")
+    local known = hashes[path]
+    if known and known.stamp == stamp then
+        return known.hash
+    end
     local content = M.read_file(path, true)
-    return content and vim.fn.sha256(content) or nil
+    local hash = content and vim.fn.sha256(content) or nil
+    hashes[path] = hash and { stamp = stamp, hash = hash } or nil
+    return hash
 end
 
 ---Whether `path` is absolute. Checked after `vim.fs.normalize`, so a Windows path

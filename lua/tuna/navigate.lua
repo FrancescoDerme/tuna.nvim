@@ -21,16 +21,9 @@ local M = {}
 ---@param dir string absolute problem directory
 ---@return string[] names, integer? index
 local function siblings(dir)
-    local parent = vim.fs.dirname(dir)
     local self_name = vim.fn.fnamemodify(dir, ":t")
-    local names = {}
-    for name, typ in vim.fs.dir(parent) do
-        -- Dot-directories are never problems (a `.git` in a contest folder, say).
-        if typ == "directory" and name:sub(1, 1) ~= "." then
-            names[#names + 1] = name
-        end
-    end
-    table.sort(names)
+    -- Dot-directories are never problems (a `.git` in a contest folder, say).
+    local names = utils.subdirectories(vim.fs.dirname(dir))
     for i, name in ipairs(names) do
         if name == self_name then
             return names, i
@@ -52,19 +45,14 @@ function M.solution_in(dir, like, cfg)
     local want_ext = like and vim.fn.fnamemodify(like, ":e")
 
     local by_name, by_ext, any
-    for _, path in ipairs(vim.fn.globpath(dir, "*", false, true)) do
-        if vim.fn.isdirectory(path) == 0 and not tools.is_support(path, cfg) then
-            local ft = vim.filetype.match({ filename = path }) or ""
-            if ft ~= "" and (cfg.run_command or {})[ft] then
-                local name = vim.fn.fnamemodify(path, ":t")
-                if name == want_name then
-                    by_name = by_name or path
-                elseif vim.fn.fnamemodify(path, ":e") == want_ext then
-                    by_ext = by_ext or path
-                else
-                    any = any or path
-                end
-            end
+    for _, path in ipairs(tools.solutions_in(dir, cfg)) do
+        local name = vim.fn.fnamemodify(path, ":t")
+        if name == want_name then
+            by_name = by_name or path
+        elseif vim.fn.fnamemodify(path, ":e") == want_ext then
+            by_ext = by_ext or path
+        else
+            any = any or path
         end
     end
     return by_name or by_ext or any

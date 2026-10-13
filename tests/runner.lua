@@ -3197,4 +3197,20 @@ pane_runner:delete_ui()
 t.eq("a pane that is gone belongs to nothing", require("tuna.runner_ui").owner_of(pane_buf), nil)
 vim.fn.delete(pdir, "rf")
 
+-- A runner is kept by buffer until the buffer unloads, however often it is replaced: one
+-- unload watcher per registry and buffer, not one per run.
+do
+    local reg = {}
+    local b = vim.api.nvim_create_buf(true, false)
+    for i = 1, 3 do
+        core.register(reg, b, { i = i })
+    end
+    t.eq("a runner registered again replaces the last, under one unload watcher", {
+        reg[b].i,
+        #vim.api.nvim_get_autocmds({ event = "BufUnload", buffer = b }),
+    }, { 3, 1 })
+    vim.api.nvim_buf_delete(b, { force = true })
+    t.eq("and is forgotten when its buffer unloads", reg[b], nil)
+end
+
 t.report()

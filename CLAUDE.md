@@ -235,8 +235,9 @@ is relative. Every configured path goes through these: compile/running directori
   that evaluates to the same names for both (`testcases_directory` included). It is never
   offered when several solutions have testcases (a contest's folder, where the shared names
   would be read by every problem's new solutions), when no format is shared, or to a name
-  without a number for more than testcase 0. The menu names every rename, and every answer
-  runs; a decline is remembered for the session, by path. Sharing is a rename on disk, not a
+  without a number, which holds testcase 0 alone. The menu's title says what sharing does and
+  its preview names every rename; every answer runs, and a decline is remembered for the
+  session, by path. Sharing is a rename on disk, not a
   link: a folder-level rule that read a sibling's testcases, or a sidecar link from one
   solution to another, would be state the user cannot see in the file names.
 - `:Tuna testcase edit`/`delete`/`split` without a number go through `commands.choose_testcase`:
@@ -342,10 +343,17 @@ is relative. Every configured path goes through these: compile/running directori
   - **A support file is never a solution**: `is_support` is a helper (by name, `is_helper`)
     or a header (by extension, `is_header`: `h`, `hpp`, `hh`, `hxx`, `h++`, `inl`, `ipp`,
     `tpp`, any case). Neovim gives a header its language's filetype, so having a
-    `run_command` does not tell one from a solution. Every place that picks solutions asks
-    it (`solution_bufnr`, run-all, `navigate.solution_in`, `recent`'s `BufEnter` and
-    `contest_problems`, the menu's command list, `:Tuna pin`), and `find` never takes a
-    header for a helper. Only C-family headers are known: a module file of another
+    `run_command` does not tell one from a solution. A folder's solutions are listed in one
+    place, `solutions_in` (`solution_bufnr`, run-all, `navigate.solution_in`,
+    `contest_problems`, sharing testcases), which reads the directory with `vim.fs.dir`
+    rather than a glob, since `globpath` takes a comma in a problem's name for a path
+    separator; `find`, a helper by role, reads it the same way, once for all the role's
+    names, and `utils.subdirectories` lists a contest's problem folders. A file's language
+    (`filetype_of`) is matched once per extension for the session, against a stand-in name:
+    listing solutions asks it of every file in every problem folder the menu summarises, and
+    `vim.filetype.match` walks Neovim's whole table each time. A name without an extension
+    is matched whole. A single file is asked directly (`recent`'s `BufEnter`, the menu's command
+    list, `:Tuna pin`), and `find` never takes a header for a helper. Only C-family headers are known: a module file of another
     language beside a solution (a Rust `mod`, a Python import) still reads as one, since
     competitive solutions in those languages are single files.
   - `solution_bufnr` redirects a run started from a support file to the sibling solution. Loading
@@ -414,6 +422,10 @@ is relative. Every configured path goes through these: compile/running directori
   `compare_methods` resolved to `{ name, fn }`.
 - `M.time_limit(cfg)` and `M.parallelism(cfg, jobs)` are how every mode reads `maximum_time`
   and `multiple_testing`.
+- **One vocabulary for a verdict**: `M.verdict(correct)` is what a judged row wears
+  (`CORRECT`, `WRONG`, `DONE` with no answer), in every mode.
+- `M.register(registry, bufnr, runner)` is how every mode keeps its runner by buffer: one
+  `BufUnload` watcher per registry and buffer, however often the buffer is run.
 - **One vocabulary for an ending**: `M.ending(how, timeout)` gives the status, colour and
   words for a process that did not exit cleanly (`TIMEOUT`, `KILLED`, `SIG n`, `RET n`,
   `vim.system`'s own timeout kill, code 124 and SIGTERM, reading as a timeout), for a testcase
@@ -992,7 +1004,9 @@ specific Vim error about a buffer the user never opened.
 - Verdict state is per file (`M.state[path]`) and drives `status`/`status_hl`/`is_submitting`.
   Final verdicts persist in the sidecar with the SHA-256 of the submitted source, not its
   mtime, because a write that changes nothing (a `:w`, the save before a run) must not drop
-  one. `restore` (on `BufReadPost`) reloads a verdict only while `still_current` holds (the
+  one. `utils.file_hash` keeps each hash for the session with the file's size, mtime and
+  inode, and hashes again only when one of them changes: the menu asks for every remembered
+  problem's hash each time it opens. `restore` (on `BufReadPost`) reloads a verdict only while `still_current` holds (the
   hash matches, and an entry without one describes no source), and
   `arm_invalidation` drops shown and stored verdicts on the first edit. `verdict_for(path)`
   reads a verdict without an open buffer (the menu).
@@ -1219,8 +1233,9 @@ specific Vim error about a buffer the user never opened.
     with by its name, and unknown where it is not defined) and the menu's Checker
     entry switching and Compare entry cycling back to the configured method, old or
     nonsense sidecar values reading as automatic, a configured command with no
-    arguments getting its role's, and stress/interactor reruns offering the starter of a helper gone (Stop writing
-    nothing, Create putting the board away and opening it in the editor);
+    arguments getting its role's, stress/interactor reruns offering the starter of a helper gone (Stop writing
+    nothing, Create putting the board away and opening it in the editor), and a folder's
+    solutions found whatever its name holds (a comma);
   - `scaffold.lua`: the shipped starters, names from `tool_names` (and found by discovery),
     the user's folder over the shipped one for its own language only, adding a language by
     adding a file, `scaffold.language` and a language asked for by name over it, the
@@ -1278,9 +1293,9 @@ specific Vim error about a buffer the user never opened.
     keeping an answer stored empty and leaving no layout behind (the store's root kept),
     which testcase a command without a number acts on, and sharing a folder's testcases
     (offered for a solution with none when exactly one other has some, never for several
-    sets, a format or `testcases_directory` carrying the file's name, or a numberless name
-    for more than testcase 0; renamed as they were, an empty answer kept; the question asked
-    once a session, naming every rename, and the run going ahead after every answer).
+    sets, a format or `testcases_directory` carrying the file's name, or a name without a
+    number; renamed as they were, an empty answer kept; the question asked once a session,
+    naming every rename, and the run going ahead after every answer).
 - Modules expose file-local helpers to tests through `M._test` (`download`, `submit`, `clean`,
   `interactive`, `scratch`, `menu`), and `tools` a way to forget the session's builds, for
   a test whose stubbed compiler answers differently for a source that has not changed. They are not public interface.

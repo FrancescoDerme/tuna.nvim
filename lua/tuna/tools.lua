@@ -34,11 +34,27 @@ M.ROLES = { "checker", "generator", "bruteforce", "interactor" }
 ---@field compile { exec: string, args: string[] }? its compile command, nil when there is none
 ---@field compile_dir string?
 
+-- Filetypes by extension, for the session. Listing a folder's solutions asks for the
+-- language of every file there (testcases and binaries included), across every problem
+-- of every contest the menu summarises, and `vim.filetype.match` walks Neovim's whole
+-- table of names and patterns each time: one match per extension, against a stand-in name,
+-- answers all of them. A name without an extension is matched whole, uncached.
+local by_extension = {}
+
 ---Neovim's filetype for a path, from its name alone (no buffer needed).
 ---@param path string
 ---@return string # filetype, or "" when undetectable
 local function filetype_of(path)
-    return vim.filetype.match({ filename = path }) or ""
+    local ext = path:match("%.([^./]+)$")
+    if not ext then
+        return vim.filetype.match({ filename = path }) or ""
+    end
+    local ft = by_extension[ext]
+    if not ft then
+        ft = vim.filetype.match({ filename = "x." .. ext }) or ""
+        by_extension[ext] = ft
+    end
+    return ft
 end
 
 --------------------------------------------------------------------------------
@@ -54,13 +70,27 @@ end
 ---@param cfg table buffer configuration
 ---@return string? # absolute path, or nil if none found
 function M.find(dir, role, cfg)
+    if vim.fn.isdirectory(dir) == 0 then
+        return nil
+    end
+    -- Read once and matched by name for every base name, never globbed: `globpath` takes a
+    -- comma in a problem's name for a path separator.
+    local names = {}
+    for name, typ in vim.fs.dir(dir) do
+        if typ ~= "directory" then
+            names[#names + 1] = name
+        end
+    end
+    table.sort(names)
     for _, base in ipairs(cfg.tool_names[role] or {}) do
-        local hits = vim.fn.globpath(dir, base .. ".*", false, true)
-        table.sort(hits)
-        for _, path in ipairs(hits) do
-            local ft = filetype_of(path)
-            if ft ~= "" and cfg.run_command[ft] and not M.is_header(path) then
-                return path
+        local prefix = base .. "."
+        for _, name in ipairs(names) do
+            if name:sub(1, #prefix) == prefix then
+                local path = dir .. "/" .. name
+                local ft = filetype_of(path)
+                if ft ~= "" and cfg.run_command[ft] and not M.is_header(path) then
+                    return path
+                end
             end
         end
     end
@@ -106,6 +136,34 @@ function M.is_support(path, cfg)
     return M.is_helper(path, cfg) or M.is_header(path)
 end
 
+---Every solution in `dir`, in name order: each file there, dotfiles aside, whose language
+---has a `run_command` and that is not a support file. What every place that picks
+---solutions goes by (run-all, `:Tuna next`, a contest's problems, a run from a helper file,
+---sharing a folder's testcases).
+---@param dir string
+---@param cfg table
+---@param filetype (fun(path: string): string)? a file's language, by its name unless given
+---@return string[] # normalized absolute paths
+function M.solutions_in(dir, cfg, filetype)
+    filetype = filetype or filetype_of
+    local out = {}
+    if vim.fn.isdirectory(dir) == 0 then
+        return out
+    end
+    dir = vim.fs.normalize(dir)
+    for name, typ in vim.fs.dir(dir) do
+        local path = dir .. "/" .. name
+        if typ ~= "directory" and name:sub(1, 1) ~= "." and not M.is_support(path, cfg) then
+            local ft = filetype(path)
+            if ft ~= "" and (cfg.run_command or {})[ft] then
+                out[#out + 1] = path
+            end
+        end
+    end
+    table.sort(out)
+    return out
+end
+
 ---Resolve the buffer a run should target. Normally that's `bufnr` itself, but if
 ---`bufnr` is a *helper* file (e.g. you're editing `checker.cpp`) or a header, redirect to
 ---the solution beside it so running/stress/etc. still work. The solution is a sibling
@@ -122,26 +180,10 @@ function M.solution_bufnr(bufnr, cfg)
         return bufnr
     end
 
-    local abspath = vim.fs.normalize(vim.fn.fnamemodify(path, ":p"))
-    local dir = vim.fn.fnamemodify(path, ":p:h")
     -- The solution may be a different language than the helper (a Python checker
     -- beside a C++ solution), so consider every runnable source file, not just the
     -- helper's extension.
-    local cands = {}
-    for _, f in ipairs(vim.fn.globpath(dir, "*", false, true)) do
-        local fp = vim.fs.normalize(vim.fn.fnamemodify(f, ":p"))
-        local ft = filetype_of(f)
-        if
-            fp ~= abspath
-            and vim.fn.isdirectory(f) == 0
-            and ft ~= ""
-            and cfg.run_command[ft]
-            and not M.is_support(f, cfg)
-        then
-            cands[#cands + 1] = f
-        end
-    end
-    table.sort(cands)
+    local cands = M.solutions_in(vim.fs.normalize(vim.fn.fnamemodify(path, ":p:h")), cfg)
     if #cands == 0 then
         return nil, "no solution file found next to '" .. vim.fn.fnamemodify(path, ":t") .. "'."
     end

@@ -698,15 +698,7 @@ function M.run(bufnr, count_override, opts)
         stopped = false,
         finished = false,
     }, StressRunner)
-    M.active[bufnr] = sr
-
-    vim.api.nvim_create_autocmd("BufUnload", {
-        buffer = bufnr,
-        once = true,
-        callback = function()
-            M.active[bufnr] = nil
-        end,
-    })
+    core.register(M.active, bufnr, sr)
 
     -- What this run compiles, declared before the board opens so the build step is laid out
     -- once: the solution is the Compile row itself, and the generator, the bruteforce and a

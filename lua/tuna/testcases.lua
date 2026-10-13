@@ -785,7 +785,8 @@ end
 ---How to share one solution's testcases with every solution in its folder, for a solution
 ---that has none: the files to rename, from the names that carry the owner's file name
 ---(`main_input0.txt`) to the first configured `files` format pair that names the same file
----for every solution there (`input0.txt`), which each of them falls back to on load. Only
+---for every solution there (`input0.txt`), which each of them falls back to on load, and is
+---numbered: a name without a number holds testcase 0 alone. Only
 ---offered when the folder holds one set of testcases, `owner`'s, so it is one problem and
 ---the shared names cannot be read by a solution of another problem.
 ---@class tuna.SharePlan
@@ -794,8 +795,9 @@ end
 
 ---The plan for sharing a folder's testcases with `filepath`, or nil when there is nothing
 ---to share: `filepath` has testcases of its own, no solution or more than one in `siblings`
----has any, they are not stored as `files`, or no configured format names a file every
----solution there would read (each carries the file's name, or `testcases_directory` does).
+---has any, they are not stored as `files`, or no configured numbered format names a file
+---every solution there would read (each carries the file's name, or `testcases_directory`
+---does).
 ---@param filepath string absolute path of the solution with no testcases
 ---@param siblings string[] absolute paths of the other solutions in its folder
 ---@param cfg table
@@ -820,7 +822,6 @@ function M.share_plan(filepath, siblings, cfg)
     local in_formats = normalize_formats(cfg.testcases_input_file_format)
     local out_formats = normalize_formats(cfg.testcases_output_file_format)
     local own_in, own_out = M.files.active_parts(directory, owner, in_formats, out_formats)
-    local several = vim.tbl_count(tctbl) > 1 or tctbl[0] == nil
     local to_in, to_out
     for i, in_fmt in ipairs(in_formats) do
         local out_fmt = out_formats[i] or out_formats[1]
@@ -829,8 +830,8 @@ function M.share_plan(filepath, siblings, cfg)
             and out_parts
             and vim.deep_equal(in_parts, eval_format_parts(filepath, in_fmt))
             and vim.deep_equal(out_parts, eval_format_parts(filepath, out_fmt))
-            -- A name without a number holds testcase 0 alone.
-            and not (several and (#in_parts <= 1 or #out_parts <= 1))
+            and #in_parts > 1
+            and #out_parts > 1
         if shared then
             to_in, to_out = in_parts, out_parts
             break
@@ -848,30 +849,13 @@ function M.share_plan(filepath, siblings, cfg)
             n, parts = match_out(name), to_out
         end
         if n then
-            local to = directory .. format_name(parts, n)
-            if utils.file_exists(to) then
-                return nil
-            end
-            moves[#moves + 1] = { from = directory .. name, to = to }
+            moves[#moves + 1] = { from = directory .. name, to = directory .. format_name(parts, n) }
         end
     end
     table.sort(moves, function(a, b)
         return a.from < b.from
     end)
     return { owner = owner, moves = moves }
-end
-
----Carry out a share plan, renaming every file in it.
----@param plan tuna.SharePlan
----@return boolean ok, string? err the rename that failed
-function M.share(plan)
-    for _, move in ipairs(plan.moves) do
-        local ok, err = vim.uv.fs_rename(move.from, move.to)
-        if not ok then
-            return false, err
-        end
-    end
-    return true
 end
 
 --------------------------------------------------------------------------------

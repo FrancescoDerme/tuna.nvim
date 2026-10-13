@@ -42,6 +42,16 @@ do
     local gen = tools.helper("generator", all, with({ running_directory = "out" }))
     t.eq("a helper runs in running_directory", gen and gen.cwd, vim.fs.dirname(all) .. "/out")
 end
+-- A folder's solutions are read by name, not by glob: a problem name with a comma in it
+-- would otherwise read as two paths, and the folder would hold no solution.
+do
+    local dir = t.tempdir() .. "/A, B"
+    vim.fn.mkdir(dir, "p")
+    t.write(dir, "main.cpp", "")
+    t.write(dir, "gen.cpp", "")
+    t.eq("a folder's solutions are found whatever its name holds", vim.tbl_map(vim.fs.basename, tools.solutions_in(dir, cfg)), { "main.cpp" })
+    t.eq("and its helpers", vim.fs.basename(tools.find(dir, "generator", cfg) or ""), "gen.cpp")
+end
 local _, bare = problem()
 t.eq("no file and nothing configured is no helper, and nothing to report", { tools.helper("checker", bare, cfg) }, {})
 

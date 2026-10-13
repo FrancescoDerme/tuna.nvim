@@ -251,14 +251,7 @@ function M.run_testcases(bufnr, list, only_show)
         if not r then
             return -- runner.new already notified
         end
-        M.runners[bufnr] = r
-        -- Drop the runner when its buffer unloads.
-        api.nvim_create_autocmd("BufUnload", {
-            buffer = bufnr,
-            callback = function()
-                M.runners[bufnr] = nil
-            end,
-        })
+        require("tuna.runner.core").register(M.runners, bufnr, r)
     end
 
     local r = M.runners[bufnr]
@@ -304,19 +297,12 @@ function M.offer_sharing(bufnr, proceed)
     config.load_buffer_config(bufnr)
     local cfg = config.get_buffer_config(bufnr)
     local dir = vim.fs.dirname(path)
-    local siblings = {}
-    for _, f in ipairs(vim.fn.globpath(dir, "*", false, true)) do
-        local ft = vim.fn.isdirectory(f) == 0 and vim.filetype.match({ filename = f }) or ""
-        if ft ~= "" and cfg.run_command[ft] and not tools.is_support(f, cfg) then
-            siblings[#siblings + 1] = vim.fs.normalize(f)
-        end
-    end
-    local plan = testcases.share_plan(path, siblings, cfg)
+    local plan = testcases.share_plan(path, tools.solutions_in(dir, cfg), cfg)
     if not plan then
         return proceed()
     end
 
-    local name, owner = vim.fs.basename(path), vim.fs.basename(plan.owner)
+    local name = vim.fs.basename(path)
     local renames = {}
     for _, move in ipairs(plan.moves) do
         local from = move.from:sub(#dir + 2)
@@ -328,19 +314,17 @@ function M.offer_sharing(bufnr, proceed)
     end
     require("tuna.widgets").menu(
         { "Rename and share", "Run without sharing" },
-        ("%s cannot read %s's testcases, renaming them shares them permanently"):format(name, owner),
+        ("%s cannot read %s's testcases, renaming them shares them permanently"):format(name, vim.fs.basename(plan.owner)),
         function(idx)
             if idx ~= 1 then
                 return decline()
             end
-            local ok, err = testcases.share(plan)
-            if ok then
-                utils.notify(
-                    ("shared %s's testcases with every solution in this folder."):format(owner),
-                    "INFO"
-                )
-            else
-                utils.notify(("could not share the testcases, %s."):format(err or "a rename failed"), "WARN")
+            for _, move in ipairs(plan.moves) do
+                local ok, err = vim.uv.fs_rename(move.from, move.to)
+                if not ok then
+                    utils.notify(("could not share the testcases, %s."):format(err), "WARN")
+                    break
+                end
             end
             proceed()
         end,

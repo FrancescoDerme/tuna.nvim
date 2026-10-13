@@ -84,30 +84,41 @@ function MultiRunner:pane_content(tc, name)
     return core.RunnerCore.pane_content(self, tc, name)
 end
 
+---A solution's header row.
+---@param sol table
+---@return table
+local function header_row(sol)
+    return { kind = "solution", name = sol.name, sol = sol, status = "", hlgroup = "TunaRunning", time_label = "" }
+end
+
+---The row of testcase `n` for `sol`, with the status it starts on.
+---@param sol table
+---@param n integer
+---@param status string
+---@param hlgroup string
+---@return table
+function MultiRunner:case_row(sol, n, status, hlgroup)
+    local tc = self.tctbl[n]
+    return {
+        kind = "case",
+        tcnum = n,
+        sol = sol,
+        stdin = tc.input or "",
+        expected = tc.output,
+        status = status,
+        hlgroup = hlgroup,
+    }
+end
+
 ---Build the matrix rows: for each solution, a header row then one row per testcase.
 function MultiRunner:load_rows()
     self.tcdata = {}
     for _, sol in ipairs(self.files) do
-        table.insert(self.tcdata, {
-            kind = "solution",
-            name = sol.name,
-            sol = sol,
-            status = "",
-            hlgroup = "TunaRunning",
-            time_label = "", -- header rows never show a time
-        })
+        table.insert(self.tcdata, header_row(sol))
         sol.header_idx = #self.tcdata
         sol.case_idxs = {}
         for _, n in ipairs(self.nums) do
-            table.insert(self.tcdata, {
-                kind = "case",
-                tcnum = n,
-                sol = sol,
-                stdin = self.tctbl[n].input or "",
-                expected = self.tctbl[n].output,
-                status = "",
-                hlgroup = "TunaRunning",
-            })
+            table.insert(self.tcdata, self:case_row(sol, n, "", "TunaRunning"))
             table.insert(sol.case_idxs, #self.tcdata)
         end
     end
@@ -151,27 +162,11 @@ function MultiRunner:rebuild_rows()
 
     self.tcdata = {}
     for _, sol in ipairs(self.files) do
-        table.insert(self.tcdata, headers[sol.name] or {
-            kind = "solution",
-            name = sol.name,
-            sol = sol,
-            status = "",
-            hlgroup = "TunaRunning",
-            time_label = "",
-        })
+        table.insert(self.tcdata, headers[sol.name] or header_row(sol))
         sol.header_idx = #self.tcdata
         sol.case_idxs = {}
         for _, n in ipairs(self.nums) do
-            local row = cases[sol.name .. "\0" .. tostring(n)]
-                or {
-                    kind = "case",
-                    tcnum = n,
-                    sol = sol,
-                    stdin = self.tctbl[n].input or "",
-                    expected = self.tctbl[n].output,
-                    status = "NOT RUN",
-                    hlgroup = "TunaDone",
-                }
+            local row = cases[sol.name .. "\0" .. tostring(n)] or self:case_row(sol, n, "NOT RUN", "TunaDone")
             table.insert(self.tcdata, row)
             table.insert(sol.case_idxs, #self.tcdata)
         end
@@ -546,18 +541,9 @@ function M.run(bufnr, opts)
     -- Discover every runnable sibling *source* file, of any language — so run_all
     -- can compare, say, a C++ and a Python attempt side by side. A file qualifies
     -- when its filetype has a run_command and it isn't a helper (checker/gen/…) or a header.
-    local paths = {}
-    for _, f in ipairs(vim.fn.globpath(dir, "*", false, true)) do
-        if vim.fn.isdirectory(f) == 0 and not tools.is_support(f, cfg) then
-            local ft = candidate_filetype(f)
-            if ft ~= "" and cfg.run_command[ft] then
-                paths[#paths + 1] = { path = f, ft = ft }
-            end
-        end
-    end
-    table.sort(paths, function(a, b)
-        return a.path < b.path
-    end)
+    local paths = vim.tbl_map(function(f)
+        return { path = f, ft = candidate_filetype(f) }
+    end, tools.solutions_in(dir, cfg, candidate_filetype))
     if #paths == 0 then
         local where = curpath and "beside " .. vim.fn.fnamemodify(curpath, ":t") or "in " .. dir
         utils.notify(
@@ -651,16 +637,8 @@ function M.run(bufnr, opts)
         tcdata = {},
         completed = false,
     }, MultiRunner)
-    M.active[bufnr] = mr
+    core.register(M.active, bufnr, mr)
     utils.ensure_directory(mr.rundir)
-
-    vim.api.nvim_create_autocmd("BufUnload", {
-        buffer = bufnr,
-        once = true,
-        callback = function()
-            M.active[bufnr] = nil
-        end,
-    })
 
     -- Rows first, and marked before the board opens, so it opens on the row it will show
     -- (see interactive).
