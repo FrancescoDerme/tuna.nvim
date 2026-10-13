@@ -282,22 +282,93 @@ function M.run_testcases(bufnr, list, only_show)
     r:show_ui()
 end
 
----Run a buffer in a given mode (dispatching to the right engine).
+-- Solutions whose offer to share their folder's testcases was turned down, by path: asked
+-- once a session, so a solution kept without testcases on purpose is not asked on every run.
+local share_declined = {}
+
+---Before a run of a solution with no testcases, in a folder where one other solution has
+---some under names carrying its file name, offer to share them with every solution there
+---by renaming them (`testcases.share_plan`), saying exactly what will be renamed. Then run,
+---whatever the answer.
+---@param bufnr integer
+---@param proceed fun()
+function M.offer_sharing(bufnr, proceed)
+    local path = api.nvim_buf_get_name(bufnr)
+    if path == "" or vim.fn.filereadable(path) == 0 then
+        return proceed()
+    end
+    path = vim.fs.normalize(vim.fn.fnamemodify(path, ":p"))
+    if share_declined[path] then
+        return proceed()
+    end
+    config.load_buffer_config(bufnr)
+    local cfg = config.get_buffer_config(bufnr)
+    local dir = vim.fs.dirname(path)
+    local siblings = {}
+    for _, f in ipairs(vim.fn.globpath(dir, "*", false, true)) do
+        local ft = vim.fn.isdirectory(f) == 0 and vim.filetype.match({ filename = f }) or ""
+        if ft ~= "" and cfg.run_command[ft] and not tools.is_support(f, cfg) then
+            siblings[#siblings + 1] = vim.fs.normalize(f)
+        end
+    end
+    local plan = testcases.share_plan(path, siblings, cfg)
+    if not plan then
+        return proceed()
+    end
+
+    local name, owner = vim.fs.basename(path), vim.fs.basename(plan.owner)
+    local renames = {}
+    for _, move in ipairs(plan.moves) do
+        local from = move.from:sub(#dir + 2)
+        renames[#renames + 1] = from .. "  →  " .. move.to:sub(#dir + 2)
+    end
+    local function decline()
+        share_declined[path] = true
+        proceed()
+    end
+    require("tuna.widgets").menu(
+        { "Rename and share", "Run without sharing" },
+        ("%s cannot read %s's testcases, renaming them shares them permanently"):format(name, owner),
+        function(idx)
+            if idx ~= 1 then
+                return decline()
+            end
+            local ok, err = testcases.share(plan)
+            if ok then
+                utils.notify(
+                    ("shared %s's testcases with every solution in this folder."):format(owner),
+                    "INFO"
+                )
+            else
+                utils.notify(("could not share the testcases, %s."):format(err or "a rename failed"), "WARN")
+            end
+            proceed()
+        end,
+        api.nvim_get_current_win(),
+        decline,
+        { title = "Renames", lines = renames }
+    )
+end
+
+---Run a buffer in a given mode (dispatching to the right engine), once its testcases are
+---settled (`offer_sharing`).
 ---@param mode string "normal" | "all" | "stress" | "interactive"
 ---@param args string[] mode arguments (testcase numbers, or a stress count)
 ---@param bufnr integer
 function M.dispatch_mode(mode, args, bufnr)
-    M.settle_results(bufnr, { run = true, keep = mode == "normal" and M.runners[bufnr] or nil }, function()
-        M.last_mode[bufnr] = mode
-        if mode == "all" then
-            require("tuna.multi").run(bufnr, { list = #args > 0 and args or nil })
-        elseif mode == "stress" then
-            require("tuna.stress").run(bufnr, tonumber(args[1]))
-        elseif mode == "interactive" then
-            require("tuna.interactive").run(bufnr, #args > 0 and args or nil)
-        else -- "normal"
-            M.run_testcases(bufnr, #args > 0 and args or nil, false)
-        end
+    M.offer_sharing(bufnr, function()
+        M.settle_results(bufnr, { run = true, keep = mode == "normal" and M.runners[bufnr] or nil }, function()
+            M.last_mode[bufnr] = mode
+            if mode == "all" then
+                require("tuna.multi").run(bufnr, { list = #args > 0 and args or nil })
+            elseif mode == "stress" then
+                require("tuna.stress").run(bufnr, tonumber(args[1]))
+            elseif mode == "interactive" then
+                require("tuna.interactive").run(bufnr, #args > 0 and args or nil)
+            else -- "normal"
+                M.run_testcases(bufnr, #args > 0 and args or nil, false)
+            end
+        end)
     end)
 end
 

@@ -394,4 +394,125 @@ do
     end
 end
 
+-- Sharing a folder's testcases: offered for a solution with none, when exactly one other
+-- solution there has some under names carrying its own, renaming them to the first format
+-- every solution there reads. Never for a folder of several problems, nor where no format
+-- is shared (the formats, or `testcases_directory`, carry the file's name), nor to a name
+-- without a number for more than testcase 0.
+do
+    local cfg0 = vim.deepcopy(require("tuna.config").current_setup)
+    local function cfg(extra)
+        return vim.tbl_deep_extend("force", cfg0, extra or {})
+    end
+    local function folder(files)
+        local d = t.tempdir()
+        for name, text in pairs(files) do
+            t.write(d, name, text)
+        end
+        return d
+    end
+    local function plan_for(d, sources, extra)
+        local siblings = vim.tbl_map(function(f)
+            return d .. "/" .. f
+        end, sources)
+        return tc.share_plan(d .. "/main2.cpp", siblings, cfg(extra))
+    end
+
+    local d = folder({ ["main.cpp"] = "", ["main2.cpp"] = "", ["main_input0.txt"] = "1\n", ["main_output0.txt"] = "",
+        ["main_input1.txt"] = "2\n" })
+    local plan = plan_for(d, { "main.cpp", "main2.cpp" })
+    t.eq("a solution with none is offered the one set in its folder, every file of it renamed", plan and {
+        plan.owner,
+        vim.tbl_map(function(m)
+            return { vim.fs.basename(m.from), vim.fs.basename(m.to) }
+        end, plan.moves),
+    }, {
+        d .. "/main.cpp",
+        { { "main_input0.txt", "input0.txt" }, { "main_input1.txt", "input1.txt" }, { "main_output0.txt", "output0.txt" } },
+    })
+    t.ok("sharing renames them", tc.share(plan))
+    local both = { tc.get_testcases(d .. "/main.cpp", cfg()), tc.get_testcases(d .. "/main2.cpp", cfg()) }
+    t.eq("and both solutions read the same testcases, an empty answer kept", both[2], both[1])
+    t.eq("as they were", both[1], { [0] = { input = "1\n", output = "" }, [1] = { input = "2\n" } })
+    t.eq("and once shared there is nothing left to offer", plan_for(d, { "main.cpp", "main2.cpp" }), nil)
+
+    local own = folder({ ["main.cpp"] = "", ["main2.cpp"] = "", ["main_input0.txt"] = "1\n", ["main2_input0.txt"] = "2\n" })
+    t.eq("a solution with testcases of its own is offered nothing", plan_for(own, { "main.cpp", "main2.cpp" }), nil)
+
+    local contest = folder({ ["a.cpp"] = "", ["b.cpp"] = "", ["main2.cpp"] = "", ["a_input0.txt"] = "1\n", ["b_input0.txt"] = "2\n" })
+    t.eq("nor in a folder holding several sets, a contest's", plan_for(contest, { "a.cpp", "b.cpp", "main2.cpp" }), nil)
+
+    local qualified = { testcases_input_file_format = { "$(FNOEXT)_input$(TCNUM).txt" }, testcases_output_file_format = { "$(FNOEXT)_output$(TCNUM).txt" } }
+    t.eq("nor when every format carries the file's name", plan_for(d, { "main.cpp", "main2.cpp" }, qualified), nil)
+    local per_file = folder({ ["main.cpp"] = "", ["main2.cpp"] = "" })
+    vim.fn.mkdir(per_file .. "/main", "p")
+    t.write(per_file .. "/main", "main_input0.txt", "1\n")
+    t.eq("or testcases_directory does", plan_for(per_file, { "main.cpp", "main2.cpp" }, { testcases_directory = "$(FNOEXT)" }), nil)
+
+    local numberless = { testcases_input_file_format = { "$(FNOEXT)_input$(TCNUM).txt", "in.txt" }, testcases_output_file_format = { "$(FNOEXT)_output$(TCNUM).txt", "out.txt" } }
+    local one = folder({ ["main.cpp"] = "", ["main2.cpp"] = "", ["main_input0.txt"] = "1\n" })
+    local p1 = plan_for(one, { "main.cpp", "main2.cpp" }, numberless)
+    t.eq("a name without a number takes testcase 0", p1 and vim.fs.basename(p1.moves[1].to), "in.txt")
+    local two = folder({ ["main.cpp"] = "", ["main2.cpp"] = "", ["main_input0.txt"] = "1\n", ["main_input1.txt"] = "2\n" })
+    t.eq("and nothing more", plan_for(two, { "main.cpp", "main2.cpp" }, numberless), nil)
+end
+
+-- The question before a run: asked once a session per solution, whatever the answer, saying
+-- what will be renamed, and the run goes ahead after every answer, dismissal included.
+do
+    local C = require("tuna.commands")
+    local widgets = require("tuna.widgets")
+    require("tuna").setup({})
+    local d = t.tempdir()
+    for name, text in pairs({ ["main.cpp"] = "", ["main2.cpp"] = "", ["main_input0.txt"] = "1\n" }) do
+        t.write(d, name, text)
+    end
+    vim.cmd("edit " .. d .. "/main2.cpp")
+    local bufnr = vim.api.nvim_get_current_buf()
+    local real_menu = widgets.menu
+    local asked, answer
+    widgets.menu = function(items, title, on_choice, _, on_close, preview)
+        asked = { title = title, items = items, renames = preview.lines }
+        if answer then
+            on_choice(answer)
+        else
+            on_close()
+        end
+    end
+    local ran = 0
+    local function run()
+        asked = nil
+        C.offer_sharing(bufnr, function()
+            ran = ran + 1
+        end)
+    end
+
+    answer = 2
+    run()
+    t.eq("a run of a solution with none asks, naming every rename", asked, {
+        title = "main2.cpp cannot read main.cpp's testcases, renaming them shares them permanently",
+        items = { "Rename and share", "Run without sharing" },
+        renames = { "main_input0.txt  →  input0.txt" },
+    })
+    t.eq("and runs without sharing", { ran, vim.fn.filereadable(d .. "/main_input0.txt") }, { 1, 1 })
+    run()
+    t.eq("declined, it is not asked again", { asked, ran }, { nil, 2 })
+
+    vim.cmd("edit " .. d .. "/main.cpp")
+    t.write(d, "main3.cpp", "")
+    vim.cmd("edit " .. d .. "/main3.cpp")
+    bufnr = vim.api.nvim_get_current_buf()
+    answer = nil
+    run()
+    t.ok("dismissed, the run goes ahead", asked ~= nil and ran == 3)
+    answer = 1
+    vim.cmd("edit " .. d .. "/main.cpp")
+    t.write(d, "main4.cpp", "")
+    vim.cmd("edit " .. d .. "/main4.cpp")
+    bufnr = vim.api.nvim_get_current_buf()
+    run()
+    t.eq("shared, the files are renamed and the run goes ahead", { ran, vim.fn.filereadable(d .. "/input0.txt") }, { 4, 1 })
+    widgets.menu = real_menu
+end
+
 t.report()

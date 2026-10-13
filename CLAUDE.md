@@ -67,7 +67,9 @@ library, contest navigation, a scratch file, an unused-file cleaner, a menu and
   a user would expect or easily find out by themselves (a key that does what Vim's would,
   a prompt that explains itself, a default that is what anyone would pick). Completeness
   lives in the reference (`REFERENCE.md`, and so the vimdoc's commands and configuration)
-  and in `config.lua`'s comments, and even there what a reader would assume goes unsaid.
+  and in `config.lua`'s comments, and even there what a reader would assume goes unsaid. An
+  offer a run makes unasked (sharing a folder's testcases, a missing helper's starter) says
+  in its float what it will do, so no doc describes it.
 - **Options are documented where they are defined.** Every option in `config.defaults` has a
   comment in `config.lua` saying what it does (a block comment may cover a group), and that
   comment is its documentation: no doc lists options. The README's Configuration section is
@@ -224,6 +226,19 @@ is relative. Every configured path goes through these: compile/running directori
   `directory` backend, removing a testcase, also removes the directories its format made
   for it once empty (`tests/0`, then `tests`), stopping at the store's root
   (`testcases_directory`), which is the user's.
+- **Sharing** (`share_plan`, `share`): unqualified names (`input0.txt`) belong to the whole
+  folder, since every solution's format list falls through to them, so they are the only way
+  two solutions share testcases, and only right when the folder is one problem. Before every
+  `:Tuna run` (`commands.dispatch_mode`, which the menu's Run entries also go through) a
+  solution with no testcases is asked through `commands.offer_sharing` whether to rename the
+  testcases of the one other solution there that has some, to the first `files` format pair
+  that evaluates to the same names for both (`testcases_directory` included). It is never
+  offered when several solutions have testcases (a contest's folder, where the shared names
+  would be read by every problem's new solutions), when no format is shared, or to a name
+  without a number for more than testcase 0. The menu names every rename, and every answer
+  runs; a decline is remembered for the session, by path. Sharing is a rename on disk, not a
+  link: a folder-level rule that read a sibling's testcases, or a sidecar link from one
+  solution to another, would be state the user cannot see in the file names.
 - `:Tuna testcase edit`/`delete`/`split` without a number go through `commands.choose_testcase`:
   the only testcase when there is one, a `widgets.menu` of them in order when there are several,
   a message when there are none. Delete still confirms.
@@ -1261,7 +1276,11 @@ specific Vim error about a buffer the user never opened.
     from a read-only pane). `testcases.lua` also covers the
     `single_file` rewrite keeping untouched testcases, a conversion through every backend
     keeping an answer stored empty and leaving no layout behind (the store's root kept),
-    and which testcase a command without a number acts on.
+    which testcase a command without a number acts on, and sharing a folder's testcases
+    (offered for a solution with none when exactly one other has some, never for several
+    sets, a format or `testcases_directory` carrying the file's name, or a numberless name
+    for more than testcase 0; renamed as they were, an empty answer kept; the question asked
+    once a session, naming every rename, and the run going ahead after every answer).
 - Modules expose file-local helpers to tests through `M._test` (`download`, `submit`, `clean`,
   `interactive`, `scratch`, `menu`), and `tools` a way to forget the session's builds, for
   a test whose stubbed compiler answers differently for a source that has not changed. They are not public interface.
