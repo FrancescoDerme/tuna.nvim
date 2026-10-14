@@ -1,10 +1,11 @@
+// Checker for problems with multiple answers.
+// Exit 0 = accepted, non-zero = wrong answer.
+
 #include <bits/stdc++.h>
 #define ll long long
 #define ld long double
 using namespace std;
 
-// Checker for problems with multiple answers.
-// Exit 0 = accepted, non-zero = wrong answer.
 bool checker(ifstream& input, ifstream& output, ifstream& answer) {
     ll n;
     input >> n;

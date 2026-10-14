@@ -1,11 +1,12 @@
+// Interactor for an interactive problem.
+// Read the solution's queries on stdin, print responses on stdout, flush
+// after every line. Exit 0 to accept, non-zero to reject.
+
 #include <bits/stdc++.h>
 #define ll long long
 #define ld long double
 using namespace std;
 
-// Interactor for an interactive problem.
-// Read the solution's queries on stdin, print responses on stdout, flush
-// after every line. Exit 0 to accept, non-zero to reject.
 bool interactor(ifstream& input) {
     ll secret;
     input >> secret;

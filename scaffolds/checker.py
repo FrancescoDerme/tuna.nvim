@@ -1,5 +1,6 @@
 # Checker for problems with multiple answers.
 # Exit 0 = accepted, non-zero = wrong answer.
+
 import sys
 
 if len(sys.argv) < 4:

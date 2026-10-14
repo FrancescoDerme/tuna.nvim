@@ -1,4 +1,5 @@
 # Generator for stress-testing.
+
 import random
 import sys
 

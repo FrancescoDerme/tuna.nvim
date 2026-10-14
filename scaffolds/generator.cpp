@@ -1,9 +1,10 @@
+// Generator for stress-testing.
+
 #include <bits/stdc++.h>
 #define ll long long
 #define ld long double
 using namespace std;
 
-// Generator for stress-testing.
 void generator(unsigned ll seed) {
     mt19937_64 rng(seed);
 

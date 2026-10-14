@@ -1,10 +1,11 @@
+// Bruteforce solution for stress-testing.
+// Read the input from stdin, write the correct answer to stdout.
+
 #include <bits/stdc++.h>
 #define ll long long
 #define ld long double
 using namespace std;
 
-// Bruteforce solution for stress-testing.
-// Read the input from stdin, write the correct answer to stdout.
 void bruteforce() {
     ll n;
     cin >> n;

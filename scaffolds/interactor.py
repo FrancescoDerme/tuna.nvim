@@ -1,6 +1,7 @@
 # Interactor for an interactive problem.
 # Read the solution's queries on stdin, print responses on stdout, flush
 # after every line. Exit 0 to accept, non-zero to reject.
+
 import sys
 
 # argv[2] = jury answer (may be empty)
