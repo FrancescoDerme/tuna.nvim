@@ -664,7 +664,6 @@ one prefix: >lua
     },
 <
     In a solution
-    `<leader>tta`, `tte`, `ttd`    add, edit, delete a testcase
     `<leader>tr`                   run
     `<leader>tu`                   show the runner UI
     `<leader>ts`                   submit
@@ -679,14 +678,13 @@ one prefix: >lua
     `<leader>tdp`, `tdc`, `tds`    download a problem, a contest, sync
     `<leader>tgp`, `tgc`           back to the last problem, contest
 
-The preset groups keys by subject: `t` for testcases, `d` for downloads and
-`g` for "go to". A key inside a group has a short label that leaves out the
-group's word (`<leader>tdp` is `Problem`), so if you use which-key, name the
-groups in your config: >lua
+The preset groups keys by subject: `d` for downloads and `g` for "go to". A
+key inside a group has a short label that leaves out the group's word
+(`<leader>tdp` is `Problem`), so if you use which-key, name the groups in your
+config: >lua
 
     require("which-key").add({
         { "<leader>t", group = "Tuna" },
-        { "<leader>tt", group = "Testcases" },
         { "<leader>td", group = "Download" },
         { "<leader>tg", group = "Go to" },
     })
@@ -697,7 +695,7 @@ rest: >lua
 
     keymaps = {
         preset = "<leader>t",
-        mappings = { run = "<leader><leader>", delete_testcase = false },
+        mappings = { run = "<leader><leader>", pin = false },
     },
 <
 `mappings` are buffer-local, set for the solution filetypes in

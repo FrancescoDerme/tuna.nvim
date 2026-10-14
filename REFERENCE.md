@@ -396,8 +396,7 @@ keymaps = {
 
 | Where         | Key                                         | Action                              |
 | ------------- | ------------------------------------------- | ----------------------------------- |
-| In a solution | `<leader>tta`, `<leader>tte`, `<leader>ttd` | add, edit, delete a testcase        |
-|               | `<leader>tr`                                | run                                 |
+| In a solution | `<leader>tr`                                | run                                 |
 |               | `<leader>tu`                                | show the runner UI                  |
 |               | `<leader>ts`                                | submit                              |
 |               | `<leader>tn`, `<leader>tp`                  | next, previous problem              |
@@ -409,13 +408,12 @@ keymaps = {
 |               | `<leader>tdp`, `<leader>tdc`, `<leader>tds` | download a problem, a contest, sync |
 |               | `<leader>tgp`, `<leader>tgc`                | back to the last problem, contest   |
 
-The preset groups keys by subject: `t` for testcases, `d` for downloads and `g` for "go to".
+The preset groups keys by subject: `d` for downloads and `g` for "go to".
 A key inside a group has a short label that leaves out the group's word (`<leader>tdp` is `Problem`), so if you use which-key, name the groups in your config:
 
 ```lua
 require("which-key").add({
     { "<leader>t", group = "Tuna" },
-    { "<leader>tt", group = "Testcases" },
     { "<leader>td", group = "Download" },
     { "<leader>tg", group = "Go to" },
 })
@@ -426,7 +424,7 @@ Your own keys layer over the preset rather than replacing it, so one can be move
 ```lua
 keymaps = {
     preset = "<leader>t",
-    mappings = { run = "<leader><leader>", delete_testcase = false },
+    mappings = { run = "<leader><leader>", pin = false },
 },
 ```
 

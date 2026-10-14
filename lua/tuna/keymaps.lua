@@ -52,18 +52,21 @@ M.actions = {
 -- Suffixes are grouped by subject, so which-key, with the groups named in the user's own
 -- config (REFERENCE.md shows how), shows one "Tuna" group with subgroups under it:
 --
---   <leader>tta  Add                <leader>tr  Run            <leader>tdt  Testcases
---   <leader>tte  Edit               <leader>tu  Show ui        <leader>tdp  Problem
---   <leader>ttd  Delete             <leader>ts  Submit         <leader>tdc  Contest
---   <leader>tn   Next problem       <leader>tm  Menu           <leader>tds  Sync
---   <leader>tp   Prev problem       <leader>tw  Scratch
---   <leader>tl   Library        <leader>tf  Pin
---   <leader>tgp  Problem            <leader>tgc Contest
+--   <leader>tr  Run             <leader>tm  Menu        <leader>tdt  Testcases
+--   <leader>tu  Show ui         <leader>tw  Scratch     <leader>tdp  Problem
+--   <leader>ts  Submit          <leader>tl  Library     <leader>tdc  Contest
+--   <leader>tn  Next problem    <leader>tf  Pin         <leader>tds  Sync
+--   <leader>tp  Prev problem                            <leader>tgp  Problem
+--                                                       <leader>tgc  Contest
 --
 -- The labels above are the which-key entries. A key inside a group does not repeat
--- what the group already says (`tt` "Testcases" → `Add`, `td` "Download" → `Problem`,
--- `tg` "Go to" → `Contest`); an ungrouped one keeps its full name, since nothing else
--- supplies the noun. See `M.preset_labels`.
+-- what the group already says (`td` "Download" → `Problem`, `tg` "Go to" →
+-- `Contest`); an ungrouped one keeps its full name, since nothing else supplies the
+-- noun. See `M.preset_labels`.
+--
+-- Testcases have no keys: they are added, edited and deleted on the results UI, where
+-- they are seen (`n`, typing in a pane, `x`), and downloads bring most of them. The
+-- `add_testcase`, `edit_testcase` and `delete_testcase` actions are still there to map.
 --
 -- No group prefix is itself a mapping, so none of them costs a `timeoutlen` wait.
 -- `:Tuna clean` is deliberately absent: it is run once in a while, not during a
@@ -74,9 +77,6 @@ M.actions = {
 -- because they are what you reach for when no solution is open yet.
 M.preset = {
     buffer = {
-        add_testcase = "ta",
-        edit_testcase = "te",
-        delete_testcase = "td",
         run = "r",
         show_ui = "u",
         submit = "s",
@@ -103,16 +103,13 @@ M.preset = {
 }
 
 -- Labels for the preset's **grouped** keys, where the group has already said the noun.
--- A which-key group is a word the user reads before the entry — `<leader>tt` is
--- "Testcases", `<leader>td` is "Download", `<leader>tg` is "Go to" — so the derived
--- `Add testcase` / `Download problem` / `Last problem` say it twice. These are used
+-- A which-key group is a word the user reads before the entry — `<leader>td` is
+-- "Download", `<leader>tg` is "Go to" — so the derived `Download problem` /
+-- `Last problem` say it twice. These are used
 -- **only** while an action is still on its preset key: move it out of the group with
 -- your own `mappings` and it goes back to the full label, which is the one that makes
 -- sense standing alone.
 M.preset_labels = {
-    add_testcase = "Add", -- under "Testcases"
-    edit_testcase = "Edit",
-    delete_testcase = "Delete",
     download_testcases = "Testcases", -- under "Download"
     download_problem = "Problem",
     download_contest = "Contest",
