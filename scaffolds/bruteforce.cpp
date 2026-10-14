@@ -20,7 +20,7 @@ int main() {
     cout.tie(0);
 
     int tt = 1;
-    cin >> tt;
+    cin >> tt;  // comment out for a single test
     while (tt--) {
         bruteforce();
     }

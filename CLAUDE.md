@@ -1162,7 +1162,14 @@ specific Vim error about a buffer the user never opened.
   The language is the one asked for, else `scaffold.language`, else the solution's; one the
   role has no template in offers the languages it has (a helper is compiled and run in its
   own language, whatever the solution's). Templates are written verbatim, with no `$(…)`
-  expansion: `$(` is command substitution in a shell. `languages` feeds the completion of
+  expansion: `$(` is command substitution in a shell. Every starter that reads a test
+  count reads it as a solution template does (`int tt = 1; cin >> tt;`), on a line marked
+  `comment out for a single test`: the bruteforce, the checker (run once per testcase file,
+  looping over its tests) and the interactor, which reads the count from the testcase file,
+  the jury's hidden data, and tells it to the solution. The generator writes whatever format
+  the problem takes, so it has none. A checker answers by its exit code alone, naming only
+  trailing output, and the interactor stops at the first game lost, after which it and the
+  solution are no longer in step. `languages` feeds the completion of
   `:Tuna scaffold <role> <Tab>`, and `template_for` lets `clean` recognise an untouched
   scaffold. `create` takes `{ open, on_done }`, so a caller can chain it.
   - **A run that needs a helper it does not have offers its starter** (`create_missing`): a

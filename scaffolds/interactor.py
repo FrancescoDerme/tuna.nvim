@@ -9,18 +9,29 @@ if len(sys.argv) < 2:
     sys.exit(2)
 
 with open(sys.argv[1]) as f:
-    data = f.read().split()
+    data = iter(f.read().split())
 
-secret = int(data[0])
-for _ in range(40):
-    line = sys.stdin.readline()
-    if not line:
+
+def interactor():
+    secret = int(next(data))
+    for _ in range(40):
+        line = sys.stdin.readline()
+        if not line:
+            return False
+        g = int(line)
+        if g == secret:
+            print("correct", flush=True)
+            return True
+        print("higher" if g < secret else "lower", flush=True)
+    print("query budget exceeded", file=sys.stderr)
+    return False
+
+
+tt = 1
+tt = int(next(data))  # comment out for a single test
+print(tt, flush=True)  # this too
+
+for t in range(1, tt + 1):
+    if not interactor():
+        # print(f"wrong answer on test {t}", file=sys.stderr)
         sys.exit(1)
-    g = int(line)
-    if g == secret:
-        print("correct", flush=True)
-        sys.exit(0)
-    print("higher" if g < secret else "lower", flush=True)
-
-print("query budget exceeded", file=sys.stderr)
-sys.exit(1)

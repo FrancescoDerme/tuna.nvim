@@ -7,18 +7,30 @@ if len(sys.argv) < 4:
     sys.exit(2)
 
 with open(sys.argv[1]) as f:
-    _input = f.read()
+    inp = iter(f.read().split())
 with open(sys.argv[2]) as f:
-    output = f.read().split()
+    output = iter(f.read().split())
 with open(sys.argv[3]) as f:
-    answer = f.read().split()
+    answer = iter(f.read().split())
 
-if output[: len(answer)] != answer:
-    print("wrong answer", file=sys.stderr)
+
+def checker():
+    n = int(next(inp))
+    a = [int(next(inp)) for _ in range(n)]
+    return next(output, None) == next(answer)
+
+
+tt = 1
+tt = int(next(inp))  # comment out for a single test
+wrong = False
+
+for t in range(1, tt + 1):
+    if not checker():
+        wrong = True
+        # print(f"wrong answer on test {t}", file=sys.stderr)
+
+trailing = next(output, None) is not None
+if trailing:
+    print("trailing output", file=sys.stderr)
+if wrong or trailing:
     sys.exit(1)
-
-if len(output) > len(answer):
-    print("wrong answer: trailing output", file=sys.stderr)
-    sys.exit(1)
-
-print("ok", file=sys.stderr)

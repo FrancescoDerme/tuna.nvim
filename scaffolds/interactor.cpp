@@ -6,23 +6,23 @@ using namespace std;
 // Interactor for an interactive problem.
 // Read the solution's queries on stdin, print responses on stdout, flush
 // after every line. Exit 0 to accept, non-zero to reject.
-int interactor(ifstream& input) {
+bool interactor(ifstream& input) {
     ll secret;
     input >> secret;
 
     for (int q = 0; q < 40; q++) {
         ll g;
-        if (!(cin >> g)) return 1;
+        if (!(cin >> g)) return false;
         if (g == secret) {
             cout << "correct" << endl;
-            return 0;
+            return true;
         }
 
         cout << (g < secret ? "higher" : "lower") << endl;
     }
 
     cerr << "query budget exceeded\n";
-    return 1;
+    return false;
 }
 
 // argv[2] = jury answer (may be empty)
@@ -33,5 +33,16 @@ int main(int argc, char** argv) {
     }
 
     ifstream input(argv[1]);
-    return interactor(input);
+
+    int tt = 1;
+    input >> tt, cout << tt << endl;  // comment out for a single test
+
+    for (int t = 1; t <= tt; ++t) {
+        if (!interactor(input)) {
+            // cerr << "wrong answer on test " << t << "\n";
+            return 1;
+        }
+    }
+
+    return 0;
 }

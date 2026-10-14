@@ -5,23 +5,15 @@ using namespace std;
 
 // Checker for problems with multiple answers.
 // Exit 0 = accepted, non-zero = wrong answer.
-int checker([[maybe_unused]] ifstream& input, ifstream& output, ifstream& answer) {
-    string a, b;
+bool checker(ifstream& input, ifstream& output, ifstream& answer) {
+    ll n;
+    input >> n;
+    vector<ll> a(n);
+    for (ll i = 0; i < n; ++i) input >> a[i];
 
-    while (answer >> b) {
-        if (!(output >> a) || a != b) {
-            cerr << "wrong answer\n";
-            return 1;
-        }
-    }
-
-    if (output >> a) {
-        cerr << "wrong answer: trailing output\n";
-        return 1;
-    }
-
-    cerr << "ok\n";
-    return 0;
+    string got, want;
+    answer >> want;
+    return (output >> got) && got == want;
 }
 
 int main(int argc, char** argv) {
@@ -31,5 +23,22 @@ int main(int argc, char** argv) {
     }
 
     ifstream input(argv[1]), output(argv[2]), answer(argv[3]);
-    return checker(input, output, answer);
+
+    int tt = 1;
+    input >> tt;  // comment out for a single test
+    bool wrong = false;
+
+    for (int t = 1; t <= tt; ++t) {
+        if (!checker(input, output, answer)) {
+            wrong = true;
+            // cerr << "wrong answer on test " << t << "\n";
+        }
+    }
+
+    string extra;
+    bool trailing = bool(output >> extra);
+    if (trailing) cerr << "trailing output\n";
+
+    if (wrong || trailing) return 1;
+    return 0;
 }
