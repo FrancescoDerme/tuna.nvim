@@ -5,9 +5,8 @@
 -- template they were generated from. Because such files are *templated* they are
 -- not empty, so "unused" can't be detected by emptiness — instead a file counts
 -- as unused when its content still matches the template that would produce it
--- (each `$(...)` modifier is treated as a wildcard, so it recognises both the
--- copied-verbatim and the `evaluate_template_modifiers` forms). A file with no
--- applicable template is unused only if it is empty/whitespace.
+-- (each `$(...)` modifier is treated as a wildcard, so a filled-in header still
+-- matches). An empty file is always unused.
 --
 -- Removing files empties directories, so a run finishes by offering those too: any
 -- directory left holding nothing but testcases and sidecars is proposed for deletion,
@@ -140,8 +139,8 @@ end
 ---@return table<string, string>
 local function tool_roles(cfg)
     local map = {}
-    for role, names in pairs(cfg.tool_names) do
-        for _, name in ipairs(names) do
+    for _, role in ipairs(require("tuna.tools").ROLES) do
+        for _, name in ipairs(cfg.tool_names[role] or {}) do
             map[name] = role
         end
     end
@@ -160,74 +159,32 @@ local function source_exts(cfg)
             end
         end
     end
-    -- Only the `{ [ext] = … }` form names extensions; a fallback *list* has integer
-    -- keys, which are not extensions.
-    if type(cfg.template_file) == "table" and cfg.template_file[1] == nil then
-        for ext in pairs(cfg.template_file) do
-            exts[ext] = true
-        end
-    end
     if cfg.downloaded_files_extension then
         exts[cfg.downloaded_files_extension] = true
     end
     return exts
 end
 
----The downloaded task a problem directory remembers, for resolving a template path
----that names the problem it was written for. This is the piece scanning would
----otherwise have no way to recover: `~/cp/templates/$(JUDGE).cpp` was resolved by the
----download, which knew the judge, and a file on disk does not carry it — but the
----sidecar written beside it does (`url`/`name`/`group`, the same fields
----`judges.parse` reads). Without this a per-judge template would make every untouched
----solution unrecognizable, and `clean` would quietly stop finding anything but empty
----files.
----@param dir string the directory the file lives in
----@param cache table<string, any> per-scan memo (a directory is asked once)
----@return tuna.CCTask|false
-local function task_of(dir, cache)
-    local key = "\0task:" .. dir
-    if cache[key] == nil then
-        local data = require("tuna.sidecar").read_or_nil(dir)
-        cache[key] = (data and data.url) and { name = data.name or "", group = data.group or "", url = data.url }
-            or false
-    end
-    return cache[key]
-end
-
----The solution template contents that could have produced a file at `full` — every
----configured candidate that can be resolved for it, since a fallback list means more
----than one may apply and only comparing tells them apart.
----@param full string absolute file path
----@param ext string its extension
+---The templates a file at `full` of `role` could have been written from, read once per scan.
+---Every one is compared, since which a file came from is recorded nowhere: a fallback list
+---means more than one may apply. The template file itself is never among them, or it would
+---match itself.
+---@param full string
+---@param ext string
+---@param role string
 ---@param cfg table
----@param cache table<string, any> memo of already-read templates
+---@param cache table<string, any> per-scan memo
 ---@return string[]
-local function solution_templates(full, ext, cfg, cache)
-    local dir = vim.fn.fnamemodify(full, ":h")
+local function templates_of(full, ext, role, cfg, cache)
+    cache["\0glob"] = cache["\0glob"] or {}
     local out = {}
-    for _, candidate in ipairs(utils.template_candidates(cfg.template_file, ext)) do
-        local path
-        if utils.only_file_modifiers(candidate) then
-            path = utils.eval_string(full, candidate) -- fills $(FEXT)/$(FNOEXT)/… from `full`
-        else
-            local task = task_of(dir, cache)
-            if task then
-                path = require("tuna.download").eval_task_path(candidate, task, ext, cfg, full)
+    for _, path in ipairs(require("tuna.scaffold").templates(role, cfg, full, ext, cache["\0glob"])) do
+        if vim.fs.normalize(path) ~= vim.fs.normalize(full) then
+            if cache[path] == nil then
+                cache[path] = utils.read_file(path) or false
             end
-        end
-        if path then
-            path = utils.expand_home(path)
-            -- `full` may *be* the template file itself (e.g. cleaning the folder that
-            -- holds `template.cpp`); it would trivially match itself 100%. Don't offer
-            -- to delete it.
-            if vim.fs.normalize(path) ~= vim.fs.normalize(full) then
-                -- The same handful of templates back every candidate: read each once.
-                if cache[path] == nil then
-                    cache[path] = utils.read_file(path) or false
-                end
-                if cache[path] then
-                    out[#out + 1] = cache[path]
-                end
+            if cache[path] then
+                out[#out + 1] = cache[path]
             end
         end
     end
@@ -237,8 +194,7 @@ end
 ---Classify a file: return a human-readable "unused" reason, or nil if it looks
 ---used. A file is unused when its similarity to the template that would produce it
 ---is at least `threshold` (1.0 = an exact/untouched match; 0.95 = "95% the template",
----so a lightly-edited file still counts). A file with no applicable template is
----unused only when empty.
+---so a lightly-edited file still counts). An empty file is always unused.
 ---@param full string
 ---@param ext string
 ---@param base string basename without extension
@@ -254,45 +210,24 @@ local function classify(full, ext, base, roles, cfg, threshold, cache)
     if stat and stat.size > 1048576 then
         return nil
     end
-    local role = roles[base]
-    local tmpls
-    if role then
-        -- Keyed by directory too: a relative `scaffold.directory` is read from it.
-        local dir = vim.fs.dirname(full)
-        local key = "\0role:" .. role .. ":" .. ext .. ":" .. dir
-        if cache[key] == nil then
-            cache[key] = require("tuna.scaffold").template_for(role, ext, cfg, dir) or false
-        end
-        tmpls = cache[key] and { cache[key] } or {}
-    else
-        tmpls = solution_templates(full, ext, cfg, cache)
-    end
     local content = utils.read_file(full)
     if content == nil then
         return nil
     end
-    if #tmpls > 0 then
-        -- More than one template can apply once `template_file` is a fallback list, and
-        -- which one a file came from is not recorded anywhere. The best match is the
-        -- answer: a file written from one of them matches that one and no other, so
-        -- taking the highest score picks it out without having to know.
-        local best = 0
-        for _, tmpl in ipairs(tmpls) do
-            local sim = similarity(content, tmpl, threshold)
-            if sim > best then
-                best = sim
-            end
-        end
-        if best >= threshold then
-            local what = role and (role .. " scaffold") or "solution template"
-            return ("%d%% match to %s"):format(math.floor(best * 100 + 0.5), what), best
-        end
-        return nil
-    end
-    -- No applicable template (e.g. template_file = false): only an empty file is unused.
     -- Nothing was ever written to it, so it ranks with the surest deletions (1.0).
     if vim.trim(content) == "" then
         return "empty file", 1
+    end
+    -- A file written from one template matches that one and no other, so the best match
+    -- picks it out.
+    local role = roles[base] or "solution"
+    local best = 0
+    for _, tmpl in ipairs(templates_of(full, ext, role, cfg, cache)) do
+        best = math.max(best, similarity(content, tmpl, threshold))
+    end
+    if best >= threshold then
+        local what = role == "solution" and "solution template" or (role .. " scaffold")
+        return ("%d%% match to %s"):format(math.floor(best * 100 + 0.5), what), best
     end
     return nil
 end
@@ -351,15 +286,8 @@ local function candidate_dirs(cfg)
     add(cwd, ("cwd (%s)"):format(cwd))
     add(base_dir_of(cfg.downloaded_problems_path))
     add(base_dir_of(cfg.downloaded_contests_directory))
-    if type(cfg.template_file) == "string" then
-        add(base_dir_of(cfg.template_file))
-    elseif type(cfg.template_file) == "table" then
-        for _, entry in pairs(cfg.template_file) do
-            -- An entry is a path, or itself a fallback list of them.
-            for _, p in ipairs(type(entry) == "table" and entry or { entry }) do
-                add(base_dir_of(p))
-            end
-        end
+    for _, p in ipairs(require("tuna.scaffold").configured_paths(cfg)) do
+        add(base_dir_of(p))
     end
     return dirs, labels
 end
@@ -1232,7 +1160,7 @@ M._test = {
     scan = scan,
     validate_dir = validate_dir,
     classify = classify,
-    solution_templates = solution_templates,
+    templates_of = templates_of,
     similarity = similarity,
     is_artifact = is_artifact,
     confirm_each = confirm_each,

@@ -13,7 +13,7 @@ t.write(tdir, "template.atcoder.cpp", "// problem: $(PROBLEM)\n\n#define AC\n")
 t.write(tdir, "template.py", "# $(PROBLEM)\nprint()\n")
 local sdir = t.tempdir()
 require("tuna").setup({
-    template_file = { tdir .. "/template.$(JUDGE).$(FEXT)", tdir .. "/template.$(FEXT)" },
+    scaffold = { templates = { solution = { tdir .. "/template.$(JUDGE).$(FEXT)", tdir .. "/template.$(FEXT)" } } },
     scratch = { file = sdir .. "/scratch.$(FEXT)", extension = "cpp" },
 })
 local scratch = require("tuna.scratch")
@@ -32,7 +32,14 @@ t.eq("every judge's template, then the general one", T.template_choices("cpp", c
     tdir .. "/template.cpp",
 })
 t.eq("only templates in the scratch's language", T.template_choices("py", cfg), { tdir .. "/template.py" })
-t.eq("none configured, none offered", T.template_choices("cpp", vim.tbl_extend("force", cfg, { template_file = false })), {})
+local function choices_with(templates, ext)
+    return T.template_choices(ext, vim.tbl_extend("force", cfg, { scaffold = { templates = templates } }))
+end
+t.eq("a solution configured false offers none", choices_with({ solution = false }, "cpp"), {})
+local shipped = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h:h") .. "/scaffolds"
+t.eq("none existing, tuna's own starter is offered", choices_with({ solution = tdir .. "/none.cpp" }, "cpp"), {
+    shipped .. "/solution.cpp",
+})
 
 --------------------------------------------------------------------------------
 -- Resumed or started over

@@ -24,6 +24,9 @@ local M = {}
 ---The roles a helper can fill, in the order they are offered (completion, the menu).
 M.ROLES = { "checker", "generator", "bruteforce", "interactor" }
 
+---What `:Tuna scaffold` writes a starter for: a solution, or a helper.
+M.SCAFFOLDS = vim.list_extend({ "solution" }, M.ROLES)
+
 ---A helper ready to prepare and spawn.
 ---@class tuna.HelperSpec
 ---@field exec string
@@ -98,14 +101,14 @@ function M.find(dir, role, cfg)
 end
 
 ---Whether `path` is a helper (checker/generator/bruteforce/interactor) rather than
----a solution, matched by base name against `tool_names`.
+---a solution, matched by base name against the helper roles' `tool_names`.
 ---@param path string
 ---@param cfg table buffer configuration
 ---@return boolean
 function M.is_helper(path, cfg)
     local base = vim.fn.fnamemodify(path, ":t:r")
-    for _, list in pairs(cfg.tool_names) do
-        for _, n in ipairs(list) do
+    for _, role in ipairs(M.ROLES) do
+        for _, n in ipairs(cfg.tool_names[role] or {}) do
             if base == n then
                 return true
             end
@@ -188,7 +191,10 @@ function M.solution_bufnr(bufnr, cfg)
         return nil, "no solution file found next to '" .. vim.fn.fnamemodify(path, ":t") .. "'."
     end
 
-    local prefer = { main = 1, sol = 2, solution = 3 }
+    local prefer = {}
+    for i, name in ipairs(cfg.tool_names.solution or {}) do
+        prefer[name] = prefer[name] or i
+    end
     local best_rank, chosen = math.huge, cands[1]
     for _, f in ipairs(cands) do
         local r = prefer[vim.fn.fnamemodify(f, ":t:r")]

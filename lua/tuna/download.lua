@@ -370,16 +370,13 @@ end
 -- Storage: turn tasks into files
 --------------------------------------------------------------------------------
 
----Expand tuna download modifiers (`$(PROBLEM)`, `$(JUDGE)`, ...) in `str`.
----@param str string
+---The download modifiers (`$(PROBLEM)`, `$(JUDGE)`, ...) a task fills.
 ---@param task tuna.CCTask
----@param file_extension string
+---@param file_extension string?
 ---@param remove_illegal_chars boolean strip characters illegal in filenames
 ---@param cfg table? resolved config (for `judge_parsers` and `date_format`)
----@param filepath string? the target file, if there is one: with it the file-format
----   modifiers (`$(FNOEXT)`, `$(DIRNAME)`, …) are available alongside the download set
----@return string? # evaluated string, or `nil` on failure
-local function eval_download_modifiers(str, task, file_extension, remove_illegal_chars, cfg, filepath)
+---@return table<string, string>
+local function task_modifiers(task, file_extension, remove_illegal_chars, cfg)
     -- Split "Judge - Contest" and normalise it via the (user-overridable) judge parsers.
     local judge, contest = judges.parse(task, cfg and cfg.judge_parsers)
     local date_format = cfg and cfg.date_format
@@ -414,16 +411,27 @@ local function eval_download_modifiers(str, task, file_extension, remove_illegal
         end
     end
 
-    -- With a target file to hand, the file-format modifiers apply too, so a path may
-    -- mix the two sets ($(JUDGE)/$(FEXT)). Folded in *after* the illegal-character
-    -- pass, which must not touch them: they are real paths, and their values are
-    -- functions rather than strings. The download set wins where the two overlap
-    -- (HOME/CWD/FEXT), which they define identically.
-    if filepath then
-        modifiers = vim.tbl_extend("force", utils.file_format_modifiers, modifiers)
-    end
+    return modifiers
+end
 
-    return utils.format_modifiers(str, modifiers, filepath)
+---Expand the download modifiers in `str`.
+---@param str string
+---@param task tuna.CCTask
+---@param file_extension string
+---@param remove_illegal_chars boolean strip characters illegal in filenames
+---@param cfg table?
+---@return string? # evaluated string, or `nil` on failure
+local function eval_download_modifiers(str, task, file_extension, remove_illegal_chars, cfg)
+    return utils.format_modifiers(str, task_modifiers(task, file_extension, remove_illegal_chars, cfg))
+end
+
+---The download modifiers a task fills, for a scaffold written for its problem.
+---@param task tuna.CCTask
+---@param file_extension string?
+---@param cfg table?
+---@return table<string, string>
+function M.task_modifiers(task, file_extension, cfg)
+    return task_modifiers(task, file_extension, false, cfg)
 end
 
 ---Evaluate a configured path (a string with modifiers, or a function).
@@ -439,8 +447,6 @@ local function eval_path(path, task, file_extension, cfg)
     -- `~` last, on the evaluated result: `$(HOME)` is a modifier the engine expands,
     -- while `~` is shell syntax no shell ever sees here, so without this a
     -- `downloaded_problems_path = "~/cp/…"` writes into a directory literally named `~`.
-    -- Not folded into `eval_download_modifiers`, which also evaluates template *content*,
-    -- where a leading `~` is text rather than a path.
     return utils.expand_home(eval_download_modifiers(path, task, file_extension, true, cfg))
 end
 
@@ -455,7 +461,7 @@ local function task_to_tctbl(task)
     return tctbl
 end
 
----Create the source file (from a template if configured) and write its testcases.
+---Create the source file from the solution's template and write its testcases.
 ---Always writes, overwriting any existing file — the caller decides whether to
 ---proceed when the target already exists (see the floating override prompts in
 ---`store_single_problem`/`store_contest`).
@@ -464,56 +470,16 @@ end
 ---@param cfg table resolved configuration for the target directory
 ---@return string? template the template file the source was written from
 local function store_downloaded_task(filepath, task, cfg)
-    local file_extension = vim.fn.fnamemodify(filepath, ":e")
-
-    -- Resolve the template. Every candidate is evaluated with the *download* modifiers
-    -- as well as the file ones, so a per-judge template is expressible in `setup()`
-    -- alone — `~/cp/templates/$(JUDGE).cpp`. A judge is a property of the problem
-    -- rather than of a directory, so it should not take a `.tuna.lua` per judge folder.
-    --
-    -- They are tried in order and the first that *exists* wins, which is what makes
-    -- that usable: a judge you have not written a template for falls back to the
-    -- general one instead of to an empty file.
-    local candidates = utils.template_candidates(cfg.template_file, file_extension)
-    local template_file
-    local tried = {}
-    for _, candidate in ipairs(candidates) do
-        local path = eval_download_modifiers(candidate, task, file_extension, false, cfg, filepath)
-        if path then
-            path = utils.expand_home(path) -- expand leading ~
-            tried[#tried + 1] = path
-            if utils.file_exists(path) then
-                template_file = path
-                break
-            end
-        end
-    end
-    -- Configured but none of them is there: worth saying, whichever form was used. The
-    -- alternative is writing an empty solution and leaving the user to work out that
-    -- their template path is wrong — and with a list, naming every path tried is what
-    -- says which fallback was expected to catch it.
-    if not template_file and #tried > 0 then
-        utils.notify("template file " .. table.concat(tried, ", ") .. " doesn't exist.", "WARN")
-    end
-
-    if template_file then
-        if cfg.evaluate_template_modifiers then
-            local content = utils.read_file(template_file) or ""
-            local evaluated = eval_download_modifiers(content, task, file_extension, false, cfg)
-            utils.write_file(filepath, evaluated or "")
-        else
-            utils.ensure_directory(vim.fn.fnamemodify(filepath, ":h"))
-            vim.uv.fs_copyfile(template_file, filepath)
-        end
-    else
-        utils.write_file(filepath, "")
-    end
+    local scaffold = require("tuna.scaffold")
+    local ext = vim.fn.fnamemodify(filepath, ":e")
+    local template = scaffold.template("solution", ext, cfg, filepath, task)
+    utils.write_file(filepath, template and scaffold.render(template, "solution", ext, cfg, filepath, task) or "")
 
     testcases.write_testcases(filepath, cfg, task_to_tctbl(task))
     -- Persist the task's URL beside the source so `:Tuna submit` can find it even
     -- when the file carries no header marker.
     require("tuna.submit").write_task_store(vim.fn.fnamemodify(filepath, ":h"), task, cfg)
-    return template_file
+    return template
 end
 
 ---Store downloaded testcases into a solution's buffer (the `testcases` download mode, and
@@ -969,19 +935,6 @@ function M.start_downloading(mode, port, notify_on_start, notify_on_download, bu
         utils.notify("ready to download " .. mode .. ", press the green plus button in your browser.", "INFO")
     end
     return nil
-end
-
----Evaluate a configured path against a downloaded task, exactly as the download
----itself does. Exported for `clean.lua`, which reconstructs a task from a problem's
----sidecar so it can work out which template a file on disk was written from.
----@param str string
----@param task tuna.CCTask
----@param file_extension string
----@param cfg table?
----@param filepath string? the file the path is being resolved for
----@return string?
-function M.eval_task_path(str, task, file_extension, cfg, filepath)
-    return eval_download_modifiers(str, task, file_extension, false, cfg, filepath)
 end
 
 -- The helpers that keep a malformed request out of the pipeline and store what arrives,

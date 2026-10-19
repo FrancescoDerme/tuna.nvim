@@ -317,7 +317,7 @@ local function command_entries(sol, cur)
         add("Compare: " .. cmp_label, function()
             commands.cycle_compare(sol)
         end)
-        for _, role in ipairs(require("tuna.tools").ROLES) do
+        for _, role in ipairs(require("tuna.tools").SCAFFOLDS) do
             add("Scaffold " .. role, function()
                 require("tuna.scaffold").create(role, cur)
             end)

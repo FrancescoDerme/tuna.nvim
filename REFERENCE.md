@@ -40,7 +40,7 @@ Every command is a subcommand of `:Tuna` with tab-completion, and a lowercase `:
   <td>download from Competitive Companion</td>
 </tr>
 <tr>
-  <td><a href="#scaffold"><code>:Tuna scaffold &lt;checker|generator|bruteforce|interactor&gt; [ext]</code></a></td>
+  <td><a href="#scaffold"><code>:Tuna scaffold &lt;solution|checker|generator|bruteforce|interactor&gt; [ext]</code></a></td>
   <td>drop in a starter file</td>
 </tr>
 <tr>
@@ -210,11 +210,14 @@ A problem that already exists is asked about before it's overwritten, and a cont
 ## scaffold
 
 ```
-:Tuna scaffold <checker|generator|bruteforce|interactor> [ext]
+:Tuna scaffold <solution|checker|generator|bruteforce|interactor> [ext]
 ```
 
-Drops a starter for a helper program beside the solution, named so that a run finds it, in the language `ext` names, else in `scaffold.language`, else in your solution's.
-tuna ships `cpp` and `py` starters, and a file called `<role>.<ext>` in your `scaffold.directory` is used instead, so replacing a starter or adding a language is done by dropping a file there.
+Drops a starter beside the solution and opens it.
+A helper program is named so that a run finds it, in the language `ext` names, else in `scaffold.language`, else in your solution's.
+A solution is named as you confirm, the next free name beside yours by default (`main2.cpp` beside `main.cpp`), in the language `ext` names, else in your file's.
+Every starter, a downloaded solution included, comes from the first file `scaffold.templates` names that exists, else from tuna's own `cpp` and `py` starters, so replacing a starter or adding a language is done by dropping a file there.
+The modifiers in a template are filled in, and without a problem to fill them from (no download, no `.tuna.json` beside it) the header lines naming one are left out.
 
 ## submit
 
@@ -303,7 +306,7 @@ The sections below cover some details.
 
 ## Modifiers
 
-Modifiers are the `$(...)` placeholders that appear in commands, file formats and paths.
+Modifiers are the `$(...)` placeholders that appear in commands, file formats, paths and templates.
 There are two sets, and which one applies depends on whether a downloaded problem is involved.
 
 File modifiers: available anywhere a path or command is evaluated.
@@ -342,12 +345,16 @@ File modifiers: available anywhere a path or command is evaluated.
   <td>the testcase number (testcase file formats only)</td>
 </tr>
 <tr>
+  <td><code>$(ROLE)</code></td>
+  <td>the role a template is for, <code>solution</code>, <code>checker</code>, <code>generator</code>, <code>bruteforce</code> or <code>interactor</code> (<code>scaffold.templates</code> only)</td>
+</tr>
+<tr>
   <td><code>$()</code></td>
   <td>a literal <code>$</code></td>
 </tr>
 </table>
 
-Download modifiers: additionally available in `downloaded_*` paths and in `template_file`, because they only exist while a problem is being downloaded.
+Download modifiers: additionally available in `downloaded_*` paths and in templates, because they only exist for a downloaded problem.
 
 <table>
 <tr>

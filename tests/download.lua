@@ -97,9 +97,6 @@ t.eq("and its name", other.name, "Sample Problem")
 -- Modifier evaluation: which set applies where
 --------------------------------------------------------------------------------
 
--- `template_file` may name the problem it is for (`~/cp/templates/$(JUDGE).cpp`), so
--- on the download path the *file* modifiers and the *download* ones are both in play
--- at once. Passing a target file is what turns the file set on.
 local eval = d.eval_download_modifiers
 local task = {
     name = "A. Example",
@@ -113,23 +110,6 @@ t.eq(
     "codeforces/2248/A. Example"
 )
 
--- Without a file there is nothing to compute `$(FNOEXT)` from, and an unresolvable
--- modifier is a failure rather than an empty string — unchanged, and what every
--- existing caller (`eval_path`) relies on.
-t.eq("a file modifier alone is unresolvable", eval("$(FNOEXT).cpp", task, "cpp", false, nil), nil)
-
--- With one, both sets apply, and a path may mix them.
-t.eq(
-    "a target file brings the file modifiers in",
-    eval("$(JUDGE)/$(FNOEXT).$(FEXT)", task, "cpp", false, nil, "/tmp/probs/sol.cpp"),
-    "codeforces/sol.cpp"
-)
-t.eq(
-    "including the ones only a path can answer",
-    eval("$(DIRNAME)", task, "cpp", false, nil, "/tmp/probs/sol.cpp"),
-    "probs"
-)
-
 -- The illegal-character pass is for path *components*, so it must not reach the file
 -- modifiers (real paths, whose separators have to survive) — it runs before they are
 -- folded in, and no caller asks for both anyway.
@@ -140,32 +120,13 @@ t.eq(
 )
 
 --------------------------------------------------------------------------------
--- Which template paths a task-less caller can resolve
---------------------------------------------------------------------------------
-
--- `:Tuna scratch` and `:Tuna clean` read `template_file` with no task to hand. They ask
--- this rather than evaluating and reporting a failure, so a per-judge template makes
--- them step aside quietly instead of nagging.
-local u = require("tuna.utils")
-t.ok("a plain path needs nothing", u.only_file_modifiers("~/cp/t.cpp"))
-t.ok("nor do the file modifiers", u.only_file_modifiers("~/cp/t.$(FEXT)"))
-t.ok("$(HOME) and $(CWD) are in the file set", u.only_file_modifiers("$(HOME)/$(CWD)/$(DIRNAME)"))
-t.ok("$() is a literal dollar, not a modifier", u.only_file_modifiers("$()cp/t.cpp"))
-t.ok("$(JUDGE) needs a task", not u.only_file_modifiers("~/cp/$(JUDGE).cpp"))
-t.ok("so does $(PROBLEM)", not u.only_file_modifiers("~/cp/$(PROBLEM).cpp"))
-t.ok("one task modifier among file ones is enough", not u.only_file_modifiers("$(HOME)/$(CONTEST)/t.$(FEXT)"))
-
-
---------------------------------------------------------------------------------
 -- `~` in a configured path
 --------------------------------------------------------------------------------
 
 -- `$(HOME)` is a modifier the engine expands; `~` is shell syntax that never reaches a
 -- shell, so left alone it survives into the path and a download writes into a directory
 -- literally *named* `~`. `eval_path` is where a configured download path becomes a real
--- one, so it is where the leading `~` is expanded — and only there, since
--- `eval_download_modifiers` also evaluates template *content*, where a leading `~` is
--- text rather than a path.
+-- one, so it is where the leading `~` is expanded.
 local home = vim.uv.os_homedir()
 local ptask = { group = "Codeforces - Round 1", url = "https://codeforces.com/contest/1/problem/A", name = "A. Alpha" }
 local pcfg = require("tuna.config").current_setup
@@ -299,26 +260,66 @@ do
     t.eq("with its testcases beside it", vim.fn.filereadable(home .. "/typed/sol_input0.txt"), 1)
     t.eq("and no directory called ~", vim.fn.isdirectory(cwd .. "/~"), 0)
 end
--- By default a downloaded problem's template has its `$(…)` filled in, its header naming the
--- problem and the URL a submit reads, rather than copied as it is.
-do
-    local dir = t.tempdir()
-    t.write(dir, "template.cpp", "// problem: $(PROBLEM)\n// submit at: $(URL)\nint main() {}\n")
+-- A downloaded problem's template has its `$(…)` filled in, its header naming the problem and
+-- the URL a submit reads, and any other `$` left as written.
+local function download_into(dir, name)
     widgets.input = function(_, _, on_submit)
-        on_submit(dir .. "/A/main.cpp")
+        on_submit(dir .. "/" .. name)
     end
-    require("tuna").setup({ template_file = dir .. "/template.cpp", open_downloaded_problems = false, cd_downloaded_problems = false })
-    local cfg = require("tuna.config").current_setup
     d.store_single_problem(
         { name = "A. Filled", group = "Codeforces - Round", url = "https://codeforces.com/contest/1/problem/A", tests = {}, languages = {}, batch = { id = "f", size = 1 } },
-        cfg,
+        require("tuna.config").current_setup,
         function() end
     )
-    t.eq("the template's header is filled in", vim.fn.readfile(dir .. "/A/main.cpp"), {
+    return vim.fn.readfile(dir .. "/" .. name)
+end
+do
+    local dir = t.tempdir()
+    t.write(dir, "template.cpp", "// problem: $(PROBLEM)\n// submit at: $(URL)\nint main() { $(date); } // $5\n")
+    require("tuna").setup({
+        scaffold = { templates = { solution = dir .. "/template.cpp" } },
+        open_downloaded_problems = false,
+        cd_downloaded_problems = false,
+    })
+    t.eq("the template's header is filled in, and every other $ left alone", download_into(dir, "A/main.cpp"), {
         "// problem: A. Filled",
         "// submit at: https://codeforces.com/contest/1/problem/A",
-        "int main() {}",
+        "int main() { $(date); } // $5",
     })
+    t.eq("a template is for its own language", download_into(dir, "A/main.py")[1], "# contest: codeforces 1")
+
+    require("tuna").setup({ open_downloaded_problems = false, cd_downloaded_problems = false })
+    local written = download_into(dir, "B/main.cpp")
+    t.eq("with none configured, tuna's own starter is written, filled in", { written[1], written[2] }, {
+        "// contest: codeforces 1",
+        "// problem: A. Filled",
+    })
+
+    -- A scratch folded into the problem keeps the header of the template the problem was
+    -- written from: the judge's own here, whose header is longer than the general one's.
+    t.write(dir, "t.codeforces.cpp", "// $(PROBLEM)\n// $(JUDGE)\n// $(URL)\n\nint main() {}\n")
+    t.write(dir, "t.cpp", "// $(PROBLEM)\n\nint main() {}\n")
+    require("tuna").setup({
+        scaffold = { templates = { solution = { dir .. "/t.$(JUDGE).$(FEXT)", dir .. "/t.$(FEXT)" } } },
+        cd_downloaded_problems = false,
+    })
+    local scratch = require("tuna.scratch")
+    local sbuf = vim.api.nvim_create_buf(true, false)
+    scratch.pending = { lines = { "solve();" }, row = 1, bufnr = sbuf }
+    t.eq("a scratch folded in keeps the header of the template used", download_into(dir, "D/main.cpp"), {
+        "// A. Filled",
+        "// codeforces",
+        "// https://codeforces.com/contest/1/problem/A",
+        "",
+        "solve();",
+    })
+
+    require("tuna").setup({
+        scaffold = { templates = { solution = false } },
+        open_downloaded_problems = false,
+        cd_downloaded_problems = false,
+    })
+    t.eq("and a solution configured false starts empty", download_into(dir, "C/main.cpp"), {})
     require("tuna").setup({})
 end
 widgets.menu, widgets.input = real_menu, real_input

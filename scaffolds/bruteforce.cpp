@@ -1,5 +1,6 @@
 // Bruteforce solution for stress-testing.
 // Read the input from stdin, write the correct answer to stdout.
+// tuna's starter, replace it with scaffold.templates (:h tuna-scaffold).
 
 #include <bits/stdc++.h>
 #define ll long long

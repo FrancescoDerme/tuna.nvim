@@ -1,6 +1,7 @@
 // Interactor for an interactive problem.
 // Read the solution's queries on stdin, print responses on stdout, flush
 // after every line. Exit 0 to accept, non-zero to reject.
+// tuna's starter, replace it with scaffold.templates (:h tuna-scaffold).
 
 #include <bits/stdc++.h>
 #define ll long long

@@ -1,16 +1,9 @@
 -- tests/clean.lua
 --
--- Which template a file on disk was written from — the question `:Tuna clean` has to
--- answer before it can call a file untouched, and the one that gets hard as soon as a
--- template path names the problem it is for (`~/cp/templates/$(JUDGE).cpp`).
---
--- Two rules:
---   * a task-dependent candidate is resolved from the **sidecar** beside the file,
---     which is where the download recorded the judge. Without that, a per-judge
---     template would make every untouched solution unrecognizable and clean would
---     quietly find nothing but empty files;
---   * with a fallback list more than one template can apply, and nothing records which
---     one a file came from, so the **best** match decides.
+-- Which template a file on disk was written from, the question `:Tuna clean` has to answer
+-- before it can call a file untouched: every template its role's configured paths can match,
+-- a modifier only a problem fills (`$(JUDGE)`) matching any text, and the best match decides,
+-- since nothing records which one a file came from.
 
 local t = dofile("tests/harness.lua")
 local clean = require("tuna.clean")._test
@@ -22,24 +15,17 @@ vim.fn.mkdir(tmpl, "p")
 t.write(tmpl, "codeforces.cpp", "// codeforces\nint main(){ cf(); }\n")
 t.write(tmpl, "default.cpp", "// default\nint main(){ plain(); }\n")
 
----A problem directory holding `content`, with `group` in its sidecar when given.
-local function problem(name, content, group)
+---A problem directory holding `content` as `sol.cpp`.
+local function problem(name, content)
     local pdir = dir .. "/" .. name
     vim.fn.mkdir(pdir, "p")
     t.write(pdir, "sol.cpp", content)
-    if group then
-        t.write(pdir, ".tuna.json", vim.json.encode({
-            url = "https://codeforces.com/contest/2248/problem/A",
-            name = "A. Example",
-            group = group,
-        }))
-    end
     return pdir .. "/sol.cpp"
 end
 
 local FALLBACK = { tmpl .. "/$(JUDGE).cpp", tmpl .. "/default.cpp" }
-local function cfg_with(template_file)
-    require("tuna").setup({ template_file = template_file })
+local function cfg_with(solution)
+    require("tuna").setup({ scaffold = { templates = { solution = solution } } })
     return config.get_buffer_config(vim.api.nvim_get_current_buf())
 end
 
@@ -48,55 +34,41 @@ local function reason(file, cfg, threshold)
 end
 
 --------------------------------------------------------------------------------
--- The judge comes from the sidecar
+-- Every template a path can match, and the best match
 --------------------------------------------------------------------------------
 
-local cf = problem("cf", "// codeforces\nint main(){ cf(); }\n", "Codeforces - Round 1112")
 local cfg = cfg_with(FALLBACK)
-t.has("a file still holding its judge's template is unused", reason(cf, cfg), "100% match")
-
--- The same file with no sidecar: nothing says which judge it came from, so the
--- per-judge candidate cannot be resolved. It must not be guessed at — and the general
--- fallback, which resolves without a task, is genuinely not what this file holds.
-local orphan = problem("orphan", "// codeforces\nint main(){ cf(); }\n", nil)
-t.eq("with no sidecar the judge template is not resolvable", reason(orphan, cfg), nil)
-t.eq("and nothing was resolved for it at all", #clean.solution_templates(orphan, "cpp", cfg, {}), 1)
-
---------------------------------------------------------------------------------
--- With a fallback list, the best match decides
---------------------------------------------------------------------------------
-
--- Written from the *fallback*, in a problem whose judge has its own template. Both
--- candidates resolve, and only the comparison tells them apart.
-local fell_back = problem("fb", "// default\nint main(){ plain(); }\n", "Codeforces - Round 1112")
-t.eq("both candidates resolve", #clean.solution_templates(fell_back, "cpp", cfg, {}), 2)
+local cf = problem("cf", "// codeforces\nint main(){ cf(); }\n")
+t.has("a file still holding a judge's template is unused", reason(cf, cfg), "100% match to solution template")
+t.eq("every judge's template is compared, and the general one", #clean.templates_of(cf, "cpp", "solution", cfg, {}), 2)
+local fell_back = problem("fb", "// default\nint main(){ plain(); }\n")
 t.has("the one it actually matches decides", reason(fell_back, cfg), "100% match")
-
--- A file that has been worked on matches neither.
-local edited = problem("edited", "// codeforces\nint main(){ cf(); solve(); }\n// more\n", "Codeforces - Round 1112")
+local edited = problem("edited", "// codeforces\nint main(){ cf(); solve(); }\n// more\n")
 t.eq("an edited file is not offered", reason(edited, cfg), nil)
-
---------------------------------------------------------------------------------
--- The shapes `template_file` can take
---------------------------------------------------------------------------------
-
-local u = require("tuna.utils")
-t.eq("false configures nothing", u.template_candidates(false, "cpp"), {})
-t.eq("a string is one candidate", u.template_candidates("a.cpp", "cpp"), { "a.cpp" })
-t.eq("a list is the candidates, in order", u.template_candidates({ "a.cpp", "b.cpp" }, "cpp"), { "a.cpp", "b.cpp" })
-t.eq("an ext map picks the extension", u.template_candidates({ cpp = "a.cpp", py = "a.py" }, "py"), { "a.py" })
-t.eq("an unlisted extension has none", u.template_candidates({ cpp = "a.cpp" }, "rs"), {})
 t.eq(
-    "an ext map may hold a list of its own",
-    u.template_candidates({ cpp = { "a.cpp", "b.cpp" } }, "cpp"),
-    { "a.cpp", "b.cpp" }
+    "a template is never compared with itself",
+    #clean.templates_of(tmpl .. "/default.cpp", "cpp", "solution", cfg, {}),
+    1
 )
 
--- A plain path is still just a path: the old single-template setup is untouched.
-local plain = problem("plain", "// default\nint main(){ plain(); }\n", nil)
-t.has("a single configured template still works", reason(plain, cfg_with(tmpl .. "/default.cpp")), "100% match")
+-- With nothing configured, a solution comes from tuna's own starter, header filled in.
+cfg = cfg_with(nil)
+local scaffold = require("tuna.scaffold")
+local starter = dir .. "/starter/sol.cpp"
+local task = { name = "A. Example", group = "Codeforces - Round 1", url = "https://codeforces.com/contest/1/problem/A" }
+vim.fn.mkdir(dir .. "/starter", "p")
+local from = scaffold.template("solution", "cpp", cfg, starter, task)
+t.write(dir .. "/starter", "sol.cpp", scaffold.render(from, "solution", "cpp", cfg, starter, task))
+t.has("an untouched starter is unused", reason(starter, cfg), "100% match to solution template")
+
+-- A role that starts empty has no template, so only an empty file is unused.
+cfg = cfg_with(false)
+t.eq("a role configured false has no template to match", reason(cf, cfg), nil)
+local empty = problem("empty", "\n")
+t.eq("so only an empty file is unused", reason(empty, cfg), "empty file")
 
 vim.fn.delete(dir, "rf")
+require("tuna").setup({})
 
 --------------------------------------------------------------------------------
 -- Build artifacts left beside a removed solution

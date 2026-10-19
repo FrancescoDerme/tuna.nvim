@@ -1,5 +1,6 @@
 // Checker for problems with multiple answers.
 // Exit 0 = accepted, non-zero = wrong answer.
+// tuna's starter, replace it with scaffold.templates (:h tuna-scaffold).
 
 #include <bits/stdc++.h>
 #define ll long long

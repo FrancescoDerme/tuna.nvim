@@ -1,4 +1,5 @@
 # Generator for stress-testing.
+# tuna's starter, replace it with scaffold.templates (:h tuna-scaffold).
 
 import random
 import sys

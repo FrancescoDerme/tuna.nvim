@@ -132,11 +132,11 @@ lua/tuna/
   navigate.lua      :Tuna next / prev
   recent.lua        :Tuna last problem / contest, pinned problems, cwd changes
   scratch.lua       scratch solution, folded into a download by `download sync`
-  scaffold.lua      helper-file starters (checker/generator/bruteforce/interactor)
+  scaffold.lua      starters for every role (solution and the helpers), the one template lookup
   menu.lua          bare :Tuna menu
   keymaps.lua       opt-in keymaps and preset
   health.lua        :checkhealth tuna
-scaffolds/          the shipped helper starters, `<role>.<ext>`
+scaffolds/          the shipped starters, `<role>.<ext>`
 doc/tuna.txt        vimdoc
 REFERENCE.md         the reference (commands, configuration) the README links into
 tests/              test suite (`tests/run.sh`)
@@ -175,18 +175,17 @@ tuna.nvim.json      package metadata
 **Modifiers.** There are two sets. The *file* set (`$(FNAME)`, `$(FNOEXT)`, `$(FEXT)`,
 `$(FABSPATH)`, `$(ABSDIR)`, `$(DIRNAME)`, `$(HOME)`, `$(CWD)`) resolves from a path via
 `utils.eval_string`/`buf_eval_string`, and a whole command through `utils.eval_command`. The *download* set (`$(JUDGE)`, `$(CONTEST)`,
-`$(PROBLEM)`, `$(URL)`…) exists only while a task is being written, in `download.lua`.
-`utils.only_file_modifiers(str)` tells them apart; `scratch` and `clean` read `template_file`
-without a task and need it.
+`$(PROBLEM)`, `$(URL)`…) exists only for a downloaded task (`download.task_modifiers`).
+Template paths and text also take `$(ROLE)` (`scaffold.lua`). A template's *text* is filled by
+`utils.fill_modifiers`, which leaves every `$` it does not know as written (a shell's `$(…)`,
+a dollar in a comment), where every configured string goes through the strict
+`format_modifiers`.
 
 **Paths.** `utils.expand_home` expands a bare `~` or a `~/` prefix (not `~user`), by
 concatenation rather than `gsub`. `utils.normalize_path` joins onto a base only when the path
 is relative. Every configured path goes through these: compile/running directories,
 `testcases_directory`, download paths, templates, `clean`, `scratch`, `scaffold`,
 `recent.ignored_directories`.
-
-`utils.template_candidates` normalizes `template_file`'s five shapes (`false`, a path, a list,
-`{ [ext] = path }`, `{ [ext] = { path, … } }`) into an ordered list; the first that exists wins.
 
 ## Testcases (`testcases.lua`)
 
@@ -948,9 +947,10 @@ specific Vim error about a buffer the user never opened.
 - Existing targets ask in a float: `Override` / `Stop` for a problem;
   `Override all` / `Write missing only` (only when some are missing) / `Stop` for a contest.
   Every branch, and dismissal, calls `finished`.
-- `template_file` is evaluated with download modifiers, plus file modifiers when a target path
-  is known. Candidates are tried in order, and a WARN lists the paths when none exists.
-  `eval_path` expands `~` on evaluated paths only, not on template content.
+- The source is written from the solution's template (`scaffold.template`/`render`, with the
+  task), and `store_downloaded_task` returns which one, for `scratch.absorb`. No warning when
+  a configured template is missing: what is written then is tuna's starter, whose header
+  says where templates are set. `eval_path` expands `~` on evaluated paths.
 - After writing, `cd_downloaded_problems`/`cd_downloaded_contests` (independent of
   `open_downloaded_*`) change directory via `recent.change_dir`. What was written is recorded in
   `recent`.
@@ -1018,10 +1018,11 @@ specific Vim error about a buffer the user never opened.
 - **`clean.lua`**
   - "Unused" means a file still similar to the template that would produce it: a line-LCS
     ratio (`similarity`, with modifier lines matched as wildcards) at or above a threshold.
-    Helper files compare against `scaffold.template_for`, solutions against every
-    `template_file` candidate (the best match wins), and task-dependent paths resolve through
-    the sidecar (`task_of`). A file with no template counts only when empty. The template file
-    itself is never offered.
+    Every file compares against every template of its role (`scaffold.templates`, a helper
+    by its `tool_names`, anything else a solution), a modifier only a problem fills matching
+    anything, so no sidecar is needed, and the best match wins: which template a file came
+    from is recorded nowhere. Globs are cached per scan by pattern. An empty file is always
+    unused. The template file itself is never offered.
   - The flow is floats only: a `form` for directory, depth and threshold, then one
     `Delete`/`Keep`/`Stop` menu per file with a preview, sorted by match, at a fixed width,
     each starting on the answer last given (`ui.row`), and the same for directories. A
@@ -1093,10 +1094,9 @@ specific Vim error about a buffer the user never opened.
   asks `Resume` / `Restart`, previewing what it holds. Restarting, and a missing or blank
   scratch, go to the template question, opened straight from the first menu's choice (which
   fires after that menu has closed) so no frame is drawn without a dialog, a menu with a
-  body preview: `template_choices` offers every existing file a `template_file` candidate can
-  match, a task-only modifier (`$(JUDGE)`) read as a glob wildcard since no problem exists
-  yet, plus an empty file. Dismissing creates nothing, and with no template file at all the
-  scratch opens empty. `download sync` sets `M.pending`; `M.absorb(filepath, cfg, template)`
+  body preview: `template_choices` offers the solution's `scaffold.templates` (a task-only
+  modifier read as a glob wildcard, since no problem exists yet), plus an empty file.
+  Dismissing creates nothing, and with no template at all the scratch opens empty. `download sync` sets `M.pending`; `M.absorb(filepath, cfg, template)`
   keeps as many header lines as the template the problem was written from (returned by
   `store_downloaded_task`), replaces the body with the scratch *buffer* lines, saves, moves the
   cursor, and deletes the scratch.
@@ -1151,28 +1151,48 @@ specific Vim error about a buffer the user never opened.
   how). `clean` is not in the preset, nor are the testcase actions: testcases are added,
   edited and deleted on the results UI, where they are seen, and most come from downloads. `pin` is `f` ("flag it for later"), `p` being the
   previous problem.
-- **`scaffold.lua`**: starter helper files. Templates are **plain files** named `<role>.<ext>`
-  (the role words of `tools.ROLES`, the same as everywhere), looked up in
-  `scaffold.directory` (default under `stdpath("config")`) and then in the `scaffolds/` folder
-  shipped at the plugin root, each role and language on its own, so replacing a starter or
-  adding a language is a file, not configuration, and no one path stands for every language.
-  The shipped folder is found from `scaffold.lua`'s own location (`SHIPPED`), not the
-  runtimepath, where another plugin's `scaffolds/` would mix in. The file written is named
-  after the role's first `tool_names`, the name discovery looks for first: a separate list of
-  scaffold names could disagree with it and write helpers the run does not find.
-  The language is the one asked for, else `scaffold.language`, else the solution's; one the
-  role has no template in offers the languages it has (a helper is compiled and run in its
-  own language, whatever the solution's). Templates are written verbatim, with no `$(…)`
-  expansion: `$(` is command substitution in a shell. Every starter that reads a test
-  count reads it as a solution template does (`int tt = 1; cin >> tt;`), on a line marked
-  `comment out for a single test`: the bruteforce, the checker (run once per testcase file,
-  looping over its tests) and the interactor, which reads the count from the testcase file,
-  the jury's hidden data, and tells it to the solution. The generator writes whatever format
-  the problem takes, so it has none. A checker answers by its exit code alone, naming only
-  trailing output, and the interactor stops at the first game lost, after which it and the
-  solution are no longer in step. `languages` feeds the completion of
-  `:Tuna scaffold <role> <Tab>`, and `template_for` lets `clean` recognise an untouched
-  scaffold. `create` takes `{ open, on_done }`, so a caller can chain it.
+- **`scaffold.lua`**: starters for every role, `tools.SCAFFOLDS` (the solution and the helper
+  roles of `tools.ROLES`), and the one template lookup downloads, `:Tuna scratch`, `clean`
+  and `:Tuna scaffold` share. A solution is not a helper role in `tools`: a helper is found
+  by name, a solution by being neither a helper nor a header, under any name, several per
+  folder; `tool_names.solution` only says which name a helper prefers for its solution
+  (`solution_bufnr`) and what a new one is called in a folder with none. Writing a file
+  needs no such split, so every role is looked up the same way.
+  - `scaffold.templates` is a path, an ordered list or a table by role (`["*"]` for every
+    role not listed, `false` an empty file), its paths taking the file modifiers, `$(ROLE)`,
+    `$(FEXT)` (the language written) and the download set when the problem is known (a
+    download's task, else the sidecar's). One option rather than a folder option beside a
+    path option: a folder is a path ending in `$(ROLE).$(FEXT)`. A role table's missing role
+    goes to tuna's starter, not to the default folder, so the config reads as the whole
+    list. `template` is the first that exists, a path naming a modifier it cannot fill
+    leading nowhere, else the shipped `scaffolds/<role>.<ext>`; `templates` every file the
+    paths can match, those modifiers read as wildcards, then the shipped starters in the
+    languages left. A template is for the language its extension names (none: every
+    language), so a `template.cpp` never lands in a `.py`.
+  - `render` fills what it can and leaves every other `$`; with no problem known, the leading
+    lines naming one go, and the blank lines under them when none of them is left. The
+    shipped folder is found from `scaffold.lua`'s own location (`SHIPPED`), not the
+    runtimepath, where another plugin's `scaffolds/` would mix in. Each starter's header
+    says it is tuna's and names `scaffold.templates`, which is how a user who configured
+    nothing, or a path that does not exist, learns where templates go.
+  - A helper is named after the role's first `tool_names`, the name discovery looks for
+    first: a separate list of scaffold names could disagree with it and write helpers the
+    run does not find. A solution goes through `widgets.input`, offered the current
+    solution's name while it is free, else it with the next free number (`main2.cpp`). A
+    helper's language is the one asked for, else `scaffold.language`, else the solution's;
+    one the role has no template in offers the languages it has (a helper is compiled and
+    run in its own language, whatever the solution's). A solution's is the one asked for,
+    else the current file's, else `downloaded_files_extension`, and with no template it
+    starts empty, as a download does. Only a new solution gets `template_cursor`.
+  - Every starter that reads a test count reads it as the solution starter does
+    (`int tt = 1; cin >> tt;`), on a line marked `comment out for a single test`: the
+    bruteforce, the checker (run once per testcase file, looping over its tests) and the
+    interactor, which reads the count from the testcase file, the jury's hidden data, and
+    tells it to the solution. The generator writes whatever format the problem takes, so it
+    has none. A checker answers by its exit code alone, naming only trailing output, and the
+    interactor stops at the first game lost, after which it and the solution are no longer
+    in step. `languages` feeds the completion of `:Tuna scaffold <role> <Tab>`. `create`
+    takes `{ open, on_done }`, so a caller can chain it.
   - **A run that needs a helper it does not have offers its starter** (`create_missing`): a
     menu naming the files (`Create gen.cpp and brute.cpp` / `Stop`), rather than a warning,
     from stress and the interactor source, on the first run and on a rerun alike. It writes
@@ -1245,8 +1265,11 @@ specific Vim error about a buffer the user never opened.
     nothing, Create putting the board away and opening it in the editor), and a folder's
     solutions found whatever its name holds (a comma);
   - `scaffold.lua`: the shipped starters, names from `tool_names` (and found by discovery),
-    the user's folder over the shipped one for its own language only, adding a language by
-    adding a file, `scaffold.language` and a language asked for by name over it, the
+    the user's templates over the shipped one for their own language only, adding a language by
+    adding a file, every shape of `scaffold.templates` (a role's list in order, a path naming
+    the problem skipped without one, `["*"]`, `false`, a template only for its language), a
+    template's text filled where it can be and its problem header dropped without one, a new
+    solution's name, header and default name, `scaffold.language` and a language asked for by name over it, the
     languages offered when one has no starter, an existing file asked about, a run that needs
     helpers offering their starters (Create writing and opening them, Stop writing nothing, a
     broken configured helper only reported), `clean`
@@ -1254,7 +1277,9 @@ specific Vim error about a buffer the user never opened.
   - `scratch.lua`: the templates a scratch can start from, when a scratch is resumed, the
     resume/restart and template menus, and absorbing keeping the header of the template actually used;
   - `download.lua`: the listener's boundary, a request handled while its sender is still
-    connected, and what is stored (an empty answer kept, no file refused, a typed `~` path);
+    connected, and what is stored (an empty answer kept, no file refused, a typed `~` path,
+    the solution's template filled in, tuna's starter with none configured, a scratch folded
+    in under the header of the template used);
   - `startup.lua`: what a session that never uses tuna pays and that it works without
     `setup()`: `tuna` alone loaded at startup with `:Tuna` and the highlight groups
     defined, a verdict restored for the first file read (before anything loads `config`),

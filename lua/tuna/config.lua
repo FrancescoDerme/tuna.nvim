@@ -75,7 +75,11 @@ M.defaults = {
     -- a sibling source file whose *base name* matches one of these (any extension),
     -- compiled and run with the same commands as a solution of that language. This
     -- is what lets you switch run modes with no .tuna.lua — just drop the file in.
+    -- A solution is any other runnable file: its names are the ones a helper prefers
+    -- when it looks for its solution, and the first is what a new one is called in a
+    -- folder with none (`:Tuna scaffold solution`).
     tool_names = {
+        solution = { "main", "sol", "solution" },
         checker = { "checker", "check" },
         generator = { "gen", "generator" },
         bruteforce = { "brute", "bruteforce", "reference" },
@@ -142,14 +146,20 @@ M.defaults = {
         },
     },
 
-    -- scaffolding (:Tuna scaffold <checker|generator|bruteforce|interactor> [ext]) — drop a
-    -- starter helper beside the solution, named after the role's first `tool_names`.
-    -- Templates are plain files named `<role>.<ext>` (`generator.cpp`), looked up in
-    -- `directory` first and in the ones tuna ships (its `scaffolds/` folder) second: put a
-    -- file there to replace one of those, or to add a language. `language` writes every
-    -- scaffold in one language (an extension, "cpp") instead of the solution's.
+    -- scaffolding (:Tuna scaffold <solution|checker|generator|bruteforce|interactor> [ext])
+    -- and every solution a download or `:Tuna scratch` writes. `templates` names the
+    -- template files: a path, an ordered list of paths, or a table by role,
+    --   { solution = { "~/cp/template.$(JUDGE).$(FEXT)", "~/cp/template.$(FEXT)" },
+    --     ["*"] = "~/cp/scaffolds/$(ROLE).$(FEXT)", checker = false }
+    -- where `["*"]` stands for every role not listed and `false` means an empty file.
+    -- Paths take the file modifiers, `$(ROLE)`, `$(FEXT)` (the language being written)
+    -- and, when the problem is known, the download ones. The first that exists wins,
+    -- else tuna's own starter (its `scaffolds/` folder). A template is for the language
+    -- its extension names, and the modifiers in it are filled in where they can be.
+    -- `language` writes every helper in one language (an extension, "py") instead of
+    -- the solution's.
     scaffold = {
-        directory = vim.fn.stdpath("config") .. "/tuna/scaffolds",
+        templates = vim.fn.stdpath("config") .. "/tuna/scaffolds/$(ROLE).$(FEXT)",
         language = nil,
     },
 
@@ -243,31 +253,20 @@ M.defaults = {
     --   }
     -- Codeforces and AtCoder have built-in defaults (see `judges.lua`).
     judge_parsers = {},
-    -- false | a path | an ordered list of paths | { [ext] = path-or-list }.
-    -- Paths take the file modifiers and, when a problem is being downloaded, the
-    -- download ones too — so a per-judge template needs no config file per judge:
-    --   template_file = { "~/cp/templates/$(JUDGE).cpp", "~/cp/templates/default.cpp" }
-    -- The list is tried in order and the first that exists wins, so a judge you have
-    -- not written a template for falls back to the general one. It is also what
-    -- `:Tuna scratch` opens from, since a scratch has no problem to name a judge with.
-    template_file = false,
-    -- Expand `$(…)` inside the template's contents too, not only in its path, so a header
-    -- line like `// problem: $(PROBLEM)` is filled in when a problem is downloaded (and its
-    -- `submit at: $(URL)` line is the problem's URL). false copies the template as it is.
-    evaluate_template_modifiers = true,
     -- Where the cursor lands whenever tuna opens a solution itself: a downloaded problem or
     -- contest, a problem stepped onto with `:Tuna next`/`prev`, one reopened with
-    -- `:Tuna last` or from the menu's recent and pinned lists, and the scratch file of
-    -- `:Tuna scratch`. Templates open on their header, which is never where one starts typing.
-    --   false                          leave the cursor at the top (default)
+    -- `:Tuna last` or from the menu's recent and pinned lists, a new solution of
+    -- `:Tuna scaffold solution`, and the scratch file of `:Tuna scratch`. Templates
+    -- open on their header, which is never where one starts typing.
+    --   false                          leave the cursor at the top
     --   <number>                       that line
     --   "<lua pattern>"                the first line matching it
-    --   { pattern = …, offset = <n> }  n lines below that match, e.g.
-    --                                  { pattern = "^void solve", offset = 1 }
+    --   { pattern = …, offset = <n> }  n lines below that match
     --   function(bufnr)                -> line number
-    -- A pattern that matches nothing leaves the cursor alone, so one written for a
-    -- given language does no harm to templates in another.
-    template_cursor = false,
+    -- The default lands on the first line of a `solve` function (`void solve() {`,
+    -- `def solve():`), as in tuna's own starters. A pattern that matches nothing leaves
+    -- the cursor alone, so one written for a given language does no harm in another.
+    template_cursor = { pattern = "^%a[%w_ ]* solve%(", offset = 1 },
     -- How tuna changes Neovim's directory when it takes you somewhere — `:Tuna last
     -- problem` / `:Tuna last contest`, and a freshly downloaded contest (see
     -- `cd_downloaded_contests`): "cd" (global), "tcd" (this tab), "lcd" (this window),

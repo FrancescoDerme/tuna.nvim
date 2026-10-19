@@ -21,7 +21,7 @@ local subcommand_args = {
     testcase = { "add", "edit", "delete", "split" },
     convert = { "files", "single_file", "directory" },
     download = { "testcases", "problem", "contest", "sync", "persistently", "status", "stop" },
-    scaffold = tools.ROLES,
+    scaffold = tools.SCAFFOLDS,
     checker = { "auto", "off" },
     submit = { "clear" },
     last = { "problem", "contest" },
@@ -822,7 +822,7 @@ M.subcommands = {
     end,
     scaffold = function(args)
         if not args[1] then
-            utils.notify("scaffold: a role is required, " .. table.concat(tools.ROLES, ", ") .. ".")
+            utils.notify("scaffold: a role is required, " .. table.concat(tools.SCAFFOLDS, ", ") .. ".")
             return
         end
         require("tuna.scaffold").create(args[1], M.target_buffer(), args[2])
@@ -912,7 +912,7 @@ function M.complete(arg_lead, cmd_line, cursor_pos)
         candidates = interactive_sources
     elseif (count == 3 or (count == 4 and not ending_space)) and words[2] == "scaffold" then
         -- The languages the role has a template in, so what is offered is what exists.
-        candidates = vim.tbl_contains(tools.ROLES, words[3])
+        candidates = vim.tbl_contains(tools.SCAFFOLDS, words[3])
                 and require("tuna.scaffold").languages(words[3], M.target_buffer())
             or {}
     elseif

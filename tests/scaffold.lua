@@ -1,16 +1,17 @@
 -- tests/scaffold.lua
 --
--- `:Tuna scaffold`: templates are plain files named `<role>.<ext>`, looked up in the user's
--- `scaffold.directory` before the ones shipped with the plugin, each role and language on
--- its own; the file written is named after the role's first `tool_names`, so discovery finds
--- it; the language is the one asked for, else `scaffold.language`, else the solution's; and a
--- role with no template in that language offers the ones it has.
+-- `:Tuna scaffold` and the templates every role is written from: `scaffold.templates` names
+-- them by path, list or role, the first that exists winning over tuna's own starter, each
+-- for the language its extension names; their text has what can be filled filled; a helper
+-- is named after its role's first `tool_names`, so discovery finds it, and a solution after
+-- the next free sibling; a helper's language is the one asked for, else `scaffold.language`,
+-- else the solution's, and a role with no template in it offers the ones it has.
 
 local t = dofile("tests/harness.lua")
 
 local own = t.tempdir() -- the user's scaffold folder
 local function setup(opts)
-    require("tuna").setup(vim.tbl_deep_extend("force", { scaffold = { directory = own } }, opts or {}))
+    require("tuna").setup(vim.tbl_deep_extend("force", { scaffold = { templates = own .. "/$(ROLE).$(FEXT)" } }, opts or {}))
 end
 setup()
 
@@ -50,7 +51,7 @@ local shipped = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h:h"
 --------------------------------------------------------------------------------
 
 local _, buf = problem()
-for _, role in ipairs(tools.ROLES) do
+for _, role in ipairs(tools.SCAFFOLDS) do
     t.eq("every role ships in C++ and Python: " .. role, scaffold.languages(role, buf), { "cpp", "py" })
     for _, ext in ipairs({ "cpp", "py" }) do
         t.ok(("and %s.%s is a template with something in it"):format(role, ext), (read(shipped .. "/" .. role .. "." .. ext) or "") ~= "")
@@ -84,7 +85,7 @@ t.has("the roles are named as everywhere else, bruteforce and not brute", said[1
 t.eq("and nothing is written for one that is not a role", vim.fn.glob(dir .. "/brute.*"), "")
 
 --------------------------------------------------------------------------------
--- The user's folder
+-- The user's templates
 --------------------------------------------------------------------------------
 
 t.write(own, "generator.cpp", "// my generator\n")
@@ -185,6 +186,104 @@ do
 end
 
 --------------------------------------------------------------------------------
+-- The shapes `scaffold.templates` takes
+--------------------------------------------------------------------------------
+
+do
+    local tdir = t.tempdir()
+    t.write(tdir, "template.cpp", "// mine\n")
+    t.write(tdir, "template.codeforces.cpp", "// mine, for codeforces\n")
+    local cfg = function()
+        return require("tuna.config").current_setup
+    end
+    local function from(role, ext, task)
+        return scaffold.template(role, ext, cfg(), tdir .. "/p/main." .. ext, task)
+    end
+    local cf = { name = "A", group = "Codeforces - Round 1", url = "https://codeforces.com/contest/1/problem/A" }
+
+    require("tuna").setup({ scaffold = { templates = { solution = { tdir .. "/template.$(JUDGE).$(FEXT)", tdir .. "/template.$(FEXT)" } } } })
+    t.eq("a role's list is tried in order", from("solution", "cpp", cf), tdir .. "/template.codeforces.cpp")
+    t.eq("falling back past a template that is not there", from("solution", "cpp", { name = "A", group = "AtCoder - X", url = "" }), tdir .. "/template.cpp")
+    t.eq("and past one naming a problem when none is known", from("solution", "cpp"), tdir .. "/template.cpp")
+    t.eq("with none existing, tuna's own starter", from("solution", "py"), shipped .. "/solution.py")
+    t.eq("as for a role not listed", from("checker", "cpp"), shipped .. "/checker.cpp")
+
+    require("tuna").setup({ scaffold = { templates = { ["*"] = tdir .. "/$(ROLE).$(FEXT)", checker = false } } })
+    t.write(tdir, "generator.cpp", "// my generator\n")
+    t.eq('["*"] stands for every role not listed', from("generator", "cpp"), tdir .. "/generator.cpp")
+    t.eq("and false starts a role empty", from("checker", "cpp"), nil)
+
+    require("tuna").setup({ scaffold = { templates = tdir .. "/template.cpp" } })
+    t.eq("a plain path is every role's", from("bruteforce", "cpp"), tdir .. "/template.cpp")
+    t.eq("but only in the language its extension names", from("bruteforce", "py"), shipped .. "/bruteforce.py")
+
+    -- What a template's text becomes: the modifiers it can fill filled, any other `$` as written,
+    -- and with no problem known the header lines naming one dropped.
+    t.write(tdir, "filled.cpp", "// problem: $(PROBLEM)\n// at: $(URL)\n\n// $(ROLE) $(FNAME), $(date), $5, $(\n")
+    local target = tdir .. "/p/main.cpp"
+    t.eq(
+        "a template's text is filled in where it can be",
+        scaffold.render(tdir .. "/filled.cpp", "solution", "cpp", cfg(), target, cf),
+        "// problem: A\n// at: https://codeforces.com/contest/1/problem/A\n\n// solution main.cpp, $(date), $5, $(\n"
+    )
+    t.eq(
+        "with no problem known, the header naming one goes, with the blank lines under it",
+        scaffold.render(tdir .. "/filled.cpp", "solution", "cpp", cfg(), target),
+        "// solution main.cpp, $(date), $5, $(\n"
+    )
+    t.write(tdir, "partial.cpp", "// $(FNAME)\n// $(PROBLEM)\n\nint main() {}\n")
+    t.eq(
+        "a header line it can fill stays",
+        scaffold.render(tdir .. "/partial.cpp", "solution", "cpp", cfg(), target),
+        "// main.cpp\n\nint main() {}\n"
+    )
+    vim.fn.delete(tdir, "rf")
+    setup()
+end
+
+--------------------------------------------------------------------------------
+-- A new solution
+--------------------------------------------------------------------------------
+
+do
+    local prompted
+    local real_input = widgets.input
+    widgets.input = function(title, default, on_submit)
+        prompted = { title = title, default = default }
+        on_submit(default)
+    end
+    local dir, buf = problem()
+    scaffold.create("solution", buf)
+    t.eq("a new solution is offered the next free name", prompted, { title = "New solution", default = "main2.cpp" })
+    t.eq("written from the solution's template, with no problem to fill in its header", read(dir .. "/main2.cpp"), table.concat(vim.list_slice(vim.fn.readfile(shipped .. "/solution.cpp"), 3), "\n") .. "\n")
+    t.eq("and opened", vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t"), "main2.cpp")
+    scaffold.create("solution", vim.api.nvim_get_current_buf())
+    t.eq("from a numbered one, the next number", prompted.default, "main3.cpp")
+
+    t.write(dir, ".tuna.json", vim.json.encode({ name = "B. Second", group = "Codeforces - Round 9", url = "https://codeforces.com/contest/9/problem/B" }))
+    scaffold.create("solution", buf)
+    t.eq("a downloaded problem's own details fill the header", vim.list_slice(vim.fn.readfile(dir .. "/main4.cpp"), 1, 2), {
+        "// contest: codeforces 9",
+        "// problem: B. Second",
+    })
+
+    local empty = t.tempdir()
+    vim.cmd("enew")
+    vim.cmd.cd(empty)
+    scaffold.create("solution", vim.api.nvim_get_current_buf())
+    t.eq("with no solution to go by, the first of tool_names.solution", prompted.default, "main.cpp")
+    vim.cmd.cd("-")
+
+    widgets.input = function(_, _, on_submit)
+        on_submit("  ")
+    end
+    dir, buf = problem()
+    scaffold.create("solution", buf)
+    t.eq("an empty name writes nothing", vim.fn.glob(dir .. "/*.cpp", false, true), { dir .. "/main.cpp" })
+    widgets.input = real_input
+end
+
+--------------------------------------------------------------------------------
 -- What else reads the templates
 --------------------------------------------------------------------------------
 
@@ -196,7 +295,11 @@ t.has("clean knows an untouched scaffold for what it is", reason, "match to gene
 
 -- Completion offers the roles, then the languages a role has a template in.
 local complete = require("tuna.commands").complete
-t.eq("completion offers the roles", complete("", "Tuna scaffold ", 14), { "bruteforce", "checker", "generator", "interactor" })
+t.eq(
+    "completion offers the roles",
+    complete("", "Tuna scaffold ", 14),
+    { "bruteforce", "checker", "generator", "interactor", "solution" }
+)
 vim.cmd("edit " .. dir .. "/main.cpp")
 t.eq("then the languages there are for one", complete("", "Tuna scaffold generator ", 24), { "cpp", "py", "rs" })
 

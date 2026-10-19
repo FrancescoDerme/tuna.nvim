@@ -25,63 +25,30 @@ local M = {}
 ---@type { lines: string[], row: integer, bufnr: integer }?
 M.pending = nil
 
----Resolve the template to open the scratch from: the first configured candidate that a
----*task-less* caller can resolve and that exists (see `utils.template_candidates`).
+---A file standing for the scratch while its template is looked up: a scratch is written
+---before there is a problem, so the template is the solution's with no problem known.
+---@param ext string
+---@return string
+local function stand_in(ext)
+    return vim.fn.getcwd() .. "/scratch." .. ext
+end
+
+---The template a download would write a solution in `ext` from, with no problem known.
 ---@param ext string
 ---@param cfg table
 ---@return string? path
----@return boolean configured whether any template was configured for `ext` at all
 local function template_path(ext, cfg)
-    for _, candidate in ipairs(utils.template_candidates(cfg.template_file, ext)) do
-        -- A candidate may name the problem it is for (`~/cp/templates/$(JUDGE).cpp`),
-        -- and a scratch is written before there is a problem to ask. Nothing here can
-        -- fill that in, so such a candidate is skipped and the next one tried — which is
-        -- exactly what a fallback entry is for: list the general template after the
-        -- per-judge ones and the scratch always has something to open.
-        if utils.only_file_modifiers(candidate) then
-            -- The rest are file-format modifiers, which need a file name to expand
-            -- against; a fictitious one in the cwd is enough to fill `$(FEXT)`.
-            local path = utils.eval_string(vim.fn.getcwd() .. "/scratch." .. ext, candidate)
-            if path then
-                path = utils.expand_home(path)
-                if utils.file_exists(path) then
-                    return path, true
-                end
-            end
-        end
-    end
-    return nil, #utils.template_candidates(cfg.template_file, ext) > 0
+    return require("tuna.scaffold").template("solution", ext, cfg, stand_in(ext))
 end
 
----Every template a scratch could start from: the existing files each configured candidate
----can match. A scratch is written before there is a problem, so a modifier only a problem
----fills in (`$(JUDGE)` in `~/cp/template.$(JUDGE).cpp`) matches any text in its place,
----and each judge's template is offered on its own. In candidate order, each file once.
+---Every template a scratch could start from. No problem exists yet, so a modifier only a
+---problem fills in (`$(JUDGE)` in `~/cp/template.$(JUDGE).cpp`) matches any text in its
+---place, and each judge's template is offered on its own.
 ---@param ext string
 ---@param cfg table
 ---@return string[] paths
 local function template_choices(ext, cfg)
-    local out, seen = {}, {}
-    for _, candidate in ipairs(utils.template_candidates(cfg.template_file, ext)) do
-        -- Task modifiers become a marker the file-modifier pass leaves alone, then a glob
-        -- wildcard; the file modifiers expand against a name in the cwd.
-        local marked = candidate:gsub("%$%(([^)]*)%)", function(name)
-            if name ~= "" and utils.file_format_modifiers[name] == nil then
-                return "\1"
-            end
-        end)
-        local path = utils.eval_string(vim.fn.getcwd() .. "/scratch." .. ext, marked)
-        if path then
-            local pattern = utils.expand_home(path):gsub("[%[%]%?%*]", "\\%0"):gsub("\1", "*")
-            for _, match in ipairs(vim.fn.glob(pattern, false, true)) do
-                if not seen[match] and vim.fn.isdirectory(match) == 0 then
-                    seen[match] = true
-                    out[#out + 1] = match
-                end
-            end
-        end
-    end
-    return out
+    return require("tuna.scaffold").templates("solution", cfg, stand_in(ext), ext)
 end
 
 ---Whether a scratch holds anything to resume: its loaded buffer, or else its file, has
@@ -234,16 +201,7 @@ end
 local function start_over(path, ext, cfg)
     local choices = template_choices(ext, cfg)
     if #choices == 0 then
-        -- No template to open from is not a reason to refuse: the scratch is what was
-        -- asked for, and `:Tuna download sync` writes the problem from the template that
-        -- does apply later. It says so only when templates *were* configured, the case
-        -- where one was expected.
-        if #utils.template_candidates(cfg.template_file, ext) > 0 then
-            utils.notify(
-                "scratch: no template file exists for '" .. ext .. "', starting an empty scratch.",
-                "INFO"
-            )
-        end
+        -- No template is not a reason to refuse: the scratch is what was asked for.
         create(path, cfg, nil)
         return
     end
