@@ -17,7 +17,7 @@ void bruteforce() {
 
 int main() {
     ios_base::sync_with_stdio(0);
-    cout << setprecision(10) << fixed;
+    cout << setprecision(0) << fixed;  // raise to 10 for real answers
     cin.tie(0);
     cout.tie(0);
 
