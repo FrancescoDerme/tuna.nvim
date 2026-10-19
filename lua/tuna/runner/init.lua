@@ -252,6 +252,11 @@ function TCRunner:run_single(tcindex)
     -- A single re-run is a run: while it is in flight the runner must not read as
     -- idle, or the structural edits (`n`/`x`/`c`/`u`) that wait on `idle()` would be
     -- let through mid-flight. `check_complete` flips it back once the row settles.
+    -- From an idle runner the lanes are over, rows added since (`n`, `u`, a split)
+    -- included, or `check_complete` would wait on them for a lane that never comes.
+    if self:idle() then
+        self.next_tc = self.tc_size + 1
+    end
     self.completed = false
     self.stopped = false
     local function settle()

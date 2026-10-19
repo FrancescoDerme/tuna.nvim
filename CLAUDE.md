@@ -477,7 +477,9 @@ is relative. Every configured path goes through these: compile/running directori
   run keys go through `RunnerCore:built_first`, so the first one builds and then runs, and
   nothing is saved or spawned before it.
 - `run_single` **claims the runner** (`completed = false`) until it settles; otherwise edits
-  could slip through mid-run.
+  could slip through mid-run. From an idle runner it closes the lanes first (`next_tc` past
+  the last row): a row added after a run (`n`, `u`, a split) would otherwise read as one a
+  lane has still to start, and `check_complete` would never settle the run.
 
 **Stress (`stress.lua`)**: `StressRunner`.
 - Helpers come from `stress_helpers` (`tools.helper` for both roles), resolved again by every
@@ -1298,7 +1300,8 @@ specific Vim error about a buffer the user never opened.
     notification; `clean.lua` also: a pinned file named, starting on Keep, and unpinned when
     deleted);
   - `runner.lua`: all four run modes with `vim.system` stubbed, covering what each child is
-    handed, bare rows, save/answer semantics, disk drift and restore, path resolution, the
+    handed, bare rows, save/answer semantics, a row added after a run settling and judged
+    by its next save, disk drift and restore, path resolution, the
     swapfile contract, interactive grids and the conversation model, and the run gate
     (`settle_results`), the local verdict a finished normal, run-all and feed run saves,
     live's typing keys starting a session, the build step showing one named pane per source

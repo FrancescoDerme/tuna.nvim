@@ -536,6 +536,33 @@ t.eq("saving writes the testcase to disk", tcs.buf_get_testcases(buf)[0], { inpu
 t.eq("and the row is no longer bare", r.tcdata[2].bare, nil)
 require("tuna.testcases").buf_delete_testcase(buf, 0)
 
+-- A row added once a run is over (`n`) runs and settles like any other: the run's lanes
+-- ended with it, so the new row is not a testcase one of them has still to start.
+do
+    tcs.buf_save_testcase(buf, 0, "1\n", "")
+    stub_system()
+    local nr = require("tuna.runner").new(buf)
+    nr:run_testcases(tcs.buf_get_testcases(buf))
+    vim.wait(2000, function()
+        return nr.completed
+    end, 20)
+    local n = nr:next_tcnum()
+    nr:add_testcase_row(n)
+    nr:save_testcase(n, "2\n", "")
+    vim.wait(2000, function()
+        return nr.completed
+    end, 20)
+    t.eq("a row added after a run settles once it has run", nr:idle(), true)
+    nr:save_testcase(n, "2\n", "x\n")
+    vim.wait(2000, function()
+        return nr.completed and nr.tcdata[#nr.tcdata].status ~= "DONE"
+    end, 20)
+    vim.system = real_system
+    t.eq("so saving an answer for it judges it", nr.tcdata[#nr.tcdata].status, "WRONG")
+    tcs.buf_delete_testcase(buf, n)
+    tcs.buf_delete_testcase(buf, 0)
+end
+
 --------------------------------------------------------------------------------
 -- `:Tuna run all` builds the same rows for every solution
 --------------------------------------------------------------------------------
