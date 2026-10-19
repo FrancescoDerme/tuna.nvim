@@ -39,7 +39,7 @@ It loads the rest of itself only when you use it, so there is no need to lazy-lo
 
 1. **[`:Tuna`](REFERENCE.md#menu)** opens the menu.
 2. **[`:Tuna download problem`](REFERENCE.md#download)** starts listening for a problem from Competitive Companion: press the green plus in your browser to download it.
-   A solution file is created from your template (tuna ships one), the testcases are written beside it, and the file opens on the first line of `solve()`.
+   A solution file is created from your template, the testcases are written beside it, and the file opens on the first line of `solve()`.
 3. **[`:Tuna run`](REFERENCE.md#run)** compiles, runs the testcases in parallel, and opens the runner UI.
    The four panes show output, expected output, input and stderr.
    This UI can do a lot, for example `d` toggles a diff of the two outputs.
@@ -109,8 +109,12 @@ Every helper is found the same way: a file named after it beside your solution (
 
 The run mode, interactive's source and the checker are decided based on the helpers present until you force them: `:Tuna run <mode>` forces a mode, `:Tuna run interactive <source>` a source, [`:Tuna checker off`](REFERENCE.md#checker) plain comparison, and `auto` hands any of them back.
 
-[`:Tuna scaffold solution|checker|generator|bruteforce|interactor`](REFERENCE.md#scaffold) drops in a starter file: a helper named as `tool_names` says, in your solution's language or in the language configured at `scaffold.language` (for example, you may want to have a `py` bruteforce even if you are coding in `cpp`), or a second solution beside yours, such as `main2.cpp` beside `main.cpp`.
-tuna ships `cpp` and `py` starters in its `scaffolds/` folder, and `scaffold.templates` points to your own, by default `tuna/scaffolds/<role>.<ext>` in your Neovim config, so you can customize a starter or add a new language by simply dropping a file there.
+[`:Tuna scaffold solution|checker|generator|bruteforce|interactor`](REFERENCE.md#scaffold) drops in a starter file:
+
+- a helper named as `tool_names` says, in your solution's language or in the language configured at `scaffold.language` (for example, you may want to have a `py` bruteforce even if you are coding in `cpp`),
+- a second solution beside yours, such as `main2.cpp` beside `main.cpp`.
+
+tuna ships `cpp` and `py` starters in its `scaffolds/` folder, and `scaffold.templates` points to your own (set to `tuna/scaffolds/<role>.<ext>` in your Neovim config by default), so you can customize a starter or add a new language by simply dropping a file there.
 
 Finally, when several solutions are present in one folder, `:Tuna run all` runs every one of them against the same testcases.
 
@@ -138,13 +142,13 @@ New solutions are created from the solution's template, with the problem's own d
 // submit at: $(URL)
 ```
 
-The `scaffold.templates` option takes a path, an ordered list tried until one exists, or a table by role, which is what makes a per-judge template practical:
+The `scaffold.templates` option takes a path, a table by role, or an ordered list tried until one exists, which is what makes a per-judge template practical:
 
 ```lua
 scaffold = { templates = { solution = { "~/cp/template.$(JUDGE).$(FEXT)", "~/cp/template.$(FEXT)" } } },
 ```
 
-A new solution opens on the first line of its `solve` function, and `template_cursor` moves that line, or turns it off with `false`.
+A new solution opens where the `template_cursor` pattern matches your template (on the first line of a `solve` function by default), `false` turns this off.
 
 When entering a contest, some judges, like AtCoder, place you in the problems page, from which pressing the green plus is convenient.
 Others, like Codeforces, place you inside the first problem, so going to the problems page to download the contest at the start of the competition would lose precious seconds.

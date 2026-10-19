@@ -912,9 +912,9 @@ function M.complete(arg_lead, cmd_line, cursor_pos)
         candidates = interactive_sources
     elseif (count == 3 or (count == 4 and not ending_space)) and words[2] == "scaffold" then
         -- The languages the role has a template in, so what is offered is what exists.
-        candidates = vim.tbl_contains(tools.SCAFFOLDS, words[3])
-                and require("tuna.scaffold").languages(words[3], M.target_buffer())
-            or {}
+        local scaffold = require("tuna.scaffold")
+        local role = scaffold.role_of(words[3], config.get_buffer_config(M.target_buffer()))
+        candidates = role and scaffold.languages(role, M.target_buffer()) or {}
     elseif
         (count == 3 or (count == 4 and not ending_space))
         and words[2] == "testcase"

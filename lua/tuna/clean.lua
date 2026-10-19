@@ -167,25 +167,27 @@ end
 
 ---The templates a file at `full` of `role` could have been written from, read once per scan.
 ---Every one is compared, since which a file came from is recorded nowhere: a fallback list
----means more than one may apply. The template file itself is never among them, or it would
----match itself.
+---means more than one may apply. Nil when the file is one of them, since a template would
+---match itself and is never offered.
 ---@param full string
 ---@param ext string
 ---@param role string
 ---@param cfg table
 ---@param cache table<string, any> per-scan memo
----@return string[]
+---@return string[]?
 local function templates_of(full, ext, role, cfg, cache)
     cache["\0glob"] = cache["\0glob"] or {}
+    local itself = vim.fs.normalize(full)
     local out = {}
     for _, path in ipairs(require("tuna.scaffold").templates(role, cfg, full, ext, cache["\0glob"])) do
-        if vim.fs.normalize(path) ~= vim.fs.normalize(full) then
-            if cache[path] == nil then
-                cache[path] = utils.read_file(path) or false
-            end
-            if cache[path] then
-                out[#out + 1] = cache[path]
-            end
+        if vim.fs.normalize(path) == itself then
+            return nil
+        end
+        if cache[path] == nil then
+            cache[path] = utils.read_file(path) or false
+        end
+        if cache[path] then
+            out[#out + 1] = cache[path]
         end
     end
     return out
@@ -214,15 +216,19 @@ local function classify(full, ext, base, roles, cfg, threshold, cache)
     if content == nil then
         return nil
     end
+    local role = roles[base] or "solution"
+    local tmpls = templates_of(full, ext, role, cfg, cache)
+    if not tmpls then
+        return nil
+    end
     -- Nothing was ever written to it, so it ranks with the surest deletions (1.0).
     if vim.trim(content) == "" then
         return "empty file", 1
     end
     -- A file written from one template matches that one and no other, so the best match
     -- picks it out.
-    local role = roles[base] or "solution"
     local best = 0
-    for _, tmpl in ipairs(templates_of(full, ext, role, cfg, cache)) do
+    for _, tmpl in ipairs(tmpls) do
         best = math.max(best, similarity(content, tmpl, threshold))
     end
     if best >= threshold then

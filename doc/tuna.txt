@@ -75,8 +75,8 @@ QUICK START                                                  *tuna-quickstart*
 1. `:Tuna` opens the menu.
 2. `:Tuna download problem` starts listening for a problem from Competitive
    Companion: press the green plus in your browser to download it. A solution
-   file is created from your template (tuna ships one), the testcases are
-   written beside it, and the file opens on the first line of `solve()`.
+   file is created from your template, the testcases are written beside it,
+   and the file opens on the first line of `solve()`.
 3. `:Tuna run` compiles, runs the testcases in parallel, and opens the runner
    UI. The four panes show output, expected output, input and stderr. This UI
    can do a lot, for example `d` toggles a diff of the two outputs.
@@ -188,14 +188,17 @@ helpers present until you force them: `:Tuna run <mode>` forces a mode,
 comparison, and `auto` hands any of them back.
 
 `:Tuna scaffold solution/checker/generator/bruteforce/interactor` drops in a
-starter file: a helper named as `tool_names` says, in your solution's language
-or in the language configured at `scaffold.language` (for example, you may
-want to have a `py` bruteforce even if you are coding in `cpp`), or a second
-solution beside yours, such as `main2.cpp` beside `main.cpp`. tuna ships `cpp`
-and `py` starters in its `scaffolds/` folder, and `scaffold.templates` points
-to your own, by default `tuna/scaffolds/<role>.<ext>` in your Neovim config,
-so you can customize a starter or add a new language by simply dropping a file
-there.
+starter file:
+
+- a helper named as `tool_names` says, in your solution's language or in the
+  language configured at `scaffold.language` (for example, you may want to
+  have a `py` bruteforce even if you are coding in `cpp`),
+- a second solution beside yours, such as `main2.cpp` beside `main.cpp`.
+
+tuna ships `cpp` and `py` starters in its `scaffolds/` folder, and
+`scaffold.templates` points to your own (set to `tuna/scaffolds/<role>.<ext>`
+in your Neovim config by default), so you can customize a starter or add a new
+language by simply dropping a file there.
 
 Finally, when several solutions are present in one folder, `:Tuna run all`
 runs every one of them against the same testcases.
@@ -229,16 +232,17 @@ own details filled in for these placeholders: >cpp
     // problem: $(PROBLEM)
     // submit at: $(URL)
 <
-The `scaffold.templates` option takes a path, an ordered list tried until one
-exists, or a table by role, which is what makes a per-judge template
+The `scaffold.templates` option takes a path, a table by role, or an ordered
+list tried until one exists, which is what makes a per-judge template
 practical: >lua
 
     scaffold = { templates = { solution = {
         "~/cp/template.$(JUDGE).$(FEXT)", "~/cp/template.$(FEXT)",
     } } },
 <
-A new solution opens on the first line of its `solve` function, and
-`template_cursor` moves that line, or turns it off with `false`.
+A new solution opens where the `template_cursor` pattern matches your
+template (on the first line of a `solve` function by default), `false` turns
+this off.
 
 When entering a contest, some judges, like AtCoder, place you in the problems
 page, from which pressing the green plus is convenient. Others, like
@@ -510,15 +514,18 @@ Every command is a subcommand of `:Tuna` with tab-completion, and a lowercase
 :Tuna scaffold {solution/checker/generator/bruteforce/interactor} [ext]
         Drop a starter beside the solution and open it. A helper program is
         named so that a run finds it, in the language `ext` names, else in
-        `scaffold.language`, else in your solution's. A solution is named as
-        you confirm, the next free name beside yours by default (`main2.cpp`
-        beside `main.cpp`), in the language `ext` names, else in your file's.
-        Every starter, a downloaded solution included, comes from the first
-        file `scaffold.templates` names that exists, else from tuna's own
-        `cpp` and `py` starters, so replacing a starter or adding a language
-        is done by dropping a file there. The modifiers in a template are
-        filled in, and without a problem to fill them from (no download, no
-        `.tuna.json` beside it) the header lines naming one are left out.
+        `scaffold.language`, else in your solution's. A solution is named by
+        you, but tuna offers the next free name (`main2.cpp` beside
+        `main.cpp`), in the language `ext` names, else, if the folder already
+        has a solution, in that solution's language, else in
+        `downloaded_files_extension`. Every starter, a downloaded solution
+        included, comes from the first file `scaffold.templates` names that
+        exists, else from tuna's own `cpp` and `py` starters, so replacing a
+        starter or adding a language is done by dropping a file at one of the
+        `scaffold.templates` paths. The modifiers in a template are filled
+        in, and without a problem to fill them from (no download, no
+        `.tuna.json` beside it) the header lines with a problem's modifier
+        are left out.
 
 :Tuna submit [clear]
         Hand the solution to the submit tool you configured, read its output

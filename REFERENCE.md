@@ -215,9 +215,9 @@ A problem that already exists is asked about before it's overwritten, and a cont
 
 Drops a starter beside the solution and opens it.
 A helper program is named so that a run finds it, in the language `ext` names, else in `scaffold.language`, else in your solution's.
-A solution is named as you confirm, the next free name beside yours by default (`main2.cpp` beside `main.cpp`), in the language `ext` names, else in your file's.
-Every starter, a downloaded solution included, comes from the first file `scaffold.templates` names that exists, else from tuna's own `cpp` and `py` starters, so replacing a starter or adding a language is done by dropping a file there.
-The modifiers in a template are filled in, and without a problem to fill them from (no download, no `.tuna.json` beside it) the header lines naming one are left out.
+A solution is named by you, but tuna offers the next free name (`main2.cpp` beside `main.cpp`), in the language `ext` names, else, if the folder already has a solution, in that solution's language, else in `downloaded_files_extension`.
+Every starter, a downloaded solution included, comes from the first file `scaffold.templates` names that exists, else from tuna's own `cpp` and `py` starters, so replacing a starter or adding a language is done by dropping a file at one of the `scaffold.templates` paths.
+The modifiers in a template are filled in, and without a problem to fill them from (no download, no `.tuna.json` beside it) the header lines with a problem's modifier are left out.
 
 ## submit
 

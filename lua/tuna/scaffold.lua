@@ -15,7 +15,7 @@
 -- under a name the user confirms, offered as the next one free beside the solution
 -- (`main2.cpp`). A helper's language is the one asked for, else `scaffold.language`, else the
 -- solution's, and a role with no template in it offers the languages it has; a solution's is
--- the one asked for, else the current file's, else `downloaded_files_extension`. A run that
+-- the one asked for, else the solution's, else `downloaded_files_extension`. A run that
 -- needs a helper it does not have offers to write its starter (`create_missing`).
 
 local config = require("tuna.config")
@@ -28,6 +28,28 @@ local M = {}
 -- The starters shipped with the plugin, found from this file's own location: through the
 -- runtimepath another plugin's `scaffolds/` folder would be mixed in with them.
 local SHIPPED = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h:h:h") .. "/scaffolds"
+
+local by_role
+
+---tuna's own starters for `role`, read once: they change only with the plugin.
+---@param role string
+---@return string[]
+local function shipped(role)
+    if not by_role then
+        by_role = {}
+        for name, kind in vim.fs.dir(SHIPPED) do
+            local of = kind == "file" and name:match("^(.+)%.[^.]+$")
+            if of then
+                by_role[of] = by_role[of] or {}
+                table.insert(by_role[of], SHIPPED .. "/" .. name)
+            end
+        end
+        for _, list in pairs(by_role) do
+            table.sort(list)
+        end
+    end
+    return by_role[role] or {}
+end
 
 ---The template paths `scaffold.templates` gives `role`, in order, or false when the role
 ---starts empty.
@@ -95,9 +117,9 @@ local function names_unknown(str, mods)
     return false
 end
 
----`spec` as a glob, relative to the target's directory. With `wild`, each modifier `mods`
----cannot fill matches anything; without it, `spec` gives no glob: a problem's template is not
----guessed at when no problem is known.
+---`spec` as a path, relative to the target's directory, or with `wild` as a glob where each
+---modifier `mods` cannot fill matches anything. Nil when it names such a modifier and `wild`
+---is off: a problem's template is not guessed at when no problem is known.
 ---@param spec string
 ---@param mods tuna.Modifiers
 ---@param target string
@@ -114,7 +136,8 @@ local function resolve(spec, mods, target, wild)
         return nil
     end
     path = utils.normalize_path(utils.expand_home(path), vim.fs.dirname(target))
-    return (path:gsub("[%[%]%?%*]", "\\%0"):gsub("\1", "*"))
+    -- What `glob` would read as a pattern or expand (`$HOME`) is escaped, the wildcards aside.
+    return wild and (path:gsub("[\\%[%]%?%*%$]", "\\%0"):gsub("\1", "*")) or path
 end
 
 ---Whether a template at `path` is for `ext`: one with no extension is for every language.
@@ -161,12 +184,16 @@ local function find(role, cfg, target, ext, task, wild, cache)
         end
     end
     for _, spec in ipairs(list) do
-        local pattern = resolve(spec, mods, target, wild)
-        for _, path in ipairs(pattern and glob(pattern) or {}) do
+        local path = resolve(spec, mods, target, wild)
+        if path and wild then
+            for _, found in ipairs(glob(path)) do
+                add(found)
+            end
+        elseif path and utils.file_exists(path) then
             add(path)
         end
     end
-    for _, path in ipairs(glob(SHIPPED .. "/" .. role .. ".*")) do
+    for _, path in ipairs(shipped(role)) do
         if not langs[vim.fn.fnamemodify(path, ":e")] then
             add(path)
         end
@@ -273,17 +300,15 @@ local function file_name(role, ext, cfg)
     return (names[1] or role) .. "." .. ext
 end
 
----The name a new solution in `dir` is offered under: the current solution's while it is
----free, else that name with the next free number (`main2.cpp`, `main3.cpp`). With no
----solution to go by, the first of `tool_names.solution`.
+---The name a new solution in `dir` is offered under: `solution`'s while it is free, else
+---that name with the next free number (`main2.cpp`, `main3.cpp`). With no solution to go
+---by, the first of `tool_names.solution`.
 ---@param dir string
----@param current string the current buffer's file
+---@param solution string?
 ---@param ext string
 ---@param cfg table
 ---@return string
-local function solution_name(dir, current, ext, cfg)
-    local solution = current ~= "" and not tools.is_support(current, cfg) and current
-        or tools.solutions_in(dir, cfg)[1]
+local function solution_name(dir, solution, ext, cfg)
     local stem = solution and vim.fn.fnamemodify(solution, ":t:r") or (cfg.tool_names.solution or {})[1] or "main"
     if not utils.file_exists(dir .. "/" .. stem .. "." .. ext) then
         return stem .. "." .. ext
@@ -306,8 +331,9 @@ end
 ---@param ext string
 ---@param path string
 ---@param cfg table
+---@param task tuna.CCTask? the problem the folder was downloaded for
 ---@param opts tuna.ScaffoldOpts
-local function write(role, ext, path, cfg, opts)
+local function write(role, ext, path, cfg, task, opts)
     local fname = vim.fn.fnamemodify(path, ":t")
     local function done(written)
         if written and opts.open ~= false then
@@ -321,7 +347,6 @@ local function write(role, ext, path, cfg, opts)
         end
     end
     local function create()
-        local task = task_of(vim.fs.dirname(path), cfg)
         local template = M.template(role, ext, cfg, path, task)
         utils.write_file(path, template and M.render(template, role, ext, cfg, path, task) or "")
         if opts.open ~= false then
@@ -346,23 +371,33 @@ local function write(role, ext, path, cfg, opts)
     end)
 end
 
----The language a scaffold of `role` is written in when none is asked for: a helper's is
----`scaffold.language`, else the solution's, a solution's the current file's, else
----`downloaded_files_extension`.
----@param role string
+---The language a helper is written in when none is asked for: `scaffold.language`, else
+---the current file's.
 ---@param cfg table
 ---@param current string the current buffer's file
 ---@return string
-local function default_language(role, cfg, current)
-    local own = vim.fn.fnamemodify(current, ":e")
-    if role == "solution" then
-        return own ~= "" and own or cfg.downloaded_files_extension or ""
+local function default_language(cfg, current)
+    return (cfg.scaffold and cfg.scaffold.language) or vim.fn.fnamemodify(current, ":e")
+end
+
+---The role `word` names: a role, else the role whose `tool_names` hold it (`main`, `brute`),
+---the names a user sees on the files being natural to type too.
+---@param word string
+---@param cfg table
+---@return string?
+function M.role_of(word, cfg)
+    if vim.tbl_contains(tools.SCAFFOLDS, word) then
+        return word
     end
-    return (cfg.scaffold and cfg.scaffold.language) or own
+    for _, role in ipairs(tools.SCAFFOLDS) do
+        if vim.tbl_contains(cfg.tool_names[role] or {}, word) then
+            return role
+        end
+    end
 end
 
 ---Create (or open) the scaffold of `role` beside the solution in `bufnr`.
----@param role string one of `tools.SCAFFOLDS`
+---@param role string one of `tools.SCAFFOLDS`, or a name of one (`role_of`)
 ---@param bufnr integer? defaults to the current buffer
 ---@param ext string? the language to write it in, else the role's default
 ---@param opts tuna.ScaffoldOpts?
@@ -374,33 +409,47 @@ function M.create(role, bufnr, ext, opts)
         end
     end
     bufnr = bufnr or vim.api.nvim_get_current_buf()
-    if not vim.tbl_contains(tools.SCAFFOLDS, role) then
+    config.load_buffer_config(bufnr)
+    local cfg = config.get_buffer_config(bufnr)
+    role = M.role_of(role, cfg)
+    if not role then
         utils.notify("scaffold: the role is one of " .. table.concat(tools.SCAFFOLDS, ", ") .. ".")
         return nothing()
     end
-    config.load_buffer_config(bufnr)
-    local cfg = config.get_buffer_config(bufnr)
     local current = vim.api.nvim_buf_get_name(bufnr)
     local dir = vim.fn.fnamemodify(current, ":p:h")
-    ext = ext or default_language(role, cfg, current)
-    if ext == "" then
+    local task = task_of(dir, cfg)
+
+    -- A new solution is written beside this file, else the folder's solution, and in its
+    -- language; it starts empty in a language with no template, as a downloaded one does.
+    local solution
+    if role == "solution" then
+        solution = current ~= ""
+                and cfg.run_command[vim.bo[bufnr].filetype]
+                and not tools.is_support(current, cfg)
+                and current
+            or tools.solutions_in(dir, cfg)[1]
+        ext = ext or (solution and vim.fn.fnamemodify(solution, ":e")) or cfg.downloaded_files_extension
+    else
+        ext = ext or default_language(cfg, current)
+    end
+    if not ext or ext == "" then
         utils.notify("scaffold: no language to write it in, open a solution file or pass an extension.")
         return nothing()
     end
 
     if role == "solution" then
-        -- A solution starts empty in a language with no template, as a downloaded one does.
-        widgets.input("New solution", solution_name(dir, current, ext, cfg), function(name)
+        widgets.input("New solution", solution_name(dir, solution, ext, cfg), function(name)
             if vim.trim(name) == "" then
                 return nothing()
             end
-            write(role, ext, utils.normalize_path(utils.expand_home(vim.trim(name)), dir), cfg, opts)
+            write(role, ext, utils.normalize_path(utils.expand_home(vim.trim(name)), dir), cfg, task, opts)
         end, nothing)
         return
     end
     local path = dir .. "/" .. file_name(role, ext, cfg)
-    if specs(cfg, role) == false or M.template(role, ext, cfg, path) then
-        write(role, ext, path, cfg, opts)
+    if specs(cfg, role) == false or M.template(role, ext, cfg, path, task) then
+        write(role, ext, path, cfg, task, opts)
         return
     end
     -- Not in this language. One it does have is still a working helper, since helpers are
@@ -420,7 +469,7 @@ function M.create(role, bufnr, ext, opts)
     items[#items + 1] = "Stop"
     widgets.menu(items, ("No %s template for .%s"):format(role, ext), function(idx)
         if idx and others[idx] then
-            write(role, others[idx], dir .. "/" .. file_name(role, others[idx], cfg), cfg, opts)
+            write(role, others[idx], dir .. "/" .. file_name(role, others[idx], cfg), cfg, task, opts)
         else
             nothing()
         end
@@ -439,7 +488,7 @@ end
 function M.create_missing(roles, bufnr, title, opts)
     opts = opts or {}
     local cfg = config.get_buffer_config(bufnr)
-    local ext = default_language(roles[1], cfg, vim.api.nvim_buf_get_name(bufnr))
+    local ext = default_language(cfg, vim.api.nvim_buf_get_name(bufnr))
     local names = vim.tbl_map(function(role)
         return file_name(role, ext, cfg)
     end, roles)

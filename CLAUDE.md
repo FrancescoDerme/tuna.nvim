@@ -1021,8 +1021,9 @@ specific Vim error about a buffer the user never opened.
     Every file compares against every template of its role (`scaffold.templates`, a helper
     by its `tool_names`, anything else a solution), a modifier only a problem fills matching
     anything, so no sidecar is needed, and the best match wins: which template a file came
-    from is recorded nowhere. Globs are cached per scan by pattern. An empty file is always
-    unused. The template file itself is never offered.
+    from is recorded nowhere. Globs are cached per scan by pattern. A file that is one of
+    its role's templates is never offered, an empty one included; any other empty file is
+    always unused.
   - The flow is floats only: a `form` for directory, depth and threshold, then one
     `Delete`/`Keep`/`Stop` menu per file with a preview, sorted by match, at a fixed width,
     each starting on the answer last given (`ui.row`), and the same for directories. A
@@ -1164,10 +1165,11 @@ specific Vim error about a buffer the user never opened.
     download's task, else the sidecar's). One option rather than a folder option beside a
     path option: a folder is a path ending in `$(ROLE).$(FEXT)`. A role table's missing role
     goes to tuna's starter, not to the default folder, so the config reads as the whole
-    list. `template` is the first that exists, a path naming a modifier it cannot fill
-    leading nowhere, else the shipped `scaffolds/<role>.<ext>`; `templates` every file the
-    paths can match, those modifiers read as wildcards, then the shipped starters in the
-    languages left. A template is for the language its extension names (none: every
+    list. `template` is the first that exists, checked by path (a path naming a modifier
+    it cannot fill is skipped), else the shipped `scaffolds/<role>.<ext>`; `templates` every
+    file the paths can match, those modifiers read as wildcards in a glob that escapes
+    everything else `glob` reads (`$HOME`, `[`, `\`), then the shipped starters in the
+    languages left, listed once per session (`shipped`). A template is for the language its extension names (none: every
     language), so a `template.cpp` never lands in a `.py`.
   - `render` fills what it can and leaves every other `$`; with no problem known, the leading
     lines naming one go, and the blank lines under them when none of them is left. The
@@ -1177,12 +1179,14 @@ specific Vim error about a buffer the user never opened.
     nothing, or a path that does not exist, learns where templates go.
   - A helper is named after the role's first `tool_names`, the name discovery looks for
     first: a separate list of scaffold names could disagree with it and write helpers the
-    run does not find. A solution goes through `widgets.input`, offered the current
-    solution's name while it is free, else it with the next free number (`main2.cpp`). A
+    run does not find. A solution goes through `widgets.input`, offered the name of the
+    solution it is written beside (the current file when it is a runnable solution, else
+    the folder's first) while it is free, else it with the next free number (`main2.cpp`),
+    in that solution's language. A
     helper's language is the one asked for, else `scaffold.language`, else the solution's;
     one the role has no template in offers the languages it has (a helper is compiled and
     run in its own language, whatever the solution's). A solution's is the one asked for,
-    else the current file's, else `downloaded_files_extension`, and with no template it
+    else that solution's, else `downloaded_files_extension`, and with no template it
     starts empty, as a download does. Only a new solution gets `template_cursor`.
   - Every starter that reads a test count reads it as the solution starter does
     (`int tt = 1; cin >> tt;`), on a line marked `comment out for a single test`: the
@@ -1192,7 +1196,9 @@ specific Vim error about a buffer the user never opened.
     has none. A checker answers by its exit code alone, naming only trailing output, and the
     interactor stops at the first game lost, after which it and the solution are no longer
     in step. `languages` feeds the completion of `:Tuna scaffold <role> <Tab>`. `create`
-    takes `{ open, on_done }`, so a caller can chain it.
+    takes `{ open, on_done }`, so a caller can chain it, and a role's `tool_names` as the
+    role (`role_of`: `main`, `brute`), the names a user sees on the files; completion and
+    the docs keep to the role words.
   - **A run that needs a helper it does not have offers its starter** (`create_missing`): a
     menu naming the files (`Create gen.cpp and brute.cpp` / `Stop`), rather than a warning,
     from stress and the interactor source, on the first run and on a rerun alike. It writes
@@ -1268,7 +1274,8 @@ specific Vim error about a buffer the user never opened.
     the user's templates over the shipped one for their own language only, adding a language by
     adding a file, every shape of `scaffold.templates` (a role's list in order, a path naming
     the problem skipped without one, `["*"]`, `false`, a template only for its language), a
-    template's text filled where it can be and its problem header dropped without one, a new
+    template's text filled where it can be and its problem header dropped without one, a role
+    named by its `tool_names` (in completion too), a new
     solution's name, header and default name, `scaffold.language` and a language asked for by name over it, the
     languages offered when one has no starter, an existing file asked about, a run that needs
     helpers offering their starters (Create writing and opening them, Stop writing nothing, a

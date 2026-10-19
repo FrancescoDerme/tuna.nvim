@@ -45,11 +45,13 @@ local fell_back = problem("fb", "// default\nint main(){ plain(); }\n")
 t.has("the one it actually matches decides", reason(fell_back, cfg), "100% match")
 local edited = problem("edited", "// codeforces\nint main(){ cf(); solve(); }\n// more\n")
 t.eq("an edited file is not offered", reason(edited, cfg), nil)
-t.eq(
-    "a template is never compared with itself",
-    #clean.templates_of(tmpl .. "/default.cpp", "cpp", "solution", cfg, {}),
-    1
-)
+-- A template is never offered, not even for matching another one closely.
+t.write(tmpl, "near.cpp", "// default\nint main(){ plain(); }\n")
+cfg = cfg_with({ tmpl .. "/$(JUDGE).cpp", tmpl .. "/near.cpp" })
+t.eq("a template is never offered, however close to another it is", reason(tmpl .. "/near.cpp", cfg, 0.5), nil)
+t.write(tmpl, "empty.cpp", "")
+t.eq("not even an empty one", reason(tmpl .. "/empty.cpp", cfg), nil)
+t.has("while a file of the same text elsewhere is", reason(fell_back, cfg), "100% match")
 
 -- With nothing configured, a solution comes from tuna's own starter, header filled in.
 cfg = cfg_with(nil)

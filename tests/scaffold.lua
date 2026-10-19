@@ -78,11 +78,20 @@ t.ok(
 )
 setup()
 
-said = t.capture_notifications()
 dir, buf = problem()
 scaffold.create("brute", buf)
-t.has("the roles are named as everywhere else, bruteforce and not brute", said[1], "bruteforce")
-t.eq("and nothing is written for one that is not a role", vim.fn.glob(dir .. "/brute.*"), "")
+t.eq("a role's tool_names name it too", read(dir .. "/brute.cpp"), read(shipped .. "/bruteforce.cpp"))
+setup({ tool_names = { generator = { "mkin" } } })
+dir, buf = problem()
+scaffold.create("mkin", buf)
+t.ok("the configured ones included", read(dir .. "/mkin.cpp") ~= nil)
+setup()
+
+said = t.capture_notifications()
+dir, buf = problem()
+scaffold.create("bogus", buf)
+t.has("a word that names no role is refused, naming the roles", said[1], "bruteforce")
+t.eq("and nothing is written for it", vim.fn.glob(dir .. "/bogus.*"), "")
 
 --------------------------------------------------------------------------------
 -- The user's templates
@@ -217,6 +226,13 @@ do
     t.eq("a plain path is every role's", from("bruteforce", "cpp"), tdir .. "/template.cpp")
     t.eq("but only in the language its extension names", from("bruteforce", "py"), shipped .. "/bruteforce.py")
 
+    vim.fn.mkdir(tdir .. "/a$b", "p")
+    t.write(tdir .. "/a$b", "t.cpp", "// in a$b\n")
+    require("tuna").setup({ scaffold = { templates = { solution = tdir .. "/a$()b/t.$(FEXT)" } } })
+    t.eq("a path glob would read as a variable is matched as written", scaffold.templates("solution", cfg(), tdir .. "/p/main.cpp", "cpp"), {
+        tdir .. "/a$b/t.cpp",
+    })
+
     -- What a template's text becomes: the modifiers it can fill filled, any other `$` as written,
     -- and with no problem known the header lines naming one dropped.
     t.write(tdir, "filled.cpp", "// problem: $(PROBLEM)\n// at: $(URL)\n\n// $(ROLE) $(FNAME), $(date), $5, $(\n")
@@ -274,6 +290,16 @@ do
     t.eq("with no solution to go by, the first of tool_names.solution", prompted.default, "main.cpp")
     vim.cmd.cd("-")
 
+    t.write(dir, "notes.txt", "")
+    vim.cmd("edit " .. dir .. "/notes.txt")
+    scaffold.create("solution", vim.api.nvim_get_current_buf())
+    t.eq("from a file that is no solution, the folder's solution is gone by", prompted.default, "main5.cpp")
+    vim.cmd("buffer " .. buf)
+
+    prompted = nil
+    scaffold.create("sol", buf)
+    t.eq("a solution's tool_names name it too", prompted and prompted.title, "New solution")
+
     widgets.input = function(_, _, on_submit)
         on_submit("  ")
     end
@@ -302,5 +328,6 @@ t.eq(
 )
 vim.cmd("edit " .. dir .. "/main.cpp")
 t.eq("then the languages there are for one", complete("", "Tuna scaffold generator ", 24), { "cpp", "py", "rs" })
+t.eq("named by its tool_names too", complete("", "Tuna scaffold gen ", 18), { "cpp", "py", "rs" })
 
 t.report()
