@@ -1,6 +1,6 @@
 -- lua/tuna/runner_ui/init.lua
 --
--- The runner results UI: six panes over as many buffers (the "Run" status, the testcase
+-- The runner UI: six panes over as many buffers (the "Run" status, the testcase
 -- selector, and the Output, Expected Output, Input and Errors detail panes), kept in sync with
 -- the runner's `tcdata`, with the inline testcase editing, the gates that settle an unsaved
 -- edit or a testcase gone from disk, the diff, the viewer and the key legend.
@@ -12,10 +12,10 @@
 
 local api = vim.api
 local utils = require("tuna.utils")
-local surface = require("tuna.surface")
-local diff = require("tuna.diff")
+local surface = require("tuna.ui.surface")
+local diff = require("tuna.run.diff")
 local layout_util = require("tuna.runner_ui.layout")
-local SKIP = require("tuna.runner.core").SKIP
+local SKIP = require("tuna.run.core").SKIP
 
 local M = {}
 
@@ -154,7 +154,7 @@ local function as_list(maps)
 end
 
 -- Every abbreviation of the commands that close a pane or the editor, by what they close and
--- whether they write first. Closing *this window* is a request to put the results UI away, so
+-- whether they write first. Closing *this window* is a request to put the runner UI away, so
 -- the UI closes itself rather than letting one pane be torn out of the grid; the
 -- quit-everything commands mean what they say and are only intercepted when an unsaved edit
 -- would be lost.
@@ -443,7 +443,7 @@ function RunnerUI:with_answer_settled(tcnum, proceed)
     -- as it finishes the `:w`, which would leave the menu on screen with the cursor
     -- still in the pane behind it and no way to answer without reaching for the mouse.
     vim.schedule(function()
-        require("tuna.widgets").menu(
+        require("tuna.ui.widgets").menu(
             { "Don't specify output", "Expect empty output", "Keep editing" },
             "The answer to testcase " .. tcnum .. " is empty",
             function(idx)
@@ -522,7 +522,7 @@ function RunnerUI:request_close(torn, on_closed)
 
     -- Dismissing the prompt keeps the UI (and the edit) as it is, exactly like
     -- choosing "Keep editing" — the safe answer is the one a stray Esc gives.
-    require("tuna.widgets").menu(
+    require("tuna.ui.widgets").menu(
         unsaved_items("close"),
         "Unsaved " .. testcase_label(nums),
         function(idx)
@@ -543,7 +543,7 @@ function RunnerUI:request_close(torn, on_closed)
 end
 
 ---@private
----Where the rows and the disk disagree, from a single read. The results UI keeps its
+---Where the rows and the disk disagree, from a single read. The runner UI keeps its
 ---rows across a re-run — that is what makes it a results view rather than a fresh
 ---load — so anything that touches the testcase files behind its back (another Neovim,
 ---`:Tuna clean`, a checkout, a plain `rm`) leaves rows describing a state that is no
@@ -567,7 +567,7 @@ function RunnerUI:disk_drift(tcnum)
     if not self.runner.editable_testcases or self.runner.preloaded then
         return {}, {}, {}
     end
-    local ok, disk = pcall(require("tuna.testcases").buf_get_testcases, self.runner:edit_bufnr())
+    local ok, disk = pcall(require("tuna.problem.testcases").buf_get_testcases, self.runner:edit_bufnr())
     if not ok then
         return {}, {}, {}
     end
@@ -605,7 +605,7 @@ end
 ---watch.
 ---@param nums integer[]
 function RunnerUI:restore_missing(nums)
-    local testcases = require("tuna.testcases")
+    local testcases = require("tuna.problem.testcases")
     local bufnr = self.runner:edit_bufnr()
     local ok, disk = pcall(testcases.buf_get_testcases, bufnr)
     disk = ok and disk or {}
@@ -696,7 +696,7 @@ function RunnerUI:with_disk_settled(tcnum, what, proceed)
     -- it does exactly what it says, drops the rows and stops, and the re-run is one
     -- keypress away once the UI says the truth. Dismissing is `Stop`, which changes
     -- nothing at all.
-    require("tuna.widgets").menu(
+    require("tuna.ui.widgets").menu(
         { "Restore and " .. what, "Discard", "Stop" },
         label:sub(1, 1):upper() .. label:sub(2) .. " no longer on disk",
         function(idx)
@@ -743,7 +743,7 @@ function RunnerUI:with_pending_settled(tcnum, what, proceed, after_save)
         return
     end
 
-    require("tuna.widgets").menu(
+    require("tuna.ui.widgets").menu(
         unsaved_items(what),
         "Unsaved " .. testcase_label(nums),
         function(idx)
@@ -1168,7 +1168,7 @@ function RunnerUI:delete_testcase(tcnum)
         return
     end
     local n = tc.tcnum
-    local testcases = require("tuna.testcases")
+    local testcases = require("tuna.problem.testcases")
     local stored = testcases.buf_get_testcases(self.runner:edit_bufnr())[n]
     -- Remember what is being lost — the pane text if it was never written, the file's
     -- content otherwise.
@@ -1568,7 +1568,7 @@ function RunnerUI:redraw_grid()
 end
 
 ---@private
----Close the whole UI when one of its windows is closed: a results grid is one thing, not six
+---Close the whole UI when one of its windows is closed: a runner UI's grid is one thing, not six
 ---windows to dismiss one at a time. Not while the grid is being laid out again, where the
 ---closing is the UI's own.
 ---@param winid integer
@@ -1699,7 +1699,7 @@ function RunnerUI:show_ui()
                 for _, key in ipairs(as_list(keys)) do
                     vim.keymap.set("n", key, function()
                         if w.winid and api.nvim_win_is_valid(w.winid) then
-                            require("tuna.widgets").move_cursor(w.winid, api.nvim_buf_line_count(w.bufnr), delta)
+                            require("tuna.ui.widgets").move_cursor(w.winid, api.nvim_buf_line_count(w.bufnr), delta)
                         end
                     end, { buffer = w.bufnr, nowait = true })
                 end
@@ -1713,7 +1713,7 @@ function RunnerUI:show_ui()
     end
 
     -- `:q` (or `:close`) typed in **any** pane is **cancelled before it runs** and turned
-    -- into a close of the whole UI, which is what it was asking for: a results grid is
+    -- into a close of the whole UI, which is what it was asking for: a runner UI's grid is
     -- one thing, not six windows to dismiss one at a time. Cancelling at the command
     -- line is what makes it silent and still — the window is never closed, so no pane
     -- flashes out and back as the grid is rebuilt around the hole, and Vim never gets
@@ -1968,7 +1968,7 @@ function RunnerUI:show_ui()
             -- one of these afterwards is Neovim falling back, which is what this exists
             -- to rescue. Focus landing anywhere else means a window opened *during* the
             -- close and took it on purpose — a dialog raised from the answer to another
-            -- dialog, which is how the results UI asks two questions in a row (an
+            -- dialog, which is how the runner UI asks two questions in a row (an
             -- unsaved edit, then a testcase that has gone missing) — and pulling the
             -- cursor back into the pane there leaves the second question on screen with
             -- no way to answer it, looking for all the world as though the first prompt
@@ -2374,7 +2374,7 @@ function RunnerUI:show_message(title, text)
 end
 
 ---@private
----The rectangle the results UI occupies on screen, borders included, as a footprint
+---The rectangle the runner UI occupies on screen, borders included, as a footprint
 ---`{ row, col, width, height }`, or nil when nothing is on screen. A bordered float's
 ---reported position is already its **top-left border cell**, with the text one cell
 ---inside, so the two border lines are added to the size only, never subtracted from the
@@ -2409,7 +2409,7 @@ end
 ---order the grid puts them, the read-only panes filling its left and the editable
 ---column down its right edge, so the legend covers each side with its own keys.
 ---
----The legend is sized to cover the results UI entirely rather than to its own content:
+---The legend is sized to cover the runner UI entirely rather than to its own content:
 ---a small float over the grid leaves the panes showing around it, and a legend read
 ---against half a set of testcase rows is a legend competing with what it explains.
 function RunnerUI:show_help()
@@ -2456,7 +2456,7 @@ function RunnerUI:show_help()
         natural = natural + c.width + 2 -- footprints, since the columns touch
     end
 
-    -- Grow to the results UI's own rectangle, never shrink below the content: the
+    -- Grow to the runner UI's own rectangle, never shrink below the content: the
     -- legend has to blot out the grid it describes, and a legend that cuts off the key
     -- it is naming is worse than one larger than the grid.
     local bounds = self:ui_bounds()
@@ -2627,7 +2627,7 @@ function RunnerUI:status_lines()
     -- Which settings are your choice rather than tuna's, on a row of their own: this is one
     -- fact about the run, not one per setting, and a word appended to each value is the
     -- first thing a pane this narrow cuts off. The names are the rows they speak for.
-    local tools = require("tuna.tools")
+    local tools = require("tuna.run.tools")
     local forced = {}
     if path ~= "" then
         if tools.get_mode(path) == mode then

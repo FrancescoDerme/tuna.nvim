@@ -8,8 +8,8 @@
 
 local t = dofile("tests/harness.lua")
 require("tuna").setup({})
-local library = require("tuna.library")
-local widgets = require("tuna.widgets")
+local library = require("tuna.workspace.library")
+local widgets = require("tuna.ui.widgets")
 
 local root = t.tempdir()
 for _, sub in ipairs({ "graphs", "graphs/.cache", ".git" }) do

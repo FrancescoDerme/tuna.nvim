@@ -2,7 +2,7 @@
 --
 -- The menu's Contests and Problems lists: a contest summarised over every problem in
 -- it, in either layout and counting only verdicts that still describe the file on disk; a
--- problem's judge verdict, else its saved local verdict; statuses in the results grid's
+-- problem's judge verdict, else its saved local verdict; statuses in the runner UI's
 -- words and colours, counts left plain and flush right; `widgets.panels` stacking the
 -- two lists in one column, scrolling a list that does not fit; and the Pinned list under
 -- them, as long as it needs to be and scrolling past what the column holds.
@@ -10,7 +10,7 @@
 local t = dofile("tests/harness.lua")
 require("tuna").setup({})
 local menu = require("tuna.menu")._test
-local core = require("tuna.runner.core")
+local core = require("tuna.run.core")
 
 ---A solution file, with a recorded verdict for it when `verdict` is given.
 local function solution(dir, name, verdict)
@@ -83,7 +83,7 @@ end
 core.save_local_verdict(blind .. "/A/main.cpp", { { tcnum = 0, status = "CORRECT" } })
 core.save_local_verdict(blind .. "/B/main.cpp", { { tcnum = 0, status = "WRONG" } })
 
-local submit = require("tuna.submit")
+local submit = require("tuna.problem.submit")
 local blind_a = blind .. "/A/main.cpp"
 t.ok("a submit tool whose output is watched reports a verdict", submit.reports_verdict(blind_a))
 for what, judge in pairs({
@@ -256,7 +256,7 @@ t.eq("problems are named by their directory, told apart by what differs", menu.p
 --------------------------------------------------------------------------------
 
 local api = vim.api
-local widgets = require("tuna.widgets")
+local widgets = require("tuna.ui.widgets")
 vim.o.columns, vim.o.lines = 140, 40
 
 local function press(keys)
@@ -420,7 +420,7 @@ press("<Esc>")
 --------------------------------------------------------------------------------
 
 do
-    local recent = require("tuna.recent")
+    local recent = require("tuna.workspace.recent")
     local pinned = {}
     for i = 1, 30 do
         local dir = t.tempdir()
@@ -468,7 +468,7 @@ do
 
     -- The Checker entry switches the setting each time it is chosen, which is the one place
     -- that happens: the command only changes it when told which way.
-    local tools = require("tuna.tools")
+    local tools = require("tuna.run.tools")
     local function choose_checker()
         require("tuna.menu").open()
         local win = board()["Catch of the day"].win

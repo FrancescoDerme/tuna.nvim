@@ -93,7 +93,7 @@ end
 
 local function check_download(cfg)
     health.start("tuna: Competitive Companion")
-    local download = require("tuna.download")
+    local download = require("tuna.problem.download")
     health.info(("listener port: %d"):format(cfg.companion_port))
     if download.is_downloading() then
         health.ok(("listening (mode: %s)"):format(download.mode() or "on"))

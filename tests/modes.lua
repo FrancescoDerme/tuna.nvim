@@ -8,7 +8,7 @@
 
 local t = dofile("tests/harness.lua")
 require("tuna").setup({})
-local tools = require("tuna.tools")
+local tools = require("tuna.run.tools")
 local cfg = require("tuna.config").current_setup
 local function with(extra)
     return vim.tbl_deep_extend("force", cfg, extra)
@@ -106,7 +106,7 @@ tools.set_mode(fsol, "normal")
 t.eq("a forced mode wins over the helpers", { tools.resolve_mode(fsol, cfg) }, { "normal" })
 tools.set_mode(fsol, nil)
 t.eq("made automatic again, the helpers decide", (tools.resolve_mode(fsol, cfg)), "interactive")
-t.eq("and nothing is left stored", require("tuna.sidecar").get_entry(fsol, "run"), nil)
+t.eq("and nothing is left stored", require("tuna.problem.sidecar").get_entry(fsol, "run"), nil)
 
 --------------------------------------------------------------------------------
 -- A forced setting gives way while what it needs is missing
@@ -238,9 +238,9 @@ do
     t.eq("and kept for the problem by it", tools.get_compare(csol), "lenient")
     tools._test.forget_run_state()
     t.eq("and still after a restart, read back from the sidecar", tools.get_compare(csol), "lenient")
-    local cr = require("tuna.runner").new(cbuf)
+    local cr = require("tuna.run").new(cbuf)
     cr:refresh_judge(csol)
-    t.eq("a run judges with it", require("tuna.compare").compare_output("a", "b", cr:effective_compare()), true)
+    t.eq("a run judges with it", require("tuna.run.compare").compare_output("a", "b", cr:effective_compare()), true)
     t.eq("and the Run pane names it", cr:judge_label(), "lenient")
     open(fsol)
     commands.execute({ "compare", "lenient" })
@@ -250,7 +250,7 @@ do
     local xdir, xsol = problem({})
     t.write(xdir, ".tuna.lua", "return { compare_methods = { exact = function() return true end } }")
     local xbuf = open(xsol)
-    local xr = require("tuna.runner").new(xbuf)
+    local xr = require("tuna.run").new(xbuf)
     xr.compare_method = "exact"
     t.eq("a method of yours named like a built-in is never used", xr:effective_compare(), "exact")
     xr:effective_compare()
@@ -274,7 +274,7 @@ end
 
 local rdir, rsol = problem({ "checker.py" })
 local rbuf = open(rsol)
-local r = require("tuna.runner").new(rbuf)
+local r = require("tuna.run").new(rbuf)
 r.cc = nil -- no build step: these runs are about the judge
 t.eq("a runner starts with the checker beside the solution", type(r.checker), "table")
 os.remove(rdir .. "/checker.py")
@@ -290,8 +290,8 @@ local mdir, msol = problem({ "checker.py" })
 t.write(mdir, "sol_input0.txt", "1\n")
 local mbuf = open(msol)
 tools.set_checker(msol, "off")
-require("tuna.multi").run(mbuf, { show_only = true })
-local mr = require("tuna.multi").active[mbuf]
+require("tuna.run.modes.multi").run(mbuf, { show_only = true })
+local mr = require("tuna.run.modes.multi").active[mbuf]
 t.eq("run-all honours the checker forced off", mr and mr.checker, "builtin")
 mr:delete_ui()
 
@@ -302,12 +302,12 @@ local kbuf = open(ksol)
 C.execute({ "run", "normal" })
 settle()
 t.eq(":Tuna run normal forces normal", tools.get_mode(ksol), "normal")
-C.settle_results(kbuf, { run = true }, function() end) -- back on the solution
+C.settle_runners(kbuf, { run = true }, function() end) -- back on the solution
 vim.api.nvim_set_current_buf(kbuf)
 C.execute({ "run", "auto" })
 settle()
 t.eq(":Tuna run auto makes the mode automatic", tools.get_mode(ksol), nil)
-C.settle_results(kbuf, { run = true }, function() end)
+C.settle_runners(kbuf, { run = true }, function() end)
 
 -- Trailing numbers name testcases. A problem that runs as stress without the mode being
 -- typed takes none, since `:Tuna run 5` would otherwise mean five inputs here and testcase
@@ -321,11 +321,11 @@ do
     settle()
     vim.notify = quiet
     t.has("numbers on a stress run tuna picked are refused", table.concat(said, "\n"), "takes no testcase numbers")
-    t.eq("and nothing runs", require("tuna.stress").active[sbuf], nil)
+    t.eq("and nothing runs", require("tuna.run.modes.stress").active[sbuf], nil)
     vim.api.nvim_set_current_buf(sbuf)
     C.execute({ "run", "stress", "5" })
     settle()
-    local sr = require("tuna.stress").active[sbuf]
+    local sr = require("tuna.run.modes.stress").active[sbuf]
     t.eq("after a typed stress a number is the count", sr and sr.count, 5)
     if sr then
         sr:kill_all_processes()
@@ -335,15 +335,15 @@ do
         local quiet2 = vim.notify
         local heard = t.capture_notifications()
         vim.api.nvim_set_current_buf(sbuf)
-        local before = require("tuna.stress").active[sbuf]
+        local before = require("tuna.run.modes.stress").active[sbuf]
         C.execute(vim.list_extend({ "run", "stress" }, extra))
         settle()
         vim.notify = quiet2
         t.has("after a typed stress, `" .. table.concat(extra, " ") .. "` is refused", table.concat(heard, "\n"), "stress takes one number")
-        t.ok("and nothing runs", require("tuna.stress").active[sbuf] == before)
+        t.ok("and nothing runs", require("tuna.run.modes.stress").active[sbuf] == before)
     end
     tools.set_mode(ssol, nil)
-    C.settle_results(sbuf, { run = true }, function() end)
+    C.settle_runners(sbuf, { run = true }, function() end)
 end
 
 -- Run-all takes numbers as normal mode does: `:Tuna run all 1` runs every solution on
@@ -355,7 +355,7 @@ do
     local abuf = open(asol)
     C.execute({ "run", "all", "1" })
     settle()
-    local ar = require("tuna.multi").active[abuf]
+    local ar = require("tuna.run.modes.multi").active[abuf]
     t.eq(":Tuna run all with a number runs that testcase alone", ar and ar.nums, { 1 })
     if ar then
         ar:kill_all_processes()
@@ -371,13 +371,13 @@ local function rerun_after_deleting(open_mode, file, answer)
     local buf = open(sol)
     local runner_of
     if open_mode == "interactive" then
-        require("tuna.interactive").run(buf, { "interactor" }, { show_only = true })
-        runner_of = require("tuna.interactive").active[buf]
+        require("tuna.run.modes.interactive").run(buf, { "interactor" }, { show_only = true })
+        runner_of = require("tuna.run.modes.interactive").active[buf]
     else
-        require("tuna.stress").run(buf, nil, { show_only = true })
-        runner_of = require("tuna.stress").active[buf]
+        require("tuna.run.modes.stress").run(buf, nil, { show_only = true })
+        runner_of = require("tuna.run.modes.stress").active[buf]
     end
-    local widgets = require("tuna.widgets")
+    local widgets = require("tuna.ui.widgets")
     local menu, asked = widgets.menu, nil
     widgets.menu = function(items, title, on_choice)
         asked = { title = title, items = items }
@@ -416,7 +416,7 @@ t.eq("a starter created from the board puts the board away", after.board, false)
 t.eq("and opens in the editor window", { after.file, after.float }, { "gen.py", false })
 
 -- A sidecar travels with a problem's folder, so a buffer that is not a file gets none:
--- `:Tuna run all` typed while standing in a results pane would otherwise write a `tuna:/`
+-- `:Tuna run all` typed while standing in a runner UI pane would otherwise write a `tuna:/`
 -- tree wherever the editor was started.
 local cwd = vim.fn.getcwd()
 tools.set_mode("tuna://runner/7/tuna", "all")
@@ -431,7 +431,7 @@ t.eq("and the forcing is still remembered for this session", tools.get_mode("tun
 -- own, since a word appended to every value is what a narrow pane cuts off first.
 local pdir, psol = problem({ "checker.py" })
 local pbuf = open(psol)
-local pr = require("tuna.runner").new(pbuf)
+local pr = require("tuna.run").new(pbuf)
 pr.cc = nil -- no build step: the Run pane is the subject
 local ptcs = { [0] = { input = "1\n", output = "1\n" } }
 pr:run_testcases(ptcs)
@@ -532,8 +532,8 @@ end
 local _, vsol = problem({ "interactor.py" })
 local vbuf = open(vsol)
 tools.set_source(vsol, "live")
-require("tuna.interactive").run(vbuf, {}, { show_only = true })
-local vr = require("tuna.interactive").active[vbuf]
+require("tuna.run.modes.interactive").run(vbuf, {}, { show_only = true })
+local vr = require("tuna.run.modes.interactive").active[vbuf]
 settle()
 t.eq("the source sits under the judge, and is named on the forced row below it", vim.list_slice(vr.ui:status_lines(), 2, 4), {
     "judge : squish",

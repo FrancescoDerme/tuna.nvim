@@ -1,4 +1,4 @@
--- lua/tuna/compare.lua
+-- lua/tuna/run/compare.lua
 --
 -- Decides whether a program's output matches the expected output. The runner
 -- calls `compare_output`; the method is chosen by name, by the `output_compare_method`

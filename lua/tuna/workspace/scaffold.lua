@@ -1,4 +1,4 @@
--- lua/tuna/scaffold.lua
+-- lua/tuna/workspace/scaffold.lua
 --
 -- Starter files for every role (`tools.SCAFFOLDS`): the solution a download, `:Tuna scratch`
 -- or `:Tuna scaffold solution` writes, and the helpers of the stress, checker and interactive
@@ -19,15 +19,15 @@
 -- needs a helper it does not have offers to write its starter (`create_missing`).
 
 local config = require("tuna.config")
-local tools = require("tuna.tools")
+local tools = require("tuna.run.tools")
 local utils = require("tuna.utils")
-local widgets = require("tuna.widgets")
+local widgets = require("tuna.ui.widgets")
 
 local M = {}
 
 -- The starters shipped with the plugin, found from this file's own location: through the
 -- runtimepath another plugin's `scaffolds/` folder would be mixed in with them.
-local SHIPPED = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h:h:h") .. "/scaffolds"
+local SHIPPED = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h:h:h:h") .. "/scaffolds"
 
 local by_role
 
@@ -98,7 +98,7 @@ end
 local function modifiers(role, ext, cfg, target, task)
     local mods = vim.tbl_extend("force", utils.file_format_modifiers, { ROLE = role })
     if task then
-        mods = vim.tbl_extend("force", mods, require("tuna.download").task_modifiers(task, ext, cfg))
+        mods = vim.tbl_extend("force", mods, require("tuna.problem.download").task_modifiers(task, ext, cfg))
     end
     mods.FEXT = ext
     return mods
@@ -267,7 +267,7 @@ end
 ---@param cfg table
 ---@return tuna.CCTask?
 local function task_of(dir, cfg)
-    local data = require("tuna.sidecar").read_or_nil(dir, cfg)
+    local data = require("tuna.problem.sidecar").read_or_nil(dir, cfg)
     return (data and data.url) and { name = data.name or "", group = data.group or "", url = data.url } or nil
 end
 
@@ -484,7 +484,7 @@ end
 ---@param bufnr integer the solution's buffer
 ---@param title string what the run needs, the menu's title
 ---@param opts { win: integer?, before: fun()? }? `before` runs once Create is chosen,
----before anything is written (a results board closing, so files open in the editor)
+---before anything is written (a runner UI closing, so files open in the editor)
 function M.create_missing(roles, bufnr, title, opts)
     opts = opts or {}
     local cfg = config.get_buffer_config(bufnr)

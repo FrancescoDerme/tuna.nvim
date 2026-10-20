@@ -1,7 +1,7 @@
--- lua/tuna/runner/core.lua
+-- lua/tuna/run/core.lua
 --
 -- RunnerCore: the shared base every run mode (normal, stress, interactive, run-all) is
--- built on. It owns the half of the runner that the results UI (`runner_ui`) talks to —
+-- built on. It owns the half of the runner that the runner UI (`tuna.runner_ui`) talks to —
 -- the `tcdata` rows, the UI show/update/resize plumbing, the verdict label, kill helpers —
 -- the build step every mode shares (`build_all`), and one "spawn a process and judge it"
 -- routine (`execute_process`). A mode subclass supplies its own driving loop (parallel
@@ -17,11 +17,11 @@
 
 local api = vim.api
 local utils = require("tuna.utils")
-local checker = require("tuna.checker")
-local compare = require("tuna.compare")
-local sidecar = require("tuna.sidecar")
-local testcases = require("tuna.testcases")
-local tools = require("tuna.tools")
+local checker = require("tuna.run.checker")
+local compare = require("tuna.run.compare")
+local sidecar = require("tuna.problem.sidecar")
+local testcases = require("tuna.problem.testcases")
+local tools = require("tuna.run.tools")
 
 local M = {}
 
@@ -48,7 +48,7 @@ M.SKIP = setmetatable({}, {
 ---@field checker "builtin"|table the resolved judge (a helper spec when a checker program judges)
 ---@field compare_method tuna.CompareSpec? the per-buffer `:Tuna compare` override
 ---@field r tuna.TCRunner? the normal runner whose commands a mode runs
----@field ui tuna.RunnerUI? the results UI, once shown
+---@field ui tuna.RunnerUI? the runner UI, once shown
 ---@field last_row_id any? the row the UI was last on (`row_id`)
 ---@field deleted_testcases table[]? what `u` restores
 ---@field run_single fun(self: tuna.RunnerCore, idx: integer) re-run one row
@@ -235,7 +235,7 @@ function M.extend()
 end
 
 --------------------------------------------------------------------------------
--- UI contract (what runner_ui drives)
+-- UI contract (what `runner_ui` drives)
 --------------------------------------------------------------------------------
 
 ---Notify the attached UI that data changed (no-op when no UI is attached).
@@ -250,7 +250,7 @@ function RunnerCore:update_ui(update_windows)
     end
 end
 
----Show the results UI, creating it on first use.
+---Show the runner UI, creating it on first use.
 function RunnerCore:show_ui()
     self.ui = self.ui or require("tuna.runner_ui").new(self)
     self.ui:show_ui()
@@ -871,7 +871,7 @@ end
 -- Inline testcase editing (what the UI's always-editable panes drive)
 --------------------------------------------------------------------------------
 
----Whether this mode's testcases can be edited from the results UI. True for every
+---Whether this mode's testcases can be edited from the runner UI. True for every
 ---mode whose rows *are* the stored testcases (normal, stress, run-all); interactive
 ---turns it off — it owns the Input pane as the thing you type at the solution.
 RunnerCore.editable_testcases = true

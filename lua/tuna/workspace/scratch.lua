@@ -1,4 +1,4 @@
--- lua/tuna/scratch.lua
+-- lua/tuna/workspace/scratch.lua
 --
 -- `:Tuna scratch` — a scratch solution to write in *before* the problem exists.
 --
@@ -38,7 +38,7 @@ end
 ---@param cfg table
 ---@return string? path
 local function template_path(ext, cfg)
-    return require("tuna.scaffold").template("solution", ext, cfg, stand_in(ext))
+    return require("tuna.workspace.scaffold").template("solution", ext, cfg, stand_in(ext))
 end
 
 ---Every template a scratch could start from. No problem exists yet, so a modifier only a
@@ -48,7 +48,7 @@ end
 ---@param cfg table
 ---@return string[] paths
 local function template_choices(ext, cfg)
-    return require("tuna.scaffold").templates("solution", cfg, stand_in(ext), ext)
+    return require("tuna.workspace.scaffold").templates("solution", cfg, stand_in(ext), ext)
 end
 
 ---Whether a scratch holds anything to resume: its loaded buffer, or else its file, has
@@ -211,7 +211,7 @@ local function start_over(path, ext, cfg)
         items[i] = vim.fn.fnamemodify(tmpl, ":~")
     end
     items[#items + 1] = "Empty file"
-    require("tuna.widgets").menu(items, "Start the scratch from", function(idx)
+    require("tuna.ui.widgets").menu(items, "Start the scratch from", function(idx)
         create(path, cfg, choices[idx])
     end, vim.api.nvim_get_current_win(), function() end, {
         width = math.max(40, math.floor(vim.o.columns * 0.6)),
@@ -245,7 +245,7 @@ function M.start(bufnr)
         start_over(path, ext, cfg)
         return
     end
-    require("tuna.widgets").menu({ "Resume", "Restart" }, "A scratch already exists", function(idx)
+    require("tuna.ui.widgets").menu({ "Resume", "Restart" }, "A scratch already exists", function(idx)
         if idx == 1 then
             resume(path, ext, cfg)
         else
@@ -285,7 +285,7 @@ function M.sync(bufnr)
     }
 
     local mode = (cfg.scratch or {}).download or "contest"
-    local err = require("tuna.download").start_downloading(
+    local err = require("tuna.problem.download").start_downloading(
         mode,
         cfg.companion_port,
         cfg.download_print_message,

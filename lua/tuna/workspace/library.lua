@@ -1,4 +1,4 @@
--- lua/tuna/library.lua
+-- lua/tuna/workspace/library.lua
 --
 -- `:Tuna lib` — pull a piece of your own algorithm library into the file you are
 -- writing. A competitive programmer keeps a folder of reference implementations and
@@ -366,7 +366,7 @@ function M.open(bufnr)
         items[i] = ("%-" .. width .. "s   %s"):format(e.name, e.whole and "(whole file)" or e.file)
     end
 
-    require("tuna.widgets").menu(
+    require("tuna.ui.widgets").menu(
         items,
         "Library",
         function(idx)

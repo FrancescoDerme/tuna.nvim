@@ -6,7 +6,7 @@
 -- request URL, `apiKey` and `apiSig` included, and the user may well be screen-sharing.
 
 local t = dofile("tests/harness.lua")
-local s = require("tuna.submit")._test
+local s = require("tuna.problem.submit")._test
 
 --------------------------------------------------------------------------------
 -- redact: by parameter name, since a credential is whatever the query calls one
@@ -159,7 +159,7 @@ local function write_entry(entry)
         submit = { ["main.cpp"] = entry },
     }))
 end
-local verdict_for = require("tuna.submit").verdict_for
+local verdict_for = require("tuna.problem.submit").verdict_for
 local accepted = { state = "accepted", text = "Accepted" }
 
 t.eq("no sidecar, no verdict", verdict_for(vpath), nil)
@@ -184,10 +184,10 @@ t.eq("and neither is a path that is not a file", verdict_for(""), nil)
 vim.uv.fs_utime(vpath, 1, 1)
 local vbuf = vim.fn.bufadd(vpath)
 vim.fn.bufload(vbuf)
-require("tuna.tools").save_sources(vbuf, { save_current_file = true })
+require("tuna.run.tools").save_sources(vbuf, { save_current_file = true })
 t.eq("the save before a run leaves an unchanged file alone", mtime_of(vpath), "1.0")
 vim.api.nvim_buf_set_lines(vbuf, 0, 0, false, { "// typed" })
-require("tuna.tools").save_sources(vbuf, { save_current_file = true })
+require("tuna.run.tools").save_sources(vbuf, { save_current_file = true })
 t.eq("and writes one that has changes", vim.fn.readfile(vpath)[1], "// typed")
 vim.api.nvim_buf_delete(vbuf, { force = true })
 vim.fn.delete(vdir, "rf")

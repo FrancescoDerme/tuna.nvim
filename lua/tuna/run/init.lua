@@ -1,4 +1,4 @@
--- lua/tuna/runner/init.lua
+-- lua/tuna/run/init.lua
 --
 -- The normal run mode plus the shared *resolver* every mode reuses. `M.new(bufnr)`
 -- resolves a buffer's compile/run commands, working directories, and checker into a
@@ -7,9 +7,9 @@
 -- its testcases in parallel (`multiple_testing` at a time), each a `vim.system`
 -- child process.
 --
--- Everything the results UI touches — `tcdata`, the show/update/resize plumbing, the
+-- Everything the runner UI touches — `tcdata`, the show/update/resize plumbing, the
 -- build, the spawn-and-judge routine (`execute_process`), kill helpers — lives in
--- `RunnerCore` (`runner/core.lua`); `TCRunner` is a thin subclass that only adds the
+-- `RunnerCore` (`run/core.lua`); `TCRunner` is a thin subclass that only adds the
 -- parallel lanes and the completion check.
 --
 -- The build is row 1 (`tcnum = "Compile"`): it runs first, and the real testcases only
@@ -17,8 +17,8 @@
 
 local config = require("tuna.config")
 local utils = require("tuna.utils")
-local tools = require("tuna.tools")
-local core = require("tuna.runner.core")
+local tools = require("tuna.run.tools")
+local core = require("tuna.run.core")
 
 local M = {}
 
@@ -61,7 +61,7 @@ function M.new(bufnr)
     end
 
     -- Every run looks the judge up again (`refresh_judge`); this first answer is what
-    -- the results UI shows before one.
+    -- the runner UI shows before one.
     local resolved_checker = tools.resolve_checker(path, cfg)
 
     return setmetatable({
@@ -131,7 +131,7 @@ end
 
 ---Fill the UI with testcases without running anything, so `:Tuna show_ui` before any
 ---`:Tuna run` shows what there is to run — each testcase's input and expected output,
----reviewable in the detail panes — instead of an empty results window. The rows are
+---reviewable in the detail panes — instead of an empty runner UI. The rows are
 ---built exactly as a run would build them (compile row included), so `R` on a row and
 ---`<C-r>` for all of them work straight from this view.
 ---@param tctbl table<integer, tuna.StoredTestcase>

@@ -24,7 +24,7 @@ t.eq("at startup only the module holding the highlight groups is loaded", loaded
 t.eq(":Tuna exists without setup()", vim.fn.exists(":Tuna"), 2)
 t.ok("and so do the highlight groups", next(vim.api.nvim_get_hl(0, { name = "TunaCorrect" })) ~= nil)
 
-local TRACKING = { "tuna", "tuna.config", "tuna.recent", "tuna.utils" }
+local TRACKING = { "tuna", "tuna.config", "tuna.utils", "tuna.workspace.recent" }
 
 -- The first file of a session is read before anything has loaded `config`.
 local solved = t.tempdir()
@@ -35,12 +35,12 @@ t.write(solved, ".tuna.json", vim.json.encode({
     },
 }))
 vim.cmd.edit(vim.fn.fnameescape(solved .. "/main.cpp"))
-local submit = package.loaded["tuna.submit"]
+local submit = package.loaded["tuna.problem.submit"]
 t.ok("the first file read, with a sidecar beside it, has its verdict looked up", submit ~= nil)
 local restored = submit and submit.state[vim.fs.normalize(solved .. "/main.cpp")]
 t.eq("and restored, without setup()", restored and restored.state, "accepted")
 
-for _, name in ipairs({ "tuna.submit", "tuna.sidecar", "tuna.tools", "tuna.testcases" }) do
+for _, name in ipairs({ "tuna.problem.submit", "tuna.problem.sidecar", "tuna.run.tools", "tuna.problem.testcases" }) do
     package.loaded[name] = nil
 end
 local plain = t.tempdir()
@@ -49,7 +49,7 @@ vim.cmd.edit(vim.fn.fnameescape(plain .. "/notes.txt"))
 t.eq("entering any other file loads only what deciding whether it is a problem takes", loaded(), TRACKING)
 
 require("tuna").setup({ keymaps = { preset = "<leader>t" } })
-t.eq("setup() loads only the keymaps on top of that", loaded(), { "tuna", "tuna.config", "tuna.keymaps", "tuna.recent", "tuna.utils" })
+t.eq("setup() loads only the keymaps on top of that", loaded(), { "tuna", "tuna.config", "tuna.keymaps", "tuna.utils", "tuna.workspace.recent" })
 
 t.has(":Tuna completes its subcommands", table.concat(vim.fn.getcompletion("Tuna ", "cmdline"), " "), "run")
 

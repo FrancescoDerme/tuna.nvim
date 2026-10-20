@@ -5,7 +5,7 @@
 -- so the same round lands in the same folder whichever host it was downloaded from.
 
 local t = dofile("tests/harness.lua")
-local judges = require("tuna.judges")
+local judges = require("tuna.problem.judges")
 
 local function parse(group, url, parsers)
     local judge, contest = judges.parse({ group = group, url = url }, parsers)

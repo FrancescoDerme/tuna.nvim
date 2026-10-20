@@ -78,7 +78,7 @@ local function collect(layout, acc, placeable)
 end
 
 ---Validate a layout. One that can't be used is reported and replaced by the shipped default
----for that option, so a typo costs the user their arrangement, not their results UI.
+---for that option, so a typo costs the user their arrangement, not their runner UI.
 ---@param layout table the configured layout
 ---@param option string the option's name, for the warning (e.g. "popup_ui.layout")
 ---@param fallback table the default layout for that option

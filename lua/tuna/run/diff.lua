@@ -1,6 +1,6 @@
--- lua/tuna/diff.lua
+-- lua/tuna/run/diff.lua
 --
--- The comparison the results UI draws between your output and the expected one.
+-- The comparison the runner UI draws between your output and the expected one.
 --
 -- Vim's own `:diffthis` computes an *edit script*: it is
 -- free to decide that a line was inserted or deleted and to re-align everything
@@ -32,7 +32,7 @@
 -- `squish` and `float` read the output as one stream of tokens, so line breaks in other
 -- places are no difference to them, while this walks line by line.
 
-local compare = require("tuna.compare")
+local compare = require("tuna.run.compare")
 
 local M = {}
 

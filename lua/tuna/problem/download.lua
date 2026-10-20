@@ -1,4 +1,4 @@
--- lua/tuna/download.lua
+-- lua/tuna/problem/download.lua
 --
 -- Competitive Companion integration. This module is the listener plus the pipeline
 -- that turns downloaded tasks into files on disk. Three small objects form that
@@ -21,8 +21,8 @@
 
 local utils = require("tuna.utils")
 local config = require("tuna.config")
-local testcases = require("tuna.testcases")
-local judges = require("tuna.judges")
+local testcases = require("tuna.problem.testcases")
+local judges = require("tuna.problem.judges")
 
 local M = {}
 
@@ -470,7 +470,7 @@ end
 ---@param cfg table resolved configuration for the target directory
 ---@return string? template the template file the source was written from
 local function store_downloaded_task(filepath, task, cfg)
-    local scaffold = require("tuna.scaffold")
+    local scaffold = require("tuna.workspace.scaffold")
     local ext = vim.fn.fnamemodify(filepath, ":e")
     local template = scaffold.template("solution", ext, cfg, filepath, task)
     utils.write_file(filepath, template and scaffold.render(template, "solution", ext, cfg, filepath, task) or "")
@@ -478,7 +478,7 @@ local function store_downloaded_task(filepath, task, cfg)
     testcases.write_testcases(filepath, cfg, task_to_tctbl(task))
     -- Persist the task's URL beside the source so `:Tuna submit` can find it even
     -- when the file carries no header marker.
-    require("tuna.submit").write_task_store(vim.fn.fnamemodify(filepath, ":h"), task, cfg)
+    require("tuna.problem.submit").write_task_store(vim.fn.fnamemodify(filepath, ":h"), task, cfg)
     return template
 end
 
@@ -516,7 +516,7 @@ local function store_testcases_into_buffer(bufnr, tclist, replace, finished)
         -- remembering — record it here rather than waiting for the next `BufEnter`.
         local path = vim.api.nvim_buf_get_name(bufnr)
         if path ~= "" then
-            require("tuna.recent").record_problem(path)
+            require("tuna.workspace.recent").record_problem(path)
         end
         if finished then
             finished()
@@ -534,7 +534,7 @@ local function store_testcases_into_buffer(bufnr, tclist, replace, finished)
     end
     -- Keep-or-replace is decided in the floating UI like every other tuna question;
     -- dismissing (Esc) stores nothing. Every answer releases the batch processor.
-    require("tuna.widgets").menu(
+    require("tuna.ui.widgets").menu(
         { "Keep them alongside the new ones", "Replace them", "Stop" },
         "Testcases already exist",
         function(idx)
@@ -561,7 +561,7 @@ end
 ---@param on_close fun()?
 local function ask(prompt, title, default, on_submit, on_close)
     if prompt then
-        require("tuna.widgets").input(title, default, on_submit, on_close)
+        require("tuna.ui.widgets").input(title, default, on_submit, on_close)
     else
         on_submit(default)
     end
@@ -581,7 +581,7 @@ local function store_single_problem(task, cfg, finished)
         return
     end
 
-    local widgets = require("tuna.widgets")
+    local widgets = require("tuna.ui.widgets")
     ask(
         cfg.downloaded_problems_prompt_path,
         "Problem path",
@@ -598,17 +598,17 @@ local function store_single_problem(task, cfg, finished)
                 local template = store_downloaded_task(filepath, task, local_cfg)
                 -- Recorded even when the problem isn't opened, so `:Tuna last problem`
                 -- takes you to what was just downloaded either way.
-                require("tuna.recent").record_problem(filepath, local_cfg)
+                require("tuna.workspace.recent").record_problem(filepath, local_cfg)
                 if local_cfg.open_downloaded_problems then
                     vim.cmd.edit(vim.fn.fnameescape(filepath))
                     utils.place_cursor(local_cfg)
-                    require("tuna.scratch").absorb(filepath, local_cfg, template)
+                    require("tuna.workspace.scratch").absorb(filepath, local_cfg, template)
                 end
                 -- After the open, so an `lcd` lands on the window the problem was just
                 -- opened in. Like the contest case, independent of whether it was
                 -- opened: which file to show and where to work are separate questions.
                 if local_cfg.cd_downloaded_problems then
-                    require("tuna.recent").change_dir(vim.fn.fnamemodify(filepath, ":h"), local_cfg)
+                    require("tuna.workspace.recent").change_dir(vim.fn.fnamemodify(filepath, ":h"), local_cfg)
                 end
                 if finished then
                     finished()
@@ -656,7 +656,7 @@ local function store_contest(tasks, cfg, finished)
         return
     end
 
-    local widgets = require("tuna.widgets")
+    local widgets = require("tuna.ui.widgets")
     ask(
         cfg.downloaded_contests_prompt_directory,
         "Contest directory",
@@ -705,7 +705,7 @@ local function store_contest(tasks, cfg, finished)
                                     utils.place_cursor(local_cfg)
                                     -- A `:Tuna scratch` file waiting for this contest
                                     -- folds into the first problem opened.
-                                    require("tuna.scratch").absorb(t.filepath, local_cfg, t.template)
+                                    require("tuna.workspace.scratch").absorb(t.filepath, local_cfg, t.template)
                                     opened = true
                                 end
                             end
@@ -718,13 +718,13 @@ local function store_contest(tasks, cfg, finished)
                         -- work are separate questions, and everything that is not tuna
                         -- (`:e`, a fuzzy finder, `:grep`, a terminal) reads the cwd.
                         if local_cfg.cd_downloaded_contests then
-                            require("tuna.recent").change_dir(directory, local_cfg)
+                            require("tuna.workspace.recent").change_dir(directory, local_cfg)
                         end
                         -- This is the one moment the contest directory is known for
                         -- certain, so record it for `:Tuna last contest` — whether or
                         -- not a problem was opened.
                         local judge, contest_name = judges.parse(tasks[1], local_cfg.judge_parsers)
-                        require("tuna.recent").record_contest(directory, contest_name, first_problem, judge)
+                        require("tuna.workspace.recent").record_contest(directory, contest_name, first_problem, judge)
                         if finished then
                             finished()
                         end
@@ -877,7 +877,7 @@ local function make_handler(mode, notify_on_download, bufnr, cfg)
                 -- tuna question — never a command-line `confirm` in the middle of a
                 -- flow whose other prompts are floating. Dismissing stores nothing;
                 -- every answer releases the batch processor.
-                require("tuna.widgets").menu(
+                require("tuna.ui.widgets").menu(
                     { "Store the testcases only", "Store the full problem", "Stop" },
                     "Downloaded '" .. tasks[1].name .. "'",
                     function(choice)

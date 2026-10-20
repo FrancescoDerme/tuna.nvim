@@ -64,7 +64,7 @@ M.actions = {
 -- `Contest`); an ungrouped one keeps its full name, since nothing else supplies the
 -- noun. See `M.preset_labels`.
 --
--- Testcases have no keys: they are added, edited and deleted on the results UI, where
+-- Testcases have no keys: they are added, edited and deleted on the runner UI, where
 -- they are seen (`n`, typing in a pane, `x`), and downloads bring most of them. The
 -- `add_testcase`, `edit_testcase` and `delete_testcase` actions are still there to map.
 --

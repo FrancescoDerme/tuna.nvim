@@ -52,7 +52,7 @@ function M.setup_highlight_groups()
         TunaDiffText = { bg = wrong_bg, ctermbg = 52 }, -- the tokens/characters that disagree
         TunaDiffAdd = { link = "DiffAdd" }, -- a line the expected output doesn't have
         TunaDiffDelete = { link = "DiffDelete" }, -- a line missing from the output
-        -- The accent on the results UI's *editable* panes (Input, Expected Output):
+        -- The accent on the runner UI's *editable* panes (Input, Expected Output):
         -- their border and title, so the two panes you can type into are told apart
         -- from the four you can only read, at a glance and without a legend.
         --
@@ -78,16 +78,16 @@ function M.setup_highlight_groups()
     end
 end
 
----Resize Tuna's user interface (widgets + any open results UIs) after the
+---Resize Tuna's user interface (widgets + any open runner UIs) after the
 ---window geometry changes. Scheduled so it runs once Neovim has settled.
 function M.resize_ui()
-    -- Every float tuna shows is drawn by `widgets` or the results UI, so with neither
+    -- Every float tuna shows is drawn by `widgets` or the runner UI, so with neither
     -- loaded there is nothing on screen to resize.
-    if not (package.loaded["tuna.widgets"] or package.loaded["tuna.runner_ui"]) then
+    if not (package.loaded["tuna.ui.widgets"] or package.loaded["tuna.runner_ui"]) then
         return
     end
     vim.schedule(function()
-        require("tuna.widgets").resize_widgets()
+        require("tuna.ui.widgets").resize_widgets()
         for _, r in ipairs(require("tuna.commands").all_runners()) do
             r:resize_ui()
         end
@@ -122,10 +122,10 @@ function M.setup(user_opts)
 end
 
 ---lualine component: shows the download listener's state, or nothing when idle.
----The submit verdict is a separate component (`require("tuna.submit").status`)
+---The submit verdict is a separate component (`require("tuna.problem.submit").status`)
 ---so it can carry its own per-verdict color, as the README's statusline section shows.
 function M.lualine_component()
-    return require("tuna.download").status()
+    return require("tuna.problem.download").status()
 end
 
 return M

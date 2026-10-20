@@ -1,4 +1,4 @@
--- lua/tuna/surface.lua
+-- lua/tuna/ui/surface.lua
 --
 -- A **surface** is any buffer this plugin puts in front of the user that is not a file:
 -- the results-UI panes, its viewer, message float and key legend, and every widget
@@ -24,7 +24,7 @@ local api = vim.api
 local M = {}
 
 ---The layers floats are drawn on. Neovim's default for a float is 50, the same as the
----results grid, so anything left unset fights the grid it is drawn over.
+---runner UI's grid, so anything left unset fights the grid it is drawn over.
 M.LAYER = {
     grid = 50, -- the results-UI pane grid
     viewer = 60, -- its viewer, over the grid
@@ -110,7 +110,7 @@ function M.read_only(bufnr)
     vim.bo[bufnr].modified = false
     -- Compared as **terminal codes**, not as written: `nvim_buf_get_keymap` hands back
     -- what a key really is (`<C-r>` comes back as a raw `\18`), so matching the written
-    -- form against it finds nothing and a surface's own action (the results UI's
+    -- form against it finds nothing and a surface's own action (the runner UI's
     -- `<C-r>`, run all) would be `<Nop>`ed over.
     local function code(key)
         return api.nvim_replace_termcodes(key, true, false, true)
@@ -128,8 +128,8 @@ end
 
 ---Open a float for a surface. Every one of them wants the same frame — positioned
 ---against the editor, `style = "minimal"`, a bordered title in the plugin's border
----colour, no wrapping, and a **layer**, since Neovim's default (50) is the results
----grid's and anything left unset fights it. What differs between surfaces is where they
+---colour, no wrapping, and a **layer**, since Neovim's default (50) is the runner
+---UI's grid's and anything left unset fights it. What differs between surfaces is where they
 ---sit and what they show, which is what the caller passes.
 ---@param bufnr integer
 ---@param opts { layer: integer, width: integer, height: integer, row: integer, col: integer, border: any, border_highlight: string|false|nil, border_group: string?, title: string|table|nil, enter: boolean?, keep_scrolloff: boolean?, wrap: boolean? }

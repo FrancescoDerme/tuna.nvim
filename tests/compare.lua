@@ -1,12 +1,12 @@
 -- tests/compare.lua
 --
 -- The verdict layer: which outputs count as matching, and how the method is named in
--- the results UI. Plus `core.answer`, the one rule that decides whether a testcase has
+-- the runner UI. Plus `core.answer`, the one rule that decides whether a testcase has
 -- an expected output at all.
 
 local t = dofile("tests/harness.lua")
-local compare = require("tuna.compare")
-local core = require("tuna.runner.core")
+local compare = require("tuna.run.compare")
+local core = require("tuna.run.core")
 
 --------------------------------------------------------------------------------
 -- no expected output at all
@@ -92,7 +92,7 @@ end
 -- The diff draws what the verdict says: two texts the method judges equal get no marks,
 -- though `squish` and `float` read the output as one stream of tokens and the diff walks it
 -- line by line.
-local diff = require("tuna.diff")
+local diff = require("tuna.run.diff")
 for _, method in ipairs({ "squish", { "float", tol = 1e-6 } }) do
     local name = compare.method_name(method)
     t.eq(name .. ": texts judged equal get no marks", diff.compute("1 2\n", "1\n2\n", method).first, nil)
@@ -108,7 +108,7 @@ do
     local quiet = vim.notify
     local said = t.capture_notifications()
     local got
-    require("tuna.checker").judge({ stdin = "1", stdout = "1", expected = "1" }, {
+    require("tuna.run.checker").judge({ stdin = "1", stdout = "1", expected = "1" }, {
         exec = "x",
         args = {},
         cwd = vim.fn.getcwd(),

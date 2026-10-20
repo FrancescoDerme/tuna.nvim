@@ -1,4 +1,4 @@
--- lua/tuna/multi.lua
+-- lua/tuna/run/modes/multi.lua
 --
 -- Run *every* solution version in a problem directory against the shared testcases
 -- (`:Tuna run all`). This is for when you keep several attempts side by side —
@@ -10,7 +10,7 @@
 -- `utils.eval_string` (no buffer needed), and each verdict goes through the same
 -- `checker` as a normal run.
 --
--- A `MultiRunner` (a `RunnerCore` subclass) drives the shared `runner_ui` as a
+-- A `MultiRunner` (a `RunnerCore` subclass) drives the shared runner UI as a
 -- flattened matrix: one solution *header* row (name + a live `correct/total`) above
 -- its indented per-testcase rows. Selecting a testcase row shows that exact run in
 -- the detail panes; selecting a solution row shows its per-testcase summary and any
@@ -18,10 +18,10 @@
 
 local config = require("tuna.config")
 local utils = require("tuna.utils")
-local checker = require("tuna.checker")
-local testcases = require("tuna.testcases")
-local tools = require("tuna.tools")
-local core = require("tuna.runner.core")
+local checker = require("tuna.run.checker")
+local testcases = require("tuna.problem.testcases")
+local tools = require("tuna.run.tools")
+local core = require("tuna.run.core")
 
 local M = {}
 
@@ -174,7 +174,7 @@ function MultiRunner:rebuild_rows()
     end
 end
 
----A testcase added from the results UI belongs to every solution in the matrix.
+---A testcase added from the runner UI belongs to every solution in the matrix.
 ---@param tcnum integer
 function MultiRunner:add_testcase_row(tcnum)
     self.tctbl[tcnum] = { input = "", output = "" }

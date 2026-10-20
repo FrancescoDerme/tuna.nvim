@@ -1,4 +1,4 @@
--- lua/tuna/recent.lua
+-- lua/tuna/workspace/recent.lua
 --
 -- `:Tuna last problem` / `:Tuna last contest` — go back to what you were working on.
 --
@@ -219,7 +219,7 @@ end
 ---@param cfg table
 ---@return table?
 local function sidecar_task(dir, cfg)
-    local store = require("tuna.sidecar").read_or_nil(dir, cfg)
+    local store = require("tuna.problem.sidecar").read_or_nil(dir, cfg)
     if store and type(store.group) == "string" and store.group ~= "" then
         return store
     end
@@ -264,7 +264,7 @@ local function infer_contest(dir, cfg)
             end
             if sidecar_group(parent .. "/" .. name, cfg) == group then
                 -- Named the way a download names it, so both show the same contest.
-                local judge, contest = require("tuna.judges").parse(task, cfg.judge_parsers)
+                local judge, contest = require("tuna.problem.judges").parse(task, cfg.judge_parsers)
                 return { dir = parent, name = contest, judge = judge }
             end
         end
@@ -431,13 +431,13 @@ local function is_problem_buffer(bufnr, path)
     if not (cfg.run_command or {})[ft] then
         return false
     end
-    if require("tuna.tools").is_support(path, cfg) then
+    if require("tuna.run.tools").is_support(path, cfg) then
         return false
     end
     if sidecar_group(vim.fs.dirname(vim.fs.normalize(path)), cfg) then
         return true
     end
-    local ok, tctbl = pcall(require("tuna.testcases").buf_get_testcases, bufnr)
+    local ok, tctbl = pcall(require("tuna.problem.testcases").buf_get_testcases, bufnr)
     return ok and next(tctbl) ~= nil
 end
 
@@ -521,7 +521,7 @@ local function open_remembered(p, what)
         -- The directory survived but the file was renamed or written in another
         -- language: open whatever solution is in there rather than giving up.
         local cfg = config.load_local_config_and_extend(p.dir)
-        local other = require("tuna.navigate").solution_in(p.dir, p.file, cfg)
+        local other = require("tuna.workspace.navigate").solution_in(p.dir, p.file, cfg)
         if not other then
             utils.notify(what .. ": '" .. pretty(p.file) .. "' no longer exists.", "WARN")
             return
@@ -571,7 +571,7 @@ local function contest_entry(contest, cfg)
     end
     local like = contest.problem
     -- Problems as files directly in the contest directory.
-    local navigate = require("tuna.navigate")
+    local navigate = require("tuna.workspace.navigate")
     local flat = navigate.solution_in(contest.dir, like, cfg)
     if flat then
         return flat
@@ -595,8 +595,8 @@ end
 ---@param cfg table
 ---@return string[]
 function M.contest_problems(dir, like, cfg)
-    local tools = require("tuna.tools")
-    local navigate = require("tuna.navigate")
+    local tools = require("tuna.run.tools")
+    local navigate = require("tuna.workspace.navigate")
     local files = tools.solutions_in(dir, cfg)
     for _, name in ipairs(utils.subdirectories(dir)) do
         local file = navigate.solution_in(dir .. "/" .. name, like, cfg)

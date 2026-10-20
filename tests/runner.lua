@@ -23,7 +23,7 @@ vim.bo.filetype = "cpp"
 local buf = vim.api.nvim_get_current_buf()
 require("tuna").setup({})
 
-local tcs = require("tuna.testcases")
+local tcs = require("tuna.problem.testcases")
 
 ---The line of a board's `?` legend (its read-only column) that contains `text`, if any.
 ---@return string?
@@ -95,7 +95,7 @@ end
 --------------------------------------------------------------------------------
 
 local function rows_of(tctbl)
-    local r = require("tuna.runner").new(buf)
+    local r = require("tuna.run").new(buf)
     r:load_testcases(tctbl)
     return r
 end
@@ -138,7 +138,7 @@ t.eq("narrower than the columns themselves, it splits what there is", { columns(
 --------------------------------------------------------------------------------
 
 stub_system()
-r = require("tuna.runner").new(buf)
+r = require("tuna.run").new(buf)
 r:run_testcases({ [0] = { output = "42\n" }, [1] = { input = "hi\n" } })
 settled(r)
 vim.system = real_system
@@ -147,8 +147,8 @@ t.ok("both testcases ran", #spawns >= 3, #spawns) -- compile + two testcases
 vim.wait(1000, function()
     return r.completed
 end, 20)
-local core = require("tuna.runner.core")
-local sidecar = require("tuna.sidecar")
+local core = require("tuna.run.core")
+local sidecar = require("tuna.problem.sidecar")
 -- The stub prints nothing: testcase 0 is WRONG, and testcase 1 has no answer to judge.
 t.eq("a finished run saves its local verdict, over the testcases it judged", { core.local_verdict(dir .. "/sol.cpp") }, { 0, 1 })
 sidecar.set_entry(dir .. "/sol.cpp", "results", nil)
@@ -168,7 +168,7 @@ t.eq("and never fewer than one", core.parallelism({ multiple_testing = 0 }, 0), 
 -- including it or in the command's include directories. The compiler's own (system)
 -- headers are not followed.
 do
-    local tools = require("tuna.tools")
+    local tools = require("tuna.run.tools")
     local bdir, idir = t.tempdir(), t.tempdir()
     t.write(bdir, "sol.cpp", '#include <vector>\n#include "local.h"\n  #  include <lib.h>\nint main(){}\n')
     t.write(bdir, "local.h", '#include "local.h"\n#include "deeper.h"\n') -- includes itself: a cycle
@@ -239,7 +239,7 @@ do
             end)
             return { kill = function() end, wait = function() return { code = 0 } end, pid = 0 }
         end
-        local br = require("tuna.runner").new(bbuf)
+        local br = require("tuna.run").new(bbuf)
         br:run_testcases({ [0] = { input = "1\n" } })
         settled(br)
         vim.system = real_system
@@ -273,8 +273,8 @@ do
     t.write(bdir, "sol", "")
     run_once(0)
     stub_system()
-    require("tuna.multi").run(bbuf)
-    local mr = require("tuna.multi").active[bbuf]
+    require("tuna.run.modes.multi").run(bbuf)
+    local mr = require("tuna.run.modes.multi").active[bbuf]
     settled(mr)
     vim.system = real_system
     t.eq("run-all reuses the build a run made", vim.tbl_filter(function(s)
@@ -343,7 +343,7 @@ do
     local builds = 0
     for _ = 1, 2 do
         stub_system()
-        local rr = require("tuna.runner").new(rbuf)
+        local rr = require("tuna.run").new(rbuf)
         rr:run_testcases({ [0] = { input = "1\n" } })
         settled(rr)
         vim.system = real_system
@@ -363,7 +363,7 @@ end
 do
     local quiet = vim.notify
     local said = t.capture_notifications()
-    r = require("tuna.runner").new(buf)
+    r = require("tuna.run").new(buf)
     r.config = vim.deepcopy(r.config)
     r.config.runner_ui.interface = "tabs"
     stub_system()
@@ -389,7 +389,7 @@ end
 local function board(interface, bad_layout)
     local quiet = vim.notify
     local said = t.capture_notifications()
-    local br = require("tuna.runner").new(buf)
+    local br = require("tuna.run").new(buf)
     br.config = vim.deepcopy(br.config)
     br.config.runner_ui.interface = interface
     -- Unaccented, so a popup's titles are the ones the interface draws.
@@ -513,7 +513,7 @@ end
 -- kinds of language disagreed: a compiled file built and showed a lone `Compile` row
 -- with nothing to say why, an interpreted one only warned, and neither ran anything.
 stub_system()
-r = require("tuna.runner").new(buf)
+r = require("tuna.run").new(buf)
 r:run_testcases({})
 settled(r)
 vim.system = real_system
@@ -534,14 +534,14 @@ check_spawns("bare run", r.rc.exec)
 r:save_testcase(0, "2 3\n", "5\n")
 t.eq("saving writes the testcase to disk", tcs.buf_get_testcases(buf)[0], { input = "2 3\n", output = "5\n" })
 t.eq("and the row is no longer bare", r.tcdata[2].bare, nil)
-require("tuna.testcases").buf_delete_testcase(buf, 0)
+require("tuna.problem.testcases").buf_delete_testcase(buf, 0)
 
 -- A row added once a run is over (`n`) runs and settles like any other: the run's lanes
 -- ended with it, so the new row is not a testcase one of them has still to start.
 do
     tcs.buf_save_testcase(buf, 0, "1\n", "")
     stub_system()
-    local nr = require("tuna.runner").new(buf)
+    local nr = require("tuna.run").new(buf)
     nr:run_testcases(tcs.buf_get_testcases(buf))
     vim.wait(2000, function()
         return nr.completed
@@ -570,10 +570,10 @@ end
 t.write(dir, "out.txt", "42\n") -- an answer with no input, on disk
 t.eq("it loads with no input", tcs.buf_get_testcases(buf)[0].input, nil)
 
-local run_exec = require("tuna.runner").new(buf).rc.exec
+local run_exec = require("tuna.run").new(buf).rc.exec
 stub_system()
-require("tuna.multi").run(buf)
-local mr = require("tuna.multi").active[buf]
+require("tuna.run.modes.multi").run(buf)
+local mr = require("tuna.run.modes.multi").active[buf]
 settled(mr)
 vim.system = real_system
 t.ok("run all built a matrix", mr ~= nil and #mr.tcdata >= 2, mr and #mr.tcdata)
@@ -595,15 +595,15 @@ do
     local quiet = vim.notify
     local said = t.capture_notifications()
     stub_system()
-    require("tuna.multi").run(buf, { list = { "0", "7" } })
-    local picked = require("tuna.multi").active[buf]
+    require("tuna.run.modes.multi").run(buf, { list = { "0", "7" } })
+    local picked = require("tuna.run.modes.multi").active[buf]
     settled(picked)
     t.eq("run all with numbers runs only those testcases", picked and picked.nums, { 0 })
     t.has("and reports one that doesn't exist", table.concat(said, "\n"), "run: testcase 7 doesn't exist.")
-    require("tuna.multi").run(buf, { list = { "7" } })
+    require("tuna.run.modes.multi").run(buf, { list = { "7" } })
     vim.system = real_system
     vim.notify = quiet
-    t.ok("and with none that exist runs nothing", require("tuna.multi").active[buf] == picked)
+    t.ok("and with none that exist runs nothing", require("tuna.run.modes.multi").active[buf] == picked)
     picked:kill_all_processes()
     picked:delete_ui()
 end
@@ -615,8 +615,8 @@ end
 -- Interactive replays a testcase's input, so an input-less one is exactly the case
 -- that would hand `nil` to the solution.
 stub_system()
-require("tuna.interactive").run(buf, {})
-local ir = require("tuna.interactive").active[buf]
+require("tuna.run.modes.interactive").run(buf, {})
+local ir = require("tuna.run.modes.interactive").active[buf]
 vim.wait(300, function()
     return ir ~= nil and ir.tcdata ~= nil and #ir.tcdata > 0
 end, 20)
@@ -630,7 +630,7 @@ end
 -- conversation, not the only correct one. So its grid drops Expected Output and the pane
 -- you talk to the solution through takes that cell, titled for what it is here.
 local iui = ir and ir.ui
-t.ok("interactive opened its results UI", iui ~= nil and iui.ui_visible)
+t.ok("interactive opened its runner UI", iui ~= nil and iui.ui_visible)
 if iui then
     t.eq("expected output is not drawn in interactive mode", iui.windows.eo.winid, nil)
     -- The conversation's selector is the narrow pane of the grid, and a row wider than it
@@ -721,7 +721,7 @@ if iui then
         end
     end
     row.log = nil
-    local conv = require("tuna.interactive")._test
+    local conv = require("tuna.run.modes.interactive")._test
     conv.log_append(row, "so", "hello\n")
     conv.log_append(row, "si", "hi\n")
     conv.log_append(row, "se", "oops\n")
@@ -801,8 +801,8 @@ end
 -- Input and Expected Output panes and edits them like a normal run; `interactor` looks
 -- like live, but nothing in it is typed into, so nothing wears the accent.
 stub_system()
-require("tuna.interactive").run(buf, { "feed" })
-local fr = require("tuna.interactive").active[buf]
+require("tuna.run.modes.interactive").run(buf, { "feed" })
+local fr = require("tuna.run.modes.interactive").active[buf]
 -- A run opens on its build step, which is shown with Errors alone, so the panes of the mode
 -- are there once the build has handed the row over.
 vim.wait(2000, function()
@@ -813,7 +813,7 @@ vim.wait(200, function()
 end)
 vim.system = real_system
 local fui = fr and fr.ui
-t.ok("feed opened its results UI", fui ~= nil and fui.ui_visible)
+t.ok("feed opened its runner UI", fui ~= nil and fui.ui_visible)
 if fui then
     t.eq("feed edits testcases, like a normal run", fr.editable_testcases, true)
     local titles, accents = {}, {}
@@ -879,8 +879,8 @@ end
 -- reach one: on a column that is not live yet they would only raise `E21` at someone the UI
 -- is asking to type, which is an answer about `modifiable` to a question about the problem.
 stub_system()
-require("tuna.interactive").run(buf, { "live" }, { show_only = true })
-local lr = require("tuna.interactive").active[buf]
+require("tuna.run.modes.interactive").run(buf, { "live" }, { show_only = true })
+local lr = require("tuna.run.modes.interactive").active[buf]
 vim.wait(500, function()
     return lr ~= nil and lr.ui ~= nil and lr.ui.ui_visible
 end, 20)
@@ -957,8 +957,8 @@ vim.system = function(_, _, on_exit)
     end
     return { kill = function() end, wait = function() return { code = 1 } end, pid = 0 }
 end
-require("tuna.interactive").run(buf, { "feed" })
-local cr = require("tuna.interactive").active[buf]
+require("tuna.run.modes.interactive").run(buf, { "feed" })
+local cr = require("tuna.run.modes.interactive").active[buf]
 vim.wait(500, function()
     return cr ~= nil and cr.compile_entry ~= nil and cr.compile_entry.exit_code == 1
 end, 20)
@@ -977,8 +977,8 @@ do
     vim.bo.filetype = "cpp"
     local nbuf = vim.api.nvim_get_current_buf()
     stub_system()
-    require("tuna.interactive").run(nbuf, { "feed" })
-    local nr = require("tuna.interactive").active[nbuf]
+    require("tuna.run.modes.interactive").run(nbuf, { "feed" })
+    local nr = require("tuna.run.modes.interactive").active[nbuf]
     vim.wait(300, function()
         return nr ~= nil and nr.ui ~= nil and nr.ui.ui_visible
     end, 20)
@@ -995,8 +995,8 @@ end
 
 t.write(dir, "interactor.cpp", "int main(){}\n")
 stub_system()
-require("tuna.interactive").run(buf, { "interactor" })
-local xr = require("tuna.interactive").active[buf]
+require("tuna.run.modes.interactive").run(buf, { "interactor" })
+local xr = require("tuna.run.modes.interactive").active[buf]
 -- Once the build has handed the row over, so the mode's own panes are the ones drawn.
 vim.wait(2000, function()
     return xr ~= nil and xr.ui ~= nil and xr.ui.ui_visible and xr.ui.update_testcase ~= 1
@@ -1006,7 +1006,7 @@ vim.wait(200, function()
 end)
 vim.system = real_system
 local xui = xr and xr.ui
-t.ok("interactor opened its results UI", xui ~= nil and xui.ui_visible)
+t.ok("interactor opened its runner UI", xui ~= nil and xui.ui_visible)
 if xui then
     t.eq("interactor does not edit testcases", xr.editable_testcases, false)
     t.eq("interactor draws no expected output", xui.windows.eo.winid, nil)
@@ -1039,7 +1039,7 @@ end
 
 -- The conversation itself: one row per thing said, owned by the column that said it.
 do
-    local conv = require("tuna.interactive")._test
+    local conv = require("tuna.run.modes.interactive")._test
     local tc = {}
     conv.log_append(tc, "so", "Guess: ")
     conv.log_append(tc, "so", "a number\n")
@@ -1072,8 +1072,8 @@ end
 t.write(dir, "gen.cpp", "int main(){}\n")
 t.write(dir, "brute.cpp", "int main(){}\n")
 stub_system()
-require("tuna.stress").run(buf, 1)
-local sr = require("tuna.stress").active[buf]
+require("tuna.run.modes.stress").run(buf, 1)
+local sr = require("tuna.run.modes.stress").active[buf]
 vim.wait(300, function()
     return sr ~= nil and sr.tcdata ~= nil and #sr.tcdata > 0
 end, 20)
@@ -1154,7 +1154,7 @@ do
         return { kill = function() end, wait = function() return { code = 0 } end, pid = 0 }
     end
 
-    local stress = require("tuna.stress")
+    local stress = require("tuna.run.modes.stress")
     local function seeded(argv)
         return { stdout = "in " .. argv[#argv] .. "\n" }
     end
@@ -1169,7 +1169,7 @@ do
     ---starts from a solution with no testcases beside it, so the row a search is caught
     ---on can only be its own.
     local function search(spec)
-        require("tuna.tools")._test.forget_builds() -- each search scripts its own compiler
+        require("tuna.run.tools")._test.forget_builds() -- each search scripts its own compiler
         for _, f in ipairs(vim.fn.globpath(sdir2, "main_*.txt", false, true)) do
             vim.fn.delete(f)
         end
@@ -1440,13 +1440,13 @@ do
     -- A restart judges with the checker as it is now, like every run.
     local judged = search({ ccx = {}, genx = seeded, solx = { stdout = "5\n" }, refx = { stdout = "6\n" } })
     t.eq("a checker that accepts every output saves nothing, having judged every input", { saved_rows(judged), judged.iter }, { {}, 3 })
-    require("tuna.tools").set_checker(sdir2 .. "/main.cpp", "off")
+    require("tuna.run.tools").set_checker(sdir2 .. "/main.cpp", "off")
     judged:run_testcases()
     vim.wait(5000, function()
         return judged.finished
     end, 10)
     t.eq("switched off, a restart judges by plain comparison and finds the difference", #saved_rows(judged), 1)
-    require("tuna.tools").set_checker(sdir2 .. "/main.cpp", "auto")
+    require("tuna.run.tools").set_checker(sdir2 .. "/main.cpp", "auto")
     vim.fn.delete(sdir2 .. "/checker.cpp")
     for _, f in ipairs(vim.fn.globpath(sdir2, "main_*.txt", false, true)) do
         vim.fn.delete(f)
@@ -1509,8 +1509,8 @@ do
         return { kill = function() end, wait = function() return { code = 0 } end, pid = 0 }
     end
 
-    require("tuna.stress").run(bbuf, 1)
-    local br = require("tuna.stress").active[bbuf]
+    require("tuna.run.modes.stress").run(bbuf, 1)
+    local br = require("tuna.run.modes.stress").active[bbuf]
     vim.wait(5000, function()
         return br and br.tcdata[1] and not br:build_pending(br.tcdata[1])
     end, 10)
@@ -1652,8 +1652,8 @@ do
         run_command = { cpp = { exec = bdir .. "/solx" } },
         stress = { generator = { exec = bdir .. "/solx", args = {} } },
     })
-    require("tuna.stress").run(bbuf, 1)
-    local cr = require("tuna.stress").active[bbuf]
+    require("tuna.run.modes.stress").run(bbuf, 1)
+    local cr = require("tuna.run.modes.stress").active[bbuf]
     vim.wait(5000, function()
         return cr and cr.tcdata[1] and not cr:build_pending(cr.tcdata[1])
     end, 10)
@@ -1686,8 +1686,8 @@ do
         end
         return { kill = function() end, wait = function() return { code = 0 } end, pid = 0 }
     end
-    require("tuna.stress").run(bbuf, 1)
-    local broke = require("tuna.stress").active[bbuf]
+    require("tuna.run.modes.stress").run(bbuf, 1)
+    local broke = require("tuna.run.modes.stress").active[bbuf]
     vim.wait(5000, function()
         return broke.tcdata[1].exit_code ~= nil and not broke:build_pending(broke.tcdata[1])
     end, 10)
@@ -1722,8 +1722,8 @@ do
         end
         return { kill = function() end, wait = function() return { code = 0 } end, pid = 0 }
     end
-    require("tuna.stress").run(bbuf, 1)
-    local at_once = require("tuna.stress").active[bbuf]
+    require("tuna.run.modes.stress").run(bbuf, 1)
+    local at_once = require("tuna.run.modes.stress").active[bbuf]
     t.eq("every source a run compiles is building at once", inflight, {
         ["main.cpp"] = true,
         ["gen.cpp"] = true,
@@ -1740,7 +1740,7 @@ do
         run_command = { cpp = { exec = solx } },
     })
     local release
-    require("tuna.tools")._test.forget_builds() -- the checker built cleanly in the searches above
+    require("tuna.run.tools")._test.forget_builds() -- the checker built cleanly in the searches above
     vim.system = function(argv, _, on_exit)
         local function answer(code, said)
             on_exit({ code = code, signal = 0, stdout = "", stderr = said or "" })
@@ -1756,7 +1756,7 @@ do
         end
         return { kill = function() end, wait = function() return { code = 0 } end, pid = 0 }
     end
-    local late = require("tuna.runner").new(bbuf)
+    local late = require("tuna.run").new(bbuf)
     late:show_ui()
     late:run_testcases({ [0] = { input = "1\n" } })
     vim.wait(5000, function()
@@ -1775,7 +1775,7 @@ do
     vim.cmd("edit " .. odir .. "/main.cpp")
     vim.bo.filetype = "cpp"
     local obuf = vim.api.nvim_get_current_buf()
-    local onl = require("tuna.runner").new(obuf)
+    local onl = require("tuna.run").new(obuf)
     onl:show_ui()
     onl:run_testcases({ [0] = { input = "1\n" } })
     settled(onl)
@@ -1839,7 +1839,7 @@ t.write(hdir, "checker.cpp", "int main(){ return 0; }\n")
 vim.cmd("edit " .. hdir .. "/checker.cpp")
 vim.bo.filetype = "cpp"
 local hbuf = vim.api.nvim_get_current_buf()
-local tools = require("tuna.tools")
+local tools = require("tuna.run.tools")
 local sb = tools.solution_bufnr(hbuf, require("tuna.config").get_buffer_config(hbuf))
 
 t.ok("the run redirects to the sibling solution", sb ~= nil and sb ~= hbuf, sb)
@@ -1893,14 +1893,14 @@ do
     t.eq("a header is never a helper either", tools.find(hd, "checker", hcfg), nil)
     local only = t.tempdir()
     t.write(only, "debug.h", "\n")
-    t.eq("the solution of a problem directory is never its header", require("tuna.navigate").solution_in(only, nil, hcfg), nil)
+    t.eq("the solution of a problem directory is never its header", require("tuna.workspace.navigate").solution_in(only, nil, hcfg), nil)
     vim.fn.delete(only, "rf")
     t.write(hd, "lib.hpp", "\n")
-    t.eq("nor a contest's problem", vim.tbl_map(vim.fs.basename, require("tuna.recent").contest_problems(hd, nil, hcfg)), { "main.cpp" })
+    t.eq("nor a contest's problem", vim.tbl_map(vim.fs.basename, require("tuna.workspace.recent").contest_problems(hd, nil, hcfg)), { "main.cpp" })
     local sol = tools.solution_bufnr(hb, hcfg)
     stub_system()
-    require("tuna.multi").run(sol)
-    local mr = require("tuna.multi").active[sol]
+    require("tuna.run.modes.multi").run(sol)
+    local mr = require("tuna.run.modes.multi").active[sol]
     vim.system = real_system
     t.eq("nor one of run-all's solutions", mr and vim.tbl_map(function(f)
         return f.name
@@ -1921,7 +1921,7 @@ do
     require("tuna.commands").toggle_pin()
     vim.notify = quiet
     t.has("and a header alone is no problem to pin", table.concat(said, "\n"), "not a solution file tuna can run")
-    t.eq("so nothing is pinned", require("tuna.recent").is_pinned(lone .. "/debug.h"), false)
+    t.eq("so nothing is pinned", require("tuna.workspace.recent").is_pinned(lone .. "/debug.h"), false)
     vim.cmd("silent! %bwipeout!")
     vim.fn.delete(hd, "rf")
     vim.fn.delete(lone, "rf")
@@ -1943,7 +1943,7 @@ local wbuf = vim.api.nvim_get_current_buf()
 local function dirs(opts)
     require("tuna.config").setup(opts)
     require("tuna.config").load_buffer_config(wbuf)
-    local r = require("tuna.runner").new(wbuf)
+    local r = require("tuna.run").new(wbuf)
     return { compile = r.compile_directory, run = r.running_directory }
 end
 local wh = vim.uv.os_homedir()
@@ -1973,13 +1973,13 @@ t.write(gdir, "sol.cpp", "int main(){}\n")
 vim.cmd("edit " .. gdir .. "/sol.cpp")
 vim.bo.filetype = "cpp"
 local gbuf = vim.api.nvim_get_current_buf()
-local gtcs = require("tuna.testcases")
+local gtcs = require("tuna.problem.testcases")
 
 -- A save stores what it is given, and stores the testcase even with nothing in it: an
 -- empty testcase is a testcase. Removing one is `buf_delete_testcase` — one way in, and
 -- an undoable one — so a save never leaves the row standing for something that is not
 -- there, which is what `bare` would have to mean afterwards.
-local gr = require("tuna.runner").new(gbuf)
+local gr = require("tuna.run").new(gbuf)
 gr.cc = nil -- rows only, no build step, so testcase 0 is row 1
 gr:load_testcases({ [0] = { input = "x\n" } })
 gr:save_testcase(0, "x\n", "y\n")
@@ -2002,14 +2002,14 @@ t.eq("while an ordinary empty save leaves no answer", gr.tcdata[1].expected, nil
 t.eq("and none on disk", gtcs.buf_get_testcases(gbuf)[0].output, nil)
 gtcs.buf_delete_testcase(gbuf, 0)
 
--- A row whose testcase is deleted behind the UI's back. The results UI keeps its rows
+-- A row whose testcase is deleted behind the UI's back. The runner UI keeps its rows
 -- across a re-run, so unlike a fresh `:Tuna run` it cannot just drop them — by then the
 -- row holds the only copy of that text.
 for i = 0, 2 do
     gtcs.buf_save_testcase(gbuf, i, "in" .. i .. "\n", "in" .. i .. "\n")
 end
 stub_system()
-gr = require("tuna.runner").new(gbuf)
+gr = require("tuna.run").new(gbuf)
 gr.cc = nil
 gr:run_testcases(gtcs.buf_get_testcases(gbuf))
 settled(gr)
@@ -2019,7 +2019,7 @@ vim.wait(400, function()
     return false
 end)
 local gui = gr.ui
-t.ok("the results UI opened", gui ~= nil and gui.ui_visible)
+t.ok("the runner UI opened", gui ~= nil and gui.ui_visible)
 
 -- The focus rescue that brings the cursor back into a pane when the window displacing
 -- the UI goes away must not fire when a *new* window took the focus during that close.
@@ -2158,7 +2158,7 @@ gtcs.buf_delete_testcase(gbuf, 0)
 -- So that is the only question, and it is asked only when a *real* answer is being
 -- turned into an empty one — which is what keeps a first save silent and keeps
 -- re-saving from asking the same thing over and over.
-local widgets = require("tuna.widgets")
+local widgets = require("tuna.ui.widgets")
 local real_menu = widgets.menu
 local asked
 widgets.menu = function(items)
@@ -2277,7 +2277,7 @@ vim.fn.delete(dir, "rf")
 -- to them.
 do
     local C = require("tuna.commands")
-    require("tuna.stress")
+    require("tuna.run.modes.stress")
     local function fake(pending)
         local f = { killed = false }
         f.ui = { ui_visible = true, pending = pending }
@@ -2302,9 +2302,9 @@ do
     local normal_r, stress_r = fake(nil), fake({ [1] = { stdin = "9" } })
     stress_r.ui.ui_visible = false
     C.runners[fb] = normal_r
-    require("tuna.stress").active[fb] = stress_r
+    require("tuna.run.modes.stress").active[fb] = stress_r
     local ran = false
-    C.settle_results(fb, { run = true, keep = normal_r }, function()
+    C.settle_runners(fb, { run = true, keep = normal_r }, function()
         ran = true
     end)
     t.eq("an unsaved edit, even in a hidden UI, is asked about before a run", { ran, stress_r.ui.asked }, { false, "run" })
@@ -2320,13 +2320,13 @@ do
     normal_r.killed, stress_r.killed = false, false
     stress_r.ui.ui_visible, stress_r.ui.pending = true, { [1] = { stdin = "9" } }
     local shown = false
-    C.settle_results(fb, { keep = normal_r }, function()
+    C.settle_runners(fb, { keep = normal_r }, function()
         shown = true
     end)
     t.eq("showing a UI asks nothing and stops nothing", { shown, normal_r.killed, stress_r.killed }, { true, false, false })
     t.eq("and hides the others", stress_r.ui.ui_visible, false)
     C.runners[fb] = nil
-    require("tuna.stress").active[fb] = nil
+    require("tuna.run.modes.stress").active[fb] = nil
 end
 
 --------------------------------------------------------------------------------
@@ -2345,10 +2345,10 @@ do
     vim.bo.filetype = "cpp"
     local rbuf = vim.api.nvim_get_current_buf()
     local C = require("tuna.commands")
-    local tools = require("tuna.tools")
+    local tools = require("tuna.run.tools")
     local path = vim.api.nvim_buf_get_name(rbuf)
     local function clear_runners()
-        for _, m in ipairs({ "tuna.interactive", "tuna.stress", "tuna.multi" }) do
+        for _, m in ipairs({ "tuna.run.modes.interactive", "tuna.run.modes.stress", "tuna.run.modes.multi" }) do
             local mod = package.loaded[m]
             local a = mod and mod.active[rbuf]
             if a then
@@ -2363,7 +2363,7 @@ do
         end
         C.last_mode[rbuf] = nil
     end
-    local compiler = require("tuna.runner").new(rbuf).cc.exec
+    local compiler = require("tuna.run").new(rbuf).cc.exec
     local function settle_ms(ms)
         vim.wait(ms, function()
             return false
@@ -2374,9 +2374,9 @@ do
     tools.set_mode(path, "interactive")
     tools.set_source(path, "feed")
     stub_system()
-    C.show_results_ui(rbuf)
+    C.show_runner_ui(rbuf)
     settle_ms(200)
-    local shown = require("tuna.interactive").active[rbuf]
+    local shown = require("tuna.run.modes.interactive").active[rbuf]
     t.ok("after a restart, show_ui opens the mode the problem is set to", shown ~= nil and shown.ui ~= nil and shown.ui.ui_visible)
     t.eq("and not the normal runner's", C.runners[rbuf], nil)
     t.eq("nothing is run to show it", #spawns, 0)
@@ -2393,9 +2393,9 @@ do
     clear_runners()
     tools.set_mode(path, "all")
     stub_system()
-    C.show_results_ui(rbuf)
+    C.show_runner_ui(rbuf)
     settle_ms(200)
-    local matrix = require("tuna.multi").active[rbuf]
+    local matrix = require("tuna.run.modes.multi").active[rbuf]
     t.ok("run-all opens listed too", matrix ~= nil and matrix.ui ~= nil and matrix.ui.ui_visible)
     t.eq("with nothing run", #spawns, 0)
     vim.system = real_system
@@ -2486,7 +2486,7 @@ t.write(wdir, "sol_output1.txt", "2\n")
 vim.cmd("edit " .. wdir .. "/sol.cpp")
 vim.bo.filetype = "cpp"
 local wbuf = vim.api.nvim_get_current_buf()
-local wtcs = require("tuna.testcases").buf_get_testcases(wbuf)
+local wtcs = require("tuna.problem.testcases").buf_get_testcases(wbuf)
 
 ---The first row that is not the build step: what every mode is expected to land on.
 local function first_real_row(r)
@@ -2502,13 +2502,13 @@ local boards = {
     {
         name = "a normal run",
         show = function()
-            local r = require("tuna.runner").new(wbuf)
+            local r = require("tuna.run").new(wbuf)
             r:load_testcases(wtcs)
             r:show_ui()
             return r
         end,
         run = function()
-            local r = require("tuna.runner").new(wbuf)
+            local r = require("tuna.run").new(wbuf)
             r:show_ui()
             r:run_testcases(wtcs)
             return r
@@ -2517,23 +2517,23 @@ local boards = {
     {
         name = "run-all",
         show = function()
-            require("tuna.multi").show(wbuf)
-            return require("tuna.multi").active[wbuf]
+            require("tuna.run.modes.multi").show(wbuf)
+            return require("tuna.run.modes.multi").active[wbuf]
         end,
         run = function()
-            require("tuna.multi").run(wbuf)
-            return require("tuna.multi").active[wbuf]
+            require("tuna.run.modes.multi").run(wbuf)
+            return require("tuna.run.modes.multi").active[wbuf]
         end,
     },
     {
         name = "stress",
         show = function()
-            require("tuna.stress").show(wbuf)
-            return require("tuna.stress").active[wbuf]
+            require("tuna.run.modes.stress").show(wbuf)
+            return require("tuna.run.modes.stress").active[wbuf]
         end,
         run = function()
-            require("tuna.stress").run(wbuf, 1)
-            return require("tuna.stress").active[wbuf]
+            require("tuna.run.modes.stress").run(wbuf, 1)
+            return require("tuna.run.modes.stress").active[wbuf]
         end,
     },
     {
@@ -2543,12 +2543,12 @@ local boards = {
             return r.active_index
         end,
         show = function()
-            require("tuna.interactive").show(wbuf)
-            return require("tuna.interactive").active[wbuf]
+            require("tuna.run.modes.interactive").show(wbuf)
+            return require("tuna.run.modes.interactive").active[wbuf]
         end,
         run = function()
-            require("tuna.interactive").run(wbuf, { "feed" })
-            return require("tuna.interactive").active[wbuf]
+            require("tuna.run.modes.interactive").run(wbuf, { "feed" })
+            return require("tuna.run.modes.interactive").active[wbuf]
         end,
     },
 }
@@ -2810,7 +2810,7 @@ end
 -- and the line the cursor is on have to agree, or the first cursor event the editor sends
 -- reads as the user taking over and the board never chooses again.
 stub_system()
-local fresh = require("tuna.runner").new(wbuf)
+local fresh = require("tuna.run").new(wbuf)
 fresh:load_testcases(wtcs)
 fresh:show_ui()
 vim.api.nvim_exec_autocmds("CursorMoved", { buffer = fresh.ui.windows.tc.bufnr })
@@ -2824,8 +2824,8 @@ vim.system = real_system
 -- A conversation follows its sessions, but not once the selector has been taken over: the
 -- next session would pull the cursor off the row someone chose to read.
 stub_system()
-require("tuna.interactive").run(wbuf, { "feed" })
-local held = require("tuna.interactive").active[wbuf]
+require("tuna.run.modes.interactive").run(wbuf, { "feed" })
+local held = require("tuna.run.modes.interactive").active[wbuf]
 vim.wait(3000, function()
     return held.ui ~= nil and held.ui.ui_visible and held.completed
 end, 20)
@@ -2851,7 +2851,7 @@ vim.system = real_system
 -- A list that gets shorter than the row the board chose takes the choice with it, rather than
 -- leaving Vim to clamp the cursor onto another row, which reads as a move by hand.
 stub_system()
-local shrink = require("tuna.runner").new(wbuf)
+local shrink = require("tuna.run").new(wbuf)
 shrink:load_testcases(wtcs)
 shrink:show_ui()
 vim.wait(1000, function()
@@ -2876,7 +2876,7 @@ vim.system = real_system
 -- tick apart, and a board opened in between drew the panes of a run for a build about to
 -- start, then redrew them — the flash of a grid that was never the right one.
 stub_system()
-local opening = require("tuna.runner").new(wbuf)
+local opening = require("tuna.run").new(wbuf)
 opening:load_testcases(wtcs)
 opening:show_ui()
 vim.wait(1000, function()
@@ -2927,12 +2927,12 @@ vim.system = function(argv, _, on_exit)
 end
 for _, building in ipairs({
     { name = "interactive", start = function()
-        require("tuna.interactive").run(wbuf, { "feed" })
-        return require("tuna.interactive").active[wbuf]
+        require("tuna.run.modes.interactive").run(wbuf, { "feed" })
+        return require("tuna.run.modes.interactive").active[wbuf]
     end },
     { name = "stress", start = function()
-        require("tuna.stress").run(wbuf, 1)
-        return require("tuna.stress").active[wbuf]
+        require("tuna.run.modes.stress").run(wbuf, 1)
+        return require("tuna.run.modes.stress").active[wbuf]
     end },
 }) do
     held_exit = nil
@@ -2969,7 +2969,7 @@ vim.system = function(argv, _, on_exit)
     end
     return { kill = function() end, wait = function() return { code = 0 } end, pid = 0 }
 end
-local noisy = require("tuna.runner").new(wbuf)
+local noisy = require("tuna.run").new(wbuf)
 noisy:show_ui()
 noisy:run_testcases(wtcs)
 vim.wait(2000, function()
@@ -2988,7 +2988,7 @@ stub_system()
 vim.api.nvim_set_current_buf(wbuf)
 local C3 = require("tuna.commands")
 -- The generator and bruteforce beside this solution would make `:Tuna run` a stress run.
-require("tuna.tools").set_mode(wdir .. "/sol.cpp", "normal")
+require("tuna.run.tools").set_mode(wdir .. "/sol.cpp", "normal")
 C3.execute({ "run" })
 local chosen = C3.runners[wbuf]
 vim.wait(3000, function()
@@ -3018,7 +3018,7 @@ t.eq("a run asked for hands the choice back", { chosen.ui.update_testcase, chose
 
 move_to(3)
 chosen.ui:delete()
-C3.show_results_ui(wbuf)
+C3.show_runner_ui(wbuf)
 vim.wait(2000, function()
     return chosen.ui.ui_visible and chosen.ui.update_testcase == 3
 end, 20)
@@ -3026,7 +3026,7 @@ t.eq("and reopening the board returns to the row last looked at", chosen.ui.upda
 chosen:kill_all_processes()
 chosen:delete_ui()
 C3.runners[wbuf] = nil
-require("tuna.tools").set_mode(wdir .. "/sol.cpp", nil)
+require("tuna.run.tools").set_mode(wdir .. "/sol.cpp", nil)
 vim.system = real_system
 vim.fn.delete(wdir, "rf")
 
@@ -3052,7 +3052,7 @@ local FULL_GRID = { "eo", "se", "si", "so", "st", "tc" }
 local BUILD_GRID = { "se", "st", "tc" }
 
 stub_system()
-local grid = require("tuna.runner").new(wbuf)
+local grid = require("tuna.run").new(wbuf)
 grid:load_testcases(wtcs)
 grid:show_ui()
 vim.wait(1000, function()
@@ -3085,8 +3085,8 @@ t.eq("and moving off it brings the grid back", drawn_panes(grid.ui), FULL_GRID)
 grid:delete_ui()
 
 -- Interactive draws its own grid for a conversation, and the build step is the build step.
-require("tuna.interactive").run(wbuf, { "live" }, { show_only = true })
-local conv_grid = require("tuna.interactive").active[wbuf]
+require("tuna.run.modes.interactive").run(wbuf, { "live" }, { show_only = true })
+local conv_grid = require("tuna.run.modes.interactive").active[wbuf]
 vim.wait(1000, function()
     return conv_grid.ui ~= nil and conv_grid.ui.ui_visible and #conv_grid.tcdata > 0
 end, 20)
@@ -3100,8 +3100,8 @@ conv_grid:kill_all_processes()
 conv_grid:delete_ui()
 
 -- Each interactive source draws the grid `interactive.layouts` gives it.
-require("tuna.interactive").run(wbuf, { "live" }, { show_only = true })
-local shaped = require("tuna.interactive").active[wbuf]
+require("tuna.run.modes.interactive").run(wbuf, { "live" }, { show_only = true })
+local shaped = require("tuna.run.modes.interactive").active[wbuf]
 vim.wait(1000, function()
     return shaped.ui ~= nil and shaped.ui.ui_visible and #shaped.tcdata > 0
 end, 20)
@@ -3136,8 +3136,8 @@ shaped:kill_all_processes()
 shaped:delete_ui()
 
 -- `feed` replays a stored testcase, so it keeps the grid configured for a run until told not to.
-require("tuna.interactive").run(wbuf, { "feed" }, { show_only = true })
-local fed = require("tuna.interactive").active[wbuf]
+require("tuna.run.modes.interactive").run(wbuf, { "feed" }, { show_only = true })
+local fed = require("tuna.run.modes.interactive").active[wbuf]
 vim.wait(1000, function()
     return fed.ui ~= nil and fed.ui.ui_visible and #fed.tcdata > 0
 end, 20)
@@ -3185,11 +3185,11 @@ vim.system = real_system
 -- A `:Tuna` command typed in one of tuna's own windows
 --------------------------------------------------------------------------------
 
--- A results pane is not a file, so a command typed there is about the solution the pane is
+-- A runner UI pane is not a file, so a command typed there is about the solution the pane is
 -- showing. Acting on the pane itself compiled nothing and kept the problem's run state under
 -- a name that is not a path, writing it under whatever directory the editor was started in.
 local C2 = require("tuna.commands")
-local tools2 = require("tuna.tools")
+local tools2 = require("tuna.run.tools")
 local pdir = t.tempdir()
 t.write(pdir, "sol.cpp", "int main(){}\n")
 t.write(pdir, "sol_input0.txt", "1\n")
@@ -3199,7 +3199,7 @@ local pbuf = vim.api.nvim_get_current_buf()
 local sol_path = pdir .. "/sol.cpp"
 
 stub_system()
-local pane_runner = require("tuna.runner").new(pbuf)
+local pane_runner = require("tuna.run").new(pbuf)
 pane_runner:show_ui()
 vim.api.nvim_set_current_win(pane_runner.ui.windows.so.winid)
 t.eq("a command typed in a pane is about the solution it shows", C2.target_buffer(), pbuf)
@@ -3207,14 +3207,14 @@ t.eq("a buffer of its own is itself", C2.target_buffer(pbuf), pbuf)
 
 C2.execute({ "run", "all" })
 vim.wait(3000, function()
-    local matrix = require("tuna.multi").active[pbuf]
+    local matrix = require("tuna.run.modes.multi").active[pbuf]
     return matrix ~= nil and matrix.completed
 end, 20)
 vim.system = real_system
 t.eq("so a run typed there forces the mode for the solution", tools2.get_mode(sol_path), "all")
 t.eq("and nothing is written beside a name that is not a path", vim.fn.isdirectory(vim.fn.getcwd() .. "/tuna:"), 0)
 local pane_buf = pane_runner.ui.windows.so.bufnr
-local matrix = require("tuna.multi").active[pbuf]
+local matrix = require("tuna.run.modes.multi").active[pbuf]
 if matrix then
     matrix:delete_ui()
 end

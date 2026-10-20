@@ -9,9 +9,9 @@
 local api = vim.api
 local config = require("tuna.config")
 local utils = require("tuna.utils")
-local testcases = require("tuna.testcases")
-local runner = require("tuna.runner")
-local tools = require("tuna.tools")
+local testcases = require("tuna.problem.testcases")
+local runner = require("tuna.run")
+local tools = require("tuna.run.tools")
 
 local M = {}
 
@@ -59,7 +59,7 @@ local function choose_testcase(tctbl, verb, cb)
             return "Testcase " .. n
         end, nums)
         local title = verb:sub(1, 1):upper() .. verb:sub(2) .. " a testcase"
-        require("tuna.widgets").menu(labels, title, function(idx)
+        require("tuna.ui.widgets").menu(labels, title, function(idx)
             cb(nums[idx])
         end, api.nvim_get_current_win())
     end
@@ -90,7 +90,7 @@ function M.edit_testcase(add, tcnum)
         local function save(tc)
             testcases.buf_save_testcase(bufnr, n, tc.input, tc.output)
         end
-        local widgets = require("tuna.widgets")
+        local widgets = require("tuna.ui.widgets")
         widgets.editor(bufnr, n, tctbl[n].input, tctbl[n].output, save, api.nvim_get_current_win())
     end
 
@@ -113,7 +113,7 @@ function M.delete_testcase(tcnum)
             utils.notify("testcase delete: testcase " .. tostring(n) .. " doesn't exist.")
             return
         end
-        require("tuna.widgets").menu({ "Delete", "Keep" }, "Delete testcase " .. n .. "?", function(idx)
+        require("tuna.ui.widgets").menu({ "Delete", "Keep" }, "Delete testcase " .. n .. "?", function(idx)
             if idx == 1 then
                 testcases.buf_delete_testcase(bufnr, n)
             end
@@ -205,7 +205,7 @@ function M.solution_bufnr()
     return target
 end
 
----Run testcases (or a subset), and show the results UI.
+---Run testcases (or a subset), and show the runner UI.
 ---@param bufnr integer the solution buffer to run
 ---@param list string[]? testcase numbers to run, or nil for all
 ---@param only_show boolean just (re)open the UI without running
@@ -219,7 +219,7 @@ function M.run_testcases(bufnr, list, only_show)
     -- the runner: the results it holds describe runs under settings that no longer apply.
     local cached = M.runners[bufnr]
     -- Kept when only showing a runner that holds unsaved edits: they would go with it, and
-    -- a run asks about them before getting here (`settle_results`).
+    -- a run asks about them before getting here (`settle_runners`).
     local holds_edits = only_show and cached and cached.ui and cached.ui:has_pending()
     if cached and not holds_edits and not vim.deep_equal(cached.config, config.get_buffer_config(bufnr)) then
         cached:delete_ui()
@@ -251,7 +251,7 @@ function M.run_testcases(bufnr, list, only_show)
         if not r then
             return -- runner.new already notified
         end
-        require("tuna.runner.core").register(M.runners, bufnr, r)
+        require("tuna.run.core").register(M.runners, bufnr, r)
     end
 
     local r = M.runners[bufnr]
@@ -264,7 +264,7 @@ function M.run_testcases(bufnr, list, only_show)
             -- No testcases is not nothing to show: `build_rows` lists the same `No input`
             -- row a run with nothing to test would build, so the UI opens on an editable
             -- testcase 0 waiting to be typed into rather than on a warning. That is the
-            -- way in to writing a problem's first testcase from the results UI.
+            -- way in to writing a problem's first testcase from the runner UI.
             r:load_testcases(tctbl)
         end
     else
@@ -312,7 +312,7 @@ function M.offer_sharing(bufnr, proceed)
         share_declined[path] = true
         proceed()
     end
-    require("tuna.widgets").menu(
+    require("tuna.ui.widgets").menu(
         { "Rename and share", "Run without sharing" },
         ("%s cannot read %s's testcases, renaming them shares them permanently"):format(name, vim.fs.basename(plan.owner)),
         function(idx)
@@ -341,14 +341,14 @@ end
 ---@param bufnr integer
 function M.dispatch_mode(mode, args, bufnr)
     M.offer_sharing(bufnr, function()
-        M.settle_results(bufnr, { run = true, keep = mode == "normal" and M.runners[bufnr] or nil }, function()
+        M.settle_runners(bufnr, { run = true, keep = mode == "normal" and M.runners[bufnr] or nil }, function()
             M.last_mode[bufnr] = mode
             if mode == "all" then
-                require("tuna.multi").run(bufnr, { list = #args > 0 and args or nil })
+                require("tuna.run.modes.multi").run(bufnr, { list = #args > 0 and args or nil })
             elseif mode == "stress" then
-                require("tuna.stress").run(bufnr, tonumber(args[1]))
+                require("tuna.run.modes.stress").run(bufnr, tonumber(args[1]))
             elseif mode == "interactive" then
-                require("tuna.interactive").run(bufnr, #args > 0 and args or nil)
+                require("tuna.run.modes.interactive").run(bufnr, #args > 0 and args or nil)
             else -- "normal"
                 M.run_testcases(bufnr, #args > 0 and args or nil, false)
             end
@@ -362,7 +362,7 @@ end
 ---@return table<integer, tuna.RunnerCore>[]
 local function runner_tables()
     local tables = { M.runners }
-    for _, mod in ipairs({ "tuna.interactive", "tuna.stress", "tuna.multi" }) do
+    for _, mod in ipairs({ "tuna.run.modes.interactive", "tuna.run.modes.stress", "tuna.run.modes.multi" }) do
         local m = package.loaded[mod]
         if m then
             tables[#tables + 1] = m.active
@@ -392,7 +392,7 @@ function M.all_runners()
     return list
 end
 
----The buffer a `:Tuna` command is about. Standing in one of tuna's own windows — a results
+---The buffer a `:Tuna` command is about. Standing in one of tuna's own windows — a runner UI
 ---pane, its viewer — that is the solution the pane is showing: a pane is not a file, so a
 ---command acting on it would compile nothing, save nothing, and keep the problem's run state
 ---under a name that is not a path. Every other buffer is itself, including a helper file,
@@ -405,7 +405,7 @@ function M.target_buffer(bufnr)
     return owner and owner.bufnr or bufnr
 end
 
----Settle a buffer's results UIs before `proceed` puts one on screen. One results UI per
+---Settle a buffer's runner UIs before `proceed` puts one on screen. One runner UI per
 ---buffer is shown at a time, so every other one is hidden, its unsaved edits kept on the
 ---runner that holds them.
 ---
@@ -418,7 +418,7 @@ end
 ---@param bufnr integer
 ---@param opts { run: boolean?, keep: table? } `keep`: the runner `proceed` shows, left on screen
 ---@param proceed fun()
-function M.settle_results(bufnr, opts, proceed)
+function M.settle_runners(bufnr, opts, proceed)
     local runners = runners_of(bufnr)
     if opts.run then
         for _, r in ipairs(runners) do
@@ -428,7 +428,7 @@ function M.settle_results(bufnr, opts, proceed)
                     r:show_ui()
                 end
                 ui:with_pending_settled(nil, "run", function()
-                    M.settle_results(bufnr, opts, proceed)
+                    M.settle_runners(bufnr, opts, proceed)
                 end, true)
                 return
             end
@@ -445,22 +445,22 @@ function M.settle_results(bufnr, opts, proceed)
     proceed()
 end
 
----(Re)open the results UI for a buffer without running — honouring the last run's
+---(Re)open the runner UI for a buffer without running — honouring the last run's
 ---mode, so a stress run re-opens its own UI rather than a fresh normal one.
 ---@param bufnr integer
-function M.show_results_ui(bufnr)
+function M.show_runner_ui(bufnr)
     -- The mode last run in this session, else the one the problem is set to: after a
     -- restart nothing has run, and the sidecar still says how this problem is run.
     config.load_buffer_config(bufnr)
     local path = api.nvim_buf_get_name(bufnr)
     local mode = M.last_mode[bufnr]
         or (tools.resolve_mode(path, config.get_buffer_config(bufnr)))
-    local mod = (mode == "stress" and "tuna.stress")
-        or (mode == "interactive" and "tuna.interactive")
-        or (mode == "all" and "tuna.multi")
+    local mod = (mode == "stress" and "tuna.run.modes.stress")
+        or (mode == "interactive" and "tuna.run.modes.interactive")
+        or (mode == "all" and "tuna.run.modes.multi")
     local active = mod and require(mod).active[bufnr] or nil
     local keep = active or (not mod and M.runners[bufnr]) or nil
-    M.settle_results(bufnr, { keep = keep }, function()
+    M.settle_runners(bufnr, { keep = keep }, function()
         M.last_mode[bufnr] = mode
         if active then
             active:show_ui()
@@ -536,7 +536,7 @@ function M.show_checker(bufnr)
 end
 
 ---Set a problem's checker to automatic or off. Every run looks the checker up, so it
----applies to the next run of any mode, and an open results UI shows the new judge straight
+---applies to the next run of any mode, and an open runner UI shows the new judge straight
 ---away.
 ---@param bufnr integer
 ---@param want "auto"|"off"
@@ -581,7 +581,7 @@ local function parse_compare(args, cfg)
             utils.notify("compare: '" .. args[2] .. "' is not a valid tolerance.")
             return false, nil
         end
-        return true, { "float", tol = tol or require("tuna.compare").DEFAULT_FLOAT_TOL }
+        return true, { "float", tol = tol or require("tuna.run.compare").DEFAULT_FLOAT_TOL }
     elseif vim.tbl_contains(names, name) then
         return true, name
     end
@@ -644,7 +644,7 @@ function M.set_compare(bufnr, args)
     if type(method) == "table" and method[1] == "float" then
         last_float_tol[path] = method.tol
     end
-    local name = require("tuna.compare").method_name
+    local name = require("tuna.run.compare").method_name
     if name(method) == name(cfg.output_compare_method) then
         method = nil
     end
@@ -660,7 +660,7 @@ end
 ---sentence for setting it and for asking about it (bare `:Tuna compare`), as for the checker.
 ---@param bufnr integer
 function M.show_compare(bufnr)
-    local name = require("tuna.compare").method_name
+    local name = require("tuna.run.compare").method_name
     local own = tools.get_compare(api.nvim_buf_get_name(bufnr))
     if own then
         utils.notify("compare: " .. name(own) .. " for this problem.", "INFO")
@@ -693,7 +693,7 @@ function M.toggle_pin(bufnr)
         return
     end
     local name = vim.fn.fnamemodify(path, ":~:.")
-    if require("tuna.recent").toggle_pin(path) then
+    if require("tuna.workspace.recent").toggle_pin(path) then
         utils.notify("pinned " .. name .. ", it waits in the menu.", "INFO")
     else
         utils.notify("unpinned " .. name .. ".", "INFO")
@@ -707,12 +707,12 @@ end
 ---Drive the Competitive Companion listener.
 ---@param mode string "testcases" | "problem" | "contest" | "sync" | "persistently" | "status" | "stop"
 function M.download(mode)
-    local download = require("tuna.download")
+    local download = require("tuna.problem.download")
     local err
     if mode == "sync" then
         -- A download that folds the `:Tuna scratch` file into the problem it opens:
         -- `scratch.sync` arms the merge and starts the download itself.
-        require("tuna.scratch").sync(M.target_buffer())
+        require("tuna.workspace.scratch").sync(M.target_buffer())
     elseif mode == "stop" then
         download.stop_downloading()
     elseif mode == "status" then
@@ -785,7 +785,7 @@ M.subcommands = {
     show_ui = function()
         local bufnr = M.solution_bufnr()
         if bufnr then
-            M.show_results_ui(bufnr)
+            M.show_runner_ui(bufnr)
         end
     end,
     download = function(args)
@@ -825,7 +825,7 @@ M.subcommands = {
             utils.notify("scaffold: a role is required, " .. table.concat(tools.SCAFFOLDS, ", ") .. ".")
             return
         end
-        require("tuna.scaffold").create(args[1], M.target_buffer(), args[2])
+        require("tuna.workspace.scaffold").create(args[1], M.target_buffer(), args[2])
     end,
     submit = function(args)
         local bufnr = M.solution_bufnr()
@@ -833,29 +833,29 @@ M.subcommands = {
             return
         end
         if args[1] == "clear" then
-            require("tuna.submit").clear(bufnr) -- dismiss the lualine verdict / cancel a running submit
+            require("tuna.problem.submit").clear(bufnr) -- dismiss the lualine verdict / cancel a running submit
         else
-            require("tuna.submit").submit(bufnr)
+            require("tuna.problem.submit").submit(bufnr)
         end
     end,
     clean = function()
-        require("tuna.clean").clean(M.target_buffer())
+        require("tuna.workspace.clean").clean(M.target_buffer())
     end,
     -- Contest navigation: step to the sibling problem directory either side of this
     -- one. Deliberately not routed through `solution_bufnr`, since navigating away
     -- from a helper file (say `gen.cpp`) is a perfectly reasonable thing to do.
     next = function()
-        require("tuna.navigate").next(M.target_buffer())
+        require("tuna.workspace.navigate").next(M.target_buffer())
     end,
     prev = function()
-        require("tuna.navigate").prev(M.target_buffer())
+        require("tuna.workspace.navigate").prev(M.target_buffer())
     end,
     -- Back to what you were working on, across restarts: the solution itself, or the
     -- contest it belongs to. Both also move Neovim's directory there (`cd_command`),
     -- since coming back to a problem means working *in* it. Bare `:Tuna last` is the
     -- problem — the one reached for most often.
     last = function(args)
-        local recent = require("tuna.recent")
+        local recent = require("tuna.workspace.recent")
         if args[1] == "contest" then
             recent.open_contest()
         else
@@ -863,12 +863,12 @@ M.subcommands = {
         end
     end,
     lib = function()
-        require("tuna.library").open(M.target_buffer())
+        require("tuna.workspace.library").open(M.target_buffer())
     end,
     -- The scratch itself. Folding it back into a real problem is a *download*
     -- (`:Tuna download sync`), since that is what it does — it downloads.
     scratch = function()
-        require("tuna.scratch").start(M.target_buffer())
+        require("tuna.workspace.scratch").start(M.target_buffer())
     end,
     pin = function()
         M.toggle_pin()
@@ -912,7 +912,7 @@ function M.complete(arg_lead, cmd_line, cursor_pos)
         candidates = interactive_sources
     elseif (count == 3 or (count == 4 and not ending_space)) and words[2] == "scaffold" then
         -- The languages the role has a template in, so what is offered is what exists.
-        local scaffold = require("tuna.scaffold")
+        local scaffold = require("tuna.workspace.scaffold")
         local role = scaffold.role_of(words[3], config.get_buffer_config(M.target_buffer()))
         candidates = role and scaffold.languages(role, M.target_buffer()) or {}
     elseif

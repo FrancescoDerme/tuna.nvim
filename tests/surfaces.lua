@@ -16,11 +16,11 @@
 --   * read-only ⇒ inert        — a key that begins a change on an unmodifiable buffer
 --     ends in `E21` a keystroke later, from a mode the user never meant to enter
 --   * a known zindex layer     — Neovim's default float layer is 50, the same as the
---     results grid, so an unset dialog fights the grid it is drawn over
+--     runner UI's grid, so an unset dialog fights the grid it is drawn over
 --   * its own keys still act    — making a surface read-only neutralises the keys that
 --     would change it, and one of those (`<C-r>`) is also a real action: matched in the
 --     wrong notation it was mapped to `<Nop>` *over* the action, and "run all" silently
---     did nothing on every results UI
+--     did nothing on every runner UI
 --
 -- Run:  nvim --headless -u NONE --cmd "set noswapfile" \
 --         -c "set rtp+=." -c "luafile tests/surfaces.lua" -c "qa!"
@@ -96,7 +96,7 @@ local function conforms(label)
 end
 
 --------------------------------------------------------------------------------
--- A problem to open the results UI on.
+-- A problem to open the runner UI on.
 --------------------------------------------------------------------------------
 
 local dir = vim.fn.tempname()
@@ -150,7 +150,7 @@ api.nvim_create_autocmd("BufEnter", {
     end,
 })
 
-local widgets = require("tuna.widgets")
+local widgets = require("tuna.ui.widgets")
 
 vim.cmd("Tuna show_ui")
 settle(800)
@@ -159,9 +159,9 @@ for _, r in pairs(require("tuna.commands").runners or {}) do
     runner = r
 end
 local ui = runner and runner.ui
-ok("results UI: opened", ui ~= nil and ui.ui_visible)
+ok("runner UI: opened", ui ~= nil and ui.ui_visible)
 if ui then
-    conforms("results UI panes")
+    conforms("runner UI panes")
 
     -- Every key the user configured has to reach its action. Read-only surfaces map the
     -- change-starting keys to `<Nop>`, and a key that is *both* (`<C-r>`: Vim's redo and
@@ -185,23 +185,23 @@ if ui then
 
     ui:show_viewer("so")
     settle()
-    conforms("results UI + viewer")
+    conforms("runner UI + viewer")
     ui:close_viewer()
     settle()
 
     ui:show_message("compiler said", "warning: unused variable")
     settle()
-    conforms("results UI + message float")
+    conforms("runner UI + message float")
     close_layer(70)
 
     ui:show_help()
     settle()
-    conforms("results UI + key legend")
+    conforms("runner UI + key legend")
     close_layer(70)
 
     ui:delete()
     settle()
-    ok("results UI: closes completely", #floats() == 0, #floats() .. " floats left")
+    ok("runner UI: closes completely", #floats() == 0, #floats() .. " floats left")
 end
 
 widgets.menu({ "one", "two" }, "a menu", function() end)
@@ -255,7 +255,7 @@ do
     _G.tuna_probe = {}
     api.nvim_feedkeys(
         api.nvim_replace_termcodes(
-            "A<Cmd>lua require('tuna.widgets').resize_widgets()<CR><Cmd>lua tuna_probe.mode = vim.api.nvim_get_mode().mode<CR><Esc>",
+            "A<Cmd>lua require('tuna.ui.widgets').resize_widgets()<CR><Cmd>lua tuna_probe.mode = vim.api.nvim_get_mode().mode<CR><Esc>",
             true, false, true
         ),
         "nx",
@@ -306,7 +306,7 @@ do
 end
 
 -- The editor saves the Neovim way, `:w`, and `:wq` to save and close, with no key of its
--- own for it, and asks before an edit is thrown away, in the results UI's words.
+-- own for it, and asks before an edit is thrown away, in the runner UI's words.
 do
     local saved, asked, answer
     local real_menu = widgets.menu
@@ -342,7 +342,7 @@ do
     edit()
     answer = 3
     press("q")
-    ok("an edit is asked about, in the results UI's words", vim.deep_equal(asked, {
+    ok("an edit is asked about, in the runner UI's words", vim.deep_equal(asked, {
         title = "Unsaved testcase 3",
         items = { "Save and close", "Discard and close", "Keep editing" },
     }), vim.inspect(asked))
@@ -505,7 +505,7 @@ ok("every float is tagged as tuna's before it is entered", #entered_untagged == 
 -- Otherwise a float draws no statusline of its own: from Neovim 0.12 a float whose
 -- 'statusline' is set draws it inside its border unless the statusline is global.
 do
-    local surface = require("tuna.surface")
+    local surface = require("tuna.ui.surface")
     local global_sl, global_ls = vim.o.statusline, vim.o.laststatus
     local columns, lines = vim.o.columns, vim.o.lines
     vim.o.columns, vim.o.lines = 80, 20

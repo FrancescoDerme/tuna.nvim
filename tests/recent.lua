@@ -28,7 +28,7 @@ t.write(store_dir, "recent.json", vim.json.encode({
 }))
 
 require("tuna").setup({})
-local recent = require("tuna.recent")
+local recent = require("tuna.workspace.recent")
 local cfg = require("tuna.config").current_setup
 local function norm(path)
     return vim.fs.normalize(vim.fn.fnamemodify(path, ":p"))

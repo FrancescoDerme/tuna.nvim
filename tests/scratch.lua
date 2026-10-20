@@ -16,7 +16,7 @@ require("tuna").setup({
     scaffold = { templates = { solution = { tdir .. "/template.$(JUDGE).$(FEXT)", tdir .. "/template.$(FEXT)" } } },
     scratch = { file = sdir .. "/scratch.$(FEXT)", extension = "cpp" },
 })
-local scratch = require("tuna.scratch")
+local scratch = require("tuna.workspace.scratch")
 local T = scratch._test
 local cfg = require("tuna.config").current_setup
 
@@ -57,7 +57,7 @@ os.remove(scratch_file)
 -- The template menu
 --------------------------------------------------------------------------------
 
-local widgets = require("tuna.widgets")
+local widgets = require("tuna.ui.widgets")
 local real_menu = widgets.menu
 local asked
 widgets.menu = function(items, _, on_choice, _, on_close, preview)

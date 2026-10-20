@@ -1,4 +1,4 @@
--- lua/tuna/checker.lua
+-- lua/tuna/run/checker.lua
 --
 -- Decides a testcase's verdict. There are two kinds of checker:
 --
@@ -16,9 +16,9 @@
 -- `judge` is asynchronous (it may spawn a process), so it reports the verdict
 -- through a callback. The builtin path calls back synchronously.
 
-local compare = require("tuna.compare")
+local compare = require("tuna.run.compare")
 local utils = require("tuna.utils")
-local tools = require("tuna.tools")
+local tools = require("tuna.run.tools")
 
 local M = {}
 

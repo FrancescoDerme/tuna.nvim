@@ -12,7 +12,7 @@
 -- The split is the point. The left column is *where you were*, the right is *what to
 -- do*, and both are lists you walk with `j`/`k` and act on with `<CR>` — so the board
 -- reads as one thing rather than as a menu with a header. `switch_window_keys`
--- moves between the columns, exactly as they move between the results UI's panes.
+-- moves between the columns, exactly as they move between the runner UI's panes.
 --
 -- This module stays a presentation layer: every action it offers is an existing entry
 -- point (`commands`, `recent`, `scaffold`, `clean`), required lazily to avoid a load
@@ -21,7 +21,7 @@
 
 local api = vim.api
 local config = require("tuna.config")
-local tools = require("tuna.tools")
+local tools = require("tuna.run.tools")
 
 local M = {}
 
@@ -61,7 +61,7 @@ end
 -- The left column: where you were, and how it went
 --------------------------------------------------------------------------------
 
--- The results grid's verdict words and colours, so a status reads the same here as there.
+-- The runner UI's verdict words and colours, so a status reads the same here as there.
 local VERDICT = {
     accepted = { "ACCEPTED", "TunaCorrect" },
     rejected = { "REJECTED", "TunaWrong" },
@@ -79,11 +79,11 @@ local function entry_status(path)
     if not path or path == "" then
         return {}
     end
-    local verdict = require("tuna.submit").verdict_for(path)
+    local verdict = require("tuna.problem.submit").verdict_for(path)
     if verdict and VERDICT[verdict.state] then
         return { VERDICT[verdict.state] }
     end
-    local passed, total = require("tuna.runner.core").local_verdict(path)
+    local passed, total = require("tuna.run.core").local_verdict(path)
     if passed then
         return { { passed .. "/" .. total .. " " }, { "PASSED", passed == total and "TunaCorrect" or "TunaWrong" } }
     end
@@ -98,7 +98,7 @@ end
 local function local_status(files)
     local passed = 0
     for _, file in ipairs(files) do
-        local ran, total = require("tuna.runner.core").local_verdict(file)
+        local ran, total = require("tuna.run.core").local_verdict(file)
         if ran and ran == total then
             passed = passed + 1
         end
@@ -120,11 +120,11 @@ local function contest_status(contest)
         return {}
     end
     local cfg = config.load_local_config_and_extend(contest.dir)
-    local files = require("tuna.recent").contest_problems(contest.dir, contest.problem, cfg)
+    local files = require("tuna.workspace.recent").contest_problems(contest.dir, contest.problem, cfg)
     if #files == 0 then
         return {}
     end
-    local submit = require("tuna.submit")
+    local submit = require("tuna.problem.submit")
     local counts = { accepted = 0, rejected = 0, partial = 0 }
     local answerable = false
     for _, file in ipairs(files) do
@@ -221,7 +221,7 @@ end
 ---the board says exactly what `:Tuna last` would do, and the pinned problems.
 ---@return table[] contests, table[] problems, table[] pinned
 local function recent_entries()
-    local recent = require("tuna.recent")
+    local recent = require("tuna.workspace.recent")
     local st = recent.snapshot() or {}
     local contests = entries_of(st.contests or {}, function(_, c)
         return c.name or vim.fn.fnamemodify(c.dir or "", ":t"), c.judge
@@ -276,7 +276,7 @@ local function command_entries(sol, cur)
         local cfg = config.get_buffer_config(sol)
         local mode = tools.resolve_mode(path, cfg)
         local forced = tools.get_mode(path)
-        local compare = require("tuna.compare")
+        local compare = require("tuna.run.compare")
         local cmp = tools.get_compare(path)
         local cmp_label = cmp and (compare.method_name(cmp) .. ", forced")
             or (compare.method_name(cfg.output_compare_method) .. ", configured")
@@ -299,11 +299,11 @@ local function command_entries(sol, cur)
         add("Run all versions", switch("all"))
         add("Stress test", switch("stress"))
         add("Interactive", switch("interactive"))
-        add("Show results UI", function()
-            commands.show_results_ui(sol)
+        add("Show runner UI", function()
+            commands.show_runner_ui(sol)
         end)
         add("Submit", function()
-            require("tuna.submit").submit(sol)
+            require("tuna.problem.submit").submit(sol)
         end)
         add("Add testcase", function()
             commands.execute({ "testcase", "add" })
@@ -317,18 +317,18 @@ local function command_entries(sol, cur)
         add("Compare: " .. cmp_label, function()
             commands.cycle_compare(sol)
         end)
-        for _, role in ipairs(require("tuna.tools").SCAFFOLDS) do
+        for _, role in ipairs(require("tuna.run.tools").SCAFFOLDS) do
             add("Scaffold " .. role, function()
-                require("tuna.scaffold").create(role, cur)
+                require("tuna.workspace.scaffold").create(role, cur)
             end)
         end
         add("Next problem", function()
-            require("tuna.navigate").go(1)
+            require("tuna.workspace.navigate").go(1)
         end)
         add("Previous problem", function()
-            require("tuna.navigate").go(-1)
+            require("tuna.workspace.navigate").go(-1)
         end)
-        add(require("tuna.recent").is_pinned(path) and "Unpin this problem" or "Pin this problem", function()
+        add(require("tuna.workspace.recent").is_pinned(path) and "Unpin this problem" or "Pin this problem", function()
             commands.toggle_pin(sol)
         end)
     end
@@ -344,13 +344,13 @@ local function command_entries(sol, cur)
         commands.execute({ "download", "contest" })
     end)
     add("Scratch", function()
-        require("tuna.scratch").start()
+        require("tuna.workspace.scratch").start()
     end)
     add("Library", function()
-        require("tuna.library").open(cur)
+        require("tuna.workspace.library").open(cur)
     end)
     add("Clean unused files", function()
-        require("tuna.clean").clean(sol)
+        require("tuna.workspace.clean").clean(sol)
     end)
     return out
 end
@@ -516,7 +516,7 @@ function M.open(bufnr)
         labels[i] = c.label
     end
 
-    require("tuna.widgets").panels({
+    require("tuna.ui.widgets").panels({
         { title = "Contests", format = format(1), column = 1 },
         { title = "Problems", format = format(2), column = 1 },
         { title = "Pinned", format = format(3), column = 1 },

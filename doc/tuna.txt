@@ -351,16 +351,19 @@ tuna window has focus. >lua
                 {
                     function() return require("tuna").lualine_component() end,
                     cond = function()
-                        return require("tuna.download").is_downloading()
+                        local download = require("tuna.problem.download")
+                        return download.is_downloading()
                     end,
                 },
                 {
-                    function() return require("tuna.submit").status() end,
+                    function()
+                        return require("tuna.problem.submit").status()
+                    end,
                     cond = function()
-                        return require("tuna.submit").is_submitting()
+                        return require("tuna.problem.submit").is_submitting()
                     end,
                     color = function()
-                        return require("tuna.submit").status_hl()
+                        return require("tuna.problem.submit").status_hl()
                     end,
                 },
             },

@@ -1,4 +1,4 @@
--- lua/tuna/navigate.lua
+-- lua/tuna/workspace/navigate.lua
 --
 -- Contest navigation: `:Tuna next` / `:Tuna prev` step from one problem of a contest
 -- to the next, without leaving the editor to find the file. A contest downloaded by
@@ -13,7 +13,7 @@
 
 local utils = require("tuna.utils")
 local config = require("tuna.config")
-local tools = require("tuna.tools")
+local tools = require("tuna.run.tools")
 
 local M = {}
 

@@ -1,4 +1,4 @@
--- lua/tuna/testcases.lua
+-- lua/tuna/problem/testcases.lua
 --
 -- Reads and writes testcases. A "testcase table" (tctbl) maps a 0-based index
 -- to `{ input = string?, output = string? }`. Three interchangeable storage
@@ -734,7 +734,7 @@ end
 ---Create or replace a single testcase for a buffer. Saving a testcase **stores** it,
 ---even with nothing in it: an empty input is written as an empty file rather than as
 ---the removal an empty write means in bulk, so a testcase never disappears because it
----was saved. Removing one is `buf_delete_testcase`, which is what the results UI's
+---was saved. Removing one is `buf_delete_testcase`, which is what the runner UI's
 ---delete key and `:Tuna testcase delete` call — one way in, and an undoable one.
 ---
 ---The **answer** is the exception, because an empty one is ambiguous where an empty
@@ -1016,7 +1016,7 @@ end
 ---testcase behind.
 ---
 ---`input`/`expected` override what is stored, for a caller holding text the user has
----typed but not yet written — the results UI, where the markers are put in by editing
+---typed but not yet written — the runner UI, where the markers are put in by editing
 ---the pane. The split writes every case, `tcnum` included, so that edit is committed
 ---by the split itself rather than by a save that would first run the marked-up input
 ---as if it were a testcase.
@@ -1165,7 +1165,7 @@ function M.offer_case_counts(bufnr, numbers, original_input, on_settled)
         on_settled()
     end
 
-    require("tuna.widgets").menu({
+    require("tuna.ui.widgets").menu({
         ("Yes: %d becomes %d here, and each new testcase starts with 1"):format(total, remaining),
         "No, leave the numbers alone",
     }, ("Testcase %d starts with '%d', is that a case count?"):format(numbers[1], total), function(idx)

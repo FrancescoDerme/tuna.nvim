@@ -11,7 +11,7 @@
 
 local api = vim.api
 local utils = require("tuna.utils")
-local surface = require("tuna.surface")
+local surface = require("tuna.ui.surface")
 
 local M = {}
 

@@ -1,4 +1,4 @@
--- lua/tuna/sidecar.lua
+-- lua/tuna/problem/sidecar.lua
 --
 -- The per-problem sidecar: a small JSON file (`problem_store_file`, `.tuna.json` by
 -- default) written beside a problem's source, holding what tuna knows about that
@@ -16,7 +16,7 @@
 --   run    = { [basename] = { mode, source, checker, compare } }
 --                         — the per-problem run state of `tools.lua`
 --   results = { [basename] = { passed, total, hash } }
---                         — the local verdict of the last finished run (`runner/core.lua`)
+--                         — the local verdict of the last finished run (`run/core.lua`)
 --
 -- The two per-file sections are keyed by file *basename* rather than by directory,
 -- because a folder may hold several problems (`a.cpp`, `b.cpp`) as easily as one
@@ -73,7 +73,7 @@ function M.read(dir, cfg)
 end
 
 ---Write a sidecar table back to disk. A sidecar travels with a problem's folder, so there is
----nothing to write for a path that has no folder: a buffer that is not a file (a results pane,
+---nothing to write for a path that has no folder: a buffer that is not a file (a runner UI pane,
 ---named `tuna://…`) would otherwise leave a `tuna:/…` tree wherever the editor was started.
 ---@param dir string
 ---@param cfg table?

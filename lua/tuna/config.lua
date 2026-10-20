@@ -539,7 +539,7 @@ M.defaults = {
     floating_border = "rounded",
     floating_border_highlight = "FloatBorder",
     -- Plugin-wide keys to move focus between panes, in every UI with more than one: the
-    -- results UI, the testcase editor, a menu and its preview, the `:Tuna clean` form and
+    -- runner UI, the testcase editor, a menu and its preview, the `:Tuna clean` form and
     -- the `:Tuna` menu. Tuna handles this itself so it works across floats, where the
     -- built-in `<C-w>hjkl` can't reach. Given as { left, down, up, right }, and they work
     -- while typing too.
@@ -559,7 +559,7 @@ M.defaults = {
     },
     -- The standalone testcase editor (`:Tuna testcase add`/`edit`): input and expected
     -- output side by side, each pane `width` × `height` of the editor, moved between with
-    -- `switch_window_keys` (left and right). As in the results UI, `:w` saves, `:wq` and
+    -- `switch_window_keys` (left and right). As in the runner UI, `:w` saves, `:wq` and
     -- `:x` save and close, and `q` or `cancel_keys` close, asking first about an edit not
     -- saved.
     editor_ui = {
@@ -569,7 +569,7 @@ M.defaults = {
         show_rnu = false, -- relative line numbers
     },
     -- The keys of every list: the menus tuna asks its questions in, the `:Tuna clean` form,
-    -- the `:Tuna` menu and the results UI's testcase list. `focus_next`/`focus_prev` move
+    -- the `:Tuna` menu and the runner UI's testcase list. `focus_next`/`focus_prev` move
     -- one entry (a count moves that many), wrapping around at the ends, and `submit`/`close`
     -- act in the menus and forms (`close` adds to `cancel_keys`).
     picker_ui = {
@@ -662,7 +662,7 @@ M.defaults = {
             show_rnu = false,
         },
     },
-    -- The results UI as floats (`runner_ui.interface = "popup"`): the grid's share of the
+    -- The runner UI as floats (`runner_ui.interface = "popup"`): the grid's share of the
     -- editor, and its layout.
     popup_ui = {
         total_width = 0.8,
@@ -682,7 +682,7 @@ M.defaults = {
             { 4, { { 1, "eo" }, { 1, "si" } } },
         },
     },
-    -- The results UI as real windows (`runner_ui.interface = "split"`): where the frame
+    -- The runner UI as real windows (`runner_ui.interface = "split"`): where the frame
     -- opens, and its share of the editor, `total_width` beside it (left, right) or
     -- `total_height` below it (top, bottom). `relative_to_editor` takes that share of the
     -- whole editor, false of the window it opens from.

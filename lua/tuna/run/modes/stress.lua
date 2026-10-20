@@ -1,4 +1,4 @@
--- lua/tuna/stress.lua
+-- lua/tuna/run/modes/stress.lua
 --
 -- Stress testing: hunt for inputs on which the current solution disagrees with a
 -- trusted bruteforce. A generator produces a random input (seeded by a number new for
@@ -8,7 +8,7 @@
 -- runner uses (so checker-based problems with multiple correct answers work too).
 -- Every counterexample — a wrong answer, a crash, or a timeout — is appended as a
 -- new testcase (so it doubles as a regression test) and shown in a dedicated
--- results UI. The search also re-runs any testcases that already exist, beside it, and while
+-- runner UI. The search also re-runs any testcases that already exist, beside it, and while
 -- it hunts it shows a row of its own, numbered as the counterexample it is looking
 -- for would be.
 --
@@ -23,16 +23,16 @@
 -- plus the live iteration count, are surfaced in the UI's status line.
 --
 -- Reuse: `runner.new()` resolves the solution's compile/run commands, working
--- directories, and checker; `checker.judge()` decides each verdict; the results
--- UI is the same `runner_ui` every mode drives, through a `RunnerCore` subclass.
+-- directories, and checker; `checker.judge()` decides each verdict; the runner
+-- UI is the same runner UI every mode drives, through a `RunnerCore` subclass.
 
 local config = require("tuna.config")
 local utils = require("tuna.utils")
-local runner = require("tuna.runner")
-local checker = require("tuna.checker")
-local testcases = require("tuna.testcases")
-local tools = require("tuna.tools")
-local core = require("tuna.runner.core")
+local runner = require("tuna.run")
+local checker = require("tuna.run.checker")
+local testcases = require("tuna.problem.testcases")
+local tools = require("tuna.run.tools")
+local core = require("tuna.run.core")
 
 local M = {}
 
@@ -99,7 +99,7 @@ end
 ---@param opts { win: integer?, before: fun()? }?
 local function offer_helpers(absent, bufnr, opts)
     local title = "Stress needs a " .. table.concat(absent, " and a ")
-    require("tuna.scaffold").create_missing(absent, bufnr, title, opts)
+    require("tuna.workspace.scaffold").create_missing(absent, bufnr, title, opts)
 end
 
 ---What the `?` legend adds for a stress run: the row the search is shown on, and what the
@@ -705,7 +705,7 @@ function M.run(bufnr, count_override, opts)
     -- checker each get a pane beside it.
     sr:plan_builds({ gen, ref, sr.checker })
 
-    -- Open the results UI with the rows listed (the Compile row, the testcases on disk and the
+    -- Open the runner UI with the rows listed (the Compile row, the testcases on disk and the
     -- search's row) right away.
     sr:load_testcases()
     if opts.show_only then

@@ -1,4 +1,4 @@
--- lua/tuna/clean.lua
+-- lua/tuna/workspace/clean.lua
 --
 -- `:Tuna clean` — remove files that were created but never used: solution files
 -- and scaffolding (checker/gen/brute/interactor) that still hold nothing but the
@@ -24,7 +24,7 @@
 local api = vim.api
 local config = require("tuna.config")
 local utils = require("tuna.utils")
-local widgets = require("tuna.widgets")
+local widgets = require("tuna.ui.widgets")
 
 local M = {}
 
@@ -139,7 +139,7 @@ end
 ---@return table<string, string>
 local function tool_roles(cfg)
     local map = {}
-    for _, role in ipairs(require("tuna.tools").ROLES) do
+    for _, role in ipairs(require("tuna.run.tools").ROLES) do
         for _, name in ipairs(cfg.tool_names[role] or {}) do
             map[name] = role
         end
@@ -179,7 +179,7 @@ local function templates_of(full, ext, role, cfg, cache)
     cache["\0glob"] = cache["\0glob"] or {}
     local itself = vim.fs.normalize(full)
     local out = {}
-    for _, path in ipairs(require("tuna.scaffold").templates(role, cfg, full, ext, cache["\0glob"])) do
+    for _, path in ipairs(require("tuna.workspace.scaffold").templates(role, cfg, full, ext, cache["\0glob"])) do
         if vim.fs.normalize(path) == itself then
             return nil
         end
@@ -292,7 +292,7 @@ local function candidate_dirs(cfg)
     add(cwd, ("cwd (%s)"):format(cwd))
     add(base_dir_of(cfg.downloaded_problems_path))
     add(base_dir_of(cfg.downloaded_contests_directory))
-    for _, p in ipairs(require("tuna.scaffold").configured_paths(cfg)) do
+    for _, p in ipairs(require("tuna.workspace.scaffold").configured_paths(cfg)) do
         add(base_dir_of(p))
     end
     return dirs, labels
@@ -368,7 +368,7 @@ local function scan(dir, cfg, depth, threshold)
                             rel = name,
                             reason = reason,
                             sim = sim or 0,
-                            pinned = require("tuna.recent").is_pinned(full),
+                            pinned = require("tuna.workspace.recent").is_pinned(full),
                         }
                     end
                 end
@@ -829,7 +829,7 @@ local function confirm_each(files, i, restore, stats, ui, done)
                 stats.artifacts[into] = stats.artifacts[into] or {}
                 stats.artifacts[into][(vim.fs.basename(f.path):gsub("%.[^.]*$", ""))] = true
                 drop_buffer(f.path)
-                require("tuna.recent").unpin(f.path)
+                require("tuna.workspace.recent").unpin(f.path)
             else
                 utils.notify("clean: could not delete " .. f.rel .. ".", "WARN")
             end

@@ -6,7 +6,7 @@
 -- since nothing records which one a file came from.
 
 local t = dofile("tests/harness.lua")
-local clean = require("tuna.clean")._test
+local clean = require("tuna.workspace.clean")._test
 local config = require("tuna.config")
 
 local dir = t.tempdir()
@@ -55,7 +55,7 @@ t.has("while a file of the same text elsewhere is", reason(fell_back, cfg), "100
 
 -- With nothing configured, a solution comes from tuna's own starter, header filled in.
 cfg = cfg_with(nil)
-local scaffold = require("tuna.scaffold")
+local scaffold = require("tuna.workspace.scaffold")
 local starter = dir .. "/starter/sol.cpp"
 local task = { name = "A. Example", group = "Codeforces - Round 1", url = "https://codeforces.com/contest/1/problem/A" }
 vim.fn.mkdir(dir .. "/starter", "p")
@@ -109,7 +109,7 @@ t.ok("and a run that removed nothing has no artifacts at all", not clean.is_arti
 -- Each prompt starts on the answer last given, so a run of files (or directories) that
 -- all get the same answer costs one key each.
 do
-    local widgets = require("tuna.widgets")
+    local widgets = require("tuna.ui.widgets")
     local real_menu = widgets.menu
     local rows, answers = {}, {}
     widgets.menu = function(_, _, on_choice, _, _, _, _, row)
@@ -142,8 +142,8 @@ end
 -- A pinned problem says so, and its prompt starts on Keep whatever was answered before,
 -- since it was put aside on purpose; deleting it all the same unpins it.
 do
-    local widgets = require("tuna.widgets")
-    local recent = require("tuna.recent")
+    local widgets = require("tuna.ui.widgets")
+    local recent = require("tuna.workspace.recent")
     local real_menu = widgets.menu
     local pdir = t.tempdir()
     t.write(pdir, "a.cpp", "")

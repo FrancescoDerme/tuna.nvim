@@ -1,4 +1,4 @@
--- lua/tuna/submit.lua
+-- lua/tuna/problem/submit.lua
 --
 -- Submit the current solution to an online judge, and show the judge's verdict. A small
 -- **provider registry** (`M.providers[name]`) does the submitting from a resolved context:
@@ -24,7 +24,7 @@ local M = {}
 -- Per-problem sidecar (written by download, read as a URL fallback here)
 --------------------------------------------------------------------------------
 
-local sidecar = require("tuna.sidecar")
+local sidecar = require("tuna.problem.sidecar")
 
 -- Forward declaration: `persist_task` below prunes an expired mirror, and the routing
 -- rule that decides what "expired" means lives with the other URL logic further down.

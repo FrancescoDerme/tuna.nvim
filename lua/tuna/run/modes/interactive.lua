@@ -1,4 +1,4 @@
--- lua/tuna/interactive.lua
+-- lua/tuna/run/modes/interactive.lua
 --
 -- Interactive problems: the solution talks to something over stdio, turn by turn.
 -- Tuna offers three *sources* for the other side of that conversation:
@@ -19,18 +19,18 @@
 -- `vim.system` only hands back stdout when a process *finishes*, so it can't cross-
 -- wire live processes. We drop to `vim.uv.spawn` and forward bytes between pipes by
 -- hand. Reuse: `runner.new()` resolves the solution's compile/run commands, dirs and
--- checker; the results UI is the shared `runner_ui` (this `InteractiveRunner` is a
+-- checker; the runner UI is the shared one (this `InteractiveRunner` is a
 -- `RunnerCore` subclass, like the normal and stress runners).
 
 local api = vim.api
 local uv = vim.uv
 local config = require("tuna.config")
 local utils = require("tuna.utils")
-local runner = require("tuna.runner")
-local checker = require("tuna.checker")
-local testcases = require("tuna.testcases")
-local tools = require("tuna.tools")
-local core = require("tuna.runner.core")
+local runner = require("tuna.run")
+local checker = require("tuna.run.checker")
+local testcases = require("tuna.problem.testcases")
+local tools = require("tuna.run.tools")
+local core = require("tuna.run.core")
 
 local M = {}
 
@@ -151,7 +151,7 @@ end
 ---@param bufnr integer
 ---@param opts { win: integer?, before: fun()? }?
 local function offer_interactor(bufnr, opts)
-    require("tuna.scaffold").create_missing({ "interactor" }, bufnr, "The interactor source needs an interactor", opts)
+    require("tuna.workspace.scaffold").create_missing({ "interactor" }, bufnr, "The interactor source needs an interactor", opts)
 end
 
 --------------------------------------------------------------------------------

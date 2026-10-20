@@ -1,4 +1,4 @@
--- lua/tuna/tools.lua
+-- lua/tuna/run/tools.lua
 --
 -- Helper programs, the sibling files a problem folder grows around a solution (a checker, a
 -- generator, a bruteforce, an interactor), and how each problem is run.
@@ -363,7 +363,7 @@ end
 ---`stress.generator`, `stress.bruteforce`, `interactive.interactor`) is used instead of a
 ---sibling file found through `tool_names`. A string there is a path to a helper file, a
 ---table an `{ exec, args }` command. Nothing is cached, so what is on disk now decides. The
----spec carries its `role`, which is what the results UI keys its build pane by.
+---spec carries its `role`, which is what the runner UI keys its build pane by.
 ---@param role "checker"|"generator"|"bruteforce"|"interactor"
 ---@param solution string absolute path of the solution
 ---@param cfg table resolved configuration
@@ -754,7 +754,7 @@ local function state_for(path)
     if not state[path] then
         local s = {}
         if path ~= "" then
-            local stored = require("tuna.sidecar").get_entry(path, "run")
+            local stored = require("tuna.problem.sidecar").get_entry(path, "run")
             if stored then
                 -- Validated on the way in: the sidecar is a plain file a user may edit
                 -- (or copy between problems), and a nonsense mode would send a bare
@@ -787,10 +787,10 @@ local function persist(path)
     end
     local s = state[path]
     if not s or is_default(s) then
-        require("tuna.sidecar").set_entry(path, "run", nil)
+        require("tuna.problem.sidecar").set_entry(path, "run", nil)
         return
     end
-    require("tuna.sidecar").set_entry(path, "run", {
+    require("tuna.problem.sidecar").set_entry(path, "run", {
         mode = s.mode,
         source = s.source,
         checker = s.checker,

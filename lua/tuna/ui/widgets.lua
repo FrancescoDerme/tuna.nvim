@@ -1,4 +1,4 @@
--- lua/tuna/widgets.lua
+-- lua/tuna/ui/widgets.lua
 --
 -- The floating dialogs every question tuna asks goes through, built on Neovim's own
 -- window API:
@@ -24,7 +24,7 @@
 
 local api = vim.api
 local utils = require("tuna.utils")
-local surface = require("tuna.surface")
+local surface = require("tuna.ui.surface")
 local config = require("tuna.config")
 
 local M = {}
@@ -239,7 +239,7 @@ end
 
 ---Move the cursor by `delta` rows in a list, `v:count1` times, wrapping around. What
 ---`picker_ui.mappings.focus_next`/`focus_prev` do in every list tuna draws: its menus, the
----form's and the `:Tuna` menu's lists, and the results UI's testcase list.
+---form's and the `:Tuna` menu's lists, and the runner UI's testcase list.
 ---@param winid integer
 ---@param count integer number of selectable rows
 ---@param delta integer -1 (previous) or +1 (next)
@@ -530,7 +530,7 @@ function M.editor(bufnr, tcnum, input_content, output_content, callback, restore
         map_keys(sw[4], { "n", "i" }, b, focus(editor.output_win))
     end
 
-    ---Close, asking first when the panes hold text not saved, as the results UI does: the
+    ---Close, asking first when the panes hold text not saved, as the runner UI does: the
     ---same three answers, and dismissing the question keeps editing, the safe answer a
     ---stray `<Esc>` gives. Text typed back to what was saved is nothing to lose.
     local function request_close()
@@ -565,7 +565,7 @@ function M.editor(bufnr, tcnum, input_content, output_content, callback, restore
     end
 
     -- Saving is Neovim's own: `:w` saves the testcase, `:wq` and `:x` save and close, as
-    -- in the results UI. Closing goes through the shared contract plus `q`/`Q`, in normal
+    -- in the runner UI. Closing goes through the shared contract plus `q`/`Q`, in normal
     -- mode only, so the first `<Esc>` only leaves insert mode, and asks before throwing
     -- an edit away.
     map_cancel({ editor.input_buf, editor.output_buf }, request_close, { normal = { "q", "Q" } })
@@ -1893,7 +1893,7 @@ function M.panels(sections, on_choice, restore_winid, on_close, header)
     end
 
     -- The plugin-wide pane keys, taken as { left, down, up, right }, move by position, the
-    -- way they move between the results UI's panes.
+    -- way they move between the runner UI's panes.
     local sw = cfg.switch_window_keys or {}
     local moves = { { -1, 0 }, { 0, 1 }, { 0, -1 }, { 1, 0 } }
 

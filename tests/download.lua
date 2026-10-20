@@ -8,7 +8,7 @@
 -- the testcases already there.
 
 local t = dofile("tests/harness.lua")
-local d = require("tuna.download")._test
+local d = require("tuna.problem.download")._test
 
 --------------------------------------------------------------------------------
 -- validate_task: repair what has an unambiguous reading, reject what does not
@@ -196,7 +196,7 @@ end
 --------------------------------------------------------------------------------
 
 require("tuna").setup({})
-local widgets = require("tuna.widgets")
+local widgets = require("tuna.ui.widgets")
 local real_menu, real_input = widgets.menu, widgets.input
 widgets.menu = function(_, _, on_choice)
     on_choice(1)
@@ -303,7 +303,7 @@ do
         scaffold = { templates = { solution = { dir .. "/t.$(JUDGE).$(FEXT)", dir .. "/t.$(FEXT)" } } },
         cd_downloaded_problems = false,
     })
-    local scratch = require("tuna.scratch")
+    local scratch = require("tuna.workspace.scratch")
     local sbuf = vim.api.nvim_create_buf(true, false)
     scratch.pending = { lines = { "solve();" }, row = 1, bufnr = sbuf }
     t.eq("a scratch folded in keeps the header of the template used", download_into(dir, "D/main.cpp"), {

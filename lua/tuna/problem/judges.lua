@@ -1,4 +1,4 @@
--- lua/tuna/judges.lua
+-- lua/tuna/problem/judges.lua
 --
 -- Turns Competitive Companion's `task.group` ("Judge - Contest") into a tidy
 -- `judge` + `contest` pair used by the download-path modifiers ($(JUDGE)/$(CONTEST))

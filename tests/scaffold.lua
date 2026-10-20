@@ -15,9 +15,9 @@ local function setup(opts)
 end
 setup()
 
-local scaffold = require("tuna.scaffold")
-local tools = require("tuna.tools")
-local widgets = require("tuna.widgets")
+local scaffold = require("tuna.workspace.scaffold")
+local tools = require("tuna.run.tools")
+local widgets = require("tuna.ui.widgets")
 
 -- Every question is a menu: answer it from here, and remember what it asked.
 local asked, answer
@@ -160,7 +160,7 @@ do
     said = t.capture_notifications()
     local dir, buf = problem()
     answer, asked = 1, nil
-    require("tuna.stress").run(buf, 1)
+    require("tuna.run.modes.stress").run(buf, 1)
     t.eq("stress with no helpers offers to write them", asked, {
         items = { "Create gen.cpp and brute.cpp", "Stop" },
         title = "Stress needs a generator and a bruteforce",
@@ -169,16 +169,16 @@ do
     t.eq("opens the first to be written", vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t"), "gen.cpp")
     t.eq("and lists the other", vim.fn.buflisted(dir .. "/brute.cpp"), 1)
     t.has("saying what to do next", said[#said], "created gen.cpp and brute.cpp, fill them in and run again.")
-    t.eq("without running anything", require("tuna.stress").active[buf], nil)
+    t.eq("without running anything", require("tuna.run.modes.stress").active[buf], nil)
 
     dir, buf = problem()
     answer = 2
-    require("tuna.stress").run(buf, 1)
+    require("tuna.run.modes.stress").run(buf, 1)
     t.eq("stopping writes nothing", vim.fn.glob(dir .. "/gen.*") .. vim.fn.glob(dir .. "/brute.*"), "")
 
     dir, buf = problem()
     answer, asked = 1, nil
-    require("tuna.interactive").run(buf, { "interactor" })
+    require("tuna.run.modes.interactive").run(buf, { "interactor" })
     t.eq("the interactor source offers its interactor", asked and asked.items, { "Create interactor.cpp", "Stop" })
     t.eq("and opens it", vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t"), "interactor.cpp")
 
@@ -188,7 +188,7 @@ do
     dir, buf = problem()
     answer, asked = 1, nil
     said = t.capture_notifications()
-    require("tuna.stress").run(buf, 1)
+    require("tuna.run.modes.stress").run(buf, 1)
     t.eq("a broken configured helper offers nothing", asked, nil)
     t.has("and says what is wrong with it", said[#said], "does not exist")
     setup()
@@ -316,7 +316,7 @@ end
 -- `clean` tells an untouched scaffold by the template it was written from, and says which.
 local cfg = require("tuna.config").get_buffer_config(buf)
 local roles = { gen = "generator" }
-local reason = require("tuna.clean")._test.classify(dir .. "/gen.cpp", "cpp", "gen", roles, cfg, 0.9, {})
+local reason = require("tuna.workspace.clean")._test.classify(dir .. "/gen.cpp", "cpp", "gen", roles, cfg, 0.9, {})
 t.has("clean knows an untouched scaffold for what it is", reason, "match to generator scaffold")
 
 -- Completion offers the roles, then the languages a role has a template in.

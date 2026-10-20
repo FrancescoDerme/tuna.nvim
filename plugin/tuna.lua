@@ -13,7 +13,7 @@ vim.g.loaded_tuna = true
 
 vim.api.nvim_create_user_command("Tuna", function(opts)
     if #opts.fargs == 0 then
-        -- Bare `:Tuna` opens the menu, for the solution behind a results pane when that
+        -- Bare `:Tuna` opens the menu, for the solution behind a runner UI pane when that
         -- is where it is typed.
         require("tuna.menu").open(require("tuna.commands").target_buffer())
         return
@@ -56,7 +56,7 @@ vim.api.nvim_create_autocmd("BufEnter", {
     group = augroup,
     callback = function(ev)
         if vim.bo[ev.buf].buftype == "" and vim.api.nvim_buf_get_name(ev.buf) ~= "" then
-            require("tuna.recent").track(ev.buf)
+            require("tuna.workspace.recent").track(ev.buf)
         end
     end,
     desc = "Remember the problem Tuna should return to with `:Tuna last problem`",
@@ -66,7 +66,7 @@ vim.api.nvim_create_autocmd("VimLeavePre", {
     group = augroup,
     callback = function()
         -- Only a session that loaded `recent` has anything of it to save.
-        local recent = package.loaded["tuna.recent"]
+        local recent = package.loaded["tuna.workspace.recent"]
         if recent then
             recent.flush()
         end
@@ -88,7 +88,7 @@ vim.api.nvim_create_autocmd("BufReadPost", {
         local config = package.loaded["tuna.config"]
         local store = config and config.current_setup.problem_store_file or ".tuna.json"
         if vim.uv.fs_stat(vim.fs.dirname(vim.fs.normalize(path)) .. "/" .. store) then
-            require("tuna.submit").restore(ev.buf)
+            require("tuna.problem.submit").restore(ev.buf)
         end
     end,
     desc = "Restore a persisted Tuna submit verdict for a solution buffer",

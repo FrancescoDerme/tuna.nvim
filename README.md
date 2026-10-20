@@ -229,12 +229,12 @@ require("lualine").setup({
         lualine_x = {
             {
                 function() return require("tuna").lualine_component() end,
-                cond = function() return require("tuna.download").is_downloading() end,
+                cond = function() return require("tuna.problem.download").is_downloading() end,
             },
             {
-                function() return require("tuna.submit").status() end,
-                cond = function() return require("tuna.submit").is_submitting() end,
-                color = function() return require("tuna.submit").status_hl() end,
+                function() return require("tuna.problem.submit").status() end,
+                cond = function() return require("tuna.problem.submit").is_submitting() end,
+                color = function() return require("tuna.problem.submit").status_hl() end,
             },
         },
     },

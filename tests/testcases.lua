@@ -5,7 +5,7 @@
 -- rooted, and the `files` backend's round trip.
 
 local t = dofile("tests/harness.lua")
-local tc = require("tuna.testcases")
+local tc = require("tuna.problem.testcases")
 
 --------------------------------------------------------------------------------
 -- split_testcase: markers come in pairs
@@ -232,7 +232,7 @@ t.eq("which loads back as an empty answer", kback[0].output, "")
 t.eq("beside its input", kback[0].input, "5\n")
 -- ...and it is judged, unlike no answer at all: this is the whole point of the
 -- distinction, so it is checked where it lands rather than only where it is stored.
-local cmp = require("tuna.compare")
+local cmp = require("tuna.run.compare")
 t.eq("an empty answer judges a silent solution correct", cmp.compare_output("", kback[0].output, "squish"), true)
 t.eq("and a talkative one wrong", cmp.compare_output("hello\n", kback[0].output, "squish"), false)
 t.eq("while no answer is no verdict", cmp.compare_output("hello\n", nil, "squish"), nil)
@@ -340,7 +340,7 @@ do
     t.write(dir, "one.cpp", "int main(){}\n")
     t.write(dir, "one_input0.txt", "1\n")
     vim.cmd("edit " .. dir .. "/one.cpp")
-    local widgets = require("tuna.widgets")
+    local widgets = require("tuna.ui.widgets")
     local C = require("tuna.commands")
     local real = { editor = widgets.editor, menu = widgets.menu }
     local edited, asked, choices
@@ -460,7 +460,7 @@ end
 -- what will be renamed, and the run goes ahead after every answer, dismissal included.
 do
     local C = require("tuna.commands")
-    local widgets = require("tuna.widgets")
+    local widgets = require("tuna.ui.widgets")
     require("tuna").setup({})
     local d = t.tempdir()
     for name, text in pairs({ ["main.cpp"] = "", ["main2.cpp"] = "", ["main_input0.txt"] = "1\n" }) do
