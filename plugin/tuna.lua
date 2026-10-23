@@ -74,9 +74,11 @@ vim.api.nvim_create_autocmd("VimLeavePre", {
     desc = "Persist Tuna's recent problems and contests",
 })
 
-vim.api.nvim_create_autocmd("BufReadPost", {
+vim.api.nvim_create_autocmd({ "BufReadPost", "BufWritePost" }, {
     group = augroup,
     callback = function(ev)
+        -- Read, and written again: an edit hides the verdict, and a write that takes the
+        -- source back to the one submitted brings it back.
         -- Only a file with a sidecar beside it can have a verdict to restore, the one
         -- `submit.restore` reads (the setup's `problem_store_file`), and looking for it
         -- is a stat. `setup()` loads `config`, so a session it has not loaded uses the

@@ -686,9 +686,12 @@ function M.clear(bufnr)
     refresh_status()
 end
 
----Arm a one-shot autocmd that clears the buffer's verdict as soon as the file is
----edited — a shown verdict is stale the moment its source changes. Re-arming
----replaces any previous arm (the augroup is per buffer, cleared each time).
+---Arm a one-shot autocmd that hides the buffer's verdict as soon as the file is
+---edited — a shown verdict is stale the moment its source changes. The stored one stays:
+---it counts only while the source hashes as the one submitted (`still_current`), so it
+---comes back with that source (`restore` runs on a write too), and a change reported for
+---text that did not change costs nothing. Re-arming replaces any previous arm (the augroup
+---is per buffer, cleared each time).
 ---@param bufnr integer
 local function arm_invalidation(bufnr)
     if not (bufnr and vim.api.nvim_buf_is_valid(bufnr)) then
@@ -701,10 +704,7 @@ local function arm_invalidation(bufnr)
         once = true,
         desc = "Invalidate the Tuna submit verdict when the solution is edited",
         callback = function(ev)
-            M.clear(ev.buf) -- hide the lualine verdict now …
-            -- … and drop the persisted verdict, so it doesn't linger in the sidecar
-            -- (or get restored on a later reopen). Global config for the store path.
-            sidecar.set_entry(vim.api.nvim_buf_get_name(ev.buf), "submit", nil, config.current_setup)
+            M.clear(ev.buf)
         end,
     })
 end
@@ -808,7 +808,8 @@ function M.reports_verdict(path)
 end
 
 ---Restore a persisted final verdict for a buffer from its sidecar, so the lualine
----indicator survives a restart. Called from the `BufReadPost` autocmd.
+---indicator survives a restart, and comes back when a write returns the source to the
+---one submitted. Called from the `BufReadPost` and `BufWritePost` autocmds.
 ---@param bufnr integer
 function M.restore(bufnr)
     local path = buf_path(bufnr)

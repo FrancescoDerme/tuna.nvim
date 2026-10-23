@@ -20,14 +20,28 @@ specific Vim error about a buffer the user never opened.
   (`<C-R>` equals `<C-r>`).
 - `render(buf, content, opts)`: no write when unchanged, `undolevels = -1` around the write,
   `modified` cleared.
-- `float(buf, opts)` with `LAYER`: grid 50, zoom 60, overlay 70, dialog 80. Neovim's default
-  is 50, so always set a layer. With `laststatus=3`, and only then, a float starts with the
-  `statusline` of the window it opens over: a new window otherwise takes the global value,
-  which lualine leaves blank until its next refresh, so the one bar would flicker whenever a
-  float takes focus. With any other `laststatus` it keeps the empty one `style = "minimal"`
-  gives it, because from Neovim 0.12 a float with a `statusline` of its own draws it inside
-  its border, showing the pane's `tuna://` name.
+- `float(buf, opts)` with `LAYER`: grid 50, zoom 60, overlay 70, dialog 80. Neovim's default is
+  50, so always set a layer. Every title is centred (`title_pos`), one given after the window
+  opens too (`fill_preview`), where Neovim would put it on the left; the conformance check holds
+  every float to it. With `laststatus=3`, and only then, a float starts with the `statusline` of
+  the window it opens over: a new window otherwise takes the global value, which lualine leaves
+  blank until its next refresh, so the one bar would flicker whenever a float takes focus. With
+  any other `laststatus` it keeps the empty one `style = "minimal"` gives it, because from
+  Neovim 0.12 a float with a `statusline` of its own draws it inside its border, showing the
+  pane's `tuna://` name.
 - `group(wins, on_close)`: windows that close together, keyed on `WinClosed`.
+- `no_completion(buf)`: a buffer typed into as a prompt (the search pane, `input`, the form's
+  custom row) keeps completion plugins out: blink.cmp's `vim.b.completion = false`, and
+  nvim-cmp's `setup.buffer({ enabled = false })`, given when nvim-cmp is loaded, which a lazily
+  loaded one is on the prompt's own `InsertEnter`, so the prompt waits for that rather than
+  loading it. The runner UI's panes and the testcase editor hold data and are left alone.
+- `follow_cursorline(win)`: a reading pane (a preview, a runner UI detail pane or zoom, the
+  testcase editor's panes) has the user's `cursorline` only while it is the current window,
+  where it marks where they read; a list keeps its line always, since it marks the selection.
+  One `WinEnter`/`WinLeave` pair serves every followed window. The user's value is read from the
+  option's global scope, so tuna sets `cursorline` with local scope only, never through
+  `vim.wo`, which would also write the global value of the window it is set in and carry it into
+  windows split from it.
 
 **`widgets.lua`**
 - **Dismissal** is bound only through `map_cancel`, from `config.cancel_keys`
@@ -49,18 +63,27 @@ specific Vim error about a buffer the user never opened.
   `skip_close` keeps the panes' `WinClosed` from running the real close (which leaves insert
   mode) while they are replaced.
 - `menu`: optional `on_close`; `preview` (fixed lines or cursor-following `content(idx)`, colour
-  via `'syntax'` not `'filetype'`, list capped at `MENU_LIST_SHARE` of the height, read-only
-  and never left modified); `notice` pane above the menu, outside the focus cycle; `row` to
-  start the cursor on (a resize keeps the row it is on); `search(query)`, a one-row pane
+  via `'syntax'` not `'filetype'`, list capped at `MENU_LIST_SHARE` of the height, read-only and
+  never left modified), or several `panes` stacked, `content` then answering one table each: a
+  `fit` pane is as tall as the tallest content any item gives it, at most a third of the room,
+  and not drawn when none gives it any. `beside` puts them right of the search and the list, the
+  whole at a given size centred as the runner UI's grid, and there the pane keys move by
+  position, up and down a column and across to the pane level with most of the one left, so the
+  list leads to the code and the search pane to the notes. A `readout` pane (the library's
+  complexity) is passed over in both layouts, as the runner UI passes over its Run pane, and the
+  pane keys still lead out of it; `notice` pane above the menu, outside the focus cycle; `row`
+  to start the cursor on (a resize keeps the row it is on); `search(query)`, a one-row pane
   above the list, opened focused and typing, whose text the list is narrowed to (`shown`,
-  indices into `items`, which `on_choice` and `content` still get). The list keeps the height
-  of the whole, so it does not resize as it narrows. The change events (`TextChangedI`) are
-  not the only reader: `refilter` runs again before `<CR>` or a list key reads the list, and
-  a resize reads the pane itself, since keys arriving together (`fen<CR>`) run before the
-  event is delivered. While typing, only the list keys that type nothing (`<Down>`/`<Up>`)
-  move the list, so `j` and `k` can be searched for; the pane keys walk search, list and
-  preview, and arriving back in the search pane types again. A resize keeps the search, the
-  pane focused and whether it was typing.
+  indices into `items`, which `on_choice` and `content` still get). The list keeps the height of
+  the whole, so it does not resize as it narrows. The change events (`TextChangedI`) are not the
+  only reader: `refilter` runs again before `<CR>` or a list key reads the list, and a resize
+  reads the pane itself, since keys arriving together (`fen<CR>`) run before the event is
+  delivered. While typing, only the list keys that type nothing (`<Down>`/`<Up>`) move the list,
+  so `j` and `k` can be searched for; the pane keys walk search, list and preview, and arriving
+  back in the search pane types again only if it was left typing (`inserting`), as an editable
+  runner UI pane keeps the mode it was left in. Closing any of its panes by hand closes the
+  whole menu, as closing the list does. A resize keeps the search, the pane focused and whether
+  it was typing.
 - `panels`: lists in columns where `<CR>` acts on the focused list only (the `:Tuna` menu).
   `form`: stacked lists where `<CR>` submits every selection (clean). A `panels` section may
   carry `highlights`, byte-range spans drawn as extmarks in `tuna_panels`. They differ in what
@@ -84,13 +107,13 @@ specific Vim error about a buffer the user never opened.
 - Widgets are module singletons: `resize_widgets()` rebuilds them (with a `skip_close` guard),
   opening one over an existing instance closes the old windows, and buffers use
   `bufhidden = wipe`.
-- `open_float` sets what every widget float needs: `cursorline` with local scope (so the
-  global value never leaks), `wrap`, `keep_scrolloff`. `step_keys` turns
-  `switch_window_keys` into the next/previous keys of stacked panes (search, menu and
-  preview, form sections). **Panes move only with `switch_window_keys`, lists only with
-  `picker_ui.mappings.focus_next`/`focus_prev`, and Tab means nothing**, in every widget
-  and in the runner UI alike: one setting per kind of move. Every list moves through
+- `open_float` sets what every widget float needs: `cursorline` with local scope (so the global
+  value never leaks), `wrap`, `keep_scrolloff`. `step_keys` turns `switch_window_keys` into the
+  next/previous keys of stacked panes (the form's sections; a menu's stacked panes walk the same
+  way). **Panes move only with `switch_window_keys`, lists only with
+  `picker_ui.mappings.focus_next`/`focus_prev`, and Tab means nothing**, in every widget and in
+  the runner UI alike: one setting per kind of move. Every list moves through
   `widgets.move_cursor` (a count steps that many, the ends wrap), the menus, the form's
   sections, the `:Tuna` menu's lists and the runner UI's selector (bound on `tc` only, so
-  `j`/`k` in a detail pane still scroll it). `close` adds to `cancel_keys` rather than
-  repeating them.
+  `j`/`k` in a detail pane still scroll it). `close` adds to `cancel_keys` rather than repeating
+  them.

@@ -110,7 +110,6 @@ local function draw_pane(w, name, config, s, p)
         vim.wo[w.winid].number, vim.wo[w.winid].relativenumber = ui.show_nu, ui.show_rnu
     end
     vim.wo[w.winid].spell = false
-    vim.wo[w.winid].cursorline = selector
 end
 
 ---@param config table

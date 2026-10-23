@@ -138,14 +138,25 @@ problems and remembering them. The rules that hold everywhere are in the root `C
   wrapping.
 - **`library.lua`**: snippets are regions between `library.marker` guard comments in plain
   source files; files without guards are offered whole. Only files with the current buffer's
-  extension are shown, dotfiles and dot-directories left out at every depth, and
-  `library.path` goes through `expand_home`/`normalize_path`. Snippets are inserted dedented
-  and re-indented to the cursor line. `:Tuna lib` is one picker, a `widgets.menu` with a
-  `search` (`open`): the `catalogue` is read once when it opens, so an unclosed guard warns
-  once, and `rank` orders a search: `matchfuzzy` over `name file` (case-insensitive for a
-  lowercase query, words in any order), then the entries whose whitespace-free, lowercased
-  body contains the whitespace-free query. Fuzzy matching stops at names, because nearly
-  anything typed is scattered somewhere in a body. Don't add a file-then-snippet route or a
-  telescope picker beside it: the search covers a file (its name finds its snippets), and
-  telescope's preview cannot be entered to read the code. Arguments after `:Tuna lib` are
-  ignored, so a mapping written with `snippet` or `search` still opens it.
+  extension are shown, dotfiles and dot-directories left out at every depth, and `library.path`
+  goes through `expand_home`/`normalize_path`. Snippets are inserted dedented and re-indented to
+  the cursor line. A snippet's **notes** are the lines right under its start guard that begin
+  with the guard's own comment leader (what precedes the marker on its line), up to the first
+  that does not, so a blank line ends them in any language; from the line starting `Complexity:`
+  to their end they are its complexity, so a complexity a formatter wrapped stays whole. They
+  are kept out of `lines`, never inserted, and `first` is the code's first line. `:Tuna lib` is
+  one picker, a `widgets.menu` with a `search` and its panes `beside` (`open`): the `catalogue`
+  is read once when it opens, so an unclosed guard warns once, and `rank` orders a search:
+  `matchfuzzy` over `name file` (case-insensitive for a lowercase query, words in any order),
+  then the entries whose whitespace-free, lowercased notes contain the whitespace-free query,
+  then those whose body does. Fuzzy matching stops at names, because nearly anything typed is
+  scattered somewhere in a body. The list holds names alone, so it stays narrow beside the
+  panes; the code pane's title names the file. Beside it, Notes, Complexity and the code: the
+  complexity has a pane of its own, without its label, because at the end of the notes it would
+  move from entry to entry and long notes would push it out of view. Notes and Complexity are
+  `fit` panes, as tall as the longest of theirs in the library, so they do not jump between
+  entries. The picker's size is `library.width`/`height`, defaulting to the runner UI's
+  `popup_ui` share: options of its own, since `popup_ui` names the runner UI. Don't add a
+  file-then-snippet route or a telescope picker beside it: the search covers a file (its name
+  finds its snippets), and telescope's preview cannot be entered to read the code. Arguments
+  after `:Tuna lib` are ignored, so a mapping written with `snippet` or `search` still opens it.

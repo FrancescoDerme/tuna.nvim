@@ -42,13 +42,11 @@ function M.setup_highlight_groups()
         TunaCorrect = { ctermfg = "green", fg = "#00ff00" },
         TunaWarning = { ctermfg = "yellow", fg = "orange" },
         TunaWrong = { ctermfg = "red", fg = "#ff0000" },
-        -- The results-UI diff. The line-level groups follow the editor's own diff
+        -- The runner UI's diff. The lines one side lacks follow the editor's own diff
         -- colours, so they wear whatever the colorscheme uses for the same idea. The
         -- values that actually disagree do not: `DiffText` is a neutral background in
-        -- most themes, so over an already-highlighted line it reads as "selected"
-        -- rather than "wrong". They keep the text's own colour and take a red-tinted
-        -- background instead (see `wrong_bg` above).
-        TunaDiffChange = { link = "DiffChange" }, -- a line whose counterpart disagrees
+        -- most themes, so it reads as "selected" rather than "wrong". They keep the
+        -- text's own colour and take a red-tinted background instead (see `wrong_bg`).
         TunaDiffText = { bg = wrong_bg, ctermbg = 52 }, -- the tokens/characters that disagree
         TunaDiffAdd = { link = "DiffAdd" }, -- a line the expected output doesn't have
         TunaDiffDelete = { link = "DiffDelete" }, -- a line missing from the output

@@ -101,6 +101,13 @@ end
 t.eq("float: a value within tolerance is no difference", diff.compute("0.3000001\n", "0.3\n", { "float", tol = 1e-6 }).first, nil)
 local within = diff.compute("0.3000001 5\n", "0.3 6\n", { "float", tol = 1e-6 })
 t.eq("and on a line that is wrong, only the value that differs is marked", within.out[1] and within.out[1].spans, { { 10, 11 } })
+local short = diff.compute("2 1 1\n", "2 1 1 1\n", "squish")
+t.eq("a line with a token missing at its end is marked there, empty, and the token on the other", {
+    short.out[1] and short.out[1].spans,
+    short.exp[1] and short.exp[1].spans,
+}, { { { 5, 5 } }, { { 6, 7 } } })
+local gap = diff.compute("ac\n", "abc\n", "exact")
+t.eq("and a character missing mid-line, by characters, where it is missing", gap.out[1] and gap.out[1].spans, { { 1, 1 } })
 
 -- A checker that did not build judges nothing and says so on the row it could not judge, and
 -- nowhere else: the build step shows why, beside the other sources.

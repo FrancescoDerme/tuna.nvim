@@ -232,7 +232,9 @@ local function fill_preview(bufnr, winid, data, defaults)
 
     local title = data.title or defaults.title
     if winid and api.nvim_win_is_valid(winid) then
-        api.nvim_win_set_config(winid, { title = title and (" " .. title .. " ") or nil })
+        -- Centred, as every title tuna draws: a pane opened without one is given it here, and
+        -- Neovim would put it on the left.
+        api.nvim_win_set_config(winid, { title = title and (" " .. title .. " ") or nil, title_pos = title and "center" or nil })
         pcall(api.nvim_win_set_cursor, winid, { 1, 0 }) -- new content, read from the top
     end
 end
@@ -313,6 +315,7 @@ function M.input(title, default_text, on_submit, on_close)
 
     input.bufnr = api.nvim_create_buf(false, true)
     api.nvim_buf_set_lines(input.bufnr, 0, -1, false, { input.default_text })
+    surface.no_completion(input.bufnr)
 
     input.winid = open_float(input.bufnr, true, {
         width = width,
@@ -471,6 +474,7 @@ function M.editor(bufnr, tcnum, input_content, output_content, callback, restore
         })
         vim.wo[w].number = ui.show_nu
         vim.wo[w].relativenumber = ui.show_rnu
+        surface.follow_cursorline(w)
         return b, w
     end
 
@@ -582,13 +586,25 @@ end
 --------------------------------------------------------------------------------
 
 ---A menu's content pane: fixed lines, or with `content` the lines of the highlighted row.
+---A preview with `panes` is several panes stacked top to bottom, each described like a
+---preview of one pane, and `content` then answers one table per pane, in their order.
 ---@class tuna.MenuPreview
 ---@field title string?
 ---@field lines string[]?
 ---@field filetype string?
 ---@field width integer? pins the float's width, so a sequence of menus keeps its size
 ---@field height integer? pins the pane's height
----@field content (fun(idx: integer): { title: string?, lines: string[], filetype: string? })?
+---@field fit boolean? a pane as tall as the tallest content any item gives it, at most a third
+---  of the room, and not drawn when no item gives it any (not the last pane)
+---@field wrap boolean? wraps its lines at word boundaries
+---@field readout boolean? a line read at a glance (the library's complexity): the pane keys pass
+---  over it, as the runner UI's over its Run pane, and still lead out of it
+---@field panes tuna.MenuPreview[]? the panes, with `content`
+---@field beside { width: integer, height: integer }? the panes to the right of the search and
+---  list rather than under them, the whole float this size, borders included, centred as the
+---  runner UI's grid is (not with a `notice`)
+---@field content (fun(idx: integer): table)? `{ title, lines, filetype }`, or with `panes` a
+---  list of them
 
 ---@class tuna.MenuWidget
 ---@field ui_visible boolean
@@ -601,10 +617,10 @@ end
 ---@field winid integer?
 ---@field menu_buf integer?
 ---@field preview tuna.MenuPreview?
----@field preview_idx integer? the row the preview shows
+---@field preview_idx integer? the item the preview shows
 ---@field row integer? the row the cursor starts on
----@field preview_win integer?
----@field preview_buf integer?
+---@field previews { win: integer, buf: integer, i: integer, readout: boolean? }[] the preview
+---  panes drawn, top to bottom, `i` being the pane's place in `preview.panes`
 ---@field notice { title: string?, lines: string[] }?
 ---@field notice_win integer?
 ---@field notice_buf integer?
@@ -614,9 +630,31 @@ end
 ---@field search_win integer?
 ---@field search_buf integer?
 ---@field focus_pane "search"|"list"|"preview"? the pane a resize puts focus back in
----@field inserting boolean? whether a resize goes back to typing in the search pane
+---@field focus_preview integer? which of `previews` it is
+---@field inserting boolean? whether the search pane was left typing, so arriving back types again
 ---@field rebuilding boolean the windows are being closed to be opened again
-local menu = { ui_visible = false, query = "", shown = {}, rebuilding = false }
+local menu = { ui_visible = false, query = "", shown = {}, previews = {}, rebuilding = false }
+
+---The screen rows `lines` take in a window `width` columns wide that wraps them at word
+---boundaries ('linebreak').
+---@param lines string[]
+---@param width integer
+---@return integer
+local function wrapped_rows(lines, width)
+    local rows = 0
+    for _, line in ipairs(lines) do
+        rows = rows + 1
+        local used = 0
+        for word, gap in line:gmatch("(%S+)(%s*)") do
+            local w = api.nvim_strwidth(word)
+            if used > 0 and used + w > width then
+                rows, used = rows + 1, 0
+            end
+            used = used + w + #gap
+        end
+    end
+    return rows
+end
 
 ---Open a generic single-choice menu. `on_choice`
 ---receives the 1-based index of the picked item. An optional `preview` renders a
@@ -631,7 +669,7 @@ local menu = { ui_visible = false, query = "", shown = {}, rebuilding = false }
 ---@param on_close fun()? called when the menu is dismissed without a choice (Esc /
 ---  window closed) — so a caller that must always continue (e.g. download's batch
 ---  processor) isn't left hanging on a cancellation
----@param preview tuna.MenuPreview? content pane; with `content` it follows the highlighted
+---@param preview tuna.MenuPreview? content pane(s); with `content` they follow the highlighted
 ---  row (pin `width`/`height`)
 ---@param notice { title: string?, lines: string[] }? a read-only pane *above* the menu,
 ---  for something the user needs to know before choosing (e.g. that a scan was partial)
@@ -647,7 +685,9 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
         menu.skip_close = true
         menu.rebuilding = true
         close_win(menu.winid)
-        close_win(menu.preview_win)
+        for _, p in ipairs(menu.previews) do
+            close_win(p.win)
+        end
         close_win(menu.notice_win)
         close_win(menu.search_win)
         menu.rebuilding = false
@@ -666,8 +706,16 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
             menu.query = table.concat(api.nvim_buf_get_lines(menu.search_buf, 0, -1, false), " ")
         end
         local cur = api.nvim_get_current_win()
-        menu.focus_pane = (cur == menu.search_win and "search") or (cur == menu.preview_win and "preview") or "list"
-        menu.inserting = menu.focus_pane == "search" and vim.fn.mode() == "i"
+        menu.focus_pane, menu.focus_preview = cur == menu.search_win and "search" or "list", nil
+        for k, p in ipairs(menu.previews) do
+            if p.win == cur then
+                menu.focus_pane, menu.focus_preview = "preview", k
+            end
+        end
+        -- Typing, or not, is the search pane's: read there, and otherwise kept as it was left.
+        if menu.focus_pane == "search" then
+            menu.inserting = vim.fn.mode() == "i"
+        end
         -- A resize closes and rebuilds the windows; keep that self-inflicted
         -- WinClosed from being mistaken for a user cancellation (firing on_close).
         take_down()
@@ -700,6 +748,9 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
     local vim_width = utils.get_ui_size()
     local pv = menu.preview
     local sr = menu.search
+    -- The preview's panes, top to bottom: its own, or the preview itself as the one pane.
+    local specs = pv and (pv.panes or { pv }) or {}
+    local beside = pv and pv.beside
 
     ---The items the list shows for the search as it stands: all of them without a search.
     local function listed()
@@ -724,31 +775,47 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
         return out
     end
 
-    -- A `preview.content(idx)` callback makes the pane follow the highlighted row
-    -- instead of showing one fixed thing: what a chooser of *things to look at* needs
-    -- (the snippet library shows the code under the cursor before it is inserted).
-    -- Such a preview should pin `width`/`height`, or the float resizes on every j/k.
-    ---@param row integer a row of the list
-    local function preview_data(row)
-        if pv and pv.content then
-            local idx = menu.shown[row]
-            if not idx then
-                return { title = "No match", lines = {} }
-            end
+    ---What each preview pane shows for item `idx`, in the order of `specs`.
+    ---@param idx integer?
+    ---@return table[]
+    local function item_data(idx)
+        local got
+        if idx then
             local ok, data = pcall(pv.content, idx)
-            return (ok and type(data) == "table") and data or { lines = {} }
+            got = ok and type(data) == "table" and (pv.panes and data or { data }) or nil
         end
-        return pv
+        local out = {}
+        for i = 1, #specs do
+            out[i] = got and got[i] or { lines = {} }
+        end
+        return out
+    end
+
+    -- A `preview.content(idx)` callback makes the panes follow the highlighted row instead
+    -- of showing one fixed thing: what a chooser of *things to look at* needs (the snippet
+    -- library shows the code under the cursor before it is inserted). Such a preview should
+    -- pin `width`/`height`, or the float resizes on every j/k.
+    ---@param row integer a row of the list
+    ---@return table[]
+    local function preview_data(row)
+        if not (pv and pv.content) then
+            return { pv }
+        end
+        local idx = menu.shown[row]
+        local out = item_data(idx)
+        if not idx then
+            out[#specs] = { title = "No match", lines = {} }
+        end
+        return out
     end
     local start_row = math.min(math.max(menu.row or 1, 1), math.max(#menu.shown, 1))
     local shown = preview_data(start_row)
-    -- The user's cursorline, captured before opening any of our floats, so the
-    -- preview (read like a normal buffer) can honour it.
-    local user_cursorline = api.nvim_get_option_value("cursorline", { scope = "global" })
 
     local width
     local pinned = pv and pv.width
-    if pinned then
+    if beside then
+        width = math.min(beside.width, vim_width) - 2
+    elseif pinned then
         -- A caller-fixed width keeps a *sequence* of previews the same size — e.g.
         -- `:Tuna clean` steps through files whose names and contents vary in length,
         -- and a float that resized on every step would be distracting.
@@ -761,78 +828,137 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
         for _, l in ipairs(menu.items) do
             width = math.max(width, api.nvim_strwidth(l))
         end
-        if pv then
-            width = math.max(width, api.nvim_strwidth(shown.title or "") + 4)
-            for _, l in ipairs(shown.lines) do
+        for _, d in ipairs(shown) do
+            width = math.max(width, api.nvim_strwidth(d.title or "") + 4)
+            for _, l in ipairs(d.lines or {}) do
                 width = math.max(width, api.nvim_strwidth(l))
             end
         end
         width = math.min(math.max(width + 4, 24), vim_width - 4)
     end
-    local col = math.floor((vim_width - width) / 2)
+    local col = beside and math.floor((vim_width - width - 2) / 2 + 0.5) or math.floor((vim_width - width) / 2)
+    -- Beside the list, the panes take what the list leaves of the width: the list is as wide
+    -- as its widest label, and at most two fifths of the float.
+    local list_w, pane_w, pane_col = width, width, col
+    if beside then
+        list_w = api.nvim_strwidth(menu.title)
+        for _, l in ipairs(menu.items) do
+            list_w = math.max(list_w, api.nvim_strwidth(l))
+        end
+        list_w = math.min(math.max(list_w + 2, 24), math.floor(width * 0.4))
+        pane_w = math.max(1, width - list_w - 2)
+        pane_col = col + list_w + 2
+    end
+
+    ---The rows a `fit` pane takes: as many as the tallest content any item gives it, up to
+    ---`cap`, and none when no item gives it any.
+    ---@param i integer the pane's place in `specs`
+    ---@param cap integer
+    ---@return integer
+    local function fit_rows(i, cap)
+        local most = 0
+        for idx = 1, #menu.items do
+            most = math.max(most, wrapped_rows(item_data(idx)[i].lines or {}, pane_w))
+            if most >= cap then
+                return cap
+            end
+        end
+        return most
+    end
+
+    ---Each preview pane's height in a column of `room` rows, borders included: a pane with a
+    ---`height` keeps it, a `fit` one fits, and the last pane takes the rest when it follows
+    ---the list, else is as tall as its lines. A pane given no rows is not drawn.
+    ---@param room integer
+    ---@return integer[]
+    local function pane_heights(room)
+        local heights, left = {}, room
+        for i = 1, #specs - 1 do
+            local spec = specs[i]
+            heights[i] = spec.height or (spec.fit and fit_rows(i, math.floor(room / 3))) or 0
+            if heights[i] > 0 then
+                left = left - (heights[i] + PANE_STEP)
+            end
+        end
+        local last = specs[#specs]
+        local avail = math.max(1, left - PANE_STEP)
+        heights[#specs] = math.max(1, math.min(last.height or (pv.content and avail) or #shown[#specs].lines, avail))
+        return heights
+    end
 
     -- Lay out the notice (if any) above the menu and the preview below it, centring
     -- the whole group vertically. Each pane costs 2 rows of border and the panes touch
     -- (see `PANE_STEP`), so the group reads as one panel.
     local nt = menu.notice
-    local menu_row, menu_h, pv_h, pv_row, nt_h, nt_row
+    local menu_row, menu_h, nt_h, nt_row, sr_row, heights, pv_row
 
     -- Heights are handed out in order of who cannot give way: the notice (what the user
     -- must read), then the list (what they act on), then the preview (what fills the
     -- rest) — each bounded by what the previous ones left, so the stack always fits,
     -- down to a 12-row editor.
     local band_row, band_h = utils.float_band()
-    local budget = band_h
-    -- The search pane is one row, and is never what gives way.
-    if sr then
-        budget = budget - (1 + PANE_STEP)
-    end
-    if nt then
-        -- The notice wraps, so its height is counted in *screen* rows, not lines.
-        nt_h = 0
-        for _, l in ipairs(nt.lines) do
-            nt_h = nt_h + math.max(1, math.ceil(api.nvim_strwidth(l) / math.max(1, width)))
-        end
-        nt_h = math.max(1, math.min(nt_h, 6, budget - 6)) -- never at the cost of the list
-        budget = budget - (nt_h + PANE_STEP)
-    end
-
-    -- With a preview, a long list is capped and scrolls instead of squeezing the pane
-    -- it exists to feed: a 30-file library would otherwise leave two lines of code
-    -- visible. Without one, the list is as tall as it needs to be.
-    local pv_min = pv and (1 + PANE_STEP) or 0
-    local list_max = pv and math.max(MENU_MIN_ROWS, math.floor(band_h * MENU_LIST_SHARE)) or (band_h - 2)
-    menu_h = math.max(1, math.min(#menu.items, list_max, budget - 2 - pv_min))
-
-    local sr_row
-    if nt or pv or sr then
-        local used = menu_h + 2
-        if pv then
-            -- Fixed `height` for a pane that must not resize between items; a
-            -- cursor-following one with no height given takes all the room left, since
-            -- its content changes with every keypress and a jumping float is worse than
-            -- an over-tall one. Otherwise the pane is as tall as its content.
-            local avail = math.max(1, budget - used - PANE_STEP)
-            pv_h = math.max(1, math.min(pv.height or (pv.content and avail) or #shown.lines, avail))
-        end
-        local total = (nt and (nt_h + PANE_STEP) or 0)
-            + (sr and (1 + PANE_STEP) or 0)
-            + used
-            + (pv and (pv_h + PANE_STEP) or 0)
-        -- A bordered float's `row` is the top of its *footprint* — the border is drawn
-        -- there, content one row below — so a stack of `total` rows starting at `first`
-        -- ends exactly at `first + total - 1`, and no offset is wanted. (Adding one
-        -- pushed the bottom border onto the statusline.)
-        local first = band_row + math.max(0, math.floor((band_h - total) / 2))
-        nt_row = nt and first or nil
-        sr_row = sr and (first + (nt and (nt_h + PANE_STEP) or 0)) or nil
-        menu_row = first + (nt and (nt_h + PANE_STEP) or 0) + (sr and (1 + PANE_STEP) or 0)
-        pv_row = pv and (menu_row + menu_h + PANE_STEP) or nil
+    if beside then
+        -- Two columns: the search and the list on the left, the panes on the right, both
+        -- starting at the float's top.
+        local rows = math.min(beside.height, band_h)
+        local top = band_row + math.floor((band_h - rows) / 2 + 0.5)
+        sr_row = sr and top or nil
+        menu_row = top + (sr and (1 + PANE_STEP) or 0)
+        menu_h = math.max(1, rows - 2 - (sr and (1 + PANE_STEP) or 0))
+        heights = pane_heights(rows)
+        pv_row = top
     else
-        menu_row = band_row + math.max(0, math.floor((band_h - menu_h - 2) / 2))
+        local budget = band_h
+        -- The search pane is one row, and is never what gives way.
+        if sr then
+            budget = budget - (1 + PANE_STEP)
+        end
+        if nt then
+            -- The notice wraps, so its height is counted in *screen* rows, not lines.
+            nt_h = 0
+            for _, l in ipairs(nt.lines) do
+                nt_h = nt_h + math.max(1, math.ceil(api.nvim_strwidth(l) / math.max(1, width)))
+            end
+            nt_h = math.max(1, math.min(nt_h, 6, budget - 6)) -- never at the cost of the list
+            budget = budget - (nt_h + PANE_STEP)
+        end
+
+        -- With a preview, a long list is capped and scrolls instead of squeezing the pane
+        -- it exists to feed: a 30-file library would otherwise leave two lines of code
+        -- visible. Without one, the list is as tall as it needs to be.
+        local pv_min = pv and (1 + PANE_STEP) or 0
+        local list_max = pv and math.max(MENU_MIN_ROWS, math.floor(band_h * MENU_LIST_SHARE)) or (band_h - 2)
+        menu_h = math.max(1, math.min(#menu.items, list_max, budget - 2 - pv_min))
+
+        if nt or pv or sr then
+            local used = menu_h + 2
+            local stacked = 0
+            if pv then
+                -- Fixed `height` for a pane that must not resize between items; a
+                -- cursor-following one with no height given takes all the room left, since
+                -- its content changes with every keypress and a jumping float is worse than
+                -- an over-tall one. Otherwise the pane is as tall as its content.
+                heights = pane_heights(budget - used)
+                for _, h in ipairs(heights) do
+                    stacked = stacked + (h > 0 and (h + PANE_STEP) or 0)
+                end
+            end
+            local total = (nt and (nt_h + PANE_STEP) or 0) + (sr and (1 + PANE_STEP) or 0) + used + stacked
+            -- A bordered float's `row` is the top of its *footprint* — the border is drawn
+            -- there, content one row below — so a stack of `total` rows starting at `first`
+            -- ends exactly at `first + total - 1`, and no offset is wanted. (Adding one
+            -- pushed the bottom border onto the statusline.)
+            local first = band_row + math.max(0, math.floor((band_h - total) / 2))
+            nt_row = nt and first or nil
+            sr_row = sr and (first + (nt and (nt_h + PANE_STEP) or 0)) or nil
+            menu_row = first + (nt and (nt_h + PANE_STEP) or 0) + (sr and (1 + PANE_STEP) or 0)
+            pv_row = menu_row + menu_h + PANE_STEP
+        else
+            menu_row = band_row + math.max(0, math.floor((band_h - menu_h - 2) / 2))
+        end
     end
 
-    if nt then
+    if nt and not beside then
         -- A read-only pane for something the user must know before choosing. It is
         -- deliberately outside the focus cycle: it carries no action, and putting it
         -- in the way of the menu would slow every confirmation down.
@@ -860,7 +986,7 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
     -- With a search, the list is as tall as the whole of it would be, so it does not
     -- resize as the search narrows it.
     menu.winid = open_float(menu.menu_buf, not sr, {
-        width = width,
+        width = list_w,
         height = menu_h,
         row = menu_row,
         col = col,
@@ -878,7 +1004,7 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
     ---Show the preview of the list's row `row`, unless it shows that item already.
     ---@param row integer
     local function preview_row(row)
-        if not (pv and pv.content and menu.preview_buf) then
+        if not (pv and pv.content and #menu.previews > 0) then
             return
         end
         local idx = menu.shown[row]
@@ -886,51 +1012,59 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
             return
         end
         menu.preview_idx = idx
-        fill_preview(menu.preview_buf, menu.preview_win, preview_data(row), pv)
+        local data = preview_data(row)
+        for _, p in ipairs(menu.previews) do
+            fill_preview(p.buf, p.win, data[p.i], specs[p.i])
+        end
     end
 
-    if pv then
-        menu.preview_buf = api.nvim_create_buf(false, true)
-        -- Read-only from the start, so its change keys are made inert as it opens.
-        vim.bo[menu.preview_buf].modifiable = false
-        menu.preview_win = open_float(menu.preview_buf, false, {
-            width = width,
-            height = pv_h,
-            row = pv_row,
-            col = col,
-            border = cfg.floating_border,
-            border_highlight = cfg.floating_border_highlight,
-            -- Read like a normal buffer, so the user's own scrolloff and cursorline
-            -- apply (the minimal float style would turn the cursorline off).
-            keep_scrolloff = true,
-            cursorline = user_cursorline,
-        })
-        fill_preview(menu.preview_buf, menu.preview_win, shown, pv)
-
-        if pv.content then
-            -- Follow the selection. Only the border title is reconfigured (not the
-            -- geometry), so the float doesn't repaint as the cursor moves.
-            menu.preview_idx = menu.shown[start_row]
-            api.nvim_create_autocmd("CursorMoved", {
-                buffer = menu.menu_buf,
-                callback = function()
-                    if not menu.ui_visible or not api.nvim_win_is_valid(menu.winid) then
-                        return
-                    end
-                    preview_row(api.nvim_win_get_cursor(menu.winid)[1])
-                end,
+    menu.previews = {}
+    for i, spec in ipairs(specs) do
+        if heights[i] > 0 then
+            local buf = api.nvim_create_buf(false, true)
+            -- Read-only from the start, so its change keys are made inert as it opens.
+            vim.bo[buf].modifiable = false
+            local win = open_float(buf, false, {
+                width = pane_w,
+                height = heights[i],
+                row = pv_row,
+                col = pane_col,
+                border = cfg.floating_border,
+                border_highlight = cfg.floating_border_highlight,
+                -- Read like a normal buffer, so the user's own scrolloff applies, and their
+                -- cursorline while it is the pane being read.
+                keep_scrolloff = true,
+                wrap = spec.wrap,
             })
+            vim.wo[win].linebreak = spec.wrap == true
+            surface.follow_cursorline(win)
+            fill_preview(buf, win, shown[i], spec)
+            menu.previews[#menu.previews + 1] = { win = win, buf = buf, i = i, readout = spec.readout }
+            pv_row = pv_row + heights[i] + PANE_STEP
         end
-    else
-        menu.preview_win, menu.preview_buf = nil, nil
+    end
+    if pv and pv.content then
+        -- Follow the selection. Only the border titles are reconfigured (not the
+        -- geometry), so the floats don't repaint as the cursor moves.
+        menu.preview_idx = menu.shown[start_row]
+        api.nvim_create_autocmd("CursorMoved", {
+            buffer = menu.menu_buf,
+            callback = function()
+                if not menu.ui_visible or not api.nvim_win_is_valid(menu.winid) then
+                    return
+                end
+                preview_row(api.nvim_win_get_cursor(menu.winid)[1])
+            end,
+        })
     end
 
     if sr then
         menu.search_buf = api.nvim_create_buf(false, true)
         api.nvim_buf_set_lines(menu.search_buf, 0, -1, false, { menu.query })
+        surface.no_completion(menu.search_buf)
         -- Opened last and entered, so typing starts in it.
         menu.search_win = open_float(menu.search_buf, menu.focus_pane == "search", {
-            width = width,
+            width = list_w,
             height = 1,
             row = sr_row,
             col = col,
@@ -954,7 +1088,9 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
         end
         close_win(menu.search_win)
         close_win(menu.winid)
-        close_win(menu.preview_win)
+        for _, p in ipairs(menu.previews) do
+            close_win(p.win)
+        end
         close_win(menu.notice_win)
         if menu.restore_winid and api.nvim_win_is_valid(menu.restore_winid) then
             api.nvim_set_current_win(menu.restore_winid)
@@ -1014,21 +1150,24 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
 
     -- Every pane submits and closes, acting on the list's highlighted row: the search pane
     -- while typing too, since <CR> there has nothing else to do.
-    local panes = vim.tbl_filter(function(b)
-        return b ~= nil
-    end, { menu.search_buf, menu.menu_buf, menu.preview_buf })
-    for _, b in ipairs(panes) do
-        map_keys(mappings.submit, b == menu.search_buf and { "n", "i" } or "n", b, submit)
-        map_cancel(b, function()
+    local panes = sr and { { win = menu.search_win, buf = menu.search_buf } } or {}
+    panes[#panes + 1] = { win = menu.winid, buf = menu.menu_buf }
+    for _, p in ipairs(menu.previews) do
+        panes[#panes + 1] = p
+    end
+    for _, p in ipairs(panes) do
+        map_keys(mappings.submit, p.buf == menu.search_buf and { "n", "i" } or "n", p.buf, submit)
+        map_cancel(p.buf, function()
             close(nil)
         end, { normal = mappings.close })
     end
 
-    if pv then
-        -- Scroll the preview without leaving the menu.
+    local scrolled = menu.previews[#menu.previews]
+    if scrolled then
+        -- Scroll the preview, its last pane, without leaving the menu.
         local function scroll(key)
-            if menu.preview_win and api.nvim_win_is_valid(menu.preview_win) then
-                api.nvim_win_call(menu.preview_win, function()
+            if api.nvim_win_is_valid(scrolled.win) then
+                api.nvim_win_call(scrolled.win, function()
                     vim.cmd("normal! " .. api.nvim_replace_termcodes(key, true, false, true))
                 end)
             end
@@ -1043,33 +1182,73 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
         end
     end
 
-    -- The pane keys walk the stack, search pane, list, preview, and stop at either end.
-    -- With focus in the preview, j/k and <C-d>/<C-u> scroll it natively. Arriving in the
-    -- search pane starts typing, which is what it is there for.
+    -- The pane keys move between the panes. Stacked, they walk the stack, search pane,
+    -- list, preview, and stop at either end. Beside, they move by position: up and down
+    -- within a column, and across to the pane of the other column level with most of this
+    -- one, so the list leads to the code beside it and the search pane to the notes. With
+    -- focus in the preview, j/k and <C-d>/<C-u> scroll it natively. Arriving back in the
+    -- search pane types again if it was left typing (`inserting`), as it opened.
     if #panes > 1 then
-        local wins = vim.tbl_filter(function(w)
-            return w ~= nil
-        end, { menu.search_win, menu.winid, menu.preview_win })
-        local function go(from, delta)
-            local to = wins[from + delta]
-            if not (to and api.nvim_win_is_valid(to)) then
+        local function go(to)
+            if not (to and api.nvim_win_is_valid(to.win)) then
                 return
             end
+            if api.nvim_get_current_win() == menu.search_win then
+                menu.inserting = vim.fn.mode() == "i"
+            end
             vim.cmd.stopinsert()
-            api.nvim_set_current_win(to)
-            if to == menu.search_win then
+            api.nvim_set_current_win(to.win)
+            if to.win == menu.search_win and menu.inserting then
                 vim.cmd("startinsert!")
             end
         end
-        local to_next, to_prev = step_keys(cfg)
-        for i, b in ipairs(panes) do
-            local modes = b == menu.search_buf and { "n", "i" } or "n"
-            map_keys(to_next, modes, b, function()
-                go(i, 1)
-            end)
-            map_keys(to_prev, modes, b, function()
-                go(i, -1)
-            end)
+        local left = vim.list_slice(panes, 1, #panes - #menu.previews)
+        local columns = beside and { left, menu.previews } or { panes }
+        ---The pane `dcol` columns and `drow` rows away from column `c`'s pane `k`, passing
+        ---over a readout.
+        local function neighbour(c, k, dcol, drow)
+            if drow ~= 0 or not beside then
+                local step = beside and drow or (dcol + drow)
+                local j = k + step
+                while columns[c][j] and columns[c][j].readout do
+                    j = j + step
+                end
+                return columns[c][j]
+            end
+            local other = columns[c + dcol]
+            if not other then
+                return nil
+            end
+            ---The rows a pane's window covers, its borders included.
+            local function span(p)
+                local top = api.nvim_win_get_position(p.win)[1]
+                return top, top + api.nvim_win_get_height(p.win) + 1
+            end
+            local from, to = span(columns[c][k])
+            local found, most
+            for _, p in ipairs(other) do
+                local top, bottom = span(p)
+                local shared = math.min(to, bottom) - math.max(from, top)
+                if not p.readout and (not most or shared > most) then
+                    found, most = p, shared
+                end
+            end
+            return found
+        end
+        -- The plugin-wide pane keys, taken as { left, down, up, right }.
+        local sw = cfg.switch_window_keys or {}
+        local moves = { { -1, 0 }, { 0, 1 }, { 0, -1 }, { 1, 0 } }
+        for c, column in ipairs(columns) do
+            for k, p in ipairs(column) do
+                local modes = p.buf == menu.search_buf and { "n", "i" } or "n"
+                for m, move in ipairs(moves) do
+                    if sw[m] then
+                        map_keys({ sw[m] }, modes, p.buf, function()
+                            go(neighbour(c, k, move[1], move[2]))
+                        end)
+                    end
+                end
+            end
         end
     end
 
@@ -1104,9 +1283,19 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
                 end
             end,
         })
-        -- Closing the search pane by hand closes the menu, as closing the list does.
+    end
+
+    -- Closing any of its panes by hand closes the menu, as closing the list does: the panes
+    -- are one dialog, and a pane left over would answer nothing.
+    local others = { menu.notice_buf }
+    for _, p in ipairs(panes) do
+        if p.buf ~= menu.menu_buf then
+            others[#others + 1] = p.buf
+        end
+    end
+    for _, b in ipairs(others) do
         api.nvim_create_autocmd("WinClosed", {
-            buffer = sb,
+            buffer = b,
             callback = function()
                 if not menu.rebuilding then
                     close(nil)
@@ -1116,8 +1305,9 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
     end
 
     -- A resize puts focus back where it was.
-    if menu.focus_pane == "preview" and menu.preview_win then
-        api.nvim_set_current_win(menu.preview_win)
+    local focused = menu.focus_pane == "preview" and menu.previews[menu.focus_preview or 1]
+    if focused then
+        api.nvim_set_current_win(focused.win)
     elseif menu.focus_pane == "list" and sr then
         api.nvim_set_current_win(menu.winid)
     end
@@ -1340,6 +1530,9 @@ function M.form(sections, on_submit, restore_winid, on_close)
         -- Only a section with a custom row is writable at all; `guard_section` then
         -- confines the writing to that one row.
         vim.bo[b].modifiable = s.custom ~= nil
+        if s.custom then
+            surface.no_completion(b)
+        end
         local w = open_float(b, i == form.focused, {
             width = width,
             height = heights[i],

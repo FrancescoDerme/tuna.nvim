@@ -168,13 +168,16 @@ submissions. The rules that hold everywhere are in the root `CLAUDE.md`.
   - Jobs: one per file in `jobs[path]`. A new submit supersedes the old job, and callbacks check
     they still own the slot. `watch_timeout` stops a hung poll; `M.clear` cancels.
 - Verdict state is per file (`M.state[path]`) and drives `status`/`status_hl`/`is_submitting`.
-  Final verdicts persist in the sidecar with the SHA-256 of the submitted source, not its
-  mtime, because a write that changes nothing (a `:w`, the save before a run) must not drop
-  one. `utils.file_hash` keeps each hash for the session with the file's size, mtime and inode,
-  and hashes again only when one of them changes: the menu asks for every remembered problem's
-  hash each time it opens. `restore` (on `BufReadPost`) reloads a verdict only while
-  `still_current` holds (the hash matches, and an entry without one describes no source), and
-  `arm_invalidation` drops shown and stored verdicts on the first edit. `verdict_for(path)`
-  reads a verdict without an open buffer (the menu).
+  Final verdicts persist in the sidecar with the SHA-256 of the submitted source, not its mtime,
+  because a write that changes nothing (a `:w`, the save before a run) must not drop one.
+  `utils.file_hash` keeps each hash for the session with the file's size, mtime and inode, and
+  hashes again only when one of them changes: the menu asks for every remembered problem's hash
+  each time it opens. `restore` (on `BufReadPost` and `BufWritePost`) shows a stored verdict
+  only while `still_current` holds (the hash matches, and an entry without one describes no
+  source), and `arm_invalidation` hides the shown one on the first edit and keeps it stored: it
+  counts only while the hash matches anyway, so a write that takes the source back to the one
+  submitted brings it back, and it is never deleted there: Vim reports more than edits, and
+  deleting on such a report would lose the verdict of a source that never changed.
+  `verdict_for(path)` reads a verdict without an open buffer (the menu).
 - `persist_task` backfills the sidecar's `url`, and `name`/`group` from header markers when
   missing.

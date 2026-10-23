@@ -107,12 +107,13 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
   change does nothing.
 - Unwritten edits live in `ui.pending[tcnum]`. They survive row switches and resizes, override
   `pane_content`, and feed the diff. The row reads `EDITED` (unstyled) instead of its verdict.
-- `on_pane_edit` must stay O(1) in testcase size. It reads only Vim's `modified` flag and
-  re-renders the selector only when the edited set changes (`edited_sig`). Comparing against
-  the stored text (`w.baseline`, `panes_changed`) happens only in `capture_pending` and in the
-  120 ms debounce `schedule_settle`, so text typed back to its original stops counting as an
-  edit. Pane `modified` flags are then cleared, because a modified `acwrite` buffer blocks
-  quitting with E37/E162.
+- `on_pane_edit` must stay O(1) in testcase size. It reads only Vim's `modified` flag (a change
+  that leaves it unset raises nothing: `TextChanged` also reports the UI's own filling of a pane
+  the first time the pane is entered after it) and re-renders the selector only when the edited
+  set changes (`edited_sig`). Comparing against the stored text (`w.baseline`, `panes_changed`)
+  happens only in `capture_pending` and in the 120 ms debounce `schedule_settle`, so text typed
+  back to its original stops counting as an edit. Pane `modified` flags are then cleared,
+  because a modified `acwrite` buffer blocks quitting with E37/E162.
 - `capture_pending` runs before anything repoints the panes. `discard_pending` clears `pending`
   and the flags together.
 - Keys with no text to author: `n` adds a row, `x` deletes, `u` undoes a delete, `c` splits.
@@ -163,8 +164,10 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
   undo and split are bound in every mode and do nothing where testcases can't be edited;
   left unbound, `n`/`N` would fall through to Vim's search.
 - `close` (`<Esc>`, `<C-c>`, `q`, `Q`) is bound on every pane in **normal mode only**.
-  `switch_window_keys` (default `<C-hjkl>`, a top-level option shared with widgets) also work
-  in insert mode and move by window geometry; `st` is never a focus target.
+  `switch_window_keys` (default `<C-hjkl>`, a top-level option shared with widgets) also work in
+  insert mode and move from the cursor, as Vim's own window moves do (`focus_dir`): the pane
+  level with the cursor in that direction, else the nearest, so right from the selector's first
+  rows is Output; `st` is never a focus target.
 - `RunnerUI:writable_pane` decides which panes are typed into. The legend (`?`, `show_help`)
   and messages render keys from the config.
 - The `zoom_*` keys (`zoom_input`, `zoom_expected`, `zoom_stdout`, `zoom_stderr`) zoom a pane
@@ -201,6 +204,8 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
   Expected Output and Input keep their lines whole: the diff pairs them line by line, and an
   input's long line is data. It follows the row, not the buffer, since the build step borrows
   the detail panes' buffers; a mode that owns panes may set them again (`on_ui_shown`).
+- The selector always shows its cursorline, the row selected; the other panes and the zoom
+  follow the user's while focused (`surface.follow_cursorline`), both set in `lay_out`.
 - The shipped layouts put `so`/`eo` on one row (the diff reads across) and `eo`/`si` in one
   right-hand column.
 - Float geometry: a bordered float's `row`/`col` is its border cell, and `width`/`height`
@@ -209,9 +214,17 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
   UI's footprint. Nothing is zoomed unasked: a failed build is read on the build step, whose
   own grid always has an Errors pane, so zooming it would cover the same text and take the row
   away from someone who had moved off it.
-- Diff view paints extmarks in the `tuna_runner_diff` namespace, with `scrollbind`/`cursorbind`
-  instead of filler lines. It is cached by texts and row (`diff_cache`) and follows unsaved
-  pane text as you type (debounced). A row nothing has answered on yet is not diffed, which is
-  decided on the row having `stdout`, not on a timestamp: a stress counterexample is written by
-  the search that found it rather than spawned like a testcase, and gating on the spawn would
-  leave exactly the rows worth comparing unmarked.
+- Diff view paints extmarks in the `tuna_runner_diff` namespace (`paint_diff`): on a line that
+  disagrees only what disagrees, and a cell put in (inline virtual text, so the panes stay
+  level) where the other side has something this one lacks; a line the other side lacks whole is
+  coloured whole. A disagreeing line takes no colour of its own: behind the agreeing tokens it
+  hides which ones disagree, and beside a cursorline it reads as a second one, so the compared
+  panes keep the cursorline like any other. It binds the compared panes with
+  `scrollbind`/`cursorbind` instead of filler lines, given the same top line before they are
+  bound (line i faces line i). Not `:syncbind`, which leaves Vim skipping the sync of the next
+  scroll in a bound window, so the first scroll after the diff was turned on from the selector
+  would leave Expected Output behind. It is cached by texts and row (`diff_cache`) and follows
+  unsaved pane text as you type (debounced). A row nothing has answered on yet is not diffed,
+  which is decided on the row having `stdout`, not on a timestamp: a stress counterexample is
+  written by the search that found it rather than spawned like a testcase, and gating on the
+  spawn would leave exactly the rows worth comparing unmarked.

@@ -450,10 +450,76 @@ local function accented(ui, name)
         and vim.api.nvim_win_is_valid(w.winid)
         and vim.wo[w.winid].winhighlight:find("TunaEditableBorder", 1, true) ~= nil
 end
+-- With the user's cursorline on: the selector's line is the row selected, always shown; a
+-- pane being read has it while focused, and none otherwise, the zoom included.
+local user_cursorline = vim.go.cursorline
+vim.go.cursorline = true
 for _, interface in ipairs({ "split", "popup" }) do
     local br, ui, move, state, done = board(interface)
     done()
     t.eq(interface .. ": a run hands the selector the first testcase, focus in it", state(), { focus = "tc", row = 2 })
+    local function lit()
+        local out = {}
+        for _, name in ipairs({ "tc", "so", "si" }) do
+            out[name] = vim.wo[ui.windows[name].winid].cursorline
+        end
+        return out
+    end
+    t.eq(interface .. ": the selector's line shows, the panes' do not", lit(), { tc = true, so = false, si = false })
+    vim.api.nvim_set_current_win(ui.windows.so.winid)
+    t.eq(interface .. ": the pane being read shows its line, the selector still its own", lit(), { tc = true, so = true, si = false })
+    ui:zoom("si")
+    t.eq(interface .. ": a zoom shows its line, the pane left does not", {
+        vim.wo[ui.zoom_winid].cursorline,
+        vim.wo[ui.windows.so.winid].cursorline,
+    }, { true, false })
+    ui:unzoom()
+    -- The diff keeps the cursorline: a disagreeing line is marked only where it disagrees.
+    ui:toggle_diff_view()
+    vim.api.nvim_set_current_win(ui.windows.so.winid)
+    t.eq(interface .. ": with the diff on, the pane being read keeps its cursorline", vim.wo[ui.windows.so.winid].cursorline, true)
+    ui:toggle_diff_view()
+    vim.api.nvim_set_current_win(ui.windows.tc.winid)
+    -- The pane keys move from the cursor, as Vim's own window moves do: right from the
+    -- selector's first rows reaches Output, level with them, not the pane level with its
+    -- middle. In an editor of a usual height, where the selector runs below Output.
+    if interface == "popup" then
+        local lines = vim.o.lines
+        vim.o.lines = 40
+        ui:redraw_grid()
+        local names = {}
+        for name, w in pairs(ui.windows) do
+            if w.winid then
+                names[w.winid] = name
+            end
+        end
+        vim.api.nvim_set_current_win(ui.windows.tc.winid)
+        local walk = {}
+        for _, dir in ipairs({ "l", "l", "h", "j", "h" }) do
+            ui:focus_dir(dir)
+            walk[#walk + 1] = names[vim.api.nvim_get_current_win()]
+        end
+        t.eq("popup: the pane keys move from the cursor", walk, { "so", "eo", "so", "se", "tc" })
+        vim.o.lines = lines
+        ui:redraw_grid()
+    end
+    -- A row reads EDITED for what is typed, not for the pane's own filling, which Vim reports
+    -- as a change the first time the pane is entered after it.
+    local function edited()
+        return table.concat(vim.api.nvim_buf_get_lines(ui.windows.tc.bufnr, 0, -1, false), "\n"):find("EDITED") ~= nil
+    end
+    local si = ui.windows.si.bufnr
+    vim.api.nvim_exec_autocmds("TextChanged", { buffer = si })
+    t.eq(interface .. ": a change reported for a pane not typed into marks nothing", edited(), false)
+    vim.api.nvim_buf_set_lines(si, 0, -1, false, { "typed" })
+    vim.api.nvim_exec_autocmds("TextChanged", { buffer = si })
+    t.eq(interface .. ": typing marks the row at once", edited(), true)
+    ui:discard_pending()
+    ui.update_windows, ui.update_details = true, true
+    ui:update_ui()
+    vim.wait(200, function()
+        return false
+    end)
     t.eq(interface .. ": on a testcase row the Errors pane wraps, the others keep lines whole", {
         wrapping(ui.windows.se.winid),
         wrapping(ui.windows.so.winid),
@@ -499,6 +565,7 @@ for _, interface in ipairs({ "split", "popup" }) do
     end
     br:delete_ui()
 end
+vim.go.cursorline = user_cursorline
 vim.fn.delete(dir .. "/checker.cpp")
 
 -- The testcase list moves like every list tuna draws: the list keys step a row (a count
@@ -1414,6 +1481,21 @@ do
         local exp = #vim.api.nvim_buf_get_extmarks(found.ui.windows.eo.bufnr, ns, 0, -1, {})
         return out > 0 and exp > 0
     end)(), found.tcdata[2])
+    -- What is painted: the disagreeing token alone on a line that disagrees, a cell put in
+    -- where a line ends short of the other, and a line the other side lacks coloured whole.
+    local painted = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(painted, 0, -1, false, { "3 9", "2 1 1", "extra" })
+    local marks = require("tuna.run.diff").compute("3 9\n2 1 1\nextra\n", "3 4\n2 1 1 1\n", "squish").out
+    ui_test.paint_diff(painted, marks)
+    local drawn = vim.tbl_map(function(m)
+        local d = m[4]
+        return { m[2], m[3], d.end_col, d.hl_group or (d.virt_text and ("cell " .. d.virt_text[1][2] .. " " .. d.virt_text_pos)) }
+    end, vim.api.nvim_buf_get_extmarks(painted, ns, 0, -1, { details = true }))
+    t.eq("a diff marks what disagrees, where a line ends short, and a line the other lacks", drawn, {
+        { 0, 2, 3, "TunaDiffText" },
+        { 1, 5, nil, "cell TunaDiffText inline" },
+        { 2, 0, 5, "TunaDiffAdd" },
+    })
 
     -- With the comparison on, moving to the build step lays the grid out again without an
     -- Output pane: it has a buffer, but no window to bind.

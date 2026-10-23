@@ -901,7 +901,17 @@ end
 ---a moment later, by comparison. Re-renders **only when the set of edited rows actually
 ---changed**, since rewriting the selector on every character is the other half of the same
 ---cost.
-function RunnerUI:on_pane_edit()
+---@param bufnr integer the pane changed
+function RunnerUI:on_pane_edit(bufnr)
+    -- A change that left the buffer unmodified was not typed: `TextChanged` also reports the
+    -- UI's own filling of a pane the first time the pane is entered after it, and an undo
+    -- back to the stored text clears `modified`. Only the settle pass may lower the edit.
+    if not vim.bo[bufnr].modified then
+        if self.pane_edited then
+            self:schedule_settle()
+        end
+        return
+    end
     -- Raised, never lowered: something was typed, which is all that can be known for
     -- free. Whether the text is *back* to the stored testcase — by undo or by hand — is
     -- a comparison, and that is the settle pass's job.
@@ -1576,6 +1586,12 @@ function RunnerUI:lay_out(idx)
     for name, w in pairs(self.windows) do
         if w.winid and api.nvim_win_is_valid(w.winid) then
             wrap_as(w.winid, text[name] == true)
+            -- The selector's line is the row selected, always shown; the other panes are read.
+            if name == "tc" then
+                api.nvim_set_option_value("cursorline", true, { scope = "local", win = w.winid })
+            else
+                surface.follow_cursorline(w.winid)
+            end
         end
     end
     self:accent_editable_panes()
@@ -1852,12 +1868,12 @@ function RunnerUI:show_ui()
             api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
                 group = self.augroup,
                 buffer = w.bufnr,
-                callback = function()
+                callback = function(ev)
                     -- Only the selector: re-rendering the *panes* would replace the text
                     -- under the cursor with an identical copy and throw the cursor back
                     -- to line 1 on every keystroke. `TextChanged` also fires on undo and
                     -- redo, which is what keeps `EDITED` honest in both directions.
-                    self:on_pane_edit()
+                    self:on_pane_edit(ev.buf)
                 end,
             })
         end
@@ -2107,26 +2123,33 @@ end
 ---this needs none of the filler lines `:diffthis` inserts to fake that alignment.
 ---@param enable boolean
 function RunnerUI:set_diff_bind(enable)
+    -- Level before bound: the same top line in both, since line i faces line i, and binding
+    -- records where each window is. Not `:syncbind`, which leaves Vim skipping the sync of the
+    -- next scroll in a bound window, wherever that happens: the first scroll after the
+    -- diff was turned on from the selector would leave Expected Output behind. A pane the
+    -- row's grid leaves out has a buffer but no window (the build step is drawn with Errors
+    -- alone), and nil is not a window to level.
+    local so, eo = self.windows.so, self.windows.eo
+    if enable and so and so.winid and eo and eo.winid and api.nvim_win_is_valid(so.winid) and api.nvim_win_is_valid(eo.winid) then
+        local top = api.nvim_win_call(so.winid, vim.fn.winsaveview).topline
+        api.nvim_win_call(eo.winid, function()
+            vim.fn.winrestview({ topline = top })
+        end)
+    end
     for _, name in ipairs({ "so", "eo" }) do
         local w = self.windows[name]
         if w and w.winid and api.nvim_win_is_valid(w.winid) then
-            vim.wo[w.winid].scrollbind = enable
-            vim.wo[w.winid].cursorbind = enable
+            api.nvim_set_option_value("scrollbind", enable, { scope = "local", win = w.winid })
+            api.nvim_set_option_value("cursorbind", enable, { scope = "local", win = w.winid })
         end
-    end
-    -- A pane the row's grid leaves out has a buffer but no window (the build step is drawn
-    -- with Errors alone), so `winid` is nil there, and nil is not a window to sync.
-    local so = self.windows.so
-    if enable and so and so.winid and api.nvim_win_is_valid(so.winid) then
-        api.nvim_win_call(so.winid, function()
-            vim.cmd("syncbind")
-        end)
     end
 end
 
 ---@private
----Paint one pane's diff marks. Line highlights run to the edge of the window (as a
----diff does), with the disagreeing spans on top of them.
+---Paint one pane's diff marks: what disagrees, and a cell where the other side has something
+---this one lacks, put in rather than over the text, so the two panes stay level. A line the
+---other side lacks is coloured whole. A line that disagrees is not: its colour behind the
+---agreeing tokens hides which ones disagree, and beside a cursorline it reads as a second one.
 ---@param bufnr integer?
 ---@param marks table<integer, tuna.DiffMark>
 local function paint_diff(bufnr, marks)
@@ -2137,18 +2160,25 @@ local function paint_diff(bufnr, marks)
     for lnum, mark in pairs(marks) do
         if lnum <= last then
             local line = api.nvim_buf_get_lines(bufnr, lnum - 1, lnum, false)[1] or ""
-            api.nvim_buf_set_extmark(bufnr, diff_ns, lnum - 1, 0, {
-                end_col = #line,
-                hl_group = mark.hl,
-                hl_eol = true,
-                priority = 190,
-            })
-            for _, span in ipairs(mark.spans) do
-                api.nvim_buf_set_extmark(bufnr, diff_ns, lnum - 1, math.min(span[1], #line), {
-                    end_col = math.min(span[2], #line),
-                    hl_group = diff.TEXT,
-                    priority = 200,
+            if mark.hl ~= diff.CHANGE then
+                api.nvim_buf_set_extmark(bufnr, diff_ns, lnum - 1, 0, {
+                    end_col = #line,
+                    hl_group = mark.hl,
+                    hl_eol = true,
+                    priority = 190,
                 })
+            end
+            for _, span in ipairs(mark.spans) do
+                local s, e = math.min(span[1], #line), math.min(span[2], #line)
+                if e > s then
+                    api.nvim_buf_set_extmark(bufnr, diff_ns, lnum - 1, s, { end_col = e, hl_group = diff.TEXT, priority = 200 })
+                else
+                    api.nvim_buf_set_extmark(bufnr, diff_ns, lnum - 1, s, {
+                        virt_text = { { " ", diff.TEXT } },
+                        virt_text_pos = "inline",
+                        priority = 200,
+                    })
+                end
             end
         end
     end
@@ -2339,6 +2369,7 @@ function RunnerUI:zoom(name)
     vim.wo[self.zoom_winid].number = zcfg.show_nu
     vim.wo[self.zoom_winid].relativenumber = zcfg.show_rnu
     wrap_as(self.zoom_winid, self:text_panes(self.drawn_row)[name] == true)
+    surface.follow_cursorline(self.zoom_winid)
     -- The source buffer already maps the close key to close_or_unzoom (set in
     -- show_ui), which closes the zoom when it's open — no extra keymap needed.
     -- Handle the zoom being closed with ":q" so our state stays consistent.
@@ -2752,8 +2783,10 @@ function RunnerUI:focus_dir(dir)
             local pos = api.nvim_win_get_position(w.winid)
             local t = {
                 winid = w.winid,
-                r = pos[1] + api.nvim_win_get_height(w.winid) / 2,
-                c = pos[2] + api.nvim_win_get_width(w.winid) / 2,
+                top = pos[1],
+                left = pos[2],
+                bottom = pos[1] + api.nvim_win_get_height(w.winid) + 1,
+                right = pos[2] + api.nvim_win_get_width(w.winid) + 1,
             }
             -- The "Run" pane is a **read-out**, not a place to be: it holds no testcase,
             -- no keys of its own and nothing to select, so stepping into it only costs a
@@ -2778,20 +2811,31 @@ function RunnerUI:focus_dir(dir)
         end
         return
     end
+    -- From the cursor, as Vim's own `<C-w>` moves are: the pane level with it in that
+    -- direction, else the nearest. The selector's cursor is on the row being looked at, so
+    -- moving right from the top rows reaches Output rather than the pane level with the
+    -- selector's middle.
+    local border = api.nvim_win_get_config(cur).border
+    local inset = (border and #border > 0 and border[1] ~= "") and 1 or 0
+    local row, col = from.top + inset + vim.fn.winline() - 1, from.left + inset + vim.fn.wincol() - 1
+    ---How far `x` lies outside `[lo, hi]`.
+    local function off(x, lo, hi)
+        return x < lo and lo - x or (x > hi and x - hi or 0)
+    end
     local best, bestscore
     for _, t in ipairs(targets) do
         if t.winid ~= cur then
-            local dr, dc = t.r - from.r, t.c - from.c
-            local score
-            if dir == "h" and dc < -0.5 then
-                score = -dc + 3 * math.abs(dr)
-            elseif dir == "l" and dc > 0.5 then
-                score = dc + 3 * math.abs(dr)
-            elseif dir == "k" and dr < -0.5 then
-                score = -dr + 3 * math.abs(dc)
-            elseif dir == "j" and dr > 0.5 then
-                score = dr + 3 * math.abs(dc)
+            local along, across
+            if dir == "l" and t.left > col then
+                along, across = t.left - col, off(row, t.top, t.bottom)
+            elseif dir == "h" and t.right < col then
+                along, across = col - t.right, off(row, t.top, t.bottom)
+            elseif dir == "j" and t.top > row then
+                along, across = t.top - row, off(col, t.left, t.right)
+            elseif dir == "k" and t.bottom < row then
+                along, across = row - t.bottom, off(col, t.left, t.right)
             end
+            local score = along and across * 1000 + along
             if score and (not bestscore or score < bestscore) then
                 bestscore, best = score, t.winid
             end
@@ -3010,6 +3054,6 @@ function RunnerUI:update_ui()
 end
 
 -- The pure half of the selector's layout, for the test suite.
-M._test = { selector_columns = selector_columns, build_text = build_text, build_titles = build_titles }
+M._test = { selector_columns = selector_columns, build_text = build_text, build_titles = build_titles, paint_diff = paint_diff }
 
 return M

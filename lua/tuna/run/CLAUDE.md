@@ -235,9 +235,11 @@ the checker gives no verdict on, since searching on would end in "no counterexam
   `{ "float", tol }`, token-wise, absolute or relative tolerance (`float_equal`, which the
   diff uses too). An unknown method judges nothing and is reported once per session.
 - `diff.compute` is **positional**: line *i* against line *i*, token against token, never
-  re-aligned, because CP output is positional and an edit-script diff pairs the wrong lines.
-  Granularity follows the compare method (characters for `exact`, tokens otherwise, `float`
-  tolerance applied), so the marks never contradict the verdict, and texts the method judges
-  equal get no marks at all: `squish` and `float` read one stream of tokens, where line
-  breaks elsewhere are no difference, while the diff walks lines. `TunaDiffText` is a red tint
-  blended into `Normal`'s background, re-derived on `ColorScheme`.
+  re-aligned, because CP output is positional and an edit-script diff pairs the wrong lines. It
+  marks spans, never a whole disagreeing line, with an empty span where the shorter of two lines
+  ends or a character is missing (`CHANGE` names no highlight group; a line one side lacks,
+  `ADD`/`DELETE`, is coloured whole). Granularity follows the compare method (characters for
+  `exact`, tokens otherwise, `float` tolerance applied), so the marks never contradict the
+  verdict, and texts the method judges equal get no marks at all: `squish` and `float` read one
+  stream of tokens, where line breaks elsewhere are no difference, while the diff walks lines.
+  `TunaDiffText` is a red tint blended into `Normal`'s background, re-derived on `ColorScheme`.

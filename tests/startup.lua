@@ -47,6 +47,8 @@ local plain = t.tempdir()
 t.write(plain, "notes.txt", "nothing to do with tuna\n")
 vim.cmd.edit(vim.fn.fnameescape(plain .. "/notes.txt"))
 t.eq("entering any other file loads only what deciding whether it is a problem takes", loaded(), TRACKING)
+vim.cmd("silent write")
+t.eq("and writing it loads nothing more", loaded(), TRACKING)
 
 require("tuna").setup({ keymaps = { preset = "<leader>t" } })
 t.eq("setup() loads only the keymaps on top of that", loaded(), { "tuna", "tuna.config", "tuna.keymaps", "tuna.utils", "tuna.workspace.recent" })

@@ -190,6 +190,28 @@ vim.api.nvim_buf_set_lines(vbuf, 0, 0, false, { "// typed" })
 require("tuna.run.tools").save_sources(vbuf, { save_current_file = true })
 t.eq("and writes one that has changes", vim.fn.readfile(vpath)[1], "// typed")
 vim.api.nvim_buf_delete(vbuf, { force = true })
+
+-- An edit hides a shown verdict and keeps the stored one, which counts again, shown with it,
+-- once a write takes the source back to the one submitted.
+t.write(vdir, "main.cpp", source)
+write_entry({ hash = vim.fn.sha256(source) })
+local submit = require("tuna.problem.submit")
+vim.cmd.edit(vim.fn.fnameescape(vpath))
+local sbuf = vim.api.nvim_get_current_buf()
+local function shown()
+    return submit.state[vim.fs.normalize(vpath)] ~= nil
+end
+t.eq("a verdict is shown for the source submitted", shown(), true)
+vim.api.nvim_buf_set_lines(sbuf, 0, 0, false, { "// typed" })
+vim.api.nvim_exec_autocmds("TextChanged", { buffer = sbuf })
+t.eq("an edit hides it", shown(), false)
+t.eq("and keeps it stored", require("tuna.problem.sidecar").get_entry(vpath, "submit") ~= nil, true)
+vim.cmd("silent write")
+t.eq("a write of other source does not bring it back", { shown(), verdict_for(vpath) }, { false, nil })
+vim.api.nvim_buf_set_lines(sbuf, 0, 1, false, {})
+vim.cmd("silent write")
+t.eq("a write of the source submitted does, shown and counted", { shown(), verdict_for(vpath) }, { true, accepted })
+vim.api.nvim_buf_delete(sbuf, { force = true })
 vim.fn.delete(vdir, "rf")
 
 --------------------------------------------------------------------------------

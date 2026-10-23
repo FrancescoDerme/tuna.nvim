@@ -44,15 +44,48 @@ t.eq("a guarded region is a snippet", { snips[1].name, snips[1].lines, snips[1].
 local _, warning = library.parse({ "// TUNALIB: dsu start", "int p[10];" }, "TUNALIB")
 t.has("an unclosed guard is reported", warning, "unclosed 'dsu' guard")
 
+-- The comment block right under a start guard is the snippet's notes, in its own comment
+-- syntax, ending at the first line that is not one; from `Complexity:` on, its complexity.
+do
+    local noted = library.parse({
+        "    // TUNALIB: spf start",
+        "    // Smallest prime factor of every number up to n",
+        "    //",
+        "    // Complexity: O(n log log n) to build,",
+        "    // O(log n) per factorization",
+        "    vector<int> spf;",
+        "    // a comment in the code",
+        "    // TUNALIB: spf end",
+    }, "TUNALIB")[1]
+    t.eq("the notes are read without their leader, an empty one kept, and are not code", {
+        noted.notes,
+        noted.lines,
+        noted.first,
+    }, {
+        { "Smallest prime factor of every number up to n", "" },
+        { "    vector<int> spf;", "    // a comment in the code" },
+        6,
+    })
+    t.eq("the complexity runs from its line to the notes' end, however it was wrapped, unlabelled", noted.complexity, {
+        "O(n log log n) to build,",
+        "O(log n) per factorization",
+    })
+    local cut = library.parse({ "# TUNALIB: gcd start", "", "# not a note", "def gcd(): pass", "# TUNALIB: gcd end" }, "TUNALIB")[1]
+    t.eq("a blank line ends them, in any language", { cut.notes, cut.complexity, cut.lines[2] }, { {}, {}, "# not a note" })
+    local plain = library.parse({ "// TUNALIB: x start", "// Complexities: none", "int x;", "// TUNALIB: x end" }, "TUNALIB")[1]
+    t.eq("only `Complexity:` starts the complexity", { plain.notes, plain.complexity }, { { "Complexities: none" }, {} })
+end
+
 -- What the picker lists, and what a search keeps of it, in order.
 do
     local lib = t.tempdir()
     t.write(lib, "fenwick.cpp", table.concat({
         "// TUNALIB: fenwick start",
+        "// Point update, range query",
         "struct Fenwick { int bit[10]; };",
         "// TUNALIB: fenwick end",
         "// TUNALIB: Fenwick 2D start",
-        "int grid[10][10];",
+        "int grid[10][10]; // range query",
         "// TUNALIB: Fenwick 2D end",
     }, "\n"))
     t.write(lib, "dsu.cpp", "// TUNALIB: dsu start\nint parent[10];\nint find(int x) { return parent [x] == x ? x : parent[x] = find(parent[x]); }\n// TUNALIB: dsu end\n")
@@ -75,6 +108,7 @@ do
     t.eq("and a file name finds what is in it", found("dsu.cpp"), { "dsu" })
     t.eq("code is matched after names, however it is spaced", found("parent[x] ==x"), { "dsu" })
     t.eq("a name match ranks above a code match", found("dsu"), { "dsu", "bexp.cpp" })
+    t.eq("notes are matched after names and before code", found("range query"), { "fenwick", "Fenwick 2D" })
     t.eq("nothing found is an empty list", found("zzz"), {})
 end
 
@@ -100,6 +134,48 @@ do
     t.eq("moving over a file with an unclosed guard warns once", #vim.tbl_filter(function(m)
         return m:find("unclosed") ~= nil
     end, said), 1)
+end
+
+-- The picker shows each entry's notes, complexity and code, beside the list, the complexity
+-- in a pane of its own without its label; the two panes fit the longest there are.
+do
+    local lib = t.tempdir()
+    t.write(lib, "sieve.cpp", "// TUNALIB: sieve start\n// Primes up to n\n// Complexity: O(n log log n)\nint p[10];\n// TUNALIB: sieve end\n")
+    t.write(lib, "bexp.cpp", "long long bexp();\n")
+    require("tuna").setup({ library = { path = lib, width = 0.5, height = 0.6 } })
+    local work = t.tempdir()
+    t.write(work, "main.cpp", "")
+    vim.cmd("edit " .. work .. "/main.cpp")
+    local real_menu, got = widgets.menu, nil
+    widgets.menu = function(items, _, _, _, _, preview)
+        got = { items = items, preview = preview }
+    end
+    library.open()
+    widgets.menu = real_menu
+    local pv = got.preview
+    local cols, rows = require("tuna.utils").get_ui_size()
+    t.eq("the picker is the size its options give it", pv.beside, {
+        width = math.floor(cols * 0.5 + 0.5),
+        height = math.floor(rows * 0.6 + 0.5),
+    })
+    local defaults = require("tuna.config").defaults
+    t.eq(
+        "by default the runner UI's",
+        { defaults.library.width, defaults.library.height },
+        { defaults.popup_ui.total_width, defaults.popup_ui.total_height }
+    )
+    t.eq("beside the list, notes and complexity that fit over the code", {
+        vim.tbl_map(function(p)
+            return { p.title, p.fit, p.wrap }
+        end, pv.panes),
+    }, { { { "Notes", true, true }, { "Complexity", true, true }, {} } })
+    local sieve = pv.content(2)
+    t.eq("an entry's notes, its complexity without the label, and its code", {
+        sieve[1].lines,
+        sieve[2].lines,
+        sieve[3].lines,
+    }, { { "Primes up to n" }, { "O(n log log n)" }, { "int p[10];" } })
+    t.eq("and a whole file has neither", { pv.content(1)[1].lines, pv.content(1)[2].lines }, { {}, {} })
 end
 
 t.report()

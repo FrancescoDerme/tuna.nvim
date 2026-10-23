@@ -12,13 +12,19 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
   `N checks, M failures` through `tests/harness.lua` (`ok`/`eq`/`has`/`report`).
 - Files:
   - `surfaces.lua`: conformance of every surface to the `surface.lua` contract, every float
-    tagged before it is entered, no float drawing a statusline of its own unless the statusline
-    is global (read off the screen), every `runner_ui.mappings` key still resolving to an
-    action, a menu's starting row and preview, a menu's search (opened typing, narrowing the
-    list before `<CR>` reads it, `j` typed and `<Down>` moving, the pane walk, a resize keeping
-    the search, nothing found choosing nothing), and the editor rebuilt by a resize in the
-    pane, cursor and insert mode it was in, and saving with `:w`/`:wq` and asking before an
-    unsaved edit is closed away;
+    tagged before it is entered and its title centred, no float drawing a statusline of its own
+    unless the statusline is global (read off the screen), every `runner_ui.mappings` key still
+    resolving to an action, a menu's starting row and preview, a menu's search (opened typing,
+    narrowing the list before `<CR>` reads it, `j` typed and `<Down>` moving, the pane walk,
+    typing again only where it was left typing, completion turned off in it and in `input`,
+    nvim-cmp told whether loaded already or loading on the prompt's `InsertEnter`, a resize
+    keeping the search, nothing found choosing nothing), a menu's panes beside its list (the
+    size given, centred as the runner UI's grid, a fitted pane's height and its absence when
+    nothing fills it, the pane keys moving by position, a resize keeping focus in a pane,
+    closing one pane, or a notice, closing the menu, a readout pane passed over up, down and
+    across and left by the pane keys, the user's cursorline on the list always and on a pane
+    only while it is read), and the editor rebuilt by a resize in the pane, cursor and insert
+    mode it was in, and saving with `:w`/`:wq` and asking before an unsaved edit is closed away;
   - `menu.lua`: the contest summary over both layouts, counting current judge verdicts only, a
     problem's judge verdict beating its local one and either lapsing with an edit, which rows a
     local verdict counts, statuses in the runner UI's words and colours with counts uncoloured
@@ -36,9 +42,12 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     menu each) and the pins (most recent first, uncapped, toggling, a deleted solution
     unpinned, `:Tuna pin` refusing a non-solution and pinning a helper's solution);
   - `library.lua`: the files listed for a language (no dotfiles at any depth, `~` in
-    `library.path`), guarded snippets, what the picker lists and how a search orders it
-    (names and files fuzzily in either case and word order, then code however it is
-    spaced), and an unclosed guard warned about once;
+    `library.path`), guarded snippets, what the picker lists and how a search orders it (names
+    and files fuzzily in either case and word order, then code however it is spaced), an
+    unclosed guard warned about once, a snippet's notes (in its comment syntax, kept out of its
+    code, ended by a blank line, the complexity from `Complexity:` to their end however it was
+    wrapped), notes searched between names and code, and the picker's panes and size (options of
+    its own, the runner UI's by default);
   - `modes.lua`: the helper and run-setting rule end to end: availability (files, configured
     paths and commands, missing ones), automatic choices, forcing and `auto`, forced settings
     giving way and coming back, old sidecar entries, runners refreshing the checker per run,
@@ -74,17 +83,19 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     connected, and what is stored (an empty answer kept, no file refused, a typed `~` path,
     the solution's template filled in, tuna's starter with none configured, a scratch folded
     in under the header of the template used);
-  - `startup.lua`: what a session that never uses tuna pays and that it works without
-    `setup()`: `tuna` alone loaded at startup with `:Tuna` and the highlight groups
-    defined, a verdict restored for the first file read (before anything loads `config`),
-    entering any other file loading only what deciding whether it is a problem takes, and
-    `setup()` adding only the keymaps;
+  - `startup.lua`: what a session that never uses tuna pays and that it works without `setup()`:
+    `tuna` alone loaded at startup with `:Tuna` and the highlight groups defined, a verdict
+    restored for the first file read (before anything loads `config`), entering or writing any
+    other file loading only what deciding whether it is a problem takes, and `setup()` adding
+    only the keymaps;
   - `testcases.lua`, `compare.lua`, `judges.lua`, `clean.lua`, `submit.lua`: unit tests of pure
-    rules (`compare.lua` also: an unknown method reported once, diff marks following the
-    verdict, a checker that did not build giving no verdict and no notification; `clean.lua`
-    also: the templates a file is compared with, a judge's matched without a sidecar and the
-    best match deciding, tuna's starter recognised, a template never offered, an empty one
-    included, and a pinned file named, starting on Keep, and unpinned when deleted);
+    rules (`compare.lua` also: an unknown method reported once, diff marks following the verdict
+    and marking a token or character missing where it is missing, a checker that did not build
+    giving no verdict and no notification; `submit.lua` also: an edit hiding a shown verdict and
+    keeping it stored, and a write of the source submitted bringing it back; `clean.lua` also:
+    the templates a file is compared with, a judge's matched without a sidecar and the best
+    match deciding, tuna's starter recognised, a template never offered, an empty one included,
+    and a pinned file named, starting on Keep, and unpinned when deleted);
   - `runner.lua`: all four run modes with `vim.system` stubbed, covering what each child is
     handed, bare rows, save/answer semantics, a board listed before any run accenting its
     editable panes, a row added after a run settling and judged by its next save, disk drift and
@@ -117,12 +128,16 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     `solution_in`, a contest's problems, `:Tuna pin` and, in `menu.lua`, the command list), the
     ending vocabulary, and run-all's headers counting judged rows only, using real UI windows,
     in both interfaces where the grid changes (focus, the selector's row and line numbers,
-    titles and a bad grid said once as the board re-tiles, `:w` from a read-only pane, and a
-    zoom key doing nothing in a zoom). `testcases.lua` also covers the `single_file` rewrite
-    keeping untouched testcases, a conversion through every backend keeping an answer stored
-    empty and leaving no layout behind (the store's root kept), which testcase a command without
-    a number acts on, and sharing a folder's testcases (offered for a solution with none when
-    exactly one other has some, never for several sets, a format or `testcases_directory`
+    titles and a bad grid said once as the board re-tiles, the pane keys moving from the cursor,
+    the selector's cursorline always and a pane's or the zoom's only while focused, a row
+    reading `EDITED` for what is typed and not for a pane's own filling, the cursorline kept in
+    diff mode, what a diff paints (only the disagreeing tokens on a line that disagrees, a cell
+    where a line ends short, a line the other lacks coloured whole), `:w` from a read-only pane,
+    and a zoom key doing nothing in a zoom). `testcases.lua` also covers the `single_file`
+    rewrite keeping untouched testcases, a conversion through every backend keeping an answer
+    stored empty and leaving no layout behind (the store's root kept), which testcase a command
+    without a number acts on, and sharing a folder's testcases (offered for a solution with none
+    when exactly one other has some, never for several sets, a format or `testcases_directory`
     carrying the file's name, or a name without a number; renamed as they were, an empty answer
     kept; the question asked once a session, naming every rename, and the run going ahead after
     every answer).

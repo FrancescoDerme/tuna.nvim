@@ -36,15 +36,18 @@ local compare = require("tuna.run.compare")
 
 local M = {}
 
--- Highlight groups, created in `init.lua` linked to the editor's own diff groups.
-M.CHANGE = "TunaDiffChange" -- a line whose counterpart disagrees
+-- What a marked line is, and the highlight groups (created in `init.lua`) it is painted with.
+-- A line whose counterpart disagrees is marked only where it disagrees, so `CHANGE` names
+-- no group; a line the other side lacks is the difference whole, in the editor's diff colours.
+M.CHANGE = "change" -- a line whose counterpart disagrees
 M.TEXT = "TunaDiffText" -- the token/characters that actually disagree
 M.ADD = "TunaDiffAdd" -- a line yours has and the expected output does not
 M.DELETE = "TunaDiffDelete" -- a line the expected output has and yours does not
 
 ---@class tuna.DiffMark
----@field hl string line highlight (`CHANGE`/`ADD`/`DELETE`)
----@field spans { [1]: integer, [2]: integer }[] byte ranges `[start, end)`, 0-based
+---@field hl string what the line is (`CHANGE`/`ADD`/`DELETE`)
+---@field spans { [1]: integer, [2]: integer }[] byte ranges `[start, end)`, 0-based; an empty one
+---  is where the other side has something this one lacks
 
 ---@class tuna.DiffResult
 ---@field out table<integer, tuna.DiffMark> marks for the output pane, by 1-based line
@@ -166,6 +169,13 @@ local function line_spans(a, b, mode, tol)
         else -- a token missing from this line
             sb[#sb + 1] = { y.s, y.e }
         end
+    end
+    -- The shorter line ends where the other goes on: an empty span there, or nothing on it
+    -- would say it disagrees.
+    if #ta < #tb then
+        sa[#sa + 1] = { #a, #a }
+    elseif #tb < #ta then
+        sb[#sb + 1] = { #b, #b }
     end
     if #sa == 0 and #sb == 0 then
         -- Same tokens in the same places: the lines differ only in spacing, which

@@ -88,6 +88,10 @@ local function conforms(label)
         ok(where .. ": not modified", not vim.bo[f.buf].modified, "an acwrite buffer left modified blocks :q/:qa")
         ok(where .. ": writes are handled", vim.bo[f.buf].buftype == "acwrite", vim.bo[f.buf].buftype .. " -> :w gives E382")
         ok(where .. ": zindex is a known layer", LAYERS[f.zindex] ~= nil, tostring(f.zindex))
+        local cfg = api.nvim_win_get_config(f.win)
+        if cfg.title then
+            ok(where .. ": its title is centred", cfg.title_pos == "center", cfg.title_pos)
+        end
         if not vim.bo[f.buf].modifiable then
             local live = live_change_keys(f.buf)
             ok(where .. ": change keys are inert", #live == 0, table.concat(live, " ") .. " -> E21")
@@ -482,6 +486,165 @@ do
     chosen = nil
     keys("Szzz<CR><Esc>")
     ok("nothing found, nothing to choose", chosen == nil and lines_of("No match") ~= nil, vim.inspect({ chosen, #floats() }))
+    close_layer(80)
+end
+
+-- A preview beside the list: the search and the list on the left, the panes stacked on the
+-- right from the same top row, the whole the size it is given, centred as the runner UI's
+-- grid is. A `fit` pane is as tall as the tallest content any item gives
+-- it, and not drawn when none gives it any. The pane keys move
+-- by position, across to the pane level with most of this one, and a resize keeps focus in
+-- the pane it was in.
+do
+    local items = { "jam", "beta" }
+    local notes = { jam = {}, beta = { "first", "second" } }
+    function _G.tuna_open_beside(with_notes)
+        widgets.menu(items, "a library", function() end, nil, nil, {
+            beside = { width = 62, height = 17 },
+            panes = { { title = "Notes", fit = true, wrap = true }, { title = "Glance", fit = true, readout = true }, {} },
+            content = function(i)
+                return {
+                    { lines = with_notes and notes[items[i]] or {} },
+                    { lines = { "O(1)" } },
+                    { title = "code of " .. items[i], lines = { "about " .. items[i] } },
+                }
+            end,
+        }, nil, nil, function()
+            return { 1, 2 }
+        end)
+    end
+    local function keys(k)
+        api.nvim_feedkeys(api.nvim_replace_termcodes(k, true, false, true), "x", false)
+    end
+    local function win_of(title)
+        for _, f in ipairs(floats()) do
+            local t = api.nvim_win_get_config(f.win).title
+            if t and vim.trim(t[1][1]) == title then
+                return f.win
+            end
+        end
+    end
+    function _G.tuna_note()
+        local title = api.nvim_win_get_config(0).title
+        tuna_probe[#tuna_probe + 1] = (title and vim.trim(title[1][1]) or "?") .. " " .. api.nvim_get_mode().mode
+    end
+
+    keys("<Cmd>lua tuna_open_beside(true)<CR><Esc>")
+    conforms("widgets.menu with panes beside")
+    local search, list, pane, code = win_of("Search"), win_of("a library"), win_of("Notes"), win_of("code of jam")
+    local function at(w)
+        return api.nvim_win_get_position(w)
+    end
+    ok(
+        "the search and the list on the left, the panes on the right from the same top row",
+        at(search)[2] == at(list)[2] and at(pane)[2] > at(list)[2] and at(pane)[1] == at(search)[1] and at(code)[1] > at(pane)[1],
+        vim.inspect({ at(search), at(list), at(pane), at(code) })
+    )
+    ok("a fitted pane is as tall as the tallest content any item gives it", api.nvim_win_get_height(pane) == 2, api.nvim_win_get_height(pane))
+    local band_row, band_h = require("tuna.utils").float_band()
+    local left, right = at(search)[2], at(pane)[2] + api.nvim_win_get_width(pane) + 2
+    local top, bottom = at(search)[1], at(list)[1] + api.nvim_win_get_height(list) + 2
+    ok(
+        "the whole is the size given, borders included, centred as the runner UI's grid",
+        vim.deep_equal(
+            { right - left, bottom - top, left, top },
+            { 62, 17, math.floor((vim.o.columns - 62) / 2 + 0.5), band_row + math.floor((band_h - 17) / 2 + 0.5) }
+        ),
+        vim.inspect({ right - left, bottom - top, left, top, vim.o.columns, band_row, band_h })
+    )
+    close_layer(80)
+
+    _G.tuna_probe = {}
+    keys("<Cmd>lua tuna_open_beside(true)<CR><Down><Cmd>lua tuna_note()<CR><C-l><Cmd>lua tuna_note()<CR><C-j><Cmd>lua tuna_note()<CR><C-h><Cmd>lua tuna_note()<CR><C-l><Cmd>lua tuna_note()<CR><C-h><C-k><Cmd>lua tuna_note()<CR><Esc>")
+    ok(
+        "the pane keys move by position: the search pane to the notes, down to the code, across to the list and back",
+        vim.deep_equal(tuna_probe, { "Search i", "Notes n", "code of beta n", "a library n", "code of beta n", "Search i" }),
+        vim.inspect(tuna_probe)
+    )
+
+    -- A readout is passed over: the notes and the code lead to each other, and the pane keys
+    -- still lead out of it.
+    _G.tuna_probe = {}
+    keys("<C-l><C-j><C-k><Cmd>lua tuna_note()<CR>")
+    vim.api.nvim_set_current_win(win_of("Glance"))
+    keys("<C-j><Cmd>lua tuna_note()<CR>")
+    ok("a readout pane is passed over and left", vim.deep_equal(tuna_probe, { "Notes n", "code of beta n" }), vim.inspect(tuna_probe))
+
+    keys("<C-l><C-j>")
+    widgets.menu(nil)
+    settle(100)
+    local title = api.nvim_win_get_config(0).title
+    ok("a resize keeps focus in the pane it was in", title and vim.trim(title[1][1]) == "code of beta", vim.inspect(title))
+    close_layer(80)
+
+    keys("<Cmd>lua tuna_open_beside(false)<CR><Esc>")
+    ok("a fitted pane no item gives anything is not drawn", win_of("Notes") == nil and win_of("code of jam") ~= nil)
+    _G.tuna_probe = {}
+    keys("<C-l><Cmd>lua tuna_note()<CR>")
+    ok("and across, a readout level with the search pane is passed over too", tuna_probe[1] == "code of jam n", tuna_probe[1])
+    close_layer(80)
+
+    -- The user's cursorline: always on the list, which marks the selection, and on a pane
+    -- only while it is the one being read. With it off, no pane has one.
+    local user_cursorline = vim.go.cursorline
+    for _, on in ipairs({ true, false }) do
+        vim.go.cursorline = on
+        keys("<Cmd>lua tuna_open_beside(true)<CR><Esc>")
+        local function lit()
+            return { vim.wo[win_of("a library")].cursorline, vim.wo[win_of("Notes")].cursorline, vim.wo[win_of("code of jam")].cursorline }
+        end
+        local before = lit()
+        keys("<C-j><C-l>")
+        local inside = lit()
+        ok(
+            ("cursorline %s: the list's always, a pane's only while it is read"):format(on and "on" or "off"),
+            vim.deep_equal({ before, inside }, { { true, false, false }, { true, false, on } }),
+            vim.inspect({ before, inside })
+        )
+        close_layer(80)
+    end
+    vim.go.cursorline = user_cursorline
+
+    -- Closing any pane by hand closes the whole menu, as closing its list does, a notice too.
+    keys("<Cmd>lua tuna_open_beside(true)<CR><Esc>")
+    vim.api.nvim_win_close(win_of("Notes"), true)
+    settle(50)
+    ok("closing one of its panes closes the menu", #floats() == 0, #floats())
+    widgets.menu({ "one" }, "a menu", function() end, nil, nil, nil, { title = "Know this", lines = { "first" } })
+    settle(50)
+    vim.api.nvim_win_close(win_of("Know this"), true)
+    settle(50)
+    ok("and so does closing its notice", #floats() == 0, #floats())
+
+    -- The search pane is typed into again only if it was left typing.
+    _G.tuna_probe = {}
+    keys("<Cmd>lua tuna_open_beside(true)<CR><Esc><C-j><C-k><Cmd>lua tuna_note()<CR>i<C-j><C-k><Cmd>lua tuna_note()<CR><Esc>")
+    ok(
+        "the search pane is typed into again only if it was left typing",
+        vim.deep_equal(tuna_probe, { "Search n", "Search i" }),
+        vim.inspect(tuna_probe)
+    )
+    close_layer(80)
+
+    -- Nothing a completion plugin offers is what a prompt is for: blink.cmp's switch is set,
+    -- and nvim-cmp is told for the buffer, whether it is loaded already or loads on the
+    -- prompt's own InsertEnter.
+    local told = {}
+    local fake_cmp = { setup = { buffer = function(c) told[#told + 1] = { vim.api.nvim_get_current_buf(), c.enabled } end } }
+    package.loaded["cmp"] = fake_cmp
+    keys("<Cmd>lua tuna_open_beside(true)<CR><Esc>")
+    local sb = vim.api.nvim_win_get_buf(win_of("Search"))
+    ok("a search pane turns completion off", vim.b[sb].completion == false and vim.deep_equal(told, { { sb, false } }), vim.inspect(told))
+    close_layer(80)
+    package.loaded["cmp"] = nil
+    told = {}
+    widgets.input("a path", "", function() end)
+    settle(50)
+    local ib = vim.api.nvim_get_current_buf()
+    package.loaded["cmp"] = fake_cmp -- loaded by the InsertEnter it is told on
+    vim.api.nvim_exec_autocmds("InsertEnter", { buffer = ib })
+    ok("and a prompt tells nvim-cmp once it loads", vim.deep_equal(told, { { ib, false } }), vim.inspect(told))
+    package.loaded["cmp"] = nil
     close_layer(80)
 end
 

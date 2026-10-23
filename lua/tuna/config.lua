@@ -316,13 +316,19 @@ M.defaults = {
     --     // TUNALIB: binary exp end
     --
     -- Everything outside the guards (includes, `main`, scratch code) is ignored, and
-    -- the guards work in any language since they are recognized anywhere in a line.
+    -- the guards work in any language since they are recognized anywhere in a line. The
+    -- comment lines right under a start guard are the snippet's notes, shown beside it and
+    -- never inserted, and from a line starting `Complexity:` on, its complexity.
     -- `:Tuna lib` lists every snippet, and every file with no guards whole, and narrows
-    -- the list as you type: names and files first, then snippets whose code contains it.
+    -- the list as you type: names and files first, then notes, then code.
     library = {
         path = false, -- false | "~/cp/snippets" | { dir, dir, … }
         marker = "TUNALIB",
         depth = 3, -- how deep to search below each path
+        -- The picker's share of the editor, borders included: the runner UI's size
+        -- (`popup_ui`) by default, the other board tuna draws over the editor.
+        width = 0.8,
+        height = 0.8,
     },
     -- Where downloads land, as paths built from the modifiers ($(JUDGE), $(CONTEST),
     -- $(PROBLEM), …, see REFERENCE.md's Modifiers section), evaluated per problem.

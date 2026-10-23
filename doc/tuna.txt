@@ -307,17 +307,20 @@ YOUR ALGORITHMS LIBRARY                                         *tuna-library*
 
 `:Tuna lib` copies a piece of your own library into the file you are writing.
 The library is plain source files in the folder `library.path` points at, with
-the parts worth copying marked in place: >cpp
+the parts worth copying marked in place, and notes about them right under the
+opening mark: >cpp
 
     // TUNALIB: binary exp start
+    // b to the power e, modulo m
+    // Complexity: O(log e)
     long long bexp(long long b, long long e, long long m) { ... }
     // TUNALIB: binary exp end
 <
-Only files matching the current buffer's extension are offered.
 It lists every snippet in files matching the current buffer's extension, and
-narrows the list as you type, matching a snippet's name, its file or a piece
-of its code. The highlighted snippet is shown below the list, where you can
-step in to read it before inserting it. Since only the marked parts are
+narrows the list as you type, matching a snippet's name, its file, its notes
+or a piece of its code. Beside the list are the highlighted snippet's notes,
+its complexity and its code, which you can step into and read before
+inserting it. Only the code is inserted. Since only the marked parts are
 copied, each library file can also be a program that tests its snippets
 against testcases, as `:Tuna lib` in |tuna-commands| explains.
 
@@ -563,16 +566,23 @@ Every command is a subcommand of `:Tuna` with tab-completion, and a lowercase
 :Tuna lib
         Copy a piece of your own library into the file you are writing. The
         library is plain source files under `library.path`, with the parts
-        worth copying marked in place, see |tuna-library|.
+        worth copying marked in place, and notes about them right under the
+        opening mark, see |tuna-library|.
 
         It lists every snippet in files with the current file's extension. If
-        a file has no marked snippet, it is offered whole. Typing narrows the
-        list: name and file name matches show up first, and then the snippets
-        whose code is matched. `<Down>` and `<Up>` move through the list as
-        you type, `<CR>` inserts the highlighted snippet, and the pane keys
-        (`switch_window_keys`) step into the list and into the preview below
-        it, which reads like any buffer. What is inserted is re-indented to
-        where the cursor is.
+        a file has no marked snippet, it is offered whole. A snippet's notes
+        are the comment lines right under its opening mark, written with the
+        same comment marker, up to the first blank or code line. From a line
+        starting with `Complexity:` to their end, they are its complexity,
+        however many lines it takes. Typing narrows the list: name and file
+        name matches show up first, then the snippets whose notes are
+        matched, and then those whose code is. Beside the list are the
+        highlighted snippet's notes, its complexity and its code, each in a
+        pane of its own. `<Down>` and `<Up>` move through the list as you
+        type, `<CR>` inserts the highlighted snippet, and the pane keys
+        (`switch_window_keys`) move between the list and those panes, which
+        read like any buffer. Only the code is inserted, re-indented to where
+        the cursor is.
 
         Since only the marked parts are copied, a library file can be a whole
         program whose `main` exercises its snippets, tested with `:Tuna run`
@@ -745,8 +755,7 @@ tuna colours its windows with these highlight groups:
   verdicts.
 - `TunaEditable`: the border of the panes you can type into.
 - `TunaMenuTitle`: the letters of the menu's banner.
-- `TunaDiffChange`, `TunaDiffText`, `TunaDiffAdd` and `TunaDiffDelete`: the
-  diff view.
+- `TunaDiffText`, `TunaDiffAdd` and `TunaDiffDelete`: the diff view.
 
 tuna's colours are only defaults: define any of these groups yourself, or in
 your colorscheme, and yours win. tuna sets its defaults again after every

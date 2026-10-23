@@ -150,7 +150,6 @@ function M.relayout(windows, config, init_winid, status_rows, layout)
                 vim.wo[w.winid].number, vim.wo[w.winid].relativenumber = ui.show_nu, ui.show_rnu
             end
             vim.wo[w.winid].spell = false
-            vim.wo[w.winid].cursorline = selector
             vim.wo[w.winid].winfixbuf = true
         end
     end

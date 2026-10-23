@@ -177,6 +177,67 @@ function M.float(bufnr, opts)
     return winid
 end
 
+---Keep completion plugins out of a buffer typed into as a prompt (a search, a path, a value):
+---what they offer, the buffer's words and a language's snippets, is never what is typed there.
+---blink.cmp reads `vim.b.completion`; nvim-cmp takes it per buffer once it has loaded, which a
+---lazily loaded one does on the `InsertEnter` that is also the prompt's, so it is told then.
+---@param bufnr integer
+function M.no_completion(bufnr)
+    vim.b[bufnr].completion = false
+    local function tell_cmp()
+        local cmp = package.loaded["cmp"]
+        if cmp and api.nvim_buf_is_valid(bufnr) then
+            api.nvim_buf_call(bufnr, function()
+                cmp.setup.buffer({ enabled = false })
+            end)
+            return true
+        end
+    end
+    if not tell_cmp() then
+        api.nvim_create_autocmd("InsertEnter", { buffer = bufnr, callback = tell_cmp })
+    end
+end
+
+-- The reading panes whose cursorline follows focus, by window, and the autocmds that do it.
+local followed, follow_group = {}, nil
+
+---Give a reading pane (a preview, a runner UI detail pane, the testcase editor's) the user's
+---`cursorline` while it is the current window, and none while it is not: there its cursor
+---marks nothing the user is doing. A list keeps its line always instead, since it marks the
+---selection. The user's value is the option's global one, which tuna never writes.
+---@param winid integer
+function M.follow_cursorline(winid)
+    local function show(win, on)
+        api.nvim_set_option_value("cursorline", on, { scope = "local", win = win })
+    end
+    if not api.nvim_get_option_value("cursorline", { scope = "global" }) then
+        followed[winid] = nil
+        show(winid, false)
+        return
+    end
+    followed[winid] = true
+    show(winid, api.nvim_get_current_win() == winid)
+    if not follow_group then
+        -- One pair of autocmds for every followed pane: `WinLeave` runs in the window being left.
+        follow_group = api.nvim_create_augroup("tuna_cursorline", { clear = true })
+        api.nvim_create_autocmd({ "WinEnter", "WinLeave" }, {
+            group = follow_group,
+            callback = function(ev)
+                local win = api.nvim_get_current_win()
+                if followed[win] then
+                    show(win, ev.event == "WinEnter")
+                end
+            end,
+        })
+        api.nvim_create_autocmd("WinClosed", {
+            group = follow_group,
+            callback = function(ev)
+                followed[tonumber(ev.match)] = nil
+            end,
+        })
+    end
+end
+
 ---Treat several windows as one surface: whichever way any of them is closed — a key, a
 ---`:q`, a `:close`, anything else — the rest go with it. Keyed on `WinClosed` because a
 ---mapping cannot cover `:q`, which never passes through one; deferred because windows

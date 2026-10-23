@@ -195,16 +195,19 @@ Every deletion is confirmed one at a time, with the file in front of you.
 ### Your algorithms library
 
 [`:Tuna lib`](REFERENCE.md#lib) copies a piece of your own library into the file you are writing.
-The library is plain source files in the folder `library.path` points at, with the parts worth copying marked in place:
+The library is plain source files in the folder `library.path` points at, with the parts worth copying marked in place, and notes about them right under the opening mark:
 
 ```cpp
 // TUNALIB: binary exp start
+// b to the power e, modulo m
+// Complexity: O(log e)
 long long bexp(long long b, long long e, long long m) { ... }
 // TUNALIB: binary exp end
 ```
 
-It lists every snippet in files matching the current buffer's extension, and narrows the list as you type, matching a snippet's name, its file or a piece of its code.
-The highlighted snippet is shown below the list, where you can step in to read it before inserting it.
+It lists every snippet in files matching the current buffer's extension, and narrows the list as you type, matching a snippet's name, its file, its notes or a piece of its code.
+Beside the list are the highlighted snippet's notes, its complexity and its code, which you can step into and read before inserting it.
+Only the code is inserted.
 Since only the marked parts are copied, each library file can also be a program that tests its snippets against testcases, as the [reference](REFERENCE.md#lib) explains.
 
 ### Keymaps

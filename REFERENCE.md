@@ -262,19 +262,24 @@ If a scratch already exists tuna asks whether to resume it or restart.
 ```
 
 Copies a piece of your own library into the file you are writing.
-The library is plain source files under `library.path`, with the parts worth copying marked in place:
+The library is plain source files under `library.path`, with the parts worth copying marked in place, and notes about them right under the opening mark:
 
 ```cpp
 // TUNALIB: binary exp start
+// b to the power e, modulo m
+// Complexity: O(log e)
 long long bexp(long long b, long long e, long long m) { ... }
 // TUNALIB: binary exp end
 ```
 
 It lists every snippet in files with the current file's extension.
 If a file has no marked snippet, it is offered whole.
-Typing narrows the list: name and file name matches show up first, and then the snippets whose code is matched.
-`<Down>` and `<Up>` move through the list as you type, `<CR>` inserts the highlighted snippet, and the pane keys (`switch_window_keys`) step into the list and into the preview below it, which reads like any buffer.
-What is inserted is re-indented to where the cursor is.
+A snippet's notes are the comment lines right under its opening mark, written with the same comment marker, up to the first blank or code line.
+From a line starting with `Complexity:` to their end, they are its complexity, however many lines it takes.
+Typing narrows the list: name and file name matches show up first, then the snippets whose notes are matched, and then those whose code is.
+Beside the list are the highlighted snippet's notes, its complexity and its code, each in a pane of its own.
+`<Down>` and `<Up>` move through the list as you type, `<CR>` inserts the highlighted snippet, and the pane keys (`switch_window_keys`) move between the list and those panes, which read like any buffer.
+Only the code is inserted, re-indented to where the cursor is.
 
 Since only the marked parts are copied, a library file can be a whole program whose `main` exercises its snippets, tested with [`:Tuna run`](#run) against testcases like any problem.
 A `.tuna.lua` in the library folder can keep every file's testcases in one shared folder, with `testcases_directory = "tests"`, and listing the library in `recent.ignored_directories` keeps its files out of your recent problems.
@@ -446,7 +451,7 @@ tuna colours its windows with these highlight groups:
 - `TunaCorrect`, `TunaWrong`, `TunaWarning`, `TunaRunning` and `TunaDone`: the verdicts.
 - `TunaEditable`: the border of the panes you can type into.
 - `TunaMenuTitle`: the letters of the menu's banner.
-- `TunaDiffChange`, `TunaDiffText`, `TunaDiffAdd` and `TunaDiffDelete`: the diff view.
+- `TunaDiffText`, `TunaDiffAdd` and `TunaDiffDelete`: the diff view.
 
 tuna's colours are only defaults: define any of these groups yourself, or in your colorscheme, and yours win.
 tuna sets its defaults again after every colorscheme change, so the groups you leave alone follow your theme.

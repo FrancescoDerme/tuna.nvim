@@ -119,7 +119,7 @@ function M.resolve(spec, own)
     return fn and { spec, fn = fn } or spec
 end
 
----A human-readable label for a compare method (for the results-UI status pane).
+---A human-readable label for a compare method (for the runner UI's Run pane).
 ---@param method tuna.CompareSpec
 ---@return string
 function M.method_name(method)
