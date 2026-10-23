@@ -571,18 +571,17 @@ Every command is a subcommand of `:Tuna` with tab-completion, and a lowercase
 
         It lists every snippet in files with the current file's extension. If
         a file has no marked snippet, it is offered whole. A snippet's notes
-        are the comment lines right under its opening mark, written with the
-        same comment marker, up to the first blank or code line. From a line
-        starting with `Complexity:` to their end, they are its complexity,
-        however many lines it takes. Typing narrows the list: name and file
-        name matches show up first, then the snippets whose notes are
-        matched, and then those whose code is. Beside the list are the
-        highlighted snippet's notes, its complexity and its code, each in a
-        pane of its own. `<Down>` and `<Up>` move through the list as you
-        type, `<CR>` inserts the highlighted snippet, and the pane keys
-        (`switch_window_keys`) move between the list and those panes, which
-        read like any buffer. Only the code is inserted, re-indented to where
-        the cursor is.
+        are the comment lines right under its opening mark, up to the first
+        blank or code line. From a line starting with `Complexity:` to their
+        end, they are treated as the snippet's complexity. Typing narrows the
+        list: name and file name matches show up first, then the snippets
+        whose notes are matched, and then those whose code is. Beside the
+        list are the snippet's notes, its complexity and its code, each in a
+        pane of its own. While you type in the search box, `<Down>` and
+        `<Up>` move the highlight through the list, `<CR>` inserts the
+        highlighted snippet, and the pane keys (`switch_window_keys`) move
+        between the list and the panes beside it. Only the code is inserted,
+        re-indented to where the cursor is.
 
         Since only the marked parts are copied, a library file can be a whole
         program whose `main` exercises its snippets, tested with `:Tuna run`
