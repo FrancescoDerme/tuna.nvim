@@ -87,7 +87,7 @@ From the read-only panes you can:
 - add or delete a testcase with `n` and `x`,
 - and more.
 
-Each pane opens full-screen with the key in the pane's title, and `<C-hjkl>` move you between panes, also customizable.
+The key in each pane's title zooms it, and `<C-hjkl>` move you between panes, also customizable.
 
 Comparison between Output and Expected Output is driven by `output_compare_method`: `"exact"`, `"squish"` (whitespace-insensitive, the default), `{ "float", tol = 1e-6 }` for problems with a tolerance, or a method of your own in `compare_methods`.
 [`:Tuna compare <method>`](REFERENCE.md#compare) overrides it for one problem.

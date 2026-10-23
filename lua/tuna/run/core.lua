@@ -489,18 +489,18 @@ end
 --------------------------------------------------------------------------------
 
 ---What a compiler said, in one piece: its complaints first, then anything it wrote to
----stdout, which is nearly always empty but is the only place some compilers talk.
+---stdout, which is nearly always empty but is the only place some compilers talk. Asked on
+---every render of the build step, so a lone stream is returned as it is, never copied.
 ---@param stderr string?
 ---@param stdout string?
 ---@return string
 local function compiler_text(stderr, stdout)
-    local parts = {}
-    for _, s in ipairs({ stderr, stdout }) do
-        if s and s ~= "" then
-            parts[#parts + 1] = s
-        end
+    if not (stdout and stdout ~= "") then
+        return stderr or ""
+    elseif not (stderr and stderr ~= "") then
+        return stdout
     end
-    return table.concat(parts, "\n")
+    return stderr .. "\n" .. stdout
 end
 
 ---What a source is called on its pane: the file being compiled, else the command running

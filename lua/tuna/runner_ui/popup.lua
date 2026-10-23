@@ -54,8 +54,8 @@ local function rec_compute_layout(layout, vertical, width, height, col, row, siz
 end
 
 ---Put a pane where the layout says, or take its window away when the layout leaves it out.
----The buffer stays either way: its content is still collected and still reachable in the
----viewer, drawn or not.
+---The buffer stays either way: its content is still collected and can still be
+---zoomed, drawn or not.
 ---@param w table the `windows` entry
 ---@param name string pane name
 ---@param config table

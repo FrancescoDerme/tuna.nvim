@@ -375,18 +375,22 @@ function InteractiveRunner:with_helpers(cont, whole)
 end
 
 ---In a conversation the three columns are scroll-bound and unwrapped, so reading back
----through one keeps the rows of all three level. When `live`, the Live column is also
----typed into, and <CR> sends the line being typed.
+---through one keeps the rows of all three level. The build step is no conversation: its panes
+---hold each source's compiler output, read on its own and wrapped by the UI. When `live`, the
+---Live column is also typed into, and <CR> sends the line being typed.
 ---@param ui table the RunnerUI
 function InteractiveRunner:on_ui_shown(ui)
     if not self:conversational() then
         return
     end
+    local talking = not (ui.drawn_row and ui.drawn_row.compile)
     for _, name in ipairs(CONVERSATION_PANES) do
         local w = ui.windows[name]
         if w and w.winid and api.nvim_win_is_valid(w.winid) then
-            api.nvim_set_option_value("scrollbind", true, { scope = "local", win = w.winid })
-            api.nvim_set_option_value("wrap", false, { scope = "local", win = w.winid })
+            api.nvim_set_option_value("scrollbind", talking, { scope = "local", win = w.winid })
+            if talking then
+                api.nvim_set_option_value("wrap", false, { scope = "local", win = w.winid })
+            end
         end
     end
     if self.source ~= "live" then

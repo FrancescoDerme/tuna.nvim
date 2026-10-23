@@ -590,7 +590,7 @@ M.defaults = {
             { 3, "tc" },
             { 8, "build" },
         },
-        -- Write the key that opens each pane full-screen at the end of its title, e.g.
+        -- Write the key that zooms each pane at the end of its title, e.g.
         -- ` Errors (e) `. On the build row each source's pane shows its own key.
         show_title_keys = true,
         interface = "popup", -- "popup" | "split"
@@ -625,10 +625,10 @@ M.defaults = {
             -- freeze the way it does in a shell.
             stop = { "s", "S" },
             stop_all = "<C-s>",
-            view_input = { "i", "I" },
-            view_expected = { "a", "A" },
-            view_stdout = { "o", "O" },
-            view_stderr = { "e", "E" },
+            zoom_input = { "i", "I" },
+            zoom_expected = { "a", "A" },
+            zoom_stdout = { "o", "O" },
+            zoom_stderr = { "e", "E" },
             toggle_diff = { "d", "D" },
             -- `<Esc>`/`<C-c>` are what dismisses every other surface in the plugin
             -- (`cancel_keys`), so they dismiss this
@@ -649,10 +649,10 @@ M.defaults = {
             undo_delete = { "u", "U" },
             help = "?",
         },
-        -- The full-screen view of one pane, opened by the `view_*` keys: its size as a share
-        -- of the editor, and its line numbers.
-        viewer = {
-            -- Large on purpose: the viewer exists to escape the cramped detail panes,
+        -- A pane zoomed by the `zoom_*` keys, a float over the grid: its size as a share of the
+        -- editor, and its line numbers.
+        zoom = {
+            -- Large on purpose: zooming exists to escape the cramped detail panes,
             -- so one that leaves a quarter of the grid showing around it has the same
             -- problem it was opened to solve. Clamped to the float band, as everything
             -- else is, so a small editor still gets a frame that fits.
@@ -671,7 +671,7 @@ M.defaults = {
         -- alternates direction (the top level splits into columns). Panes:
         -- `tc` testcases, `so` output, `eo` expected output, `si` input, `se` errors.
         -- Any of them but `tc` may be left out — what is left simply divides the
-        -- space, and an omitted pane's content stays reachable in the viewer.
+        -- space, and an omitted pane's content can still be zoomed.
         -- Two pairings decide this arrangement: `so`/`eo` share a row because the
         -- diff compares them line against line, and the two editable panes
         -- (`eo`/`si`, the accented ones) share a column so what you can type into

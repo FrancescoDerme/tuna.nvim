@@ -84,9 +84,11 @@ The rules that hold everywhere are in the root `CLAUDE.md`.
   - `on_details_rendered` draws the columns with `set_column` (no undo, not modified, skips
     identical content). The build step is not a conversation and is left to the UI, which
     draws it with one pane per source, as in every other mode.
-  - Columns are `scrollbind` and `nowrap`. All three follow the latest line unless one is being
-    read back (cursor in it, not at the bottom), in which case none move. `scrollbind` is
-    re-armed after a scroll made from code, or later manual scrolls drift.
+  - Columns are `scrollbind` and `nowrap` (`on_ui_shown`, when the row laid out,
+    `ui.drawn_row`, is a session's: the build step is no conversation, and its panes wrap and
+    scroll on their own). All three follow the latest line unless one is being read back
+    (cursor in it, not at the bottom), in which case none move. `scrollbind` is re-armed after
+    a scroll made from code, or later manual scrolls drift.
   - `run_one_session` hands the cursor to the row it is about to talk to (`ui:goto_row`):
     that row's columns are the conversation, and in live it is the only row whose column is
     typable, so the UI would otherwise sit on Compile with nothing to show and nothing to

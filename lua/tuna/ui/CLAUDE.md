@@ -20,7 +20,7 @@ specific Vim error about a buffer the user never opened.
   (`<C-R>` equals `<C-r>`).
 - `render(buf, content, opts)`: no write when unchanged, `undolevels = -1` around the write,
   `modified` cleared.
-- `float(buf, opts)` with `LAYER`: grid 50, viewer 60, overlay 70, dialog 80. Neovim's default
+- `float(buf, opts)` with `LAYER`: grid 50, zoom 60, overlay 70, dialog 80. Neovim's default
   is 50, so always set a layer. With `laststatus=3`, and only then, a float starts with the
   `statusline` of the window it opens over: a new window otherwise takes the global value,
   which lualine leaves blank until its next refresh, so the one bar would flicker whenever a

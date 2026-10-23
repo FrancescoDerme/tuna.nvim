@@ -1,7 +1,7 @@
 -- lua/tuna/ui/surface.lua
 --
 -- A **surface** is any buffer this plugin puts in front of the user that is not a file:
--- the results-UI panes, its viewer, message float and key legend, and every widget
+-- the runner UI's panes, its zoom, message float and key legend, and every widget
 -- (menu, input, form, panels, testcase editor). They differ in what they show and what
 -- their keys do; they do not differ in what Vim must be told about them, and a surface
 -- missing any piece of that grows a red error about a buffer the user never opened:
@@ -26,9 +26,9 @@ local M = {}
 ---The layers floats are drawn on. Neovim's default for a float is 50, the same as the
 ---runner UI's grid, so anything left unset fights the grid it is drawn over.
 M.LAYER = {
-    grid = 50, -- the results-UI pane grid
-    viewer = 60, -- its viewer, over the grid
-    overlay = 70, -- its message float and key legend, over the viewer
+    grid = 50, -- the runner UI's pane grid
+    zoom = 60, -- its zoomed pane, over the grid
+    overlay = 70, -- its message float and key legend, over the zoom
     dialog = 80, -- widgets: always the thing being asked about, so always on top
 }
 

@@ -1,5 +1,5 @@
 -- Conformance test for tuna's floating **surfaces** — every buffer/window the plugin
--- puts in front of the user (the results-UI panes, its viewer, message float and key
+-- puts in front of the user (the runner UI's panes, its zoom, message float and key
 -- legend, and every widget: menu, input, form, panels, testcase editor).
 --
 -- They are all scratch buffers pretending to be a UI, and each one has to hold the same
@@ -41,7 +41,7 @@ local CHANGE_KEYS = {
     "i", "I", "a", "A", "o", "O", "c", "C", "s", "S", "r", "R", "x", "X", "d", "D",
     "p", "P", "J", "~", "v", "V", "<C-v>", "gi", "gI", "gp", "gP", "gJ", "g~", "u", "<C-r>",
 }
-local LAYERS = { [50] = "grid", [60] = "viewer", [70] = "overlay", [80] = "dialog" }
+local LAYERS = { [50] = "grid", [60] = "zoom", [70] = "overlay", [80] = "dialog" }
 
 ---Every floating window on screen, with the state we care about.
 local function floats()
@@ -183,10 +183,10 @@ if ui then
         end
     end
 
-    ui:show_viewer("so")
+    ui:zoom("so")
     settle()
-    conforms("runner UI + viewer")
-    ui:close_viewer()
+    conforms("runner UI + zoom")
+    ui:unzoom()
     settle()
 
     ui:show_message("compiler said", "warning: unused variable")

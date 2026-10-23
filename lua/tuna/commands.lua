@@ -393,7 +393,7 @@ function M.all_runners()
 end
 
 ---The buffer a `:Tuna` command is about. Standing in one of tuna's own windows — a runner UI
----pane, its viewer — that is the solution the pane is showing: a pane is not a file, so a
+---pane, its zoom — that is the solution the pane is showing: a pane is not a file, so a
 ---command acting on it would compile nothing, save nothing, and keep the problem's run state
 ---under a name that is not a path. Every other buffer is itself, including a helper file,
 ---which each run resolves for itself (`tools.solution_bufnr`).

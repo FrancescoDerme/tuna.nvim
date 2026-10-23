@@ -142,8 +142,8 @@ behave in them as in any buffer. From the read-only panes you can:
 - add or delete a testcase with `n` and `x`,
 - and more.
 
-Each pane opens full-screen with the key in the pane's title, and `<C-hjkl>`
-move you between panes, also customizable.
+The key in each pane's title zooms it, and `<C-hjkl>` move you between panes,
+also customizable.
 
 Comparison between Output and Expected Output is driven by
 `output_compare_method`: `"exact"`, `"squish"` (whitespace-insensitive, the

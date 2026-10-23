@@ -3,7 +3,7 @@
 -- The runner UI: six panes over as many buffers (the "Run" status, the testcase
 -- selector, and the Output, Expected Output, Input and Errors detail panes), kept in sync with
 -- the runner's `tcdata`, with the inline testcase editing, the gates that settle an unsaved
--- edit or a testcase gone from disk, the diff, the viewer and the key legend.
+-- edit or a testcase gone from disk, the diff, the zoom and the key legend.
 --
 -- Where the windows go is delegated to an interface module, `popup` (floats) or `split`
 -- (native splits), selected by `runner_ui.interface`. The UI owns the buffers and hands the
@@ -23,23 +23,23 @@ local M = {}
 -- the detail panes' own: the build step shows no stdout, answer or input, so they are free
 -- there, and borrowing them means the build step never makes a buffer of its own. Nothing a
 -- user reads or writes names them on that row: the grid places a `build` cell, the titles
--- name the source, and the view keys open what is actually there (`view_pane`).
+-- name the source, and the zoom keys zoom what is actually there (`zoom_target`).
 local BUILD_PANES = { "se", "so", "eo", "si" }
 
--- The action that opens each detail pane full-screen. The keys are bound from it and, with
+-- The action that zooms each detail pane. The keys are bound from it and, with
 -- `runner_ui.show_title_keys`, the titles name its key from it, so the two cannot disagree.
-local VIEW_ACTIONS = { so = "view_stdout", eo = "view_expected", si = "view_input", se = "view_stderr" }
+local ZOOM_ACTIONS = { so = "zoom_stdout", eo = "zoom_expected", si = "zoom_input", se = "zoom_stderr" }
 
 -- On the build step each source is opened by the key of the pane its program is about when a
 -- testcase runs: the solution by its errors, the generator and the interactor by the input
 -- (they are what writes it), the bruteforce by the answer (it writes that), the checker by the
 -- output (it judges it). No run holds two sources on one key, so every pane there has its own.
 local BUILD_ACTIONS = {
-    solution = "view_stderr",
-    generator = "view_input",
-    interactor = "view_input",
-    bruteforce = "view_expected",
-    checker = "view_stdout",
+    solution = "zoom_stderr",
+    generator = "zoom_input",
+    interactor = "zoom_input",
+    bruteforce = "zoom_expected",
+    checker = "zoom_stdout",
 }
 
 ---Split the grid's `build` cell into `panes`, one above the other, leaving the rest of the
@@ -98,8 +98,9 @@ local detail_windows = { "so", "eo", "si", "se" }
 ---@field update_details boolean redraw the detail panes on next update
 ---@field update_testcase integer? selected testcase (selector line)
 ---@field diff_view boolean
----@field viewer_winid integer?
----@field viewer_content string? which detail window the viewer is showing
+---@field zoom_winid integer?
+---@field zoomed string? which detail pane is zoomed
+---@field drawn_row table? the row the panes were last laid out for
 ---@field restore_winid integer?
 ---@field kind "popup"|"split" the interface in use
 ---@field grids table<string, { layout: table, grid: table }> grids checked, by option name
@@ -132,8 +133,8 @@ function M.new(runner)
         -- moves it out from under them.
         user_moved = false,
         diff_view = false,
-        viewer_winid = nil,
-        viewer_content = nil,
+        zoom_winid = nil,
+        zoomed = nil,
         restore_winid = nil,
         -- Testcase edits typed into the Input/Expected panes but not yet written,
         -- keyed by testcase number so they survive moving to another row (and, in
@@ -226,17 +227,17 @@ function RunnerUI:current_row()
 end
 
 ---@private
----The pane a `view_*` key opens on the row on screen. On a testcase row it is the pane the key
----names. On the build step every pane holds a compiler's words, and each key opens the source
+---The pane a `zoom_*` key zooms on the row laid out, as its title says. On a testcase row it is
+---the pane the key names. On the build step every pane holds a compiler's words, and each key opens the source
 ---whose role it stands for (`BUILD_ACTIONS`), or nothing when this run compiles no such source.
 ---@param name string the pane the key names
 ---@return string?
-function RunnerUI:view_pane(name)
-    local build = self:build_assignment(self:current_row())
+function RunnerUI:zoom_target(name)
+    local build = self:build_assignment(self.drawn_row)
     if not build then
         return name
     end
-    return build.opens[VIEW_ACTIONS[name]]
+    return build.opens[ZOOM_ACTIONS[name]]
 end
 
 ---@private
@@ -269,7 +270,7 @@ function RunnerUI:accent_editable_panes()
     -- Nothing on the build step is typed into, whatever its panes are on a testcase row, so
     -- the accent is off there — and taken off again, since a pane the re-tiling left open
     -- keeps the colour it had.
-    local building = self:build_assignment(self:current_row()) ~= nil
+    local building = self.drawn_row and self.drawn_row.compile
     for name, w in pairs(self.windows) do
         if w.winid and api.nvim_win_is_valid(w.winid) then
             local cfg = api.nvim_win_get_config(w.winid)
@@ -355,10 +356,10 @@ function RunnerUI:legend_sections()
         { "stop", keys("stop") },
         { "stop all", keys("stop_all") },
         { "toggle diff", keys("toggle_diff") },
-        { "view output / expected", keys("view_stdout") .. "  " .. keys("view_expected") },
-        { "view input / errors", keys("view_input") .. "  " .. keys("view_stderr") },
+        { "zoom output / expected", keys("zoom_stdout") .. "  " .. keys("zoom_expected") },
+        { "zoom input / errors", keys("zoom_input") .. "  " .. keys("zoom_stderr") },
     }
-    -- The build row's view keys follow its sources, so they are spelt out under the others.
+    -- The build row's zoom keys follow its sources, so they are spelt out under the others.
     rows[#rows + 1] = self:legend_build_row(m)
     vim.list_extend(rows, {
         { "", "" },
@@ -400,7 +401,7 @@ function RunnerUI:legend_build_row(m)
             parts[#parts + 1] = key .. " " .. source.label
         end
     end
-    return { "view on the build row", table.concat(parts, "  ") }
+    return { "zoom on the build row", table.concat(parts, "  ") }
 end
 
 ---@private
@@ -510,7 +511,7 @@ function RunnerUI:request_close(torn, on_closed)
     -- you were certainly not: keeping the edit means going back to the pane holding
     -- it, or failing that the selector.
     local back_to = was_in
-    if not (back_to and api.nvim_win_is_valid(back_to) and back_to ~= self.viewer_winid) then
+    if not (back_to and api.nvim_win_is_valid(back_to) and back_to ~= self.zoom_winid) then
         for _, name in ipairs({ "si", "eo", "tc" }) do
             local w = self.windows[name]
             if w and w.winid and api.nvim_win_is_valid(w.winid) then
@@ -764,7 +765,7 @@ function RunnerUI:with_pending_settled(tcnum, what, proceed, after_save)
 end
 
 ---@private
----Whether a buffer is one of this UI's panes (the viewer borrows one, so it counts).
+---Whether a buffer is one of this UI's panes (the zoom borrows one, so it counts).
 ---@param bufnr integer
 ---@return boolean
 function RunnerUI:owns_buf(bufnr)
@@ -1349,17 +1350,54 @@ function RunnerUI:opening_row()
     return self:initial_row()
 end
 
----@private
----Every pane's title on row `idx`: its own, a name the mode gives it (interactive's `Live`),
----the source it holds on the build step, and with `runner_ui.show_title_keys` the key that opens it.
----@param idx integer? the row (default: the row on screen)
+---What each pane of the build step shows: its source's compiler output, or each of its
+---sources' under its name when it carries several.
+---@param build table `build_assignment`
 ---@return table<string, string>
-function RunnerUI:titles_for(idx)
+local function build_text(build)
+    local text = {}
+    for pane, sources in pairs(build.holds) do
+        if #sources == 1 then
+            text[pane] = sources[1].output
+        else
+            local parts = {}
+            for i, source in ipairs(sources) do
+                parts[i] = source.label .. ":\n" .. source.output
+            end
+            text[pane] = table.concat(parts, "\n")
+        end
+    end
+    return text
+end
+
+---Each pane's title on the build step, naming its sources when the step has more than one.
+---@param build table `build_assignment`
+---@return table<string, string>
+local function build_titles(build)
+    local titles = {}
+    if build.named then
+        for pane, sources in pairs(build.holds) do
+            local labels = {}
+            for i, source in ipairs(sources) do
+                labels[i] = source.label
+            end
+            titles[pane] = (" Errors: %s "):format(table.concat(labels, ", "))
+        end
+    end
+    return titles
+end
+
+---@private
+---Every pane's title on `row`: its own, a name the mode gives it (interactive's `Live`), the
+---source it holds on the build step, and with `runner_ui.show_title_keys` the key that zooms it.
+---@param row table?
+---@return table<string, string>
+function RunnerUI:titles_for(row)
     local r = self.runner
     local titles = vim.tbl_extend("force", layout_util.titles, r.pane_titles and r:pane_titles() or {})
-    local build = self:build_assignment(r.tcdata[idx or self.update_testcase or 1])
+    local build = self:build_assignment(row)
     if build then
-        titles = vim.tbl_extend("force", titles, build.titles)
+        titles = vim.tbl_extend("force", titles, build_titles(build))
     end
     if self.config.runner_ui.show_title_keys then
         titles = self:titled_with_keys(titles, build)
@@ -1368,7 +1406,7 @@ function RunnerUI:titles_for(idx)
 end
 
 ---@private
----`titles` with the key that opens each pane full-screen at the end (` Errors (e) `). On the
+---`titles` with the key that zooms each pane at the end (` Errors (e) `). On the
 ---build step the keys follow the sources' roles rather than the panes' names, so each is
 ---written on the pane it actually opens.
 ---@param titles table<string, string>
@@ -1387,7 +1425,7 @@ function RunnerUI:titled_with_keys(titles, build)
             write(pane, action)
         end
     else
-        for pane, action in pairs(VIEW_ACTIONS) do
+        for pane, action in pairs(ZOOM_ACTIONS) do
             write(pane, action)
         end
     end
@@ -1428,13 +1466,14 @@ function RunnerUI:checked_grid(name, layout, fallback, kind)
 end
 
 ---@private
----How the build step's sources are shown: which pane each is in, what its compiler said,
----what to call that pane, and which key opens it (`opens`, view action to pane, from the
----source's role). `nil` on every row but the build step. These are answered together because
----they have to agree: the grid stacks exactly the panes the titles name, the content fills and
----the keys open.
+---Where the build step's sources go: the panes they fill (`panes`, in order), the sources each
+---holds (`holds`), and which key zooms which pane (`opens`, zoom action to pane, from the
+---source's role). `nil` on every row but the build step. The grid, the titles, the text and
+---the keys all come from this one placement, so they agree; it joins no text, since the grid
+---check asks for it on every render, and `build_text` and `build_titles` derive the rest where
+---it is drawn.
 ---@param tc table? the row being laid out or drawn
----@return { panes: string[], text: table<string, string>, titles: table<string, string>, opens: table<string, string> }?
+---@return { panes: string[], holds: table<string, table[]>, opens: table<string, string>, named: boolean }?
 function RunnerUI:build_assignment(tc)
     if not (tc and tc.compile) then
         return nil
@@ -1454,32 +1493,20 @@ function RunnerUI:build_assignment(tc)
             opens[action] = pane
         end
     end
-    local text, titles = {}, {}
-    for _, pane in ipairs(panes) do
-        local shared, labels, parts = #holds[pane] > 1, {}, {}
-        for _, source in ipairs(holds[pane]) do
-            labels[#labels + 1] = source.label
-            parts[#parts + 1] = shared and (source.label .. ":\n" .. source.output) or source.output
-        end
-        text[pane] = table.concat(parts, "\n")
-        -- Named only when there is more than one source: with a single one, "Errors" is
-        -- already the whole answer to which source it belongs to.
-        if #sources > 1 then
-            titles[pane] = (" Errors: %s "):format(table.concat(labels, ", "))
-        end
-    end
-    return { panes = panes, text = text, titles = titles, opens = opens }
+    -- Named only when there is more than one source: with a single one, "Errors" is already
+    -- the whole answer to which source it belongs to.
+    return { panes = panes, holds = holds, opens = opens, named = #sources > 1 }
 end
 
 ---@private
----The grid row `idx` is drawn with. The build step is not a testcase: it has no input, no
+---The grid `row` is drawn with. The build step is not a testcase: it has no input, no
 ---answer and no output to compare, so it gets `runner_ui.compile_layout`, the selector and a
 ---`build` cell split into one pane per source it compiles. Every other row gets the mode's
 ---own layout, else the configured one.
----@param idx integer? the row (default: the row on screen)
+---@param row table?
 ---@return table
-function RunnerUI:grid(idx)
-    local build = self:build_assignment(self.runner.tcdata[idx or self.update_testcase or 1])
+function RunnerUI:grid(row)
+    local build = self:build_assignment(row)
     if build then
         local default = require("tuna.config").defaults.runner_ui.compile_layout
         local cell = self:checked_grid("runner_ui.compile_layout", self.config.runner_ui.compile_layout, default, "build")
@@ -1496,14 +1523,42 @@ function RunnerUI:grid(idx)
 end
 
 ---@private
+---The panes that hold text to be read on `row` rather than data that lines up: every pane
+---of the build step, all compiler output, and the Errors pane on a testcase row. They wrap, at
+---word boundaries and keeping a line's indent (a compiler's notes are indented); the others do
+---not, since the diff pairs the Output and Expected Output panes line by line and an input's
+---long lines are data.
+---@param row table?
+---@return table<string, boolean>
+function RunnerUI:text_panes(row)
+    local build = self:build_assignment(row)
+    local out = {}
+    for _, name in ipairs(build and build.panes or { "se" }) do
+        out[name] = true
+    end
+    return out
+end
+
+---@param winid integer
+---@param text boolean whether the window shows text to be read (`text_panes`)
+local function wrap_as(winid, text)
+    vim.wo[winid].wrap = text
+    vim.wo[winid].linebreak = text
+    vim.wo[winid].breakindent = text
+end
+
+---@private
 ---Place the panes for row `idx` (default: the row on screen), keeping focus where it was: a
 ---pane the new grid leaves out, or one the split interface opens anew, hands it to the pane
----of the same name, else the selector.
+---of the same name, else the selector. What depends on the kind of row (wrapping, the accent,
+---a mode's own pane setup) follows `drawn_row`, the row laid out, which is not yet the row
+---selected while `show_ui` waits a tick to choose it.
 ---@param idx integer?
 function RunnerUI:lay_out(idx)
-    local grid = self:grid(idx)
-    self.drawn_layout = grid
-    for name, title in pairs(self:titles_for(idx)) do
+    local row = self.runner.tcdata[idx or self.update_testcase or 1]
+    local grid = self:grid(row)
+    self.drawn_layout, self.drawn_row = grid, row
+    for name, title in pairs(self:titles_for(row)) do
         self.windows[name].title = title
     end
     local cur, focused = api.nvim_get_current_win(), nil
@@ -1517,6 +1572,13 @@ function RunnerUI:lay_out(idx)
     -- flag outlives the call by a tick, which is when those events are delivered.
     self.relayouting = true
     self.interface.relayout(self.windows, self.config, self.restore_winid, math.max(1, #self:status_lines()), grid)
+    local text = self:text_panes(row)
+    for name, w in pairs(self.windows) do
+        if w.winid and api.nvim_win_is_valid(w.winid) then
+            wrap_as(w.winid, text[name] == true)
+        end
+    end
+    self:accent_editable_panes()
     vim.schedule(function()
         self.relayouting = false
     end)
@@ -1550,7 +1612,6 @@ function RunnerUI:redraw_grid()
             self:watch_pane_window(w.winid)
         end
     end
-    self:accent_editable_panes()
     if self.diff_view then
         self:set_diff_bind(true)
     end
@@ -1558,10 +1619,10 @@ function RunnerUI:redraw_grid()
     if self.runner.on_ui_shown then
         self.runner:on_ui_shown(self)
     end
-    if self.viewer_winid then
-        local was = self.viewer_content
-        self:close_viewer()
-        self:show_viewer(was)
+    if self.zoom_winid then
+        local was = self.zoomed
+        self:unzoom()
+        self:zoom(was)
     end
     self.update_windows = true
     self:update_ui()
@@ -1636,7 +1697,6 @@ function RunnerUI:show_ui()
     -- would rebuild every pane a tick later.
     self:lay_out(next(self.runner.tcdata) ~= nil and self:opening_row() or nil)
     self.ui_visible = true
-    self:accent_editable_panes()
     self:update_status_line()
 
     augroup_counter = augroup_counter + 1
@@ -1644,17 +1704,17 @@ function RunnerUI:show_ui()
 
     local mappings = self.config.runner_ui.mappings
 
-    local function close_or_viewer()
-        if self.viewer_winid then
-            self:close_viewer()
+    local function close_or_unzoom()
+        if self.zoom_winid then
+            self:unzoom()
         else
             self:request_close()
         end
     end
 
     -- Close maps on every window; ":q" handled per-window via WinClosed keyed on
-    -- the *window id* (not buffer — the viewer borrows a detail pane's buffer, so
-    -- a buffer-keyed autocmd would tear the UI down when the viewer is closed).
+    -- the *window id* (not buffer — the zoom borrows a detail pane's buffer, so
+    -- a buffer-keyed autocmd would tear the UI down when the zoom is closed).
     local switch = as_list(self.config.switch_window_keys or {})
     local dirs = { "h", "j", "k", "l" }
     for name, w in pairs(self.windows) do
@@ -1665,7 +1725,7 @@ function RunnerUI:show_ui()
         -- else in tuna. In normal mode they mean what they mean in the rest of the UI,
         -- and an unsaved edit is caught by the prompt rather than by withholding the key.
         for _, key in ipairs(as_list(mappings.close)) do
-            vim.keymap.set("n", key, close_or_viewer, { buffer = w.bufnr, nowait = true })
+            vim.keymap.set("n", key, close_or_unzoom, { buffer = w.bufnr, nowait = true })
         end
         -- The key legend is reachable from wherever you are, editable panes included:
         -- being lost is exactly when it is wanted. Normal mode only, like the rest.
@@ -1706,7 +1766,7 @@ function RunnerUI:show_ui()
             end
         end
         -- A pane the layout left out has a buffer but no window, so there is nothing
-        -- to watch for it (its content is still reachable through the viewer).
+        -- to watch for it (its content can still be zoomed).
         if w.winid then
             self:watch_pane_window(w.winid)
         end
@@ -1741,9 +1801,9 @@ function RunnerUI:show_ui()
                 if not self:owns_buf(api.nvim_get_current_buf()) then
                     return
                 end
-                -- The viewer is a window of its own, over the grid: `:q` there means
-                -- close the viewer, and that is exactly what Vim is about to do.
-                if self.viewer_winid and api.nvim_get_current_win() == self.viewer_winid then
+                -- The zoom is a window of its own, over the grid: `:q` there means
+                -- close the zoom, and that is exactly what Vim is about to do.
+                if self.zoom_winid and api.nvim_get_current_win() == self.zoom_winid then
                     return
                 end
             end
@@ -1874,11 +1934,11 @@ function RunnerUI:show_ui()
     map_tc("toggle_diff", function()
         self:toggle_diff_view()
     end)
-    for pane, action in pairs(VIEW_ACTIONS) do
+    for pane, action in pairs(ZOOM_ACTIONS) do
         map_tc(action, function()
-            local shown = self:view_pane(pane)
+            local shown = self:zoom_target(pane)
             if shown then
-                self:show_viewer(shown)
+                self:zoom(shown)
             end
         end)
     end
@@ -2212,12 +2272,12 @@ function RunnerUI:disable_diff_view()
 end
 
 ---@private
----Close the viewer popup (keeping the detail buffer it borrowed).
-function RunnerUI:close_viewer()
-    if self.viewer_winid and api.nvim_win_is_valid(self.viewer_winid) then
-        api.nvim_win_close(self.viewer_winid, true)
+---Close the zoom (keeping the detail buffer it borrowed).
+function RunnerUI:unzoom()
+    if self.zoom_winid and api.nvim_win_is_valid(self.zoom_winid) then
+        api.nvim_win_close(self.zoom_winid, true)
     end
-    self.viewer_winid = nil
+    self.zoom_winid = nil
     local tc = self.windows.tc
     if tc and tc.winid and api.nvim_win_is_valid(tc.winid) then
         api.nvim_set_current_win(tc.winid)
@@ -2225,21 +2285,21 @@ function RunnerUI:close_viewer()
 end
 
 ---@private
----The geometry of the two large overlays that cover the grid — the viewer and the
----message float — both sized from `runner_ui.viewer` and centred on the editor.
+---The geometry of the two large overlays that cover the grid — the zoom and the
+---message float — both sized from `runner_ui.zoom` and centred on the editor.
 ---
 ---Both dimensions are bounded by the room there is, and both subtract the two border
 ---lines: a bordered float's footprint is its size *plus* its frame, so a `width` or
 ---`height` of 1.0 asks for a window two cells larger than the screen. The height is
 ---bounded by the float band (a row is kept clear above and below every float), the
 ---width by the screen, there being no horizontal margin.
----@param vcfg table `runner_ui.viewer`
+---@param zcfg table `runner_ui.zoom`
 ---@return integer width, integer height, integer col, integer row
-local function overlay_geometry(vcfg)
+local function overlay_geometry(zcfg)
     local vim_width, vim_height = utils.get_ui_size()
     local band_row, band_h = utils.float_band()
-    local width = math.max(1, math.min(math.floor(vim_width * vcfg.width + 0.5), vim_width - 2))
-    local height = math.max(1, math.min(math.floor(vim_height * vcfg.height + 0.5), band_h - 2))
+    local width = math.max(1, math.min(math.floor(vim_width * zcfg.width + 0.5), vim_width - 2))
+    local height = math.max(1, math.min(math.floor(vim_height * zcfg.height + 0.5), band_h - 2))
     -- Centred on the *footprint*, border included: `col`/`row` are where the frame is
     -- drawn, not where the text starts.
     return width,
@@ -2248,29 +2308,24 @@ local function overlay_geometry(vcfg)
         band_row + math.max(0, math.floor((band_h - height - 2) / 2))
 end
 
----Open (or retarget) the viewer: a large float showing one detail pane's buffer.
----@param content string? detail window name; nil keeps the current one
-function RunnerUI:show_viewer(content)
-    self.viewer_content = content or self.viewer_content
-    if not self.viewer_content then
+---Zoom a detail pane: a large float over the grid showing the pane's buffer. Nothing while a
+---pane is zoomed: an editable pane's letters are text, so its zoom cannot take the zoom keys,
+---and a key that acted in one zoom and typed in another would be learned wrong.
+---@param name string
+function RunnerUI:zoom(name)
+    if self.zoom_winid and api.nvim_win_is_valid(self.zoom_winid) then
         return
     end
-    local source = self.windows[self.viewer_content]
+    local source = self.windows[name]
     if not source then
         return
     end
+    self.zoomed = name
 
-    if self.viewer_winid and api.nvim_win_is_valid(self.viewer_winid) then
-        api.nvim_win_set_buf(self.viewer_winid, source.bufnr)
-        api.nvim_win_set_config(self.viewer_winid, { title = source.title, title_pos = "center" })
-        api.nvim_set_current_win(self.viewer_winid)
-        return
-    end
-
-    local vcfg = self.config.runner_ui.viewer
-    local width, height, col, row = overlay_geometry(vcfg)
-    self.viewer_winid = surface.float(source.bufnr, {
-        layer = surface.LAYER.viewer, -- over the pane grid
+    local zcfg = self.config.runner_ui.zoom
+    local width, height, col, row = overlay_geometry(zcfg)
+    self.zoom_winid = surface.float(source.bufnr, {
+        layer = surface.LAYER.zoom, -- over the pane grid
         width = width,
         height = height,
         col = col,
@@ -2281,17 +2336,18 @@ function RunnerUI:show_viewer(content)
         enter = true,
         keep_scrolloff = true, -- read like a buffer, not navigated like a list
     })
-    vim.wo[self.viewer_winid].number = vcfg.show_nu
-    vim.wo[self.viewer_winid].relativenumber = vcfg.show_rnu
-    -- The source buffer already maps the close key to close_or_viewer (set in
-    -- show_ui), which closes the viewer when it's open — no extra keymap needed.
-    -- Handle the viewer being closed with ":q" so our state stays consistent.
+    vim.wo[self.zoom_winid].number = zcfg.show_nu
+    vim.wo[self.zoom_winid].relativenumber = zcfg.show_rnu
+    wrap_as(self.zoom_winid, self:text_panes(self.drawn_row)[name] == true)
+    -- The source buffer already maps the close key to close_or_unzoom (set in
+    -- show_ui), which closes the zoom when it's open — no extra keymap needed.
+    -- Handle the zoom being closed with ":q" so our state stays consistent.
     api.nvim_create_autocmd("WinClosed", {
         group = self.augroup,
-        pattern = tostring(self.viewer_winid),
+        pattern = tostring(self.zoom_winid),
         once = true,
         callback = function()
-            self.viewer_winid = nil
+            self.zoom_winid = nil
         end,
     })
 end
@@ -2323,10 +2379,10 @@ function RunnerUI:delete()
         self.augroup = nil
     end
     self:disable_diff_view()
-    if self.viewer_winid and api.nvim_win_is_valid(self.viewer_winid) then
-        api.nvim_win_close(self.viewer_winid, true)
+    if self.zoom_winid and api.nvim_win_is_valid(self.zoom_winid) then
+        api.nvim_win_close(self.zoom_winid, true)
     end
-    self.viewer_winid = nil
+    self.zoom_winid = nil
     for _, w in pairs(self.windows) do
         if w.winid and api.nvim_win_is_valid(w.winid) then
             pcall(api.nvim_win_close, w.winid, true)
@@ -2342,7 +2398,7 @@ function RunnerUI:delete()
 end
 
 ---Say something about the mode, rather than about a process, in a large float closable with
----the same keys as the viewer (a stress helper gone on a rerun).
+---the same keys as the zoom (a stress helper gone on a rerun).
 ---@param title string
 ---@param text string
 function RunnerUI:show_message(title, text)
@@ -2351,9 +2407,9 @@ function RunnerUI:show_message(title, text)
     vim.bo[buf].modifiable = false
     surface.adopt(buf, "message")
 
-    local width, height, col, row = overlay_geometry(self.config.runner_ui.viewer)
+    local width, height, col, row = overlay_geometry(self.config.runner_ui.zoom)
     local win = surface.float(buf, {
-        layer = surface.LAYER.overlay, -- over the grid and the viewer
+        layer = surface.LAYER.overlay, -- over the grid and the zoom
         width = width,
         height = height,
         col = col,
@@ -2587,7 +2643,7 @@ local function selector_columns(entries, width)
     return last[1], last[2], last[3]
 end
 
----The runner whose UI holds `bufnr`, if that is one of its panes (the viewer borrows a pane's
+---The runner whose UI holds `bufnr`, if that is one of its panes (the zoom borrows a pane's
 ---buffer, so it is covered too).
 ---@param bufnr integer
 ---@return table?
@@ -2713,11 +2769,11 @@ function RunnerUI:focus_dir(dir)
         end
     end
     if not from then
-        -- The viewer isn't part of the grid, so there is no direction to move in from
+        -- The zoom isn't part of the grid, so there is no direction to move in from
         -- it. Rather than doing nothing (a big float you can only leave one way), take
         -- a directional key as "done looking": close it and move on from the selector.
-        if self.viewer_winid and cur == self.viewer_winid then
-            self:close_viewer()
+        if self.zoom_winid and cur == self.zoom_winid then
+            self:unzoom()
             return self:focus_dir(dir)
         end
         return
@@ -2869,7 +2925,7 @@ function RunnerUI:update_ui()
         -- The row on screen decides the grid (the build step gets its sources and nothing
         -- else), so a row of another kind means the panes are laid out again before anything
         -- is drawn into them. The redraw renders on its own tick.
-        if not vim.deep_equal(self:grid(), self.drawn_layout) then
+        if not vim.deep_equal(self:grid(self:current_row()), self.drawn_layout) then
             self:redraw_grid()
             return
         end
@@ -2900,6 +2956,7 @@ function RunnerUI:update_ui()
                 -- whatever they mean on a testcase row, so they are filled from here and
                 -- not from the mode: a build is the same thing in every mode.
                 local build = self:build_assignment(tc)
+                local text = build and build_text(build)
                 -- Ask the runner what each detail pane should show. A mode can own a
                 -- pane (return SKIP) so we don't clobber it — e.g. interactive's
                 -- editable Input pane while you're typing into it.
@@ -2907,7 +2964,7 @@ function RunnerUI:update_ui()
                     local writable = editable and (name == "si" or name == "eo")
                     -- What is stored, and what to show: the two differ exactly when an
                     -- unwritten edit is being restored into the pane.
-                    local base = (build and build.text[name]) or self.runner:pane_content(tc, name)
+                    local base = (text and text[name]) or self.runner:pane_content(tc, name)
                     local content = base
                     if pending and name == "si" then
                         content = pending.stdin
@@ -2953,6 +3010,6 @@ function RunnerUI:update_ui()
 end
 
 -- The pure half of the selector's layout, for the test suite.
-M._test = { selector_columns = selector_columns }
+M._test = { selector_columns = selector_columns, build_text = build_text, build_titles = build_titles }
 
 return M

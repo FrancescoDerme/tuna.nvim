@@ -86,48 +86,50 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     best match deciding, tuna's starter recognised, a template never offered, an empty one
     included, and a pinned file named, starting on Keep, and unpinned when deleted);
   - `runner.lua`: all four run modes with `vim.system` stubbed, covering what each child is
-    handed, bare rows, save/answer semantics, a row added after a run settling and judged by
-    its next save, disk drift and restore, path resolution, the swapfile contract, interactive
-    grids and the conversation model, and the run gate (`settle_runners`), the local verdict a
-    finished normal, run-all and feed run saves, live's typing keys starting a session, the
-    build step showing one named pane per source it compiles (and none for a helper with
-    nothing to compile, nor a name when the solution is alone) without a buffer more than a
-    board's six, its grid's own vocabulary, a key for every source by its role and titles
-    naming it, the legend's sections for stress and live interactive and its build-row line
-    (and none of that for a plain run), panes renamed and un-accented for it and back again for
-    a testcase row, and what the stress search trusts (a bruteforce that crashed or ran past
-    its own budget saving nothing, one that printed nothing saving an empty answer, the row the
-    search is shown on, when it is listed and that it stays last and numbered past every
-    testcase while the board is edited, a helper that failed reported on that row and on the
-    Compile row rather than in a float, the search running beside the testcases on disk rather
-    than after them, every run searching from a seed of its own and the Run pane showing the
-    one being tried, a checker that did not build or gives no verdict stopping it and a restart
-    judging with the checker as it is now, a failed build finishing it and spawning nothing
-    behind it, in every mode that builds a solution of its own), a stop in every mode (nothing
-    started after it, the rows it had not reached `NOT RUN`, a stopped session `KILLED`, the
-    board idle), `<C-r>` building the solution again and running after a stop, reusing a build
-    (the files its stamp reads: headers beside it and through `-I` and `-Idir`, none of the
-    compiler's own, an include cycle; a flag changing it; a file touched or an edit undone
-    being no change; a reused row reading `CACHED` with its compiler's words; a missing program
-    or a failed build never reused by another run; run-all and the helpers going by the same
-    rule; a helper's build answered within its run without its sources read, a failure
-    included; Rust never reused across runs), headers never taken for a solution or a helper (a
-    run from one running the solution beside it, run-all, `solution_in`, a contest's problems,
-    `:Tuna pin` and, in `menu.lua`, the command list), the ending vocabulary, and run-all's
-    headers counting judged rows only, using real UI windows, in both interfaces where the grid
-    changes (focus, the selector's row and line numbers, titles and a bad grid said once as the
-    board re-tiles, and `:w` from a read-only pane). `testcases.lua` also covers the
-    `single_file` rewrite keeping untouched testcases, a conversion through every backend
-    keeping an answer stored empty and leaving no layout behind (the store's root kept), which
-    testcase a command without a number acts on, and sharing a folder's testcases (offered for
-    a solution with none when exactly one other has some, never for several sets, a format or
-    `testcases_directory` carrying the file's name, or a name without a number; renamed as they
-    were, an empty answer kept; the question asked once a session, naming every rename, and the
-    run going ahead after every answer).
+    handed, bare rows, save/answer semantics, a board listed before any run accenting its
+    editable panes, a row added after a run settling and judged by its next save, disk drift and
+    restore, path resolution, the swapfile contract, interactive grids and the conversation
+    model (its columns unwrapped and scroll-bound on a session's row only, a board listed before
+    any run included), and the run gate (`settle_runners`), the local verdict a finished normal,
+    run-all and feed run saves, live's typing keys starting a session, the build step showing
+    one named pane per source it compiles (and none for a helper with nothing to compile, nor a
+    name when the solution is alone) without a buffer more than a board's six, its grid's own
+    vocabulary, a key for every source by its role and titles naming it, the legend's sections
+    for stress and live interactive and its build-row line (and none of that for a plain run),
+    panes renamed, un-accented and wrapped for it and back again for a testcase row, and what
+    the stress search trusts (a bruteforce that crashed or ran past its own budget saving
+    nothing, one that printed nothing saving an empty answer, the row the search is shown on,
+    when it is listed and that it stays last and numbered past every testcase while the board is
+    edited, a helper that failed reported on that row and on the Compile row rather than in a
+    float, the search running beside the testcases on disk rather than after them, every run
+    searching from a seed of its own and the Run pane showing the one being tried, a checker
+    that did not build or gives no verdict stopping it and a restart judging with the checker as
+    it is now, a failed build finishing it and spawning nothing behind it, in every mode that
+    builds a solution of its own), a stop in every mode (nothing started after it, the rows it
+    had not reached `NOT RUN`, a stopped session `KILLED`, the board idle), `<C-r>` building the
+    solution again and running after a stop, reusing a build (the files its stamp reads: headers
+    beside it and through `-I` and `-Idir`, none of the compiler's own, an include cycle; a flag
+    changing it; a file touched or an edit undone being no change; a reused row reading `CACHED`
+    with its compiler's words; a missing program or a failed build never reused by another run;
+    run-all and the helpers going by the same rule; a helper's build answered within its run
+    without its sources read, a failure included; Rust never reused across runs), headers never
+    taken for a solution or a helper (a run from one running the solution beside it, run-all,
+    `solution_in`, a contest's problems, `:Tuna pin` and, in `menu.lua`, the command list), the
+    ending vocabulary, and run-all's headers counting judged rows only, using real UI windows,
+    in both interfaces where the grid changes (focus, the selector's row and line numbers,
+    titles and a bad grid said once as the board re-tiles, `:w` from a read-only pane, and a
+    zoom key doing nothing in a zoom). `testcases.lua` also covers the `single_file` rewrite
+    keeping untouched testcases, a conversion through every backend keeping an answer stored
+    empty and leaving no layout behind (the store's root kept), which testcase a command without
+    a number acts on, and sharing a folder's testcases (offered for a solution with none when
+    exactly one other has some, never for several sets, a format or `testcases_directory`
+    carrying the file's name, or a name without a number; renamed as they were, an empty answer
+    kept; the question asked once a session, naming every rename, and the run going ahead after
+    every answer).
 - Modules expose file-local helpers to tests through `M._test` (`download`, `submit`, `clean`,
-  `interactive`, `scratch`, `menu`), and `tools` a way to forget the session's builds, for a
-  test whose stubbed compiler answers differently for a source that has not changed. They are
-  not public interface.
+  `interactive`, `scratch`, `menu`, `runner_ui`), and `tools` a way to forget the session's
+  builds, for a test whose stubbed compiler answers differently for a source that has not
+  changed. They are not public interface.
 - **Mutation-check new tests**: break the rule each test describes and confirm it fails, and
   confirm a harmless edit doesn't.
 - The suite doesn't cover real processes, verdicts coming back, or most UI interaction. Verify

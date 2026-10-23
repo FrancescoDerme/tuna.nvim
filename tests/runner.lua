@@ -122,7 +122,8 @@ t.eq("the compile row's stdin is a string", r.tcdata[1].stdin, "")
 -- Ten-wide columns are what the rows line up on in every mode, but the conversation's
 -- selector is narrower than three of them, and a pane that cuts `0.266 s` in half reports
 -- a run that never happened.
-local columns = require("tuna.runner_ui")._test.selector_columns
+local ui_test = require("tuna.runner_ui")._test
+local columns, build_text, build_titles = ui_test.selector_columns, ui_test.build_text, ui_test.build_titles
 local sel_rows = {
     { header = "Compile", status = "DONE", time = "0.266 s" },
     { header = "TC 0", status = "RUNNING", time = "" },
@@ -384,7 +385,7 @@ end
 -- The build step and a testcase row are drawn with different grids, so moving between them
 -- re-tiles the board. The split interface opens its windows anew each time, the popup one
 -- moves them, and either way focus stays on the pane it was in, the selector stays on the
--- row, the titles follow the row (the viewer's too), and a grid that can't be used is said
+-- row, the titles follow the row (the zoom's too), and a grid that can't be used is said
 -- once, not on every re-tile.
 local function board(interface, bad_layout)
     local quiet = vim.notify
@@ -429,10 +430,36 @@ local function board(interface, bad_layout)
 end
 
 t.write(dir, "checker.cpp", "int main() {}\n")
+-- Text to be read wraps, at word boundaries and keeping its indent: the Errors pane on a
+-- testcase row and every pane on the build step, which holds compiler output. The Output,
+-- Expected Output and Input panes keep their lines whole, since the diff pairs them line by line.
+local function wrapping(win)
+    return win and vim.api.nvim_win_is_valid(win) and { vim.wo[win].wrap, vim.wo[win].linebreak, vim.wo[win].breakindent }
+        or nil
+end
+local WRAPS, WHOLE = { true, true, true }, { false, false, false }
+---A conversation column's `{ wrap, scrollbind }`.
+local function column(ui, name)
+    local w = ui.windows[name].winid
+    return w and { vim.wo[w].wrap, vim.wo[w].scrollbind }
+end
+---Whether a pane wears the accent that says it is typed into.
+local function accented(ui, name)
+    local w = ui.windows[name]
+    return w.winid ~= nil
+        and vim.api.nvim_win_is_valid(w.winid)
+        and vim.wo[w.winid].winhighlight:find("TunaEditableBorder", 1, true) ~= nil
+end
 for _, interface in ipairs({ "split", "popup" }) do
     local br, ui, move, state, done = board(interface)
     done()
     t.eq(interface .. ": a run hands the selector the first testcase, focus in it", state(), { focus = "tc", row = 2 })
+    t.eq(interface .. ": on a testcase row the Errors pane wraps, the others keep lines whole", {
+        wrapping(ui.windows.se.winid),
+        wrapping(ui.windows.so.winid),
+        wrapping(ui.windows.eo.winid),
+        wrapping(ui.windows.si.winid),
+    }, { WRAPS, WHOLE, WHOLE, WHOLE })
     -- The selector's own line-number options, `false` by default, beside panes numbered by default.
     t.eq(interface .. ": the selector has no line numbers, the panes do", {
         vim.wo[ui.windows.tc.winid].number,
@@ -442,17 +469,30 @@ for _, interface in ipairs({ "split", "popup" }) do
     move(1)
     t.eq(interface .. ": moving onto the build step keeps focus and the row", state(), { focus = "tc", row = 1 })
     t.has(interface .. ": its panes are named after their sources", ui.windows.so.title, "checker.cpp")
+    t.eq(interface .. ": and every one of them wraps", { wrapping(ui.windows.se.winid), wrapping(ui.windows.so.winid) }, { WRAPS, WRAPS })
     if interface == "popup" then
         local drawn = vim.api.nvim_win_get_config(ui.windows.so.winid).title
         t.has("popup: and drawn with that name", drawn and drawn[1][1] or "", "checker.cpp")
     end
-    ui:show_viewer("so")
-    local viewer = ui.viewer_winid and vim.api.nvim_win_get_config(ui.viewer_winid).title
-    t.has(interface .. ": and the viewer opens with that name", viewer and viewer[1][1] or "", "checker.cpp")
-    ui:close_viewer()
+    ui:zoom("so")
+    local zoomed = ui.zoom_winid and vim.api.nvim_win_get_config(ui.zoom_winid).title
+    t.has(interface .. ": and zoomed with that name", zoomed and zoomed[1][1] or "", "checker.cpp")
+    t.eq(interface .. ": wrapped, as the pane it shows", wrapping(ui.zoom_winid), WRAPS)
+    ui:unzoom()
     move(2)
     t.eq(interface .. ": and back to a testcase row", state(), { focus = "tc", row = 2 })
     t.eq(interface .. ": where the pane is Output again", ui.windows.so.title, " Output (o) ")
+    t.eq(interface .. ": keeping its lines whole again", wrapping(ui.windows.so.winid), WHOLE)
+    ui:zoom("so")
+    t.eq(interface .. ": as its zoom does", wrapping(ui.zoom_winid), WHOLE)
+    ui:unzoom()
+    -- A zoom key does nothing in a zoom: an editable pane's zoom types the letter, so no zoom
+    -- takes it.
+    ui:zoom("se")
+    vim.api.nvim_feedkeys("o", "xt", false)
+    local still = vim.api.nvim_win_get_config(ui.zoom_winid).title
+    t.has(interface .. ": a zoom key in a zoom leaves it as it is", still and still[1][1] or "", "Errors")
+    ui:unzoom()
     if interface == "popup" then
         local drawn = vim.api.nvim_win_get_config(ui.windows.so.winid).title
         t.eq("popup: and drawn as Output again", drawn and drawn[1][1], " Output (o) ")
@@ -896,6 +936,14 @@ t.ok(
 )
 t.eq("nothing is typable before a session", vim.bo[live_buf].modifiable, false)
 t.eq("and nothing is built", lr.preloaded, true)
+vim.wait(200, function()
+    return false
+end)
+t.eq(
+    "it opens on the conversation, its columns unwrapped and scroll-bound",
+    { lr.ui.update_testcase, column(lr.ui, "se"), column(lr.ui, "so") },
+    { 2, { false, true }, { false, true } }
+)
 typing_keys.i()
 t.eq("pressing one builds and starts the session", lr.preloaded, false)
 t.eq("and remembers to hand the column over once it is live", lr.type_when_live, true)
@@ -1013,6 +1061,20 @@ if xui then
     local xc = vim.api.nvim_win_get_config(xui.windows.si.winid)
     t.eq("its conversation pane is titled Live", xc.title and xc.title[1][1], " Live (i) ")
     t.ok("and wears no accent, since nothing is typed into it", not (xc.title and xc.title[1][2] == "TunaEditableBorder"), xc.title)
+    -- The conversation's columns stay level: unwrapped and scroll-bound, Errors included. The
+    -- build step is no conversation, so there its panes wrap and scroll on their own.
+    local function show_row(row)
+        vim.api.nvim_set_current_win(xui.windows.tc.winid)
+        vim.api.nvim_win_set_cursor(0, { row, 0 })
+        vim.api.nvim_exec_autocmds("CursorMoved", { buffer = xui.windows.tc.bufnr })
+        vim.wait(300, function()
+            return false
+        end)
+    end
+    show_row(2)
+    t.eq("a conversation's columns stay unwrapped and scroll together", { column(xui, "se"), column(xui, "so") }, { { false, true }, { false, true } })
+    show_row(1)
+    t.eq("while the build step's panes wrap and scroll on their own", column(xui, "se"), { true, false })
     xui:delete()
 end
 vim.fn.delete(dir .. "/interactor.cpp")
@@ -1516,26 +1578,26 @@ do
     end, 10)
     local bui, first = br.ui, br.tcdata[1]
 
-    t.eq("the build step stacks one pane per source it compiles", bui:grid(1), {
+    t.eq("the build step stacks one pane per source it compiles", bui:grid(bui.runner.tcdata[1]), {
         { 3, "tc" },
         { 8, { { 1, "se" }, { 1, "so" }, { 1, "eo" }, { 1, "si" } } },
     })
     local assigned = bui:build_assignment(first)
-    t.eq("the solution first, then the helpers the mode needs", assigned.titles, {
+    t.eq("the solution first, then the helpers the mode needs", build_titles(assigned), {
         se = " Errors: main.cpp ",
         so = " Errors: gen.cpp ",
         eo = " Errors: brute.cpp ",
         si = " Errors: checker.cpp ",
     })
-    t.eq("each holding what its own compiler said, and nothing when it said nothing", assigned.text, {
+    t.eq("each holding what its own compiler said, and nothing when it said nothing", build_text(assigned), {
         se = "",
         so = "gen.cpp warns\n",
         eo = "",
         si = "checker.cpp warns\n",
     })
-    t.eq("a testcase row keeps the grid of the run", bui:grid(2), require("tuna.config").current_setup.popup_ui.layout)
+    t.eq("a testcase row keeps the grid of the run", bui:grid(bui.runner.tcdata[2]), require("tuna.config").current_setup.popup_ui.layout)
     t.ok("a row that is not the build step has no sources", bui:build_assignment(br.tcdata[2]) == nil)
-    t.ok("a helper that warned keeps the cursor on the build step", br:build_spoke(first), assigned.text)
+    t.ok("a helper that warned keeps the cursor on the build step", br:build_spoke(first), first.stderr)
     t.eq("though the solution itself built quietly", { first.stderr, first.exit_code }, { "", 0 })
 
     -- What the panes are actually drawn with, and that they are named back again: a pane
@@ -1546,13 +1608,6 @@ do
     vim.wait(400, function()
         return false
     end)
-    ---Whether a pane wears the accent that says it is typed into.
-    local function accented(name)
-        local w = bui.windows[name]
-        return w.winid
-            and vim.api.nvim_win_is_valid(w.winid)
-            and vim.wo[w.winid].winhighlight:find("TunaEditableBorder", 1, true) ~= nil
-    end
     ---What a pane's border actually says, which is what a rename has to reach.
     local function drawn_title(name)
         local w = bui.windows[name]
@@ -1564,13 +1619,13 @@ do
         drawn_title("so"),
         vim.api.nvim_buf_get_lines(bui.windows.so.bufnr, 0, 1, false)[1],
     }, { " Errors: main.cpp (e) ", " Errors: gen.cpp (i) ", "gen.cpp warns" })
-    t.ok("and wear no accent, nothing on the build step is typed into", not accented("eo"), "eo")
+    t.ok("and wear no accent, nothing on the build step is typed into", not accented(bui, "eo"), "eo")
     t.eq("four sources, and still the six panes every board has, not one buffer more", vim.tbl_count(bui.windows), 6)
     t.ok("the legend has a section for the search", legend_line(bui, "STRESS") ~= nil)
     t.has("saying what the search row is", legend_line(bui, "the search row"), "the input being tried")
     t.has(
         "and spells out the build row's keys, which follow its sources",
-        legend_line(bui, "view on the build row"),
+        legend_line(bui, "zoom on the build row"),
         "e main.cpp  i gen.cpp  a brute.cpp  o checker.cpp"
     )
 
@@ -1582,8 +1637,8 @@ do
     local opened = {}
     for _, key in ipairs({ "e", "i", "a", "o" }) do
         vim.api.nvim_feedkeys(key, "xt", false)
-        opened[key] = bui.viewer_winid and vim.api.nvim_win_get_config(bui.viewer_winid).title[1][1]
-        bui:close_viewer()
+        opened[key] = bui.zoom_winid and vim.api.nvim_win_get_config(bui.zoom_winid).title[1][1]
+        bui:unzoom()
     end
     t.eq("every source on the build step opens with its own key", opened, {
         e = " Errors: main.cpp (e) ",
@@ -1598,7 +1653,7 @@ do
         return false
     end)
     t.eq("and named back for a testcase row", { drawn_title("so"), drawn_title("se") }, { " Output (o) ", " Errors (e) " })
-    t.ok("which is where the accent comes back", accented("eo"), "eo")
+    t.ok("which is where the accent comes back", accented(bui, "eo"), "eo")
     -- And goes again: a pane the re-tiling leaves open keeps the colour it had, so the
     -- accent has to be taken off as well as put on.
     bui:select_row(1)
@@ -1607,9 +1662,9 @@ do
     vim.wait(400, function()
         return false
     end)
-    t.ok("and goes again on the way back to the build step", not accented("eo"), "eo")
+    t.ok("and goes again on the way back to the build step", not accented(bui, "eo"), "eo")
 
-    -- `show_title_keys` (on by default) writes the key that opens each pane full-screen at the end
+    -- `show_title_keys` (on by default) writes the key that zooms each pane at the end
     -- of its title, and on the build step that is each source's own key.
     local function render()
         bui.update_windows, bui.update_details = true, true
@@ -1657,7 +1712,7 @@ do
     vim.wait(5000, function()
         return cr and cr.tcdata[1] and not cr:build_pending(cr.tcdata[1])
     end, 10)
-    t.eq("a helper with nothing to compile takes no pane", cr.ui:build_assignment(cr.tcdata[1]).titles, {
+    t.eq("a helper with nothing to compile takes no pane", build_titles(cr.ui:build_assignment(cr.tcdata[1])), {
         se = " Errors: main.cpp ",
         so = " Errors: brute.cpp ",
         eo = " Errors: checker.cpp ",
@@ -1698,7 +1753,7 @@ do
     }, { "FAILED", "TunaWarning", 0 })
     t.has(
         "with what its compiler said in that source's pane",
-        broke.ui:build_assignment(broke.tcdata[1]).text.so,
+        build_text(broke.ui:build_assignment(broke.tcdata[1])).so,
         "gen.cpp:1: error"
     )
     t.ok("and nothing searching, the run being over", broke:idle(), broke.finished)
@@ -1779,11 +1834,11 @@ do
     onl:show_ui()
     onl:run_testcases({ [0] = { input = "1\n" } })
     settled(onl)
-    t.eq("one source alone keeps the build step's configured grid", onl.ui:grid(1), {
+    t.eq("one source alone keeps the build step's configured grid", onl.ui:grid(onl.ui.runner.tcdata[1]), {
         { 3, "tc" },
         { 8, "se" },
     })
-    t.eq("and the Errors pane its own name", onl.ui:build_assignment(onl.tcdata[1]).titles, {})
+    t.eq("and the Errors pane its own name", build_titles(onl.ui:build_assignment(onl.tcdata[1])), {})
     -- One source is one key: the others have no source of their own to open here.
     onl.ui:select_row(1)
     onl.ui.update_windows, onl.ui.update_details = true, true
@@ -1795,12 +1850,12 @@ do
     local lone = {}
     for _, key in ipairs({ "i", "a", "o", "e" }) do
         vim.api.nvim_feedkeys(key, "xt", false)
-        lone[key] = onl.ui.viewer_winid and vim.api.nvim_win_get_config(onl.ui.viewer_winid).title[1][1] or false
-        onl.ui:close_viewer()
+        lone[key] = onl.ui.zoom_winid and vim.api.nvim_win_get_config(onl.ui.zoom_winid).title[1][1] or false
+        onl.ui:unzoom()
     end
     t.eq("with the solution alone, only its key opens anything", lone, { i = false, a = false, o = false, e = " Errors (e) " })
     t.eq("and a plain run's legend adds no section and no build row line", {
-        legend_line(onl.ui, "view on the build row"),
+        legend_line(onl.ui, "zoom on the build row"),
         legend_line(onl.ui, "STRESS"),
         legend_line(onl.ui, "INTERACTIVE"),
     }, {})
@@ -2425,6 +2480,12 @@ do
         end, spawns)
     end
     local nr = listed_normal(0)
+    settle_ms(200)
+    t.eq(
+        "a listed board opens on a testcase, its editable panes accented",
+        { nr.ui.update_testcase, accented(nr.ui, "eo"), accented(nr.ui, "si") },
+        { 2, true, true }
+    )
     nr:run_single(2)
     settle_ms(300)
     t.eq("a listed normal board's run key builds, then runs the row", commands_run(), { compiler, "./sol" })
@@ -2623,7 +2684,7 @@ for _, board in ipairs(boards) do
         end)
         t.eq(board.name .. ": read on the build step itself, nothing opened over the board", {
             r.ui.update_testcase,
-            r.ui.viewer_winid,
+            r.ui.zoom_winid,
         }, { 1, nil })
         local ran = 0
         for _, spawn in ipairs(spawns) do
