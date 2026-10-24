@@ -108,10 +108,13 @@ function M.go(offset, bufnr)
         return
     end
 
-    if working_in(dir) then
+    -- Decided where the user is, and done once the file is open, in the window showing it
+    -- (an `lcd` set from a runner UI pane would go with the pane).
+    local follow = working_in(dir)
+    require("tuna.ui.surface").edit(file)
+    if follow then
         require("tuna.workspace.recent").change_dir(target_dir, config.load_local_config_and_extend(target_dir))
     end
-    vim.cmd.edit(vim.fn.fnameescape(file))
     utils.place_cursor(cfg)
     utils.notify(("problem %d/%d: %s"):format(target_idx, #names, target), "INFO")
 end

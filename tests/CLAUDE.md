@@ -78,9 +78,11 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     an untouched scaffold, and completion of roles and languages;
   - `scratch.lua`: the templates a scratch can start from, when a scratch is resumed, the
     resume/restart and template menus, and absorbing keeping the header of the template actually
-    used; `navigate.lua`: the next and previous problem opened, Neovim's directory moving along
-    only from the problem left or a folder inside it (by real path), and staying in the
-    contest's folder and with `cd_command = false`;
+    used;
+  - `navigate.lua`: the next and previous problem opened, Neovim's directory moving along only
+    from the problem left or a folder inside it (by real path), staying in the contest's folder
+    and with `cd_command = false`, and from a runner UI pane the window under it opening the
+    problem and taking an `lcd`;
   - `download.lua`: the listener's boundary, a request handled while its sender is still
     connected, and what is stored (an empty answer kept, no file refused, a typed `~` path,
     the solution's template filled in, tuna's starter with none configured, a scratch folded
@@ -135,6 +137,7 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     reading `EDITED` for what is typed and not for a pane's own filling, the cursorline kept in
     diff mode, what a diff paints (only the disagreeing tokens on a line that disagrees, a cell
     where a line ends short, a line the other lacks coloured whole), `:w` from a read-only pane,
+    a file opened from the board opening where the board was opened over and the board put away,
     and a zoom key doing nothing in a zoom). `testcases.lua` also covers the `single_file`
     rewrite keeping untouched testcases, a conversion through every backend keeping an answer
     stored empty and leaving no layout behind (the store's root kept), which testcase a command

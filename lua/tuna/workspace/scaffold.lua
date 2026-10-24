@@ -337,7 +337,7 @@ local function write(role, ext, path, cfg, task, opts)
     local fname = vim.fn.fnamemodify(path, ":t")
     local function done(written)
         if written and opts.open ~= false then
-            vim.cmd.edit(vim.fn.fnameescape(written))
+            require("tuna.ui.surface").edit(written)
             if role == "solution" then
                 utils.place_cursor(cfg)
             end
@@ -517,7 +517,7 @@ function M.create_missing(roles, bufnr, title, opts)
             if opts.win and vim.api.nvim_win_is_valid(opts.win) then
                 vim.api.nvim_set_current_win(opts.win)
             end
-            vim.cmd.edit(vim.fn.fnameescape(created[1]))
+            require("tuna.ui.surface").edit(created[1])
             for j = 2, #created do
                 vim.cmd.badd(vim.fn.fnameescape(created[j]))
             end

@@ -544,9 +544,9 @@ Every command is a subcommand of `:Tuna` with tab-completion, and a lowercase
         Open the problem either side of this one in its contest, preferring
         the file name you are leaving (`A/main.cpp` to `B/main.cpp`). If
         Neovim's directory is the problem you are leaving, or a folder inside
-        it, it moves to the new problem with you, the way `cd_command` asks.
-        From the contest's folder, or anywhere else, it stays. At either end
-        of the contest they say so rather than wrapping around.
+        it, it moves to the new problem with you. From the contest's folder,
+        or anywhere else, it stays. At either end of the contest they say so
+        rather than wrapping around.
 
 :Tuna last [problem/contest]
         Go back to the problem, or the contest, you were last working on,

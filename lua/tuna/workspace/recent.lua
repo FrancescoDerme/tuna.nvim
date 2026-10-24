@@ -484,15 +484,18 @@ function M.change_dir(dir, cfg)
 end
 
 ---Open `file`, point Neovim's directory at `dir`, and put the cursor where a
----templated solution expects it.
+---templated solution expects it. The directory changes once the file is open, so an `lcd`
+---lands on the window showing it rather than on a runner UI pane the file was opened from.
 ---@param file string?
 ---@param dir string
 ---@return table cfg the config resolved at `dir`
 local function open_at(file, dir)
     local cfg = config.load_local_config_and_extend(dir)
+    if file then
+        require("tuna.ui.surface").edit(file)
+    end
     M.change_dir(dir, cfg)
     if file then
-        vim.cmd.edit(vim.fn.fnameescape(file))
         utils.place_cursor(cfg)
     end
     return cfg

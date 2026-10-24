@@ -177,6 +177,18 @@ function M.float(bufnr, opts)
     return winid
 end
 
+---Open `path` in a window that can show a file. From inside the runner UI (a pane or its
+---zoom), whose windows are tuna's own and pinned to their buffers, the board is put away first,
+---landing in the window it was opened over, as a run of another mode puts it away.
+---@param path string
+function M.edit(path)
+    local ui = package.loaded["tuna.runner_ui"]
+    if ui then
+        ui.step_out()
+    end
+    vim.cmd.edit(vim.fn.fnameescape(path))
+end
+
 ---Keep completion plugins out of a buffer typed into as a prompt (a search, a path, a value):
 ---what they offer, the buffer's words and a language's snippets, is never what is typed there.
 ---blink.cmp reads `vim.b.completion`; nvim-cmp takes it per buffer once it has loaded, which a

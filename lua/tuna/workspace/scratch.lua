@@ -159,7 +159,7 @@ local function create(path, cfg, tmpl)
         utils.notify("scratch: could not write the scratch file at '" .. path .. "'.", "WARN")
         return
     end
-    vim.cmd.edit(vim.fn.fnameescape(path))
+    require("tuna.ui.surface").edit(path)
     place_cursor(cfg, header, blanks)
 end
 
@@ -168,7 +168,7 @@ end
 ---@param ext string
 ---@param cfg table
 local function resume(path, ext, cfg)
-    vim.cmd.edit(vim.fn.fnameescape(path))
+    require("tuna.ui.surface").edit(path)
     -- Resuming has to land where starting did: reopening the scratch is the same
     -- gesture as opening it, so it must not drop the user on line 1.
     local header, blanks = 0, 0

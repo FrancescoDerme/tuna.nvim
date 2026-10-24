@@ -600,7 +600,7 @@ local function store_single_problem(task, cfg, finished)
                 -- takes you to what was just downloaded either way.
                 require("tuna.workspace.recent").record_problem(filepath, local_cfg)
                 if local_cfg.open_downloaded_problems then
-                    vim.cmd.edit(vim.fn.fnameescape(filepath))
+                    require("tuna.ui.surface").edit(filepath)
                     utils.place_cursor(local_cfg)
                     require("tuna.workspace.scratch").absorb(filepath, local_cfg, template)
                 end
@@ -701,7 +701,7 @@ local function store_contest(tasks, cfg, finished)
                                 -- download lands on something new rather than on a
                                 -- problem that was already there.
                                 if local_cfg.open_downloaded_contests and not opened then
-                                    vim.cmd.edit(vim.fn.fnameescape(t.filepath))
+                                    require("tuna.ui.surface").edit(t.filepath)
                                     utils.place_cursor(local_cfg)
                                     -- A `:Tuna scratch` file waiting for this contest
                                     -- folds into the first problem opened.

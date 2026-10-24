@@ -2686,6 +2686,15 @@ function M.owner_of(bufnr)
     return nil
 end
 
+---Put away the board whose pane, or zoom, the cursor is in, landing in the window it was
+---opened over (`surface.edit`). Unwritten edits stay on its runner, as when a run hides it.
+function M.step_out()
+    local r = M.owner_of(api.nvim_get_current_buf())
+    if r then
+        r:delete_ui()
+    end
+end
+
 ---@private
 ---How wide the selector pane is, or nil when the layout gave it no window (its buffer is
 ---still kept, and nothing truncates a buffer).

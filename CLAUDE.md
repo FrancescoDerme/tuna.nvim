@@ -56,7 +56,8 @@ library, contest navigation, a scratch file, an unused-file cleaner, a menu and
   `widgets` float. Widgets are callback-async, so a caller that must continue passes `on_close`
   and handles dismissal.
 - Every buffer or window put in front of the user goes through `surface.lua` (see
-  `lua/tuna/ui/CLAUDE.md`).
+  `lua/tuna/ui/CLAUDE.md`), and every file tuna opens is opened through `surface.edit`, a
+  directory change made after it.
 - libuv callbacks run in a fast event context, where `vim.notify` and most API calls raise.
   Hop to the main loop with `vim.schedule` (`download.notify_soon`).
 - Async results land by **row identity and a token**, never by index: rows get rebuilt,

@@ -30,6 +30,13 @@ specific Vim error about a buffer the user never opened.
   Neovim 0.12 a float with a `statusline` of its own draws it inside its border, showing the
   pane's `tuna://` name.
 - `group(wins, on_close)`: windows that close together, keyed on `WinClosed`.
+- `edit(path)`: how tuna opens a file (`:Tuna next`, `:Tuna last`, starters, the scratch,
+  downloads). From a runner UI pane or zoom, whose windows are pinned to their buffers (a file
+  would land in a float, or the split interface's `winfixbuf` refuse it), the board is put away
+  first (`runner_ui.step_out`, which keeps unwritten edits on its runner as a run's hiding
+  does), landing in the window it was opened over. The runner UI is consulted only when loaded.
+  A caller that also changes directory does so after it, so an `lcd` lands on the window showing
+  the file, not on a pane put away.
 - `no_completion(buf)`: a buffer typed into as a prompt (the search pane, `input`, the form's
   custom row) keeps completion plugins out: blink.cmp's `vim.b.completion = false`, and
   nvim-cmp's `setup.buffer({ enabled = false })`, given when nvim-cmp is loaded, which a lazily
