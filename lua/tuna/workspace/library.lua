@@ -85,7 +85,7 @@ function M.files(cfg, ext)
             local function visible(rel)
                 return vim.fs.basename(rel):sub(1, 1) ~= "."
             end
-            for name, typ in vim.fs.dir(root, { depth = lib.depth or 3, skip = visible }) do
+            for name, typ in vim.fs.dir(root, { depth = lib.depth, skip = visible }) do
                 if typ == "file" and visible(name) and name:match("%.([^./]+)$") == ext then
                     out[#out + 1] = { path = root .. "/" .. name, rel = name }
                 end

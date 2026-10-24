@@ -325,7 +325,7 @@ M.defaults = {
     library = {
         path = false, -- false | "~/cp/snippets" | { dir, dir, … }
         marker = "TUNALIB",
-        depth = 3, -- how deep to search below each path
+        depth = 5, -- how deep to search below each path
         -- The picker's share of the editor, borders included: the runner UI's size
         -- (`popup_ui`) by default, the other board tuna draws over the editor.
         width = 0.8,
