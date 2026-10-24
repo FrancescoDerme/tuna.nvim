@@ -10,6 +10,11 @@
 -- (a contest of `A/main.cpp`, `B/main.cpp`, … keeps you on `main.cpp`), then the same
 -- extension, then any runnable non-helper source. That way a problem solved in a
 -- different language is still reachable, while `checker.cpp` and friends never are.
+--
+-- Neovim's directory comes along when it was the problem being left, or a folder inside it,
+-- as `:Tuna last problem` leaves it: working *in* a problem, `:e` and a file finder would
+-- otherwise keep pointing at the one left behind. From the contest's folder, or anywhere
+-- else, it stays, so a contest opened to be worked from as a whole stays that way.
 
 local utils = require("tuna.utils")
 local config = require("tuna.config")
@@ -58,6 +63,15 @@ function M.solution_in(dir, like, cfg)
     return by_name or by_ext or any
 end
 
+---Whether Neovim's directory is `dir` or a folder inside it, each read as its real path, so
+---a symlink, a `~` or a trailing slash does not make one folder look like two.
+---@param dir string
+---@return boolean
+local function working_in(dir)
+    local here, there = vim.uv.fs_realpath(vim.fn.getcwd()), vim.uv.fs_realpath(dir)
+    return here ~= nil and there ~= nil and (here == there or vim.startswith(here, there .. "/"))
+end
+
 ---Step `offset` problems from the current one.
 ---@param offset integer -1 (previous) or +1 (next)
 ---@param bufnr integer? defaults to the current buffer
@@ -94,6 +108,9 @@ function M.go(offset, bufnr)
         return
     end
 
+    if working_in(dir) then
+        require("tuna.workspace.recent").change_dir(target_dir, config.load_local_config_and_extend(target_dir))
+    end
     vim.cmd.edit(vim.fn.fnameescape(file))
     utils.place_cursor(cfg)
     utils.notify(("problem %d/%d: %s"):format(target_idx, #names, target), "INFO")
@@ -110,5 +127,7 @@ end
 function M.prev(bufnr)
     M.go(-1, bufnr)
 end
+
+M._test = { working_in = working_in }
 
 return M

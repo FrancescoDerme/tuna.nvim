@@ -232,6 +232,8 @@ Setting it up is described in the [Submitting](#submitting) guide below.
 ## next and prev
 
 `:Tuna next` and `:Tuna prev` open the problem either side of this one in its contest, preferring the file name you are leaving (`A/main.cpp` to `B/main.cpp`).
+If Neovim's directory is the problem you are leaving, or a folder inside it, it moves to the new problem with you, the way `cd_command` asks.
+From the contest's folder, or anywhere else, it stays.
 At either end of the contest they say so rather than wrapping around.
 
 ## last

@@ -77,8 +77,10 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     them, Stop writing nothing, a broken configured helper only reported), `clean` recognising
     an untouched scaffold, and completion of roles and languages;
   - `scratch.lua`: the templates a scratch can start from, when a scratch is resumed, the
-    resume/restart and template menus, and absorbing keeping the header of the template
-    actually used;
+    resume/restart and template menus, and absorbing keeping the header of the template actually
+    used; `navigate.lua`: the next and previous problem opened, Neovim's directory moving along
+    only from the problem left or a folder inside it (by real path), and staying in the
+    contest's folder and with `cd_command = false`;
   - `download.lua`: the listener's boundary, a request handled while its sender is still
     connected, and what is stored (an empty answer kept, no file refused, a typed `~` path,
     the solution's template filled in, tuna's starter with none configured, a scratch folded
@@ -142,9 +144,9 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     kept; the question asked once a session, naming every rename, and the run going ahead after
     every answer).
 - Modules expose file-local helpers to tests through `M._test` (`download`, `submit`, `clean`,
-  `interactive`, `scratch`, `menu`, `runner_ui`), and `tools` a way to forget the session's
-  builds, for a test whose stubbed compiler answers differently for a source that has not
-  changed. They are not public interface.
+  `interactive`, `scratch`, `menu`, `runner_ui`, `navigate`), and `tools` a way to forget the
+  session's builds, for a test whose stubbed compiler answers differently for a source that has
+  not changed. They are not public interface.
 - **Mutation-check new tests**: break the rule each test describes and confirm it fails, and
   confirm a harmless edit doesn't.
 - The suite doesn't cover real processes, verdicts coming back, or most UI interaction. Verify

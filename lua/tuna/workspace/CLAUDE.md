@@ -133,9 +133,13 @@ problems and remembering them. The rules that hold everywhere are in the root `C
     loaded state for the menu. `contest_problems` lists a contest's solutions in both
     layouts (plain files in the contest directory, and one per problem directory).
 - **`navigate.lua`**: the next or previous sibling problem directory in name order.
-  `solution_in` prefers the same file name, then the same extension, then any runnable file
-  that is not a support file (`tools.is_support`). The ends of a contest warn instead of
-  wrapping.
+  `solution_in` prefers the same file name, then the same extension, then any runnable file that
+  is not a support file (`tools.is_support`). The ends of a contest warn instead of wrapping.
+  Neovim's directory comes along (`recent.change_dir`, with the new problem's `cd_command`) only
+  when it was the problem left or a folder inside it (`working_in`, by real path): working in a
+  problem, `:e` and a file finder would point at the one left, while a contest's folder, where
+  `:Tuna last contest` puts you, is kept. `recent` is required lazily, as it requires
+  `navigate`.
 - **`library.lua`**: snippets are regions between `library.marker` guard comments in plain
   source files; files without guards are offered whole. Only files with the current buffer's
   extension are shown, dotfiles and dot-directories left out at every depth, and `library.path`

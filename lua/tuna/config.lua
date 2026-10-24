@@ -268,7 +268,8 @@ M.defaults = {
     -- the cursor alone, so one written for a given language does no harm in another.
     template_cursor = { pattern = "^%a[%w_ ]* solve%(", offset = 1 },
     -- How tuna changes Neovim's directory when it takes you somewhere — `:Tuna last
-    -- problem` / `:Tuna last contest`, and a freshly downloaded contest (see
+    -- problem` / `:Tuna last contest`, `:Tuna next` / `:Tuna prev` when it was the
+    -- problem being left, and a freshly downloaded contest (see
     -- `cd_downloaded_contests`): "cd" (global), "tcd" (this tab), "lcd" (this window),
     -- or false to go to the file without touching the directory. Global by default, so
     -- everything else — `:e`, a fuzzy finder, `:Tuna run all` from a scratch buffer —
