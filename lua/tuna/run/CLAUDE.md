@@ -108,7 +108,13 @@ hold everywhere are in the root `CLAUDE.md`.
 **`RunnerCore` (`run/core.lua`)** is the base of every mode (subclassed with `M.extend()`).
 - `tcdata` rows. `execute_process(tcindex, cmd, dir, opts, on_done)` spawns via `vim.system`
   with its own timeout timer (TIMEOUT, KILLED, SIG, RET), then judges with `checker.judge`
-  unless `opts.judge == false` (the Compile row), setting `judging` while it waits.
+  unless `opts.judge == false` (the Compile row), setting `judging` while it waits. Every
+  program tuna runs (testcases, the checker, the stress search's steps, a session's solution and
+  interactor) gets `tools.RUN_ENV` on top of the editor's environment:
+  `GLIBCXX_DEBUG_MESSAGE_LENGTH=0`, since libstdc++'s debug mode wraps its reports at 78 columns
+  and a narrower pane would wrap each of its lines again, leaving a word alone on a row.
+  `vim.system`'s `env` adds to the environment, `uv.spawn`'s replaces it, so interactive mode's
+  spawns take `tools.spawn_env()`, the whole of it.
 - **Stale results are dropped**: `run_id` is bumped per spawn *and* in `reset_row`.
   `finish_process` gets the row object plus the token and bails if either the token changed or
   the row is no longer in `tcdata` (`owns_row`), closing its timer first (the timer is a closure

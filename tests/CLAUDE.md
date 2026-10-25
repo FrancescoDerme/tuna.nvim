@@ -101,7 +101,8 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     match deciding, tuna's starter recognised, a template never offered, an empty one included,
     and a pinned file named, starting on Keep, and unpinned when deleted);
   - `runner.lua`: all four run modes with `vim.system` stubbed, covering what each child is
-    handed, bare rows, save/answer semantics, a board listed before any run accenting its
+    handed (a debug-mode report left unwrapped included, through `vim.system` and `uv.spawn`
+    alike), bare rows, save/answer semantics, a board listed before any run accenting its
     editable panes, a row added after a run settling and judged by its next save, disk drift and
     restore, path resolution, the swapfile contract, interactive grids and the conversation
     model (its columns unwrapped and scroll-bound on a session's row only, a board listed before

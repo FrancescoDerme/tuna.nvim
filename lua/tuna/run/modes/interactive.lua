@@ -595,6 +595,7 @@ function InteractiveRunner:spawn_solution(cbs)
     handle = uv.spawn(self.r.rc.exec, {
         args = self.r.rc.args,
         cwd = self.rundir,
+        env = tools.spawn_env(),
         stdio = { sol_in, sol_out, sol_err },
     }, function(code, signal)
         if done then
@@ -840,6 +841,7 @@ function InteractiveRunner:run_interactor(idx, on_done)
     sol_handle = uv.spawn(self.r.rc.exec, {
         args = self.r.rc.args,
         cwd = self.rundir,
+        env = tools.spawn_env(),
         stdio = { sol_in, sol_out, nil },
     }, function(code, signal)
         safe_close(sol_handle)
@@ -866,6 +868,7 @@ function InteractiveRunner:run_interactor(idx, on_done)
     int_handle = uv.spawn(self.interactor.exec, {
         args = int_args,
         cwd = self.rundir,
+        env = tools.spawn_env(),
         stdio = { int_in, int_out, int_err },
     }, function(code, signal)
         safe_close(int_handle)

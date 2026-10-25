@@ -358,6 +358,23 @@ function M.expand_args(args, files)
     end, args)
 end
 
+---What every program tuna runs gets added to its environment (a solution, a helper, a
+---session's interactor). libstdc++'s debug mode wraps its reports at 78 columns, and a pane
+---narrower than that wraps each of its lines again, leaving a word alone on a row; unwrapped,
+---a report is wrapped once, by the pane, to its width.
+M.RUN_ENV = { GLIBCXX_DEBUG_MESSAGE_LENGTH = "0" }
+
+---`RUN_ENV` for `vim.uv.spawn`, whose `env` replaces the environment where `vim.system`'s adds
+---to it: the editor's own, with `RUN_ENV` over it.
+---@return string[]
+function M.spawn_env()
+    local out = {}
+    for name, value in pairs(vim.tbl_extend("force", vim.fn.environ(), M.RUN_ENV)) do
+        out[#out + 1] = name .. "=" .. value
+    end
+    return out
+end
+
 ---The helper filling `role` for a solution, as a spec ready to prepare and spawn, or nil
 ---when there is none. One rule for every role: a helper set in the config (`checker`,
 ---`stress.generator`, `stress.bruteforce`, `interactive.interactor`) is used instead of a

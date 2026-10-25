@@ -487,7 +487,7 @@ end
 ---@param opts table `vim.system` options besides `cwd`
 ---@param cb fun(res: vim.SystemCompleted)
 function StressRunner:spawn(label, i, cmd, opts, cb)
-    opts.cwd = self.rundir
+    opts.cwd, opts.env = self.rundir, tools.RUN_ENV
     local ok, err = pcall(vim.system, cmd, opts, function(res)
         vim.schedule(function()
             if not self:aborted() then

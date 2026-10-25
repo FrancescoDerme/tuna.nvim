@@ -59,7 +59,7 @@ function M.judge(tc, checker, compare_method, callback)
             ANSWER = utils.temp_file(tc.expected),
         }
         local argv = vim.list_extend({ checker.exec }, tools.expand_args(checker.args, files))
-        local ok, err = pcall(vim.system, argv, { text = true, cwd = checker.cwd }, function(res)
+        local ok, err = pcall(vim.system, argv, { text = true, cwd = checker.cwd, env = tools.RUN_ENV }, function(res)
             vim.schedule(function()
                 for _, path in pairs(files) do
                     utils.delete_file(path)

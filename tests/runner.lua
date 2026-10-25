@@ -45,7 +45,7 @@ local real_system = vim.system
 local function stub_system()
     spawns = {}
     vim.system = function(argv, opts, on_exit)
-        spawns[#spawns + 1] = { argv = argv, stdin = opts and opts.stdin }
+        spawns[#spawns + 1] = { argv = argv, stdin = opts and opts.stdin, env = opts and opts.env }
         if on_exit then
             vim.schedule(function()
                 on_exit({ code = 0, signal = 0, stdout = "", stderr = "" })
@@ -70,9 +70,37 @@ local function check_spawns(what, run_exec)
                 type(s.stdin) == "string",
                 { argv = s.argv, stdin = s.stdin }
             )
+            -- libstdc++'s debug mode wraps its reports at 78 columns, which a narrower pane
+            -- would wrap again.
+            t.eq(
+                ("%s: run %d is told not to wrap a debug-mode report"):format(what, i),
+                s.env and s.env.GLIBCXX_DEBUG_MESSAGE_LENGTH,
+                "0"
+            )
         end
     end
     t.ok(what .. ": a solution was actually run", runs > 0, spawns)
+end
+
+-- `RUN_ENV` reaches a program on top of the editor's environment: `vim.system` adds it, and
+-- `uv.spawn`, which replaces the environment, is handed all of it with `RUN_ENV` over it.
+do
+    local tools = require("tuna.run.tools")
+    local probe = { "sh", "-c", 'printf "%s:%s" "$GLIBCXX_DEBUG_MESSAGE_LENGTH" "$HOME"' }
+    local through_system = real_system(probe, { env = tools.RUN_ENV, text = true }):wait().stdout
+    local out, got = vim.uv.new_pipe(), ""
+    local handle = vim.uv.spawn(probe[1], { args = { probe[2], probe[3] }, env = tools.spawn_env(), stdio = { nil, out, nil } }, function() end)
+    out:read_start(function(_, data)
+        got = got .. (data or "")
+    end)
+    vim.wait(2000, function()
+        return got ~= ""
+    end, 10)
+    handle:close()
+    t.eq("what tuna runs gets RUN_ENV over the editor's environment, by vim.system and uv.spawn alike", {
+        through_system,
+        got,
+    }, { "0:" .. vim.env.HOME, "0:" .. vim.env.HOME })
 end
 
 local FINAL = { CORRECT = true, WRONG = true, DONE = true, CACHED = true, TIMEOUT = true, FAILED = true, CE = true }
@@ -1270,12 +1298,13 @@ do
 
     -- One scripted answer per program, by name. A "hold" answer is kept until the test
     -- releases it, which is how the search is caught in the middle of an iteration.
-    local script, budgets, held, calls = {}, {}, nil, {}
+    local script, budgets, held, calls, envs = {}, {}, nil, {}, {}
     vim.system = function(argv, opts, on_exit)
         local name = vim.fn.fnamemodify(argv[1], ":t")
         local res = script[name]
         calls[#calls + 1] = name
         budgets[name] = opts and opts.timeout
+        envs[name] = opts and opts.env and opts.env.GLIBCXX_DEBUG_MESSAGE_LENGTH
         res = type(res) == "function" and res(argv) or res
         local function answer(r)
             on_exit(vim.tbl_extend("keep", type(r) == "table" and r or {}, {
@@ -1352,6 +1381,11 @@ do
         { "TC 0", "STRESS" },
     })
     t.eq("a bruteforce killed by a signal is a failure, not an empty answer", saved_rows(crashed), {})
+    t.eq("each program of the search is told not to wrap a debug-mode report", {
+        envs.genx,
+        envs.solx,
+        envs.refx,
+    }, { "0", "0", "0" })
     t.eq("so nothing is written beside the solution", testcase_files(), {})
     t.eq("and the search stops on the seed it happened on", crashed.iter, 1)
     t.ok("finished, so the rows can be edited again", crashed:idle(), crashed.finished)

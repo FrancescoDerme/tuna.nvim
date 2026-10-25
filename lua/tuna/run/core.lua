@@ -723,7 +723,7 @@ function RunnerCore:execute_process(tcindex, cmd, dir, opts, on_done)
         stdin = tc.stdin
     end
     local argv = vim.list_extend({ cmd.exec }, cmd.args or {})
-    local ok, handle = pcall(vim.system, argv, { cwd = dir, stdin = stdin }, function(res)
+    local ok, handle = pcall(vim.system, argv, { cwd = dir, stdin = stdin, env = tools.RUN_ENV }, function(res)
         -- on_exit is a fast context; defer API/UI work to the main loop.
         vim.schedule(function()
             self:finish_process(tc, run_id, timer, res, opts, on_done)
