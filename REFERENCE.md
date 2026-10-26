@@ -289,9 +289,9 @@ A `.tuna.lua` in the library folder can keep every file's testcases in one share
 ## clean
 
 `:Tuna clean` removes files you created and never used, such as unchanged template solutions and scaffolds, and then the directories they leave empty.
-It also offers the builds whose source is gone, such as the binary of a solution you deleted, and deleting a source deletes its build with it.
+It also offers the binaries of sources you deleted manually, while deleting a source through the command automatically deletes its binary.
 You choose where to look, how deep, and how close to its template a file must still be.
-Every deletion is confirmed one at a time, with the file in front of you, and pinned problems come last, named as pinned.
+Every deletion is confirmed one at a time, with the file in front of you.
 
 ## checkhealth
 
