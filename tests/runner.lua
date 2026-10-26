@@ -605,6 +605,19 @@ for _, interface in ipairs({ "split", "popup" }) do
     }, { "other.txt", true, false })
     vim.cmd("buffer " .. buf)
     vim.fn.delete(dir .. "/other.txt")
+    -- A board kept between runs goes back to the window it is shown over this time, not the
+    -- one it was first shown over, which may show another file by now.
+    br:show_ui()
+    br.ui:delete()
+    vim.cmd("vsplit")
+    local split = vim.api.nvim_get_current_win()
+    br:show_ui()
+    br.ui:delete()
+    t.eq(interface .. ": a board shown again from another window closes back to that one", {
+        split ~= opened_over,
+        vim.api.nvim_get_current_win() == split,
+    }, { true, true })
+    vim.api.nvim_win_close(split, true)
     br:delete_ui()
 end
 vim.go.cursorline = user_cursorline

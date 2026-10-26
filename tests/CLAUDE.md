@@ -139,8 +139,9 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     diff mode, what a diff paints (only the disagreeing tokens on a line that disagrees, a cell
     where a line ends short, a line the other lacks coloured whole), `:w` from a read-only pane,
     a file opened from the board opening where the board was opened over and the board put away,
-    and a zoom key doing nothing in a zoom). `testcases.lua` also covers the `single_file`
-    rewrite keeping untouched testcases, a conversion through every backend keeping an answer
+    a board kept between runs closing back to the window it was last shown over, and a zoom
+    key doing nothing in a zoom). `testcases.lua` also covers the `single_file` rewrite keeping
+    untouched testcases, a conversion through every backend keeping an answer
     stored empty and leaving no layout behind (the store's root kept), which testcase a command
     without a number acts on, and sharing a folder's testcases (offered for a solution with none
     when exactly one other has some, never for several sets, a format or `testcases_directory`

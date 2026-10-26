@@ -1694,7 +1694,9 @@ function RunnerUI:show_ui()
         return
     end
 
-    self.restore_winid = self.restore_winid or api.nvim_get_current_win()
+    -- Closing goes back to the window the board is shown over now: one kept between runs may
+    -- have been shown over another before.
+    self.restore_winid = api.nvim_get_current_win()
     -- The six panes, each a buffer for the life of the board whether or not the row on screen
     -- gives it a window: the interface only places windows onto them.
     for name in pairs(layout_util.titles) do
