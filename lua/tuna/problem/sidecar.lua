@@ -18,7 +18,7 @@
 --   results = { [basename] = { passed, total, hash } }
 --                         — the local verdict of the last finished run (`run/core.lua`)
 --
--- The two per-file sections are keyed by file *basename* rather than by directory,
+-- The per-file sections are keyed by file *basename* rather than by directory,
 -- because a folder may hold several problems (`a.cpp`, `b.cpp`) as easily as one
 -- problem's several attempts. Writers merge, so no writer clobbers another's field.
 --
@@ -31,6 +31,9 @@
 local utils = require("tuna.utils")
 
 local M = {}
+
+-- The sections holding one entry per file, keyed by its basename.
+local PER_FILE = { "submit", "run", "results" }
 
 ---@param cfg table? resolved config (falls back to the current setup, then defaults)
 ---@return string
@@ -75,11 +78,34 @@ end
 ---Write a sidecar table back to disk. A sidecar travels with a problem's folder, so there is
 ---nothing to write for a path that has no folder: a buffer that is not a file (a runner UI pane,
 ---named `tuna://…`) would otherwise leave a `tuna:/…` tree wherever the editor was started.
+---
+---The entries of files no longer beside it go (`keep` aside, a buffer not yet written), or
+---a new file given a deleted one's name would take its forced run settings. With nothing
+---left to say about the problem, the file goes too.
 ---@param dir string
 ---@param cfg table?
 ---@param store table
-function M.write(dir, cfg, store)
-    if vim.fn.isdirectory(vim.fs.normalize(dir)) ~= 1 then
+---@param keep string? the basename being written, kept whether or not its file exists
+function M.write(dir, cfg, store, keep)
+    dir = vim.fs.normalize(dir)
+    if vim.fn.isdirectory(dir) ~= 1 then
+        return
+    end
+    for _, section in ipairs(PER_FILE) do
+        local sec = store[section]
+        if type(sec) == "table" then
+            for name in pairs(sec) do
+                if name ~= keep and not utils.file_exists(dir .. "/" .. name) then
+                    sec[name] = nil
+                end
+            end
+            store[section] = next(sec) ~= nil and sec or nil
+        end
+    end
+    if next(store) == nil then
+        if utils.file_exists(M.path(dir, cfg)) then
+            utils.delete_file(M.path(dir, cfg))
+        end
         return
     end
     local ok, encoded = pcall(vim.json.encode, store)
@@ -111,17 +137,26 @@ end
 ---@param entry table? the entry to store, or nil to remove it
 ---@param cfg table?
 function M.set_entry(filepath, section, entry, cfg)
-    local dir = vim.fn.fnamemodify(filepath, ":h")
+    local dir, name = vim.fn.fnamemodify(filepath, ":h"), vim.fn.fnamemodify(filepath, ":t")
     local store = M.read(dir, cfg)
-    local sec = type(store[section]) == "table" and store[section] or {}
-    sec[vim.fn.fnamemodify(filepath, ":t")] = entry
-    store[section] = next(sec) ~= nil and sec or nil
-    -- Nothing left to say about this problem: don't leave an empty file behind.
-    if next(store) == nil then
-        if utils.file_exists(M.path(dir, cfg)) then
-            utils.delete_file(M.path(dir, cfg))
-        end
+    store[section] = type(store[section]) == "table" and store[section] or {}
+    store[section][name] = entry
+    M.write(dir, cfg, store, name)
+end
+
+---Forget everything stored about a file, for one written anew in its place.
+---@param filepath string absolute path of the source file
+---@param cfg table?
+function M.forget(filepath, cfg)
+    local dir, name = vim.fn.fnamemodify(filepath, ":h"), vim.fn.fnamemodify(filepath, ":t")
+    local store = M.read_or_nil(dir, cfg)
+    if not store then
         return
+    end
+    for _, section in ipairs(PER_FILE) do
+        if type(store[section]) == "table" then
+            store[section][name] = nil
+        end
     end
     M.write(dir, cfg, store)
 end

@@ -59,7 +59,8 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     words (`off`/`auto`, bare reporting and changing nothing, no `toggle`, no `default`:
     choosing the configured method, or a float of its tolerance, keeps no override; a method of
     the user's own offered, kept and judged with by its name, and unknown where it is not
-    defined) and the menu's Checker entry switching and Compare entry cycling back to the
+    defined), a sidecar written dropping a deleted file's entries but keeping one not yet
+    written, and the menu's Checker entry switching and Compare entry cycling back to the
     configured method, old or nonsense sidecar values reading as automatic, a configured
     command with no arguments getting its role's, stress/interactor reruns offering the starter
     of a helper gone (Stop writing nothing, Create putting the board away and opening it in the
@@ -71,7 +72,8 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     template's text filled where it can be and its problem header dropped without one, a role
     named by its `tool_names` (in completion too), a template path holding what `glob` would
     expand matched as written, a new solution's name, header, default name and language (from
-    the folder's solution when the current file is none), `scaffold.language` and a language
+    the folder's solution when the current file is none), a new solution forced by nothing a
+    deleted one of its name left, `scaffold.language` and a language
     asked for by name over it, the languages offered when one has no starter, an existing file
     asked about, a run that needs helpers offering their starters (Create writing and opening
     them, Stop writing nothing, a broken configured helper only reported), `clean` recognising
@@ -99,7 +101,12 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     keeping it stored, and a write of the source submitted bringing it back; `clean.lua` also:
     the templates a file is compared with, a judge's matched without a sidecar and the best
     match deciding, tuna's starter recognised, a template never offered, an empty one included,
-    and a pinned file named, starting on Keep, and unpinned when deleted);
+    a pinned file offered last, named, starting on Keep, and unpinned when deleted, a build
+    whose source is gone offered first, hidden or not, while a program with its source and a
+    build-shaped file that is no program are not, previewed by what it is and counted as a
+    build, a source deleted taking its builds and nothing else of its name, and a folder of
+    nothing but testcases offered only when no source stores into it, its own
+    `testcases_directory`, a `.tuna.lua`'s shared one and the directory backend's included);
   - `runner.lua`: all four run modes with `vim.system` stubbed, covering what each child is
     handed (a debug-mode report left unwrapped included, through `vim.system` and `uv.spawn`
     alike), bare rows, save/answer semantics, a board listed before any run accenting its

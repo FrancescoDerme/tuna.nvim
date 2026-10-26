@@ -80,8 +80,12 @@ submissions. The rules that hold everywhere are in the root `CLAUDE.md`.
 
   Entries are keyed by **basename** because one folder can hold several problems or several
   attempts. Writers merge. `set_entry(…, nil)` removes an entry and deletes the file once it is
-  empty. This is problem state that travels with the folder; machine state belongs in
-  `stdpath("state")` (`recent.lua`).
+  empty. Every write drops the entries of files no longer beside it (but the one being written,
+  which may be a buffer not yet on disk), or a new file given a deleted one's name would take
+  its forced run settings, which no hash guards as one does a verdict. `forget` clears a file
+  written anew in a deleted one's place (`scaffold`, with `tools.forget` for the session's
+  copy), as no write may have come between. This is problem state that travels with the
+  folder; machine state belongs in `stdpath("state")` (`recent.lua`).
 
 ## Download and judges
 

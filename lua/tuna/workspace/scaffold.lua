@@ -349,6 +349,9 @@ local function write(role, ext, path, cfg, task, opts)
     local function create()
         local template = M.template(role, ext, cfg, path, task)
         utils.write_file(path, template and M.render(template, role, ext, cfg, path, task) or "")
+        -- A file written anew starts with nothing stored about it, whatever one of its name left.
+        require("tuna.problem.sidecar").forget(path, cfg)
+        require("tuna.run.tools").forget(path)
         if opts.open ~= false then
             utils.notify("scaffold: created " .. fname .. ".", "INFO")
         end

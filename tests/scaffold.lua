@@ -276,6 +276,20 @@ do
     scaffold.create("solution", vim.api.nvim_get_current_buf())
     t.eq("from a numbered one, the next number", prompted.default, "main3.cpp")
 
+    -- A new solution starts with nothing stored about it, whatever a deleted one of its name
+    -- left, in the session and in the sidecar.
+    local tools, sidecar = require("tuna.run.tools"), require("tuna.problem.sidecar")
+    local gone = vim.api.nvim_buf_get_name(0)
+    tools.set_mode(gone, "all")
+    vim.cmd("buffer " .. buf)
+    os.remove(gone)
+    scaffold.create("solution", buf)
+    t.eq("a new solution given a deleted one's name is not forced, by the session or the sidecar", {
+        vim.api.nvim_buf_get_name(0) == gone,
+        tools.get_mode(gone) or "auto",
+        sidecar.get_entry(gone, "run") or "none",
+    }, { true, "auto", "none" })
+
     t.write(dir, ".tuna.json", vim.json.encode({ name = "B. Second", group = "Codeforces - Round 9", url = "https://codeforces.com/contest/9/problem/B" }))
     scaffold.create("solution", buf)
     t.eq("a downloaded problem's own details fill the header", vim.list_slice(vim.fn.readfile(dir .. "/main4.cpp"), 1, 2), {

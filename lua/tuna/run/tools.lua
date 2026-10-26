@@ -815,6 +815,12 @@ local function persist(path)
     })
 end
 
+---Forget a path's run state, for a file written anew in its place.
+---@param path string
+function M.forget(path)
+    state[path] = nil
+end
+
 ---The mode forced for a solution, or nil when its mode is automatic.
 ---@param path string
 ---@return string?

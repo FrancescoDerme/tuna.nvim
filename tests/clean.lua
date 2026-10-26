@@ -73,36 +73,6 @@ vim.fn.delete(dir, "rf")
 require("tuna").setup({})
 
 --------------------------------------------------------------------------------
--- Build artifacts left beside a removed solution
---------------------------------------------------------------------------------
-
--- The directory pass offers a directory holding nothing but testcases and a sidecar.
--- A compiled binary is neither, so `main` beside a removed `main.cpp` kept the whole
--- problem directory alive and stranded its testcases there — the litter competitest is
--- asked to delete after every run, surfacing here instead as a directory never offered.
---
--- The rule is deliberately not "does this look like a binary": it matches only the
--- leftovers of a solution *this run removed*, so nothing in an untouched directory can
--- be caught by it.
-local art = { artifacts = { ["/p"] = { main = true } } }
-t.ok("the bare stem of a removed source is an artifact", clean.is_artifact("/p", "main", art))
-t.ok("so is its .exe", clean.is_artifact("/p", "main.exe", art))
-t.ok("and its .o", clean.is_artifact("/p", "main.o", art))
-t.ok("and a Java .class", clean.is_artifact("/p", "main.class", art))
--- macOS leaves a *directory* beside a debug build; it goes with the rest of them.
-t.ok("and macOS's .dSYM bundle", clean.is_artifact("/p", "main.dSYM", art))
-t.ok("a build written hidden is one too", clean.is_artifact("/p", ".main", art))
-t.ok("and so is a hidden one's .o", clean.is_artifact("/p", ".main.o", art))
-t.ok("but not a hidden file no solution was removed for", not clean.is_artifact("/p", ".helper", art))
-
--- Nothing else, in either direction.
-t.ok("a source file is not an artifact of itself", not clean.is_artifact("/p", "main.cpp", art))
-t.ok("an unknown extension is not one", not clean.is_artifact("/p", "main.md", art))
-t.ok("nor is a stem no solution was removed for", not clean.is_artifact("/p", "helper", art))
-t.ok("nor anything in another directory", not clean.is_artifact("/other", "main", art))
-t.ok("and a run that removed nothing has no artifacts at all", not clean.is_artifact("/p", "main", { artifacts = {} }))
-
---------------------------------------------------------------------------------
 -- Stepping through the confirmations
 --------------------------------------------------------------------------------
 
@@ -124,7 +94,7 @@ do
         files[#files + 1] = { path = fdir .. "/" .. name, rel = name, reason = "empty file", sim = 1 }
     end
     answers = { 2, 1, 2 } -- Keep, Delete, Keep
-    clean.confirm_each(files, 1, nil, { deleted = 0, dirs = 0, emptied = {}, artifacts = {} }, { width = 40 }, function() end)
+    clean.confirm_each(files, 1, nil, { deleted = 0, builds = 0, dirs = 0, emptied = {} }, { width = 40 }, function() end)
     t.eq("each file prompt starts on the answer to the one before", rows, { 1, 2, 1 })
     t.eq("while doing what each answer says", vim.uv.fs_stat(fdir .. "/b.cpp"), nil)
 
@@ -139,8 +109,8 @@ do
     vim.fn.delete(d2, "rf")
 end
 
--- A pinned problem says so, and its prompt starts on Keep whatever was answered before,
--- since it was put aside on purpose; deleting it all the same unpins it.
+-- A pinned problem comes after the rest, says so, and its prompt starts on Keep whatever was
+-- answered before, since it was put aside on purpose; deleting it all the same unpins it.
 do
     local widgets = require("tuna.ui.widgets")
     local recent = require("tuna.workspace.recent")
@@ -148,22 +118,19 @@ do
     local pdir = t.tempdir()
     t.write(pdir, "a.cpp", "")
     t.write(pdir, "b.cpp", "")
-    local pinned = vim.fs.normalize(pdir .. "/b.cpp")
+    local pinned = vim.fs.normalize(pdir .. "/a.cpp")
     recent.toggle_pin(pinned)
     local found = clean.scan(pdir, config.current_setup, 1, 1.0)
-    table.sort(found, function(x, y)
-        return x.rel < y.rel
-    end)
-    t.eq("a scan marks the pinned file", vim.tbl_map(function(f)
-        return f.pinned
-    end, found), { false, true })
+    t.eq("a scan marks the pinned file and offers it last", vim.tbl_map(function(f)
+        return { f.rel, f.pinned }
+    end, found), { { "b.cpp", false }, { "a.cpp", true } })
 
     local titles, rows = {}, {}
     widgets.menu = function(_, title, on_choice, _, _, _, _, row)
         titles[#titles + 1], rows[#rows + 1] = title, row or 1
         on_choice(1) -- Delete
     end
-    clean.confirm_each(found, 1, nil, { deleted = 0, dirs = 0, emptied = {}, artifacts = {} }, { width = 40 }, function() end)
+    clean.confirm_each(found, 1, nil, { deleted = 0, builds = 0, dirs = 0, emptied = {} }, { width = 40 }, function() end)
     widgets.menu = real_menu
     t.eq("its prompt says it is pinned", titles[2], "[2/2] pinned, empty file")
     t.eq("and starts on Keep, though the one before was deleted", rows, { 1, 2 })
@@ -172,6 +139,110 @@ do
     end, recent.state.pinned or {})
     t.eq("deleting it unpins it", #left, 0)
     vim.fn.delete(pdir, "rf")
+end
+
+-- A build whose source is gone is offered, first: a compiled program shaped like a build output,
+-- hidden or not, with no source of its name beside it. A program with its source, and a file
+-- shaped like a build that is no program, are not.
+do
+    local widgets = require("tuna.ui.widgets")
+    local real_menu = widgets.menu
+    local pdir = t.tempdir()
+    local elf = "\127ELF\2\1\1\0"
+    t.write(pdir, "main.cpp", "int main() { return 0; }\n")
+    t.write(pdir, ".main", elf)
+    t.write(pdir, ".main2", elf)
+    t.write(pdir, "old.exe", "MZ\144\0")
+    t.write(pdir, ".clangd", "CompileFlags:\n")
+    t.write(pdir, "notes", "to do\n")
+    t.write(pdir, "input0.txt", "1\n")
+    t.write(pdir, ".tuna.json", "{}")
+    t.write(pdir, "empty.cpp", "")
+    local found = clean.scan(pdir, config.current_setup, 1, 1.0)
+    t.eq("a scan offers the builds whose source is gone, ahead of the rest", vim.tbl_map(function(f)
+        return { f.rel, f.reason }
+    end, found), {
+        { ".main2", "build of main2, whose source is gone" },
+        { "old.exe", "build of old, whose source is gone" },
+        { "empty.cpp", "empty file" },
+    })
+
+    local previews, stats = {}, { deleted = 0, builds = 0, dirs = 0, emptied = {} }
+    widgets.menu = function(_, _, on_choice, _, _, preview)
+        previews[#previews + 1] = preview.lines[1]
+        on_choice(1) -- Delete
+    end
+    clean.confirm_each({ found[1] }, 1, nil, stats, { width = 40 }, function() end)
+    widgets.menu = real_menu
+    t.has("its preview says what it is, having no text to show", previews[1], "A compiled program")
+    t.eq("deleted, it counts as a build, its directory emptied", {
+        vim.fn.filereadable(pdir .. "/.main2"),
+        stats.builds,
+        stats.deleted,
+        stats.emptied[vim.fs.normalize(pdir)],
+    }, { 0, 1, 0, true })
+    vim.fn.delete(pdir, "rf")
+end
+
+-- A source deleted takes its builds with it, hidden or not and macOS's bundle included, and
+-- nothing else of its name.
+do
+    local widgets = require("tuna.ui.widgets")
+    local real_menu = widgets.menu
+    local pdir = t.tempdir()
+    local elf = "\127ELF\2\1\1\0"
+    t.write(pdir, "main.cpp", "")
+    t.write(pdir, ".main", elf)
+    t.write(pdir, "main.exe", "MZ\144\0")
+    vim.fn.mkdir(pdir .. "/main.dSYM/Contents", "p")
+    t.write(pdir, "main.out", "42\n")
+    t.write(pdir, "main2", elf)
+    vim.fn.mkdir(pdir .. "/main", "p")
+    local stats = { deleted = 0, builds = 0, dirs = 0, emptied = {} }
+    widgets.menu = function(_, _, on_choice)
+        on_choice(1) -- Delete
+    end
+    clean.confirm_each({ { path = pdir .. "/main.cpp", rel = "main.cpp", reason = "empty file", sim = 1 } }, 1, nil, stats, { width = 40 }, function() end)
+    widgets.menu = real_menu
+    local left = {}
+    for name in vim.fs.dir(pdir) do
+        left[#left + 1] = name
+    end
+    table.sort(left)
+    t.eq("deleting a source deletes its builds", left, { "main", "main.out", "main2" })
+    t.eq("each counted as a build, the bundle with its program", { stats.deleted, stats.builds }, { 1, 2 })
+    vim.fn.delete(pdir, "rf")
+end
+
+-- A folder holding nothing but testcases is offered when no solution is left to read them,
+-- and kept while one is: in its own `testcases_directory`, a library's shared one named by its
+-- `.tuna.lua`, and the directory backend's folders.
+do
+    local widgets = require("tuna.ui.widgets")
+    local real_menu = widgets.menu
+    local root = t.tempdir()
+    for _, sub in ipairs({ "A/tests", "B", "C/tests/1", "lib/shared" }) do
+        vim.fn.mkdir(root .. "/" .. sub, "p")
+    end
+    t.write(root .. "/A", "main.cpp", "int main() {}\n")
+    t.write(root .. "/A", ".tuna.lua", 'return { testcases_directory = "tests" }\n')
+    t.write(root .. "/A/tests", "main_input0.txt", "1\n")
+    t.write(root .. "/B", "main_input0.txt", "1\n")
+    t.write(root .. "/B", ".tuna.json", "{}")
+    t.write(root .. "/C", "main.cpp", "int main() {}\n")
+    t.write(root .. "/C/tests/1", "input.txt", "1\n")
+    t.write(root .. "/lib", "dsu.cpp", "struct DSU {};\n")
+    t.write(root .. "/lib", ".tuna.lua", ("return { testcases_directory = %q }\n"):format(root .. "/lib/shared"))
+    t.write(root .. "/lib/shared", "dsu_input0.txt", "1\n")
+    local offered = {}
+    widgets.menu = function(_, _, on_choice, _, _, preview)
+        offered[#offered + 1] = preview.title
+        on_choice(2) -- Keep
+    end
+    clean.prune_dirs(root, config.current_setup, nil, nil, { deleted = 0, builds = 0, dirs = 0, emptied = {} }, math.huge, function() end)
+    widgets.menu = real_menu
+    t.eq("only the folder whose solution is gone is offered", offered, { "B/" })
+    vim.fn.delete(root, "rf")
 end
 
 --------------------------------------------------------------------------------

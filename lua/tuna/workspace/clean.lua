@@ -2,7 +2,7 @@
 --
 -- `:Tuna clean` — remove files that were created but never used: solution files
 -- and scaffolding (checker/gen/brute/interactor) that still hold nothing but the
--- template they were generated from. Because such files are *templated* they are
+-- template they were generated from, and builds whose source is gone. Because such files are *templated* they are
 -- not empty, so "unused" can't be detected by emptiness — instead a file counts
 -- as unused when its content still matches the template that would produce it
 -- (each `$(...)` modifier is treated as a wildcard, so a filled-in header still
@@ -332,13 +332,107 @@ local function entry_budget(cfg)
     return { used = 0, max = (cfg.clean or {}).max_entries or 20000 }
 end
 
+-- What a compiler leaves beside a source file. A bare stem (`main`, from `main.cpp`) is
+-- what every default `compile_command` here produces with `-o $(FNOEXT)`; the rest are
+-- the toolchain leftovers that keep it company, `.dSYM` being a *directory* on macOS.
+local ARTIFACT_EXTS = { exe = true, out = true, o = true, class = true, dSYM = true }
+
+-- The first bytes of a compiled program or object: ELF, Mach-O (32 and 64 bit in either byte
+-- order, and universal, whose magic Java's class files share) and a Windows executable.
+local PROGRAM_MAGIC = {
+    "\127ELF",
+    "\254\237\250\206",
+    "\254\237\250\207",
+    "\206\250\237\254",
+    "\207\250\237\254",
+    "\202\254\186\190",
+    "MZ",
+}
+
+---Whether the file at `full` is a compiled program, read off its first bytes.
+---@param full string
+---@return boolean
+local function is_program(full)
+    local fd = vim.uv.fs_open(full, "r", 0)
+    if not fd then
+        return false
+    end
+    local head = vim.uv.fs_read(fd, 4, 0) or ""
+    vim.uv.fs_close(fd)
+    for _, magic in ipairs(PROGRAM_MAGIC) do
+        if head:sub(1, #magic) == magic then
+            return true
+        end
+    end
+    return false
+end
+
+---The stem of the source a file named `leaf` would be the build of: `main` for `main`,
+---`main.exe` or `main.dSYM`, and for a build written hidden (`-o .$(FNOEXT)`), `.main`.
+---@param leaf string basename
+---@return string?
+local function build_stem(leaf)
+    local name = leaf:match("^%.(.+)$") or leaf
+    local stem, ext = name:match("^(.*)%.([^.]+)$")
+    if stem and not ARTIFACT_EXTS[ext] then
+        return nil
+    end
+    return stem or name
+end
+
+---The builds beside the source at `path`: every compiled program named as its build
+---(`build_stem`), and macOS's `.dSYM` bundle.
+---@param path string
+---@return string[]
+local function builds_of(path)
+    local dir, stem = vim.fs.dirname(path), vim.fs.basename(path):gsub("%.[^.]*$", "")
+    local out = {}
+    local handle = vim.uv.fs_scandir(dir)
+    while handle do
+        local name, typ = vim.uv.fs_scandir_next(handle)
+        if not name then
+            break
+        end
+        local full = dir .. "/" .. name
+        if
+            build_stem(name) == stem
+            and (typ == "file" and is_program(full) or typ == "directory" and name:match("%.dSYM$"))
+        then
+            out[#out + 1] = full
+        end
+    end
+    return out
+end
+
+---The name of the source a build was made from, when that source is gone: a compiled
+---program named as a build (`build_stem`), with no source of that name beside it in a
+---language the scan reads.
+---@param full string
+---@param leaf string its basename
+---@param exts table<string, boolean> `source_exts`
+---@return string? stem
+local function orphaned_build(full, leaf, exts)
+    local stem = build_stem(leaf)
+    if not stem then
+        return nil
+    end
+    local dir = vim.fs.dirname(full)
+    for source_ext in pairs(exts) do
+        if utils.file_exists(dir .. "/" .. stem .. "." .. source_ext) then
+            return nil
+        end
+    end
+    return is_program(full) and stem or nil
+end
+
 ---Scan `dir` for unused files, recursing up to `depth` levels (`math.huge` =
----unlimited). A file counts as unused at similarity `threshold`.
+---unlimited). A file counts as unused at similarity `threshold`, and a build as unused once
+---its source is gone (`orphaned_build`).
 ---@param dir string
 ---@param cfg table
 ---@param depth number recursion depth passed to `vim.fs.dir`
 ---@param threshold number similarity threshold in [0,1]
----@return { path: string, rel: string, reason: string, sim: number, pinned: boolean? }[] files, boolean truncated
+---@return { path: string, rel: string, reason: string, sim: number, pinned: boolean?, build: boolean? }[] files, boolean truncated
 local function scan(dir, cfg, depth, threshold)
     local exts = source_exts(cfg)
     local roles = tool_roles(cfg)
@@ -355,12 +449,21 @@ local function scan(dir, cfg, depth, threshold)
                 budget.truncated = true
                 return
             end
-            -- Skip dotfiles/dot-directories (e.g. .git) entirely.
-            if typ == "file" and not name:match("^%.") and not name:match("/%.") then
+            local full, leaf = dir .. "/" .. name, name:match("[^/]+$") or name
+            local stem = typ == "file" and orphaned_build(full, leaf, exts)
+            if stem then
+                out[#out + 1] = {
+                    path = full,
+                    rel = name,
+                    reason = "build of " .. stem .. ", whose source is gone",
+                    sim = 1,
+                    build = true,
+                }
+            -- A dotfile may be a hidden build, but it is no template's output.
+            elseif typ == "file" and not leaf:match("^%.") then
                 local ext = name:match("%.([^./]+)$") or ""
-                local base = (name:match("[^/]+$") or name):gsub("%.[^.]*$", "")
+                local base = leaf:gsub("%.[^.]*$", "")
                 if exts[ext] or roles[base] then
-                    local full = dir .. "/" .. name
                     local reason, sim = classify(full, ext, base, roles, cfg, threshold, cache)
                     if reason then
                         out[#out + 1] = {
@@ -375,11 +478,19 @@ local function scan(dir, cfg, depth, threshold)
             end
         end
     end)
-    -- Most-certainly-unused first: the closer a file still is to its template, the
-    -- less of it was ever written, so reviewing in decreasing match order front-loads
-    -- the easy deletions and leaves the judgement calls for last. Equal scores fall
-    -- back to path order, so the list is stable between runs.
+    -- Most-certainly-unused first: a build whose source is gone, which nothing can run
+    -- again, then the closer a file still is to its template, the less of it was ever
+    -- written, so reviewing in decreasing match order front-loads the easy deletions and
+    -- leaves the judgement calls for last. Pinned files come after the rest, together, being
+    -- put aside on purpose. Equal scores fall back to path order, so the list is stable
+    -- between runs.
+    local function group(f)
+        return f.build and 0 or f.pinned and 2 or 1
+    end
     table.sort(out, function(a, b)
+        if group(a) ~= group(b) then
+            return group(a) < group(b)
+        end
         if a.sim ~= b.sim then
             return a.sim > b.sim
         end
@@ -448,36 +559,59 @@ local function is_disposable(name, pats)
     return false
 end
 
--- What a compiler leaves beside a source file. A bare stem (`main`, from `main.cpp`) is
--- what every default `compile_command` here produces with `-o $(FNOEXT)`; the rest are
--- the toolchain leftovers that keep it company, `.dSYM` being a *directory* on macOS.
-local ARTIFACT_EXTS = { exe = true, out = true, o = true, obj = true, class = true, pdb = true, ilk = true, dSYM = true }
+---The directories outside `dir` that the sources in it keep their testcases in: a
+---`testcases_directory` of their own (`tests`, a library's shared folder) and the directory
+---backend's root (`tests`, from `tests/$(TCNUM)`), each read from the config a buffer of that
+---source would get, its `.tuna.lua` included.
+---@param dir string normalized
+---@param ctx { exts: table<string, boolean>, stores: table<string, string[]> }
+---@return string[]
+local function stores_in(dir, ctx)
+    if ctx.stores[dir] then
+        return ctx.stores[dir]
+    end
+    local testcases = require("tuna.problem.testcases")
+    local out, cfg = {}, nil
+    local handle = vim.uv.fs_scandir(dir)
+    while handle do
+        local name, typ = vim.uv.fs_scandir_next(handle)
+        if not name then
+            break
+        end
+        if typ == "file" and ctx.exts[name:match("%.([^.]+)$") or ""] then
+            local file = dir .. "/" .. name
+            cfg = cfg or config.load_local_config_and_extend(dir)
+            local base = vim.fs.normalize(testcases.tc_directory(dir, file, cfg))
+            local nested = (cfg.testcases_directory_format or ""):match("^(.*)/[^/]*%$%(TCNUM%)")
+            nested = nested and utils.eval_string(file, nested)
+            for _, store in ipairs({ base, nested and vim.fs.normalize(base .. "/" .. nested) }) do
+                if store ~= dir then
+                    out[#out + 1] = store
+                end
+            end
+        end
+    end
+    ctx.stores[dir] = out
+    return out
+end
 
----Whether `name` is the build output of a source file **this run deleted** from `dir`.
----
----Deliberately not "does this look like a binary": it only ever matches the leftovers of
----a solution clean itself has just removed, so nothing in an untouched directory can be
----caught by it. That is enough for the case it exists for — the run removes `main.cpp`,
----the `main` beside it keeps the directory alive, and the testcases and sidecar are then
----stranded there with it while the directory pass declines to offer a directory that is
----not empty. A build written hidden (`-o .$(FNOEXT)`, keeping solution folders tidy) is
----the same output, so one leading dot is ignored.
----@param dir string
----@param name string basename
----@param ctx { artifacts: table<string, table<string, boolean>>? } scan context, whose
----  `artifacts` maps a directory to the stems removed from it
+---Whether `dir` holds the testcases of a source still on disk (`stores_in`) in a directory
+---above it, within the scan. Such a folder holds nothing but testcases, like a problem whose
+---solution is gone, and only where it stands tells them apart.
+---@param dir string normalized
+---@param ctx { root: string, exts: table<string, boolean>, stores: table<string, string[]> }
 ---@return boolean
-local function is_artifact(dir, name, ctx)
-    local stems = ctx.artifacts and ctx.artifacts[vim.fs.normalize(dir)]
-    if not stems then
-        return false
+local function holds_live_testcases(dir, ctx)
+    local cur = dir
+    while cur ~= ctx.root and (cur .. "/"):sub(1, #ctx.root + 1) == ctx.root .. "/" do
+        cur = vim.fs.dirname(cur)
+        for _, store in ipairs(stores_in(cur, ctx)) do
+            if (dir .. "/"):sub(1, #store + 1) == store .. "/" then
+                return true
+            end
+        end
     end
-    name = name:match("^%.(.+)$") or name
-    local stem, ext = name:match("^(.*)%.([^.]+)$")
-    if not stem then
-        return stems[name] == true
-    end
-    return stems[stem] == true and ARTIFACT_EXTS[ext] == true
+    return false
 end
 
 -- Filesystem roots that belong to the system, not to any problem set. An empty one is
@@ -591,7 +725,7 @@ end
 ---evaluated from two different starting points (the targeted pass over what the run
 ---emptied, and the general sweep) without walking any subtree twice.
 ---@param dir string
----@param ctx { pats: string[], protected: table<string, boolean>, skips: table<string, boolean>, budget: table, decided: table<string, { removable: boolean, files: integer }>, artifacts: table<string, table<string, boolean>>? }
+---@param ctx { root: string, pats: string[], exts: table<string, boolean>, protected: table<string, boolean>, skips: table<string, boolean>, budget: table, decided: table<string, { removable: boolean, files: integer }>, stores: table<string, string[]> }
 ---@param out { path: string, files: integer }[] collected, deepest first
 ---@param depth number levels left to descend
 ---@return boolean removable whether `dir` itself could go
@@ -627,24 +761,20 @@ local function collect_prunable(dir, ctx, out, depth)
         -- Dot-directories are pruned here exactly as in the file scan: they are never
         -- tuna's to remove, and walking them is what made a scan of a home directory
         -- burn its whole allowance before reaching anything relevant.
-        if typ == "directory" and is_artifact(dir, name, ctx) then
-            -- A build output that happens to be a directory (macOS's `main.dSYM`) goes
-            -- with the rest of them rather than being walked into.
-            files = files + 1
-        elseif typ == "directory" and not ctx.skips[name] and name:sub(1, 1) ~= "." then
+        if typ == "directory" and not ctx.skips[name] and name:sub(1, 1) ~= "." then
             local ok, n = collect_prunable(full, ctx, out, depth - 1)
             if ok then
                 files = files + n -- its count already covers everything below it
             else
                 removable = false
             end
-        elseif typ == "directory" or not (is_disposable(name, ctx.pats) or is_artifact(dir, name, ctx)) then
+        elseif typ == "directory" or not is_disposable(name, ctx.pats) then
             removable = false -- a pruned directory, or something worth keeping
         else
             files = files + 1
         end
     end
-    removable = removable and not ctx.protected[key]
+    removable = removable and not ctx.protected[key] and not holds_live_testcases(key, ctx)
     ctx.decided[key] = { removable = removable, files = files }
     if removable then
         out[#out + 1] = { path = dir, files = files }
@@ -786,10 +916,10 @@ local function confirm_width(files, cfg)
 end
 
 ---Confirm and delete the candidate files one at a time, via a menu per file.
----@param files { path: string, rel: string, reason: string, sim: number, pinned: boolean? }[]
+---@param files { path: string, rel: string, reason: string, sim: number, pinned: boolean?, build: boolean? }[]
 ---@param i integer index into `files`
 ---@param restore integer? window to refocus after each menu
----@param stats { deleted: integer, dirs: integer, emptied: table<string, boolean>, artifacts: table<string, table<string, boolean>>, stopped: boolean? }
+---@param stats { deleted: integer, builds: integer, dirs: integer, emptied: table<string, boolean>, stopped: boolean? }
 ---@param ui { width: integer, notice: table?, row: integer? } fixed menu width shared by every file
 ---  this run, plus an optional notice pane shown above each prompt
 ---@param done fun() continuation, run once the last file has been decided
@@ -799,11 +929,18 @@ local function confirm_each(files, i, restore, stats, ui, done)
     end
     local f = files[i]
     -- Preview the file to be deleted in a pane below the prompt: scroll it with
-    -- <C-d>/<C-u>, or step into it with the pane-switch keys (`switch_window_keys`).
+    -- <C-d>/<C-u>, or step into it with the pane-switch keys (`switch_window_keys`). A build
+    -- has no text to show, so it says how big and how old it is.
+    local stat = f.build and vim.uv.fs_stat(f.path)
+    local about = stat
+        and ("A compiled program, %d KiB, built %s."):format(
+            math.ceil(stat.size / 1024),
+            os.date("%Y-%m-%d %H:%M", stat.mtime.sec)
+        )
     local preview = {
         title = f.rel,
-        lines = vim.split(utils.read_file(f.path) or "", "\n", { plain = true }),
-        filetype = vim.filetype.match({ filename = f.path }),
+        lines = about and { about } or vim.split(utils.read_file(f.path) or "", "\n", { plain = true }),
+        filetype = not f.build and vim.filetype.match({ filename = f.path }) or nil,
         width = ui.width,
     }
     -- A pinned file starts on Keep, whatever was answered last: a run of Deletes must not carry
@@ -818,18 +955,25 @@ local function confirm_each(files, i, restore, stats, ui, done)
         end
         if idx == 1 then -- Delete
             if utils.delete_file(f.path) then
-                stats.deleted = stats.deleted + 1
                 -- Remember what this emptied: the directory pass starts from here, so
                 -- what the run itself hollowed out is offered even when the general
                 -- sweep is too big to finish.
                 local into = vim.fs.normalize(vim.fs.dirname(f.path))
                 stats.emptied[into] = true
-                -- ...and what it was called, so the build output left beside it is not
-                -- mistaken for something worth keeping the directory for.
-                stats.artifacts[into] = stats.artifacts[into] or {}
-                stats.artifacts[into][(vim.fs.basename(f.path):gsub("%.[^.]*$", ""))] = true
-                drop_buffer(f.path)
-                require("tuna.workspace.recent").unpin(f.path)
+                if f.build then
+                    stats.builds = stats.builds + 1
+                else
+                    stats.deleted = stats.deleted + 1
+                    drop_buffer(f.path)
+                    require("tuna.workspace.recent").unpin(f.path)
+                    -- Its builds go with it: nothing can rebuild them, and left behind they
+                    -- would keep the directory from being offered.
+                    for _, build in ipairs(builds_of(f.path)) do
+                        if vim.fn.delete(build, "rf") == 0 and not build:match("%.dSYM$") then
+                            stats.builds = stats.builds + 1
+                        end
+                    end
+                end
             else
                 utils.notify("clean: could not delete " .. f.rel .. ".", "WARN")
             end
@@ -959,7 +1103,7 @@ end
 ---@param cfg table
 ---@param bufnr integer?
 ---@param restore integer?
----@param stats { deleted: integer, dirs: integer, emptied: table<string, boolean>, artifacts: table<string, table<string, boolean>>, stopped: boolean?, truncated: boolean?, found: integer? }
+---@param stats { deleted: integer, builds: integer, dirs: integer, emptied: table<string, boolean>, stopped: boolean?, truncated: boolean?, found: integer? }
 ---@param depth number how far the file scan reached, so both passes cover the same area
 ---@param done fun()
 local function prune_dirs(root, cfg, bufnr, restore, stats, depth, done)
@@ -968,12 +1112,14 @@ local function prune_dirs(root, cfg, bufnr, restore, stats, depth, done)
     end
     local found = {}
     local ctx = {
+        root = vim.fs.normalize(root),
         pats = disposable_patterns(cfg),
+        exts = source_exts(cfg),
         protected = protected_directories(root, cfg, bufnr),
         skips = skip_set(cfg),
         budget = entry_budget(cfg),
-        artifacts = stats.artifacts or {},
         decided = {},
+        stores = {},
     }
     -- What the run emptied first, the general sweep for already-empty directories
     -- second: both share one allowance, and this is the order of decreasing certainty
@@ -1094,10 +1240,10 @@ local function scan_and_confirm(dir, cfg, restore, depth, threshold, bufnr)
         utils.notify("clean: '" .. dir .. "' is not a directory.")
         return
     end
-    local stats = { deleted = 0, dirs = 0, emptied = {}, artifacts = {} }
+    local stats = { deleted = 0, builds = 0, dirs = 0, emptied = {} }
 
     local function report()
-        if stats.deleted == 0 and stats.dirs == 0 then
+        if stats.deleted == 0 and stats.builds == 0 and stats.dirs == 0 then
             if stats.stopped then
                 utils.notify("clean: stopped, nothing removed.", "INFO")
                 return
@@ -1125,14 +1271,21 @@ local function scan_and_confirm(dir, cfg, restore, depth, threshold, bufnr)
         end
         -- "source files" rather than plain "files": removing a directory takes its
         -- testcases and metadata with it, so only the first count is about code.
-        local parts = { ("%d source file%s"):format(stats.deleted, plural(stats.deleted)) }
+        local parts = {}
+        if stats.deleted > 0 then
+            parts[#parts + 1] = ("%d source file%s"):format(stats.deleted, plural(stats.deleted))
+        end
+        if stats.builds > 0 then
+            parts[#parts + 1] = ("%d build%s"):format(stats.builds, plural(stats.builds))
+        end
         if stats.dirs > 0 then
             parts[#parts + 1] = ("%d director%s"):format(stats.dirs, stats.dirs == 1 and "y" or "ies")
         end
+        local last = table.remove(parts)
         utils.notify(
             ("clean: %sremoved %s%s."):format(
                 stats.stopped and "stopped, " or "",
-                table.concat(parts, " and "),
+                #parts > 0 and table.concat(parts, ", ") .. " and " .. last or last,
                 stats.truncated and " (only part of the directory was scanned)" or ""
             ),
             "INFO"
@@ -1168,7 +1321,7 @@ M._test = {
     classify = classify,
     templates_of = templates_of,
     similarity = similarity,
-    is_artifact = is_artifact,
+    prune_dirs = prune_dirs,
     confirm_each = confirm_each,
     confirm_dirs = confirm_dirs,
 }

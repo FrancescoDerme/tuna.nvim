@@ -108,6 +108,22 @@ tools.set_mode(fsol, nil)
 t.eq("made automatic again, the helpers decide", (tools.resolve_mode(fsol, cfg)), "interactive")
 t.eq("and nothing is left stored", require("tuna.problem.sidecar").get_entry(fsol, "run"), nil)
 
+-- A sidecar written keeps nothing of a file no longer beside it, or a new file given its name
+-- would take its forced settings: only a file not written yet keeps an entry.
+do
+    local sidecar = require("tuna.problem.sidecar")
+    local pdir, sol = problem({ "sol2.py" })
+    tools.set_mode(pdir .. "/sol2.py", "stress")
+    os.remove(pdir .. "/sol2.py")
+    tools.set_mode(sol, "normal")
+    tools.set_mode(pdir .. "/unwritten.py", "stress")
+    local kept = vim.tbl_keys(sidecar.read(pdir).run or {})
+    table.sort(kept)
+    t.eq("a sidecar written drops a deleted file's entries and keeps a file not written yet", kept, { "sol.py", "unwritten.py" })
+    tools.set_mode(sol, nil)
+    t.eq("written again, the one not written yet is dropped too, and with nothing left the file goes", vim.fn.filereadable(sidecar.path(pdir)), 0)
+end
+
 --------------------------------------------------------------------------------
 -- A forced setting gives way while what it needs is missing
 --------------------------------------------------------------------------------

@@ -76,18 +76,32 @@ problems and remembering them. The rules that hold everywhere are in the root `C
   - The flow is floats only: a `form` for directory, depth and threshold, then one
     `Delete`/`Keep`/`Stop` menu per file with a preview, sorted by match, at a fixed width,
     each starting on the answer last given (`ui.row`), and the same for directories. A
-    pinned file (`scan` marks it) is titled `pinned, …` and starts on `Keep` whatever was
-    answered last, so a run of Deletes cannot carry it along.
+    pinned file (`scan` marks it) comes after the other files, is titled `pinned, …` and
+    starts on `Keep` whatever was answered last, so a run of Deletes cannot carry it along.
   - **Scan cost is bounded**: pruning at traversal (`descend_into`, `clean.skip_directories`,
     dot-directories, judged by the directory's own name at every depth: `vim.fs.dir` hands
     `skip` the path relative to the root), a shared `clean.max_entries` budget reported through
     the `notice` pane, early rejection on the line-count ceiling, and a 1 MiB size guard.
-  - **Directory pass**: offers directories left empty apart from disposable files (testcases,
-    the sidecar, and `is_artifact` build outputs of a solution *this run* removed, a hidden
-    one, `.main`, included). Directories are evaluated post-order, deepest first. Directories
-    the run emptied are evaluated before the general sweep, so the budget can't starve them.
+  - **Directory pass**: offers directories left empty apart from disposable files (testcases
+    and the sidecar). Directories are evaluated post-order, deepest first. Directories the run
+    emptied are evaluated before the general sweep, so the budget can't starve them.
     `protected_directories` covers the scan root, cwd, launch directory, configured roots, home
     and its XDG/standard subdirectories, system directories and `clean.protected_directories`.
+  - A folder of testcases kept apart from its solution (a `testcases_directory` such as
+    `tests`, a library's shared one, the directory backend's `tests/1`) holds nothing else
+    either, so one that a source still on disk stores into is kept (`holds_live_testcases`).
+    Only the sources in the directories above it, within the scan, are asked (`stores_in`,
+    each by the config a buffer of it would get, `.tuna.lua` included, read only for a
+    directory that would otherwise be offered): a store elsewhere is not found.
+  - **A build whose source is gone** is offered in the file pass, ahead of everything
+    (`orphaned_build`): a file shaped like a build output (`ARTIFACT_EXTS`, one leading dot
+    ignored) that is a compiled program by its first bytes (`is_program`: ELF, Mach-O, PE),
+    with no source of its stem beside it in a language the scan reads. The bytes decide, not
+    the name, as a problem folder holds files without an extension that are no build; nor the
+    compile command, which may name no output (`rustc`). Its preview gives its size and age.
+    A source deleted takes its builds with it (`builds_of`, by the same name rule and bytes,
+    plus a `.dSYM` bundle), unasked: nothing can rebuild them, and left behind they would keep
+    its directory from being offered.
   - Every modified buffer is saved first (otherwise an open buffer rewrites a deleted file),
     and buffers of deleted files are wiped.
 - **`scratch.lua`**: the scratch is a template minus its leading modifier header
