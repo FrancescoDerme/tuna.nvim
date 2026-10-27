@@ -17,7 +17,9 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
   - `surfaces.lua`: conformance of every surface to the `surface.lua` contract, every float
     tagged before it is entered and its title centred, no float drawing a statusline of its own
     unless the statusline is global (read off the screen), every `runner_ui.mappings` key still
-    resolving to an action, the testcase editor's two panes together `editor_ui.width` of the
+    resolving to an action, a menu's preview saying in its footer that it is cut off and not
+    once the row it shows fits, lualine told to draw the bar at once as a float takes focus and
+    nothing copied while it is loaded, the testcase editor's two panes together `editor_ui.width` of the
     editor, a menu of varying previews as wide as the widest, between half and seven tenths
     of the editor, the key legend's two columns closing together when one is closed
     with `:q`, a menu's starting row and preview, a menu's search (opened typing, narrowing the
@@ -96,8 +98,8 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     and with `cd_command = false`, from a runner UI pane the window under it opening the
     problem and taking an `lcd`, and `next scaffold` going round the problem's sources in name
     order both ways, passing over a header and stepping from where it sorts, and staying on a
-    lone source, and `next`, `prev` and `go` completing their words, bare `next` stepping
-    between problems;
+    lone source, `next`, `prev` and `go` completing their words, bare `next` stepping between
+    problems, and the cursor placed under `solve(` before the file is drawn;
   - `download.lua`: the listener's boundary, a request handled while its sender is still
     connected, and what is stored (an empty answer kept, no file refused, a typed `~` path,
     the solution's template filled in, tuna's starter with none configured, a scratch folded
@@ -179,7 +181,11 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     solution it is on through a delete, a restore and an add, a delete taking the edit typed and
     not yet captured, a cursor event before the render that follows rows moved being no move by
     hand, and a move back before a render selecting the row moved back to,
-    a board kept between runs closing back to the window it was last shown over, and a zoom
+    a pane cut off counting the lines out of sight in its footer (below, above once scrolled,
+    none when all shows, as drawn, scrolled and typed, the zoom and a conversation column read
+    back too, in the border's colour, the editable accent included), an editable pane zoomed
+    keeping its accent, a board kept between
+    runs closing back to the window it was last shown over, and a zoom
     key doing nothing in a zoom). `testcases.lua` also covers the `single_file` rewrite keeping
     untouched testcases, a conversion through every backend keeping an answer
     stored empty and leaving no layout behind (the store's root kept), which testcase a command

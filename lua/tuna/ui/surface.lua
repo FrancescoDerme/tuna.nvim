@@ -126,6 +126,144 @@ function M.read_only(bufnr)
     end
 end
 
+-- The floats whose footer says how much of their buffer is out of sight, the buffers watched for
+-- it, those with a refresh due, and the autocmds.
+local overflowing, watched, due, overflow_group = {}, {}, {}, nil
+
+---Bring a float's footer up to date: `↑ n` for the lines above the first on show, `↓ n` for
+---those below the last, nothing when all of it shows. Compared with the footer the window has,
+---not with one kept here, since re-tiling the grid gives every float a new config.
+---@param win integer
+local function show_overflow(win)
+    if not api.nvim_win_is_valid(win) then
+        overflowing[win] = nil
+        return
+    end
+    local top, bottom = vim.fn.line("w0", win), vim.fn.line("w$", win)
+    local below = api.nvim_buf_line_count(api.nvim_win_get_buf(win)) - bottom
+    local parts = {}
+    if top > 1 then
+        parts[#parts + 1] = "↑ " .. (top - 1)
+    end
+    if below > 0 then
+        parts[#parts + 1] = "↓ " .. below
+    end
+    local footer = #parts > 0 and (" " .. table.concat(parts, "  ") .. " ") or ""
+    local had = api.nvim_win_get_config(win).footer
+    if footer ~= (had and had[1] and had[1][1] or "") then
+        pcall(api.nvim_win_set_config, win, footer ~= "" and { footer = footer, footer_pos = "right" } or { footer = "" })
+    end
+end
+
+---The followed floats showing `bufnr`.
+---@param bufnr integer
+---@return integer[]
+local function showing(bufnr)
+    local wins = {}
+    for win in pairs(overflowing) do
+        if api.nvim_win_is_valid(win) and api.nvim_win_get_buf(win) == bufnr then
+            wins[#wins + 1] = win
+        end
+    end
+    return wins
+end
+
+---Watch `bufnr` for every change made to it, whoever makes it (a render, a writer of its own, a
+---preview following the cursor, a list narrowed by a search, typing), and refresh the footers
+---of the floats showing it once the change is done: `on_lines` runs inside the change, where a
+---window cannot be configured. A buffer no followed float shows any more is let go.
+---@param bufnr integer
+local function watch(bufnr)
+    if watched[bufnr] then
+        return
+    end
+    watched[bufnr] = true
+    api.nvim_buf_attach(bufnr, false, {
+        on_lines = function(_, buf)
+            if due[buf] then
+                return
+            end
+            if #showing(buf) == 0 then
+                watched[buf] = nil
+                return true
+            end
+            due[buf] = true
+            vim.schedule(function()
+                due[buf] = nil
+                for _, win in ipairs(showing(buf)) do
+                    show_overflow(win)
+                end
+            end)
+        end,
+        on_detach = function(_, buf)
+            watched[buf] = nil
+        end,
+    })
+end
+
+---Say in a float's bottom border how much of its buffer is out of sight (`↑ 3  ↓ 25`, on the
+---right, nothing when it all shows): a float has no scrollbar, so a long output would read as
+---complete. `float` does it for every float tuna opens. Kept current as the buffer changes
+---(`watch`) and as the window scrolls or resizes (`WinScrolled`).
+---@param winid integer
+local function follow_overflow(winid)
+    overflowing[winid] = true
+    watch(api.nvim_win_get_buf(winid))
+    show_overflow(winid)
+    if overflow_group then
+        return
+    end
+    overflow_group = api.nvim_create_augroup("tuna_overflow", { clear = true })
+    -- Every float followed, not only those `v:event` names: a handful, each a comparison.
+    api.nvim_create_autocmd("WinScrolled", {
+        group = overflow_group,
+        callback = function()
+            for win in pairs(overflowing) do
+                show_overflow(win)
+            end
+        end,
+    })
+    api.nvim_create_autocmd("WinClosed", {
+        group = overflow_group,
+        callback = function(ev)
+            overflowing[tonumber(ev.match)] = nil
+        end,
+    })
+end
+
+-- The floats whose bar lualine is told to draw as they take focus, and the autocmds doing it.
+local floats, bar_group = {}, nil
+
+---Have lualine draw the global bar for the current window now rather than from its queue.
+local function refresh_bar()
+    pcall(require("lualine").refresh, { scope = "window", place = { "statusline" }, force = true })
+end
+
+---Redraw lualine's bar whenever `winid` takes focus. The autocmds are made with the first float,
+---so a session whose bar is not lualine's has none.
+---@param winid integer
+local function bar_follows(winid)
+    floats[winid] = true
+    if bar_group then
+        return
+    end
+    bar_group = api.nvim_create_augroup("tuna_bar", { clear = true })
+    api.nvim_create_autocmd("WinEnter", {
+        group = bar_group,
+        callback = function()
+            if floats[api.nvim_get_current_win()] and vim.o.laststatus == 3 then
+                refresh_bar()
+            end
+        end,
+    })
+    api.nvim_create_autocmd("WinClosed", {
+        group = bar_group,
+        callback = function(ev)
+            floats[tonumber(ev.match)] = nil
+        end,
+    })
+end
+
 ---Open a float for a surface. Every one of them wants the same frame — positioned
 ---against the editor, `style = "minimal"`, a bordered title in the plugin's border
 ---colour, no wrapping, and a **layer**, since Neovim's default (50) is the runner
@@ -159,8 +297,21 @@ function M.float(bufnr, opts)
         zindex = opts.layer,
     })
     require("tuna.utils").set_border_highlight(winid, opts.border_highlight, opts.border_group)
+    follow_overflow(winid)
     pcall(function()
         if vim.o.laststatus ~= 3 then
+            return
+        end
+        -- lualine draws the bar on a timer, from a queue of refreshes, so a float entered shows
+        -- whatever bar it already holds for a moment, and a copy of another window's is a copy
+        -- of a moment past (the COMMAND of the `:Tuna` that opened it). Told to refresh now as
+        -- a float takes focus (`refresh_bar`), it draws the right one at once; any other
+        -- statusline keeps the copy.
+        if package.loaded["lualine"] then
+            bar_follows(winid)
+            if api.nvim_get_current_win() == winid then
+                refresh_bar()
+            end
             return
         end
         local bar = api.nvim_get_option_value("statusline", { win = over })

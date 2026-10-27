@@ -950,6 +950,9 @@ if iui then
     ir:update_ui(false)
     drain(iui)
     t.eq("and output landing meanwhile does not pull them away", { top(sow), top(sew) }, { 1, 1 })
+    local hidden = vim.api.nvim_buf_line_count(vim.api.nvim_win_get_buf(sow)) - vim.fn.line("w$", sow)
+    local said = vim.api.nvim_win_get_config(sow).footer
+    t.eq("the column read back counts what landed below it", said and said[1] and said[1][1], " ↓ " .. hidden .. " ")
     vim.api.nvim_set_current_win(back)
 end
 
@@ -3855,6 +3858,91 @@ do
     vim.cmd("enew")
     vim.cmd("silent! bwipeout! " .. buf)
     vim.fn.delete(gdir, "rf")
+end
+
+
+--------------------------------------------------------------------------------
+-- A pane cut off says so in its border
+--------------------------------------------------------------------------------
+
+-- A float has no scrollbar, so each pane's footer counts the lines out of sight: below the last
+-- on show, above the first once scrolled, nothing when all of it shows. It follows what is drawn
+-- into the pane, the pane scrolling and the zoom.
+do
+    local odir = t.tempdir()
+    t.write(odir, "main.cpp", "int main(){}\n")
+    vim.cmd("edit " .. odir .. "/main.cpp")
+    vim.bo.filetype = "cpp"
+    local obuf = vim.api.nvim_get_current_buf()
+    local long = {}
+    for i = 1, 60 do
+        long[i] = tostring(i)
+    end
+    local output = table.concat(long, "\n") .. "\n"
+    vim.system = function(_, _, on_exit)
+        if on_exit then
+            vim.schedule(function()
+                on_exit({ code = 0, signal = 0, stdout = output, stderr = "" })
+            end)
+        end
+        return { kill = function() end, wait = function() return { code = 0 } end, pid = 0 }
+    end
+    local r = require("tuna.run").new(obuf)
+    r.cc = nil
+    r:run_testcases({ [0] = { input = "1\n", output = output } })
+    r:show_ui()
+    settled(r)
+    drain(r.ui)
+    local function footer(win)
+        local f = vim.api.nvim_win_get_config(win).footer
+        return f and f[1] and f[1][1] or ""
+    end
+    local function hidden(win)
+        return vim.api.nvim_buf_line_count(vim.api.nvim_win_get_buf(win)) - vim.fn.line("w$", win)
+    end
+    local so = r.ui.windows.so.winid
+    t.eq("an output cut off counts the lines below the pane", footer(so), " ↓ " .. hidden(so) .. " ")
+    t.eq("and a pane that shows all of it says nothing", footer(r.ui.windows.si.winid), "")
+    local function colours(win)
+        local hl = vim.wo[win].winhighlight
+        return { hl:match("FloatBorder:([%w_]+)"), hl:match("FloatFooter:([%w_]+)") }
+    end
+    local plain, accented = colours(so), colours(r.ui.windows.si.winid)
+    t.eq("in the colour of the border, the editable panes' accent included", {
+        plain[1] == plain[2],
+        accented[1] == accented[2],
+        accented[1] ~= plain[1],
+    }, { true, true, true })
+    -- A headless editor, with no UI attached, raises no `WinScrolled` of its own.
+    vim.api.nvim_win_call(so, function()
+        vim.cmd("normal! G")
+    end)
+    vim.api.nvim_exec_autocmds("WinScrolled", {})
+    drain(r.ui)
+    t.has("scrolled to its end, it counts the lines above instead", footer(so), "↑ ")
+    t.ok("and none below", not footer(so):find("↓"), footer(so))
+    local si = r.ui.windows.si.winid
+    vim.api.nvim_set_current_win(si)
+    vim.api.nvim_buf_set_lines(vim.api.nvim_win_get_buf(si), 0, -1, false, long)
+    drain(r.ui)
+    t.has("typing past the bottom of a pane says so as it is typed", footer(si), "↓ ")
+    r.ui:zoom("so")
+    drain(r.ui)
+    t.has("a zoomed pane says so too", footer(r.ui.zoom_winid), "↓ ")
+    r.ui:unzoom()
+    r.ui:zoom("si")
+    drain(r.ui)
+    local ztitle = vim.api.nvim_win_get_config(r.ui.zoom_winid).title
+    t.eq("an editable pane zoomed keeps its accent, border and title", {
+        colours(r.ui.zoom_winid)[1],
+        ztitle and ztitle[1] and ztitle[1][2],
+    }, { accented[1], accented[1] })
+    r.ui:unzoom()
+    vim.system = real_system
+    r:delete_ui()
+    vim.cmd("enew")
+    vim.cmd("silent! bwipeout! " .. obuf)
+    vim.fn.delete(odir, "rf")
 end
 
 t.report()

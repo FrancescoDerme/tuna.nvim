@@ -39,7 +39,9 @@ problems and remembering them. The rules that hold everywhere are in the root `C
     solution's; one the role has no template in offers the languages it has (a helper is
     compiled and run in its own language, whatever the solution's). A solution's is the one
     asked for, else that solution's, else `downloaded_files_extension`, and with no template it
-    starts empty, as a download does. Only a new solution gets `template_cursor`.
+    starts empty, as a download does. Only a new solution gets `template_cursor`, placed by
+    `utils.place_cursor` at once, so the file is drawn with the cursor already there, and once
+    only: a plugin the user installed to place it (a last-position restore) has the last word.
   - Every starter that reads a test count reads it as the solution starter does (`int tt = 1;
     cin >> tt;`), on a line marked `comment out for a single test`: the bruteforce, the checker
     (run once per testcase file, looping over its tests) and the interactor, which reads the

@@ -229,6 +229,35 @@ settle()
 conforms("widgets.menu")
 close_layer(80)
 
+-- Every float says in its border when it is cut off, a preview following the cursor included,
+-- which is written as the row changes rather than through `render`.
+do
+    local long = {}
+    for i = 1, 80 do
+        long[i] = "line " .. i
+    end
+    widgets.menu({ "long", "short" }, "a menu", function() end, nil, nil, {
+        width = 40,
+        content = function(i)
+            return { title = "preview", lines = i == 1 and long or { "fits" } }
+        end,
+    })
+    settle()
+    local function preview_footer()
+        for _, f in ipairs(floats()) do
+            local cfg = api.nvim_win_get_config(f.win)
+            if f.zindex == 80 and cfg.title and vim.inspect(cfg.title):find("preview") then
+                return cfg.footer and cfg.footer[1] and cfg.footer[1][1] or ""
+            end
+        end
+    end
+    local cut = preview_footer()
+    api.nvim_feedkeys("j", "x", false)
+    settle()
+    ok("a preview cut off says so in its border, and not once the row it shows fits", (cut or ""):find("↓") ~= nil and preview_footer() == "", vim.inspect({ cut, preview_footer() }))
+    close_layer(80)
+end
+
 -- A menu whose preview varies takes one width for all of it: what it shows fits, between half
 -- and seven tenths of the editor.
 do
@@ -703,6 +732,27 @@ local focused = api.nvim_get_current_win()
 local bar = api.nvim_get_option_value("statusline", { win = focused })
 ok("laststatus=3: a float starts with the statusline of the window it opened over", focused ~= code and bar == "CODE BAR", bar)
 close_layer(80)
+-- lualine draws the bar from a queue, so a copy, or the bar a float already holds, would show
+-- for a moment as it takes focus: it is told to draw now instead, on opening and on every move
+-- into a float, and nothing is copied.
+do
+    local asked = {}
+    package.loaded["lualine"] = {
+        refresh = function(opts)
+            asked[#asked + 1] = opts.force == true and opts.scope == "window"
+        end,
+    }
+    widgets.form({ { title = "one", items = { "a" } }, { title = "two", items = { "b" } } }, function() end)
+    settle()
+    local opened = #asked
+    local copied = api.nvim_get_option_value("statusline", { win = api.nvim_get_current_win() }) == "CODE BAR"
+    api.nvim_feedkeys(api.nvim_replace_termcodes("<C-j>", true, false, true), "x", false)
+    settle()
+    ok("with lualine, a float taking focus has it draw the bar at once, and copies none",
+        opened >= 1 and #asked > opened and not vim.tbl_contains(asked, false) and not copied, vim.inspect({ opened, asked, copied }))
+    close_layer(80)
+    package.loaded["lualine"] = nil
+end
 vim.o.laststatus = laststatus
 
 ok("every float is tagged as tuna's before it is entered", #entered_untagged == 0, entered_untagged)

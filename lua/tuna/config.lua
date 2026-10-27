@@ -538,7 +538,8 @@ M.defaults = {
     },
 
     -- Every float's border, passed to nvim_open_win, and its highlight group, applied
-    -- through the window's `winhighlight` (FloatBorder remap).
+    -- through the window's `winhighlight` (FloatBorder remap), which the footer saying how
+    -- much of a pane is out of sight wears too.
     floating_border = "rounded",
     floating_border_highlight = "FloatBorder",
     -- Plugin-wide keys to move focus between panes, in every UI with more than one: the

@@ -24,11 +24,16 @@ specific Vim error about a buffer the user never opened.
   50, so always set a layer. Every title is centred (`title_pos`), one given after the window
   opens too (`fill_preview`), where Neovim would put it on the left; the conformance check holds
   every float to it. With `laststatus=3`, and only then, a float starts with the `statusline` of
-  the window it opens over: a new window otherwise takes the global value, which lualine leaves
-  blank until its next refresh, so the one bar would flicker whenever a float takes focus. With
-  any other `laststatus` it keeps the empty one `style = "minimal"` gives it, because from
-  Neovim 0.12 a float with a `statusline` of its own draws it inside its border, showing the
-  pane's `tuna://` name.
+  the window it opens over: a new window otherwise takes the global value, which a statusline
+  plugin may leave blank until its next refresh, so the one bar would flicker whenever a float
+  takes focus. lualine is the exception: it draws the bar from a queue of refreshes served on a
+  timer, so a copy shows a moment past (the COMMAND of the `:Tuna` that opened the float) and a
+  float taking focus shows the bar it holds until the queue is served. With lualine loaded
+  nothing is copied, and lualine is told to refresh with `force = true` as a float opens
+  focused and whenever one takes focus (`bar_follows`, its `WinEnter` made with the first
+  float), so the bar is right the moment it shows. With any other `laststatus` a float keeps
+  the empty one `style = "minimal"` gives it, because from Neovim 0.12 a float with a
+  `statusline` of its own draws it inside its border, showing the pane's `tuna://` name.
 - `group(wins, on_close)`: windows that close together, keyed on `WinClosed`.
 - `edit(path)`: how tuna opens a file (`:Tuna next`, `:Tuna go`, starters, the scratch,
   downloads). From a runner UI pane or zoom, whose windows are pinned to their buffers (a file
@@ -49,6 +54,21 @@ specific Vim error about a buffer the user never opened.
   option's global scope, so tuna sets `cursorline` with local scope only, never through
   `vim.wo`, which would also write the global value of the window it is set in and carry it into
   windows split from it.
+- **Footers** (`follow_overflow`, private: `float` runs it for every float tuna opens, so no
+  caller opts in): a float has no scrollbar, so a pane cut off would read as complete; its
+  footer counts the lines out of sight (`↑ n` above the first on show, `↓ n` below the last,
+  on the right, nothing when all of it shows), above as well as below because the interactive
+  columns follow their latest line. The buffer is watched with `nvim_buf_attach` (`on_lines`), which sees
+  every change whoever makes it (a `render`, interactive's own column writer, a preview
+  following the cursor, a list narrowed by a search, typing), where hooking each writer would
+  miss the next one written; the refresh is scheduled, since `on_lines` runs inside the change,
+  and a buffer no followed float shows is let go. `WinScrolled` covers scrolling and resizing,
+  refreshing every followed float rather than those `v:event` names, a handful of comparisons.
+  A headless editor has no UI and raises no `WinScrolled`, so a test raises it itself. The
+  footer is compared with the window's own, since re-tiling the grid configures every float
+  anew, and wears the border's colour (`set_border_highlight` maps `FloatFooter` with
+  `FloatBorder`), the editable panes' accent included. A window that is not a float (the split
+  interface) is left alone.
 
 **`widgets.lua`**
 - **Dismissal** is bound only through `map_cancel`, from `config.cancel_keys`
@@ -117,8 +137,8 @@ specific Vim error about a buffer the user never opened.
   content and has no option. A menu whose preview varies, from row to row or question to
   question (the scratch's templates, `clean`'s files), pins one width for all of it
   (`sequence_width`: the widest of its names and its previews' titles and lines, between half
-  and seven tenths of the editor), or it would resize at every step. `input` is half the editor, room for a path, whatever its
-  title.
+  and seven tenths of the editor), or it would resize at every step. `input` is half the
+  editor, room for a path, whatever its title.
 - Widgets are module singletons: `resize_widgets()` rebuilds them (with a `skip_close` guard),
   opening one over an existing instance closes the old windows, and buffers use
   `bufhidden = wipe`.

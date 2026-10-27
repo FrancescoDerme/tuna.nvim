@@ -272,6 +272,19 @@ function RunnerUI:writable_pane(name)
 end
 
 ---@private
+---Whether pane `name` wears the editable accent: it can be typed into, and the row laid out is
+---a testcase. Nothing on the build step is typed into, whatever its panes are on a testcase row.
+---Its zoom wears it too, being the same pane, larger.
+---@param name string
+---@return boolean
+function RunnerUI:accented(name)
+    return self.config.runner_ui.editable_border_highlight
+            and not (self.drawn_row and self.drawn_row.compile)
+            and self:writable_pane(name)
+        or false
+end
+
+---@private
 ---Colour the border and title of the panes that can be typed into, so the two you can
 ---edit are told apart from the four you can only read without having to try one. The
 ---interfaces don't know which panes those are (it depends on the runner), so this is
@@ -282,15 +295,13 @@ function RunnerUI:accent_editable_panes()
     if not hl then
         return
     end
-    -- Nothing on the build step is typed into, whatever its panes are on a testcase row, so
-    -- the accent is off there — and taken off again, since a pane the re-tiling left open
-    -- keeps the colour it had.
-    local building = self.drawn_row and self.drawn_row.compile
+    -- Taken off again where it no longer applies, since a pane the re-tiling left open keeps
+    -- the colour it had.
     for name, w in pairs(self.windows) do
         if w.winid and api.nvim_win_is_valid(w.winid) then
             local cfg = api.nvim_win_get_config(w.winid)
             if cfg.border and cfg.border ~= "none" then
-                if not building and self:writable_pane(name) then
+                if self:accented(name) then
                     utils.set_border_highlight(w.winid, hl, "TunaEditableBorder")
                     -- A title given as `{ { text, group } }` chunks carries its own
                     -- highlight, so the name is accented too — the border alone is easy to
@@ -2407,6 +2418,7 @@ function RunnerUI:zoom(name)
 
     local zcfg = self.config.runner_ui.zoom
     local width, height, col, row = overlay_geometry(zcfg)
+    local accent = self:accented(name)
     self.zoom_winid = surface.float(source.bufnr, {
         layer = surface.LAYER.zoom, -- over the pane grid
         width = width,
@@ -2414,8 +2426,10 @@ function RunnerUI:zoom(name)
         col = col,
         row = row,
         border = self.config.floating_border,
-        border_highlight = self.config.floating_border_highlight,
-        title = source.title,
+        border_highlight = accent and self.config.runner_ui.editable_border_highlight
+            or self.config.floating_border_highlight,
+        border_group = accent and "TunaEditableBorder" or nil,
+        title = accent and { { source.title, "TunaEditableBorder" } } or source.title,
         enter = true,
         keep_scrolloff = true, -- read like a buffer, not navigated like a list
     })

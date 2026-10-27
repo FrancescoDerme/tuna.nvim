@@ -95,5 +95,12 @@ t.eq("bare next is the next problem, and each word goes where it says", {
     run("prev", "scaffold"),
 }, { "B/main.cpp", "B/main.cpp", "A/gen.cpp" })
 
+-- A solution tuna opens is drawn with the cursor already under `solve(`, not moved there a tick
+-- after the file shows.
+t.write(b, "sol.cpp", "#include <bits/stdc++.h>\n\nvoid solve() {\n    int n;\n}\n")
+vim.cmd.edit(vim.fn.fnameescape(b .. "/sol.cpp"))
+require("tuna.utils").place_cursor(require("tuna.config").get_buffer_config(0))
+t.eq("the cursor is placed before the file is drawn", vim.api.nvim_win_get_cursor(0)[1], 4)
+
 vim.notify = quiet
 t.report()

@@ -200,8 +200,10 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
   `and`/`or` would let the selector's `false` fall through to the panes' value.
 - Writable panes wear `runner_ui.editable_border_highlight` (default `TunaEditable`, bold
   magenta, the one hue not used for verdicts) on border and title, the title in the derived
-  `TunaEditableBorder`. `accent_editable_panes` takes the accent off as well as on: a pane the
-  re-tiling leaves open keeps its colour, and nothing on the build step is typed into.
+  `TunaEditableBorder`. `accented(name)` decides it, for the grid (`accent_editable_panes`) and
+  for the zoom, which is the same pane larger. `accent_editable_panes` takes the accent off as
+  well as on: a pane the re-tiling leaves open keeps its colour, and nothing on the build step
+  is typed into.
 - **Text wraps, data does not** (`text_panes`, set by `lay_out` and on the zoom): the Errors
   pane on a testcase row and every build step pane hold text to read and wrap at word
   boundaries, indent kept (`linebreak`, `breakindent`); Output, Expected Output and Input keep
