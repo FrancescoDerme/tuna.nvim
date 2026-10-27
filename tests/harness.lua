@@ -59,6 +59,30 @@ function M.report()
     end
 end
 
+---Run the event loop until what has been scheduled has run. A callback scheduled now runs
+---after every one scheduled before it, so each tick runs what the one before it scheduled:
+---ticks are run until a chain of them (a render, the re-tiling it starts, a stubbed process's
+---exit and what it starts) has ended and `busy`, what the caller knows to be still pending
+---(a timer), has said no, ten in a row. A tick costs well under a millisecond, where a sleep
+---costs as long as the slowest of these might take.
+---@param busy (fun(): boolean)?
+function M.drain(busy)
+    local calm = 0
+    for _ = 1, 1000 do
+        local ran = false
+        vim.schedule(function()
+            ran = true
+        end)
+        vim.wait(1000, function()
+            return ran
+        end, 1)
+        calm = (busy and busy()) and 0 or calm + 1
+        if calm == 10 then
+            return
+        end
+    end
+end
+
 ---A throwaway directory, removed by `report`-time cleanup callers do themselves.
 function M.tempdir()
     local dir = vim.fn.tempname()

@@ -184,11 +184,7 @@ vim.system = function(_, _, on_exit)
     end
     return { kill = function() end, wait = function() return { code = 0 } end, pid = 0, is_closing = function() return false end }
 end
-local function settle(ms)
-    vim.wait(ms or 200, function()
-        return false
-    end)
-end
+local settle = t.drain
 local function open(sol)
     vim.cmd("edit " .. sol)
     vim.bo.filetype = "python"
@@ -401,7 +397,7 @@ local function rerun_after_deleting(open_mode, file, answer)
     end
     os.remove(dir .. "/" .. file)
     runner_of:run_testcases()
-    settle(300)
+    settle()
     widgets.menu = menu
     -- What the answer left on screen, before this cleans the board up.
     local after = {

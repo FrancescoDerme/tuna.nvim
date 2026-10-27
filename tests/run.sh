@@ -3,6 +3,9 @@
 #
 #   tests/run.sh            all of them
 #   tests/run.sh submit     just tests/submit.lua
+#
+# Each file is its own headless nvim, so they run side by side and the suite takes about as
+# long as its slowest file.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -16,22 +19,34 @@ else
 fi
 
 # Tests open solutions beside testcases, which tuna records as recent problems and saves
-# under stdpath("state") on exit: a throwaway state directory keeps them out of yours. The
-# plugin goes on the runtimepath by absolute path, so a test that changes directory (as
-# `:Tuna last` does) still finds its modules, and its `plugin/tuna.lua` is sourced by hand,
-# as `-u NONE` sources no plugin files.
-state=$(mktemp -d)
-trap 'rm -rf "$state"' EXIT
+# under stdpath("state") on exit: a throwaway state directory, one per file so files running
+# together never share one, keeps them out of yours. The plugin goes on the runtimepath by
+# absolute path, so a test that changes directory (as `:Tuna last` does) still finds its
+# modules, and its `plugin/tuna.lua` is sourced by hand, as `-u NONE` sources no plugin files.
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+
+for i in "${!files[@]}"; do
+    f=${files[$i]}
+    (
+        mkdir -p "$work/$i/state"
+        XDG_STATE_HOME="$work/$i/state" nvim --headless -u NONE --cmd "set noswapfile" -c "set rtp+=$PWD" \
+            -c "runtime plugin/tuna.lua" -c "luafile $f" -c "qa!" </dev/null >"$work/$i/out" 2>&1
+        echo $? >"$work/$i/status"
+    ) &
+done
+wait
 
 failed=0
 total_checks=0
-for f in "${files[@]}"; do
-    out=$(XDG_STATE_HOME="$state" nvim --headless -u NONE --cmd "set noswapfile" -c "set rtp+=$PWD" -c "runtime plugin/tuna.lua" -c "luafile $f" -c "qa!" 2>&1)
-    status=$?
+for i in "${!files[@]}"; do
+    f=${files[$i]}
+    out=$(cat "$work/$i/out")
+    status=$(cat "$work/$i/status")
     summary=$(printf '%s' "$out" | grep -Eo '[0-9]+ checks, [0-9]+ failures' | tail -1)
     checks=${summary%% *}
     total_checks=$(( total_checks + ${checks:-0} ))
-    if [ $status -eq 0 ] && [ -n "$summary" ]; then
+    if [ "$status" -eq 0 ] && [ -n "$summary" ]; then
         printf '  ok   %-24s %s\n' "$(basename "$f")" "$summary"
     else
         failed=$(( failed + 1 ))

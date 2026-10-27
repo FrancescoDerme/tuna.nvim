@@ -103,19 +103,29 @@ do
     }, { "0:" .. vim.env.HOME, "0:" .. vim.env.HOME })
 end
 
-local FINAL = { CORRECT = true, WRONG = true, DONE = true, CACHED = true, TIMEOUT = true, FAILED = true, CE = true }
+-- Until what the board has scheduled has run, its debounced settle pass included.
+local function drain(ui)
+    t.drain(function()
+        return ui ~= nil and (ui.render_scheduled or ui.relayouting or (ui.settle_timer and ui.settle_timer:is_active()))
+    end)
+end
+
+-- Until the run is over: every run claims its runner as it starts, so an idle runner with no
+-- row still running or being judged has nothing left to land. Read off the runner rather than
+-- off the rows' words, which a run legitimately leaves blank (a failed build's testcases) or
+-- `NOT RUN`.
 local function settled(runner)
     vim.wait(5000, function()
-        if not runner or not runner.tcdata or #runner.tcdata == 0 then
+        if not (runner and runner.tcdata and runner.tcdata[1] and runner:idle()) then
             return false
         end
         for _, r in ipairs(runner.tcdata) do
-            if not (r.status and (FINAL[r.status] or r.status:match("^RET") or r.status:match("^%d+/%d+$"))) then
+            if r.running or r.judging then
                 return false
             end
         end
         return true
-    end, 20)
+    end, 10)
 end
 
 --------------------------------------------------------------------------------
@@ -431,18 +441,14 @@ local function board(interface, bad_layout)
     br:run_testcases({ [0] = { input = "1\n" }, [1] = { input = "2\n" } })
     br:show_ui()
     settled(br)
-    vim.wait(300, function()
-        return false
-    end)
+    drain(br.ui)
     vim.system = real_system
     local ui = br.ui
     local function move(row)
         vim.api.nvim_set_current_win(ui.windows.tc.winid)
         vim.api.nvim_win_set_cursor(0, { row, 0 })
         vim.api.nvim_exec_autocmds("CursorMoved", { buffer = ui.windows.tc.bufnr })
-        vim.wait(300, function()
-            return false
-        end)
+        drain(ui)
     end
     local function state()
         local tcw = ui.windows.tc.winid
@@ -545,9 +551,7 @@ for _, interface in ipairs({ "split", "popup" }) do
     ui:discard_pending()
     ui.update_windows, ui.update_details = true, true
     ui:update_ui()
-    vim.wait(200, function()
-        return false
-    end)
+    drain(ui)
     t.eq(interface .. ": on a testcase row the Errors pane wraps, the others keep lines whole", {
         wrapping(ui.windows.se.winid),
         wrapping(ui.windows.so.winid),
@@ -888,9 +892,7 @@ if iui then
     conv.log_append(row, "si", "hi\n")
     conv.log_append(row, "se", "oops\n")
     ir:update_ui(false)
-    vim.wait(200, function()
-        return false
-    end)
+    drain(iui)
     local function lines_of(name)
         return vim.api.nvim_buf_get_lines(iui.windows[name].bufnr, 0, -1, false)
     end
@@ -918,17 +920,13 @@ if iui then
     ir:live_send("42")
     t.eq("a sent line is Live's own row and nothing else's", row.log, { { col = "si", text = "42", open = false } })
     ir:update_ui(false)
-    vim.wait(200, function()
-        return false
-    end)
+    drain(iui)
     local sib = iui.windows.si.bufnr
     local last = vim.api.nvim_buf_line_count(sib)
     vim.api.nvim_buf_set_lines(sib, last - 1, last, false, { "typing" })
     conv.log_append(row, "so", "reply\n")
     ir:update_ui(false)
-    vim.wait(200, function()
-        return false
-    end)
+    drain(iui)
     t.eq("the line being typed survives output arriving under it", lines_of("si"), { "42", "", "typing" })
     t.eq("faced by a blank line in the other columns", lines_of("so"), { "", "reply", "" })
     ir.sol_in = nil
@@ -938,9 +936,7 @@ if iui then
         conv.log_append(row, "so", "line " .. k .. "\n")
     end
     ir:update_ui(false)
-    vim.wait(200, function()
-        return false
-    end)
+    drain(iui)
     local sow, sew = iui.windows.so.winid, iui.windows.se.winid
     local function top(win)
         return vim.api.nvim_win_call(win, vim.fn.winsaveview).topline
@@ -952,9 +948,7 @@ if iui then
     t.eq("scrolling back in one column scrolls the others with it", top(sew), 1)
     conv.log_append(row, "se", "late\n")
     ir:update_ui(false)
-    vim.wait(200, function()
-        return false
-    end)
+    drain(iui)
     t.eq("and output landing meanwhile does not pull them away", { top(sow), top(sew) }, { 1, 1 })
     vim.api.nvim_set_current_win(back)
 end
@@ -970,9 +964,7 @@ local fr = require("tuna.run.modes.interactive").active[buf]
 vim.wait(2000, function()
     return fr ~= nil and fr.ui ~= nil and fr.ui.ui_visible and fr.ui:selected_index() ~= 1
 end, 20)
-vim.wait(200, function()
-    return false
-end)
+drain(fr and fr.ui)
 vim.system = real_system
 local fui = fr and fr.ui
 t.ok("feed opened its runner UI", fui ~= nil and fui.ui_visible)
@@ -1058,9 +1050,7 @@ t.ok(
 )
 t.eq("nothing is typable before a session", vim.bo[live_buf].modifiable, false)
 t.eq("and nothing is built", lr.preloaded, true)
-vim.wait(200, function()
-    return false
-end)
+drain(lr.ui)
 t.eq(
     "it opens on the conversation, its columns unwrapped and scroll-bound",
     { lr.ui:selected_index(), column(lr.ui, "se"), column(lr.ui, "so") },
@@ -1077,9 +1067,7 @@ end, 10)
 vim.wait(2000, function()
     return lr.completed
 end, 20)
-vim.wait(200, function()
-    return false
-end)
+drain(lr.ui)
 
 -- The column going live is what hands it over: the cursor ends up in it, in insert, at the
 -- end of the line being composed. A stand-in pipe makes the session "live". The row is chosen
@@ -1093,9 +1081,7 @@ lr.sol_in = {
     write = function() end,
 }
 lr.ui:follow_row(2)
-vim.wait(500, function()
-    return false
-end)
+drain(lr.ui)
 lr.type_when_live = true
 lr:update_ui(true)
 vim.wait(500, function()
@@ -1171,9 +1157,7 @@ local xr = require("tuna.run.modes.interactive").active[buf]
 vim.wait(2000, function()
     return xr ~= nil and xr.ui ~= nil and xr.ui.ui_visible and xr.ui:selected_index() ~= 1
 end, 20)
-vim.wait(200, function()
-    return false
-end)
+drain(xr and xr.ui)
 vim.system = real_system
 local xui = xr and xr.ui
 t.ok("interactor opened its runner UI", xui ~= nil and xui.ui_visible)
@@ -1189,9 +1173,7 @@ if xui then
         vim.api.nvim_set_current_win(xui.windows.tc.winid)
         vim.api.nvim_win_set_cursor(0, { row, 0 })
         vim.api.nvim_exec_autocmds("CursorMoved", { buffer = xui.windows.tc.bufnr })
-        vim.wait(300, function()
-            return false
-        end)
+        drain(xui)
     end
     show_row(2)
     t.eq("a conversation's columns stay unwrapped and scroll together", { column(xui, "se"), column(xui, "so") }, { { false, true }, { false, true } })
@@ -1513,9 +1495,7 @@ do
     end, 10)
     halted:kill_all_processes()
     held({ stdout = "5\n" })
-    vim.wait(400, function()
-        return false
-    end)
+    drain(halted.ui)
     t.eq("a stop ends the re-runs where they are", {
         halted.tcdata[2].status,
         halted.tcdata[3].status,
@@ -1534,9 +1514,7 @@ do
     found.ui:select_row(2)
     found.ui.update_windows, found.ui.update_details = true, true
     found.ui:update_ui()
-    vim.wait(400, function()
-        return false
-    end)
+    drain(found.ui)
     t.ok("and it is marked up in both panes", (function()
         local out = #vim.api.nvim_buf_get_extmarks(found.ui.windows.so.bufnr, ns, 0, -1, {})
         local exp = #vim.api.nvim_buf_get_extmarks(found.ui.windows.eo.bufnr, ns, 0, -1, {})
@@ -1750,9 +1728,7 @@ do
     bui:select_row(1)
     bui.update_windows, bui.update_details = true, true
     bui:update_ui()
-    vim.wait(400, function()
-        return false
-    end)
+    drain(bui)
     ---What a pane's border actually says, which is what a rename has to reach.
     local function drawn_title(name)
         local w = bui.windows[name]
@@ -1794,9 +1770,7 @@ do
     bui:select_row(2)
     bui.update_windows, bui.update_details = true, true
     bui:update_ui()
-    vim.wait(400, function()
-        return false
-    end)
+    drain(bui)
     t.eq("and named back for a testcase row", { drawn_title("so"), drawn_title("se") }, { " Output (o) ", " Errors (e) " })
     t.ok("which is where the accent comes back", accented(bui, "eo"), "eo")
     -- And goes again: a pane the re-tiling leaves open keeps the colour it had, so the
@@ -1804,9 +1778,7 @@ do
     bui:select_row(1)
     bui.update_windows, bui.update_details = true, true
     bui:update_ui()
-    vim.wait(400, function()
-        return false
-    end)
+    drain(bui)
     t.ok("and goes again on the way back to the build step", not accented(bui, "eo"), "eo")
 
     -- `show_title_keys` (on by default) writes the key that zooms each pane at the end
@@ -1814,9 +1786,7 @@ do
     local function render()
         bui.update_windows, bui.update_details = true, true
         bui:update_ui()
-        vim.wait(400, function()
-            return false
-        end)
+        drain(bui)
     end
     local function titles_of(...)
         return vim.tbl_map(drawn_title, { ... })
@@ -1978,7 +1948,8 @@ do
     local onl = require("tuna.run").new(obuf)
     onl:show_ui()
     onl:run_testcases({ [0] = { input = "1\n" } })
-    settled(onl)
+    -- The build is held by the stub above and never lands: the step is what is looked at.
+    drain(onl.ui)
     t.eq("one source alone keeps the build step's configured grid", onl.ui:grid(onl.ui.runner.tcdata[1]), {
         { 3, "tc" },
         { 8, "se" },
@@ -1988,9 +1959,7 @@ do
     onl.ui:select_row(1)
     onl.ui.update_windows, onl.ui.update_details = true, true
     onl.ui:update_ui()
-    vim.wait(300, function()
-        return false
-    end)
+    drain(onl.ui)
     vim.api.nvim_set_current_win(onl.ui.windows.tc.winid)
     local lone = {}
     for _, key in ipairs({ "i", "a", "o", "e" }) do
@@ -2215,9 +2184,7 @@ gr:run_testcases(gtcs.buf_get_testcases(gbuf))
 settled(gr)
 vim.system = real_system
 gr:show_ui()
-vim.wait(400, function()
-    return false
-end)
+drain(gr.ui)
 local gui = gr.ui
 t.ok("the runner UI opened", gui ~= nil and gui.ui_visible)
 
@@ -2230,9 +2197,7 @@ t.ok("the runner UI opened", gui ~= nil and gui.ui_visible)
 vim.api.nvim_set_current_win(gui.windows.tc.winid)
 vim.cmd("botright split | enew")
 local excursion = vim.api.nvim_get_current_win()
-vim.wait(80, function()
-    return false
-end)
+drain(gui)
 t.eq("leaving the UI is recorded as an excursion", gui.escaped_to, excursion)
 -- A window opened while the excursion closes: focus is its own, and must be left alone.
 local dialog_buf = vim.api.nvim_create_buf(false, true)
@@ -2251,9 +2216,7 @@ vim.api.nvim_create_autocmd("WinClosed", {
     end,
 })
 vim.api.nvim_win_close(excursion, true)
-vim.wait(200, function()
-    return false
-end)
+drain(gui)
 t.eq("a dialog opened during the close keeps the focus", vim.api.nvim_get_current_buf(), dialog_buf)
 vim.api.nvim_win_close(vim.api.nvim_get_current_win(), true)
 
@@ -2262,13 +2225,9 @@ vim.api.nvim_win_close(vim.api.nvim_get_current_win(), true)
 vim.api.nvim_set_current_win(gui.windows.tc.winid)
 vim.cmd("botright split | enew")
 excursion = vim.api.nvim_get_current_win()
-vim.wait(80, function()
-    return false
-end)
+drain(gui)
 vim.api.nvim_win_close(excursion, true)
-vim.wait(200, function()
-    return false
-end)
+drain(gui)
 t.ok("a plain close still returns the cursor to the pane", gui:owns_win(vim.api.nvim_get_current_win()))
 local gm, gc = gui:disk_drift()
 t.eq("with nothing changed, no row has drifted", { gm, gc }, { {}, {} })
@@ -2362,9 +2321,7 @@ do
     ur:run_testcases(gtcs.buf_get_testcases(ubuf))
     settled(ur)
     ur:show_ui()
-    vim.wait(400, function()
-        return false
-    end)
+    drain(ur.ui)
     local uui = ur.ui
     local function nums()
         return vim.tbl_map(function(tc)
@@ -2385,9 +2342,7 @@ do
 
     uui:delete_testcase(1)
     uui:add_testcase()
-    vim.wait(100, function()
-        return false
-    end)
+    drain(uui)
     t.eq("a testcase added takes the lowest free number, in number order, selected", { nums(), selected() }, { { 0, 1, 2 }, 1 })
 
     -- The number is held by the row just added though nothing is saved under it yet.
@@ -2406,18 +2361,14 @@ do
     -- And never over a testcase saved under its number since, wherever the cursor was moved.
     uui:delete_testcase(2)
     uui:add_testcase()
-    vim.wait(100, function()
-        return false
-    end)
+    drain(uui)
     uui.pending[2] = nil
     ur:save_testcase(2, "brand new\n", "brand new\n")
     settled(ur)
     uui.user_moved = true
     uui:restore_testcase()
     settled(ur)
-    vim.wait(100, function()
-        return false
-    end)
+    drain(uui)
     disk = gtcs.buf_get_testcases(ubuf)
     t.eq("a testcase saved under the number since is left as it is", { disk[2].input, disk[4] and disk[4].input }, { "brand new\n", "in2\n" })
     t.eq("the cursor on the row restored", {
@@ -2434,9 +2385,7 @@ do
     t.eq("a board of named testcases adds none found on disk", nums(), { 0, 1, 2, 3, 4 })
     ur.subset = nil
     uui:delete_testcase(0)
-    vim.wait(100, function()
-        return false
-    end)
+    drain(uui)
     uui:goto_row(ur:rows_for(4)[1])
     gtcs.buf_save_testcase(ubuf, 0, "also elsewhere\n", "")
     local before = ur.tcdata[uui:selected_index()]
@@ -2455,9 +2404,7 @@ do
     uui.user_moved = true
     ur:run_testcases(gtcs.buf_get_testcases(ubuf))
     settled(ur)
-    vim.wait(100, function()
-        return false
-    end)
+    drain(uui)
     local held = ur.tcdata[uui:selected_index()]
     gtcs.buf_save_testcase(ubuf, 1, "from elsewhere\n", "")
     uui:with_disk_settled(nil, "re-run all", function() end)
@@ -2502,9 +2449,7 @@ do
     })
     -- Named for what is typed into it from the first keystroke, as on the normal board.
     mr.ui:goto_row(2)
-    vim.wait(100, function()
-        return false
-    end)
+    drain(mr.ui)
     local si = mr.ui.windows.si.bufnr
     vim.api.nvim_buf_set_lines(si, 0, -1, false, { "typed" })
     vim.api.nvim_exec_autocmds("TextChanged", { buffer = si })
@@ -2519,9 +2464,7 @@ do
         end, cases()),
     }, { { input = "5\n", output = "6\n" }, { "  TC 0", "  TC 0" } })
     mr.ui:add_testcase()
-    vim.wait(100, function()
-        return false
-    end)
+    drain(mr.ui)
     t.eq("and a testcase added on the board is added under every solution", vim.tbl_map(function(c)
         return c[1] .. " " .. c[2]
     end, cases()), { "a.cpp   TC 0", "a.cpp   TC 1", "b.cpp   TC 0", "b.cpp   TC 1" })
@@ -2557,9 +2500,7 @@ do
     settled(mr)
     local ui = mr.ui
     local function rest()
-        vim.wait(100, function()
-            return false
-        end)
+        drain(ui)
     end
     local function named(idx)
         local tc = mr.tcdata[idx]
@@ -2880,19 +2821,14 @@ do
         C.last_mode[rbuf] = nil
     end
     local compiler = require("tuna.run").new(rbuf).cc.exec
-    local function settle_ms(ms)
-        vim.wait(ms, function()
-            return false
-        end)
-    end
 
     clear_runners()
     tools.set_mode(path, "interactive")
     tools.set_source(path, "feed")
     stub_system()
     C.show_runner_ui(rbuf)
-    settle_ms(200)
     local shown = require("tuna.run.modes.interactive").active[rbuf]
+    drain(shown and shown.ui)
     t.ok("after a restart, show_ui opens the mode the problem is set to", shown ~= nil and shown.ui ~= nil and shown.ui.ui_visible)
     t.eq("and not the normal runner's", C.runners[rbuf], nil)
     t.eq("nothing is run to show it", #spawns, 0)
@@ -2901,7 +2837,7 @@ do
     t.eq("and the runner is idle, so feed's testcases can be edited", shown and shown:idle(), true)
     if shown then
         shown:run_testcases()
-        settle_ms(300)
+        settled(shown)
     end
     t.eq("the first run builds before running", spawns[1] and spawns[1].argv[1], compiler)
     vim.system = real_system
@@ -2910,8 +2846,8 @@ do
     tools.set_mode(path, "all")
     stub_system()
     C.show_runner_ui(rbuf)
-    settle_ms(200)
     local matrix = require("tuna.run.modes.multi").active[rbuf]
+    drain(matrix and matrix.ui)
     t.ok("run-all opens listed too", matrix ~= nil and matrix.ui ~= nil and matrix.ui.ui_visible)
     t.eq("with nothing run", #spawns, 0)
     vim.system = real_system
@@ -2941,27 +2877,27 @@ do
         end, spawns)
     end
     local nr = listed_normal(0)
-    settle_ms(200)
+    drain(nr.ui)
     t.eq(
         "a listed board opens on a testcase, its editable panes accented",
         { nr.ui:selected_index(), accented(nr.ui, "eo"), accented(nr.ui, "si") },
         { 2, true, true }
     )
     nr:run_single(2)
-    settle_ms(300)
+    settled(nr)
     t.eq("a listed normal board's run key builds, then runs the row", commands_run(), { compiler, "./sol" })
     t.ok("which then has a verdict", nr.tcdata[2].status ~= "NOT RUN", nr.tcdata[2].status)
 
     nr = listed_normal(1)
     nr:run_single(2)
-    settle_ms(300)
+    settled(nr)
     t.eq("a build that fails runs nothing behind it", commands_run(), { compiler })
     t.eq("and leaves the row saying it was never run", nr.tcdata[2].status, "NOT RUN")
     t.eq("with the runner idle again", nr:idle(), true)
 
     nr = listed_normal(0)
     nr:run_single(1)
-    settle_ms(300)
+    settled(nr)
     t.eq("the Compile row's run key builds once", commands_run(), { compiler })
     t.eq("and settles", nr:idle(), true)
 
@@ -2976,7 +2912,7 @@ do
     C.run_testcases(pybuf, nil, true)
     vim.api.nvim_buf_set_lines(pybuf, 0, -1, false, { "print(2)" })
     C.runners[pybuf]:run_single(1)
-    settle_ms(300)
+    settled(C.runners[pybuf])
     t.eq("a listed interpreted solution is saved before its first row runs", vim.fn.readfile(py), { "print(2)" })
     C.runners[pybuf]:delete_ui()
     C.runners[pybuf] = nil
@@ -3080,9 +3016,7 @@ local function shown_row(r, want)
     vim.wait(3000, function()
         return r.ui ~= nil and r.ui.ui_visible and #r.tcdata > 0 and r.ui:selected_index() == want
     end, 20)
-    vim.wait(150, function()
-        return false
-    end)
+    drain(r.ui)
     return r.ui and r.ui:selected_index()
 end
 
@@ -3098,12 +3032,8 @@ for _, board in ipairs(boards) do
     r:delete_ui()
 
     r = board.run()
-    vim.wait(3000, function()
-        return r.ui ~= nil and r.ui.ui_visible and #r.tcdata > 0 and r.completed
-    end, 20)
-    vim.wait(200, function()
-        return false
-    end)
+    settled(r)
+    drain(r.ui)
     local want = board.run_row and board.run_row(r) or first_real_row(r)
     t.eq(board.name .. ": run, a silent build hands over the row the run is about", r.ui:selected_index(), want)
     r:kill_all_processes()
@@ -3128,9 +3058,7 @@ for _, board in ipairs(boards) do
         return { kill = function() end, wait = function() return { code = 0 } end, pid = 0 }
     end
     local r = board.run()
-    vim.wait(3000, function()
-        return r.tcdata[1] ~= nil and r.tcdata[1].exit_code ~= nil and r:idle()
-    end, 20)
+    settled(r)
     if r.tcdata[1] and r.tcdata[1].tcnum == "Compile" then
         built = built + 1
         t.eq(board.name .. ": a build that failed says so on its row", {
@@ -3140,9 +3068,7 @@ for _, board in ipairs(boards) do
         t.ok(board.name .. ": and the run settles, nothing having started", r:idle(), r.tcdata[1])
         -- The build step's own grid has an Errors pane whatever the configured one lacks,
         -- so the failure is read where the run left the cursor, with nothing opened over it.
-        vim.wait(300, function()
-            return false
-        end)
+        drain(r.ui)
         t.eq(board.name .. ": read on the build step itself, nothing opened over the board", {
             r.ui:selected_index(),
             r.ui.zoom_winid,
@@ -3252,9 +3178,7 @@ for _, board in ipairs(boards) do
         end, 20)
         r:kill_all_processes()
         local spawned = #spawns
-        vim.wait(300, function()
-            return false
-        end)
+        drain(r.ui)
         local cases = {}
         for _, tc in ipairs(r.tcdata) do
             if type(tc.tcnum) == "number" then
@@ -3356,15 +3280,11 @@ vim.api.nvim_win_set_cursor(held_tc.winid, { 1, 0 })
 vim.api.nvim_exec_autocmds("CursorMoved", { buffer = held_tc.bufnr })
 t.eq("the selector can be taken over mid-conversation", held.ui:selected_index(), 1)
 held:run_testcases()
-vim.wait(200, function()
-    return false
-end)
+drain(held.ui)
 vim.wait(3000, function()
     return held.completed
 end, 20)
-vim.wait(200, function()
-    return false
-end)
+drain(held.ui)
 t.eq("and the sessions that follow leave it where it was put", held.ui:selected_index(), 1)
 held:kill_all_processes()
 held:delete_ui()
@@ -3385,9 +3305,7 @@ shrink:load_testcases({ [0] = { input = "1\n", output = "1\n" } })
 vim.wait(1000, function()
     return #shrink.tcdata == 2
 end, 20)
-vim.wait(200, function()
-    return false
-end)
+drain(shrink.ui)
 t.eq("a shorter list moves the choice down with it", { shrink.ui:selected_index(), shrink.ui.user_moved }, { 2, false })
 t.eq("with the cursor on it", vim.api.nvim_win_get_cursor(shrink.ui.windows.tc.winid)[1], 2)
 shrink:delete_ui()
@@ -3462,9 +3380,7 @@ for _, building in ipairs({
     vim.wait(2000, function()
         return r.ui ~= nil and r.ui.ui_visible and #r.tcdata > 0 and held_exit ~= nil
     end, 20)
-    vim.wait(200, function()
-        return false
-    end)
+    drain(r.ui)
     t.eq(building.name .. ": a run opens on the build while it is still going", {
         r.ui:selected_index(),
         r.compile_entry.running,
@@ -3497,9 +3413,7 @@ noisy:run_testcases(wtcs)
 vim.wait(2000, function()
     return noisy.completed
 end, 20)
-vim.wait(200, function()
-    return false
-end)
+drain(noisy.ui)
 t.eq("a build that printed something keeps the row, so it can be read", noisy.ui:selected_index(), 1)
 noisy:delete_ui()
 vim.system = real_system
@@ -3516,9 +3430,7 @@ local chosen = C3.runners[wbuf]
 vim.wait(3000, function()
     return chosen ~= nil and chosen.ui ~= nil and chosen.ui.ui_visible and chosen.completed
 end, 20)
-vim.wait(200, function()
-    return false
-end)
+drain(chosen.ui)
 local function move_to(row)
     local w = chosen.ui.windows.tc
     vim.api.nvim_win_set_cursor(w.winid, { row, 0 })
@@ -3530,10 +3442,14 @@ t.eq("moving back before a render selects the row moved back to", chosen.ui:sele
 move_to(3)
 t.eq("moving the selector by hand selects that row", { chosen.ui:selected_index(), chosen.ui.user_moved }, { 3, true })
 chosen:update_ui(true)
-vim.wait(300, function()
-    return false
-end)
+drain(chosen.ui)
 t.eq("and results landing leave it where it was put", chosen.ui:selected_index(), 3)
+-- A move whose cursor event has not arrived yet is the user's too: a render meanwhile leaves
+-- the cursor where they put it.
+vim.api.nvim_win_set_cursor(chosen.ui.windows.tc.winid, { 2, 0 })
+chosen:update_ui(true)
+drain(chosen.ui)
+t.eq("a render before a move's cursor event leaves the cursor where it was put", vim.api.nvim_win_get_cursor(chosen.ui.windows.tc.winid)[1], 2)
 
 C3.execute({ "run" })
 vim.wait(3000, function()

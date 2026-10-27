@@ -26,6 +26,7 @@
 --         -c "set rtp+=." -c "luafile tests/surfaces.lua" -c "qa!"
 
 local api = vim.api
+local drain = dofile("tests/harness.lua").drain
 
 local failures, checks = 0, 0
 local function ok(what, cond, extra)
@@ -127,16 +128,10 @@ local function close_layer(z)
             api.nvim_win_close(f.win, true)
         end
     end
-    vim.wait(200, function()
-        return false
-    end)
+    drain()
 end
 
-local function settle(ms)
-    vim.wait(ms or 300, function()
-        return false
-    end)
-end
+local settle = drain
 
 --------------------------------------------------------------------------------
 -- The surfaces, one at a time (each cleans up after itself).
@@ -157,7 +152,7 @@ api.nvim_create_autocmd("BufEnter", {
 local widgets = require("tuna.ui.widgets")
 
 vim.cmd("Tuna show_ui")
-settle(800)
+settle()
 local runner
 for _, r in pairs(require("tuna.commands").runners or {}) do
     runner = r
@@ -203,29 +198,50 @@ if ui then
     conforms("runner UI + key legend")
     close_layer(70)
 
+    -- Its two columns are one legend: closing either by hand (`:q`, `:close`) takes the other.
+    -- Two need the width of both, which the editor here is given for the purpose.
+    local narrow = vim.o.columns
+    vim.o.columns = 200
+    settle()
+    ui:show_help()
+    settle()
+    local function legend()
+        return vim.tbl_filter(function(f)
+            return f.zindex == 70
+        end, floats())
+    end
+    local columns = #legend()
+    api.nvim_set_current_win(legend()[1].win)
+    vim.cmd("quit")
+    settle()
+    ok("closing one column of the legend closes the other", columns == 2 and #legend() == 0, vim.inspect({ columns, #legend() }))
+    vim.o.columns = narrow
+    settle()
+    close_layer(70)
+
     ui:delete()
     settle()
     ok("runner UI: closes completely", #floats() == 0, #floats() .. " floats left")
 end
 
 widgets.menu({ "one", "two" }, "a menu", function() end)
-settle(150)
+settle()
 conforms("widgets.menu")
 close_layer(80)
 
 widgets.input("type here", "", function() end)
-settle(150)
+settle()
 conforms("widgets.input")
 close_layer(80)
 
 widgets.form({ { title = "pick", items = { "a", "b" } } }, function() end)
-settle(150)
+settle()
 conforms("widgets.form")
 close_layer(80)
 
 widgets.panels({ { title = "left", items = { "a", "b" } }, { title = "right", items = { "x" } } }, function() end,
     nil, nil, { "BANNER", "BANNER" })
-settle(150)
+settle()
 conforms("widgets.panels")
 -- `conforms` cannot demand this of every widget — the chooser form has a row that is
 -- typed into — but a board of lists has nothing to type, and a scratch buffer is
@@ -237,7 +253,7 @@ end
 close_layer(80)
 
 widgets.editor(api.nvim_get_current_buf(), 0, "1\n", "1\n", function() end)
-settle(150)
+settle()
 conforms("widgets.editor")
 close_layer(80)
 
@@ -245,7 +261,7 @@ close_layer(80)
 -- it, what was typed, and still typing, never going through the editor's own close.
 do
     widgets.editor(api.nvim_get_current_buf(), 0, "1\n", "1\n", function() end, api.nvim_get_current_win())
-    settle(150)
+    settle()
     for _, f in ipairs(floats()) do
         local title = api.nvim_win_get_config(f.win).title
         if title and vim.inspect(title):find("Output") then
@@ -265,7 +281,7 @@ do
         "nx",
         false
     )
-    settle(150)
+    settle()
     local title = api.nvim_win_get_config(0).title
     ok("a resize keeps the editor open", #floats() == 2, #floats() .. " floats")
     ok("still typing", tuna_probe.mode == "i", tuna_probe.mode)
@@ -280,7 +296,7 @@ end
 do
     require("tuna").setup({ switch_window_keys = { "<A-h>", "<A-j>", "<A-k>", "<A-l>" } })
     widgets.editor(api.nvim_get_current_buf(), 0, "1\n", "1\n", function() end, api.nvim_get_current_win())
-    settle(150)
+    settle()
     local function pane()
         local title = api.nvim_win_get_config(0).title
         return title and vim.trim(title[1][1]):match("^%a+") or "?"
@@ -323,11 +339,11 @@ do
         widgets.editor(api.nvim_get_current_buf(), 3, "1\n", "1\n", function(c)
             saved = c
         end, api.nvim_get_current_win())
-        settle(150)
+        settle()
     end
     local function press(k)
         api.nvim_feedkeys(api.nvim_replace_termcodes(k, true, false, true), "x", false)
-        settle(50)
+        settle()
     end
     local function edit()
         api.nvim_buf_set_lines(0, 0, -1, false, { "2" })
@@ -371,7 +387,7 @@ do
     open()
     edit()
     vim.cmd("wq")
-    settle(100)
+    settle()
     ok(":wq saves and closes", saved ~= nil and #floats() == 0, #floats() .. " floats")
 
     open()
@@ -390,11 +406,11 @@ end
 -- A menu can start on a given row (a following preview with it), and a resize keeps the
 -- row the cursor is on rather than going back to the top.
 widgets.menu({ "one", "two", "three" }, "a menu", function() end, nil, nil, nil, nil, 2)
-settle(150)
+settle()
 ok("a menu starts on the row it is given", api.nvim_win_get_cursor(0)[1] == 2, api.nvim_win_get_cursor(0)[1])
 api.nvim_win_set_cursor(0, { 3, 0 })
 widgets.menu(nil)
-settle(150)
+settle()
 ok("and a resize keeps the row the cursor is on", api.nvim_win_get_cursor(0)[1] == 3, api.nvim_win_get_cursor(0)[1])
 close_layer(80)
 widgets.menu({ "one", "two" }, "a menu", function() end, nil, nil, {
@@ -403,7 +419,7 @@ widgets.menu({ "one", "two" }, "a menu", function() end, nil, nil, {
         return { lines = { "row " .. i } }
     end,
 }, nil, 2)
-settle(150)
+settle()
 local previewed
 for _, f in ipairs(floats()) do
     if f.win ~= api.nvim_get_current_win() and f.zindex == 80 then
@@ -479,7 +495,7 @@ do
         vim.deep_equal(tuna_probe, { "Search i", "a search n", "jam n", "Search i" }), vim.inspect(tuna_probe))
 
     widgets.menu(nil)
-    settle(100)
+    settle()
     ok("a resize keeps the search and the list it found", vim.deep_equal({ lines_of("Search"), lines_of("a search") }, { { "be" }, { "beta" } }),
         vim.inspect({ lines_of("Search"), lines_of("a search") }))
 
@@ -572,7 +588,7 @@ do
 
     keys("<C-l><C-j>")
     widgets.menu(nil)
-    settle(100)
+    settle()
     local title = api.nvim_win_get_config(0).title
     ok("a resize keeps focus in the pane it was in", title and vim.trim(title[1][1]) == "code of beta", vim.inspect(title))
     close_layer(80)
@@ -608,12 +624,12 @@ do
     -- Closing any pane by hand closes the whole menu, as closing its list does, a notice too.
     keys("<Cmd>lua tuna_open_beside(true)<CR><Esc>")
     vim.api.nvim_win_close(win_of("Notes"), true)
-    settle(50)
+    settle()
     ok("closing one of its panes closes the menu", #floats() == 0, #floats())
     widgets.menu({ "one" }, "a menu", function() end, nil, nil, nil, { title = "Know this", lines = { "first" } })
-    settle(50)
+    settle()
     vim.api.nvim_win_close(win_of("Know this"), true)
-    settle(50)
+    settle()
     ok("and so does closing its notice", #floats() == 0, #floats())
 
     -- The search pane is typed into again only if it was left typing.
@@ -639,7 +655,7 @@ do
     package.loaded["cmp"] = nil
     told = {}
     widgets.input("a path", "", function() end)
-    settle(50)
+    settle()
     local ib = vim.api.nvim_get_current_buf()
     package.loaded["cmp"] = fake_cmp -- loaded by the InsertEnter it is told on
     vim.api.nvim_exec_autocmds("InsertEnter", { buffer = ib })
@@ -656,7 +672,7 @@ local laststatus = vim.o.laststatus
 vim.o.laststatus = 3
 api.nvim_set_option_value("statusline", "CODE BAR", { scope = "local", win = code })
 widgets.menu({ "one" }, "a menu", function() end)
-settle(150)
+settle()
 local focused = api.nvim_get_current_win()
 local bar = api.nvim_get_option_value("statusline", { win = focused })
 ok("laststatus=3: a float starts with the statusline of the window it opened over", focused ~= code and bar == "CODE BAR", bar)

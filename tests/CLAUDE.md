@@ -4,18 +4,22 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
 
 ## Testing
 
-- Run `tests/run.sh` (all files, one headless nvim each, non-zero exit on failure) or
-  `tests/run.sh runner`. Keep it passing: it ships with the plugin. Each file gets a throwaway
-  `XDG_STATE_HOME` (tests open problems, which tuna records into `recent.json` on exit) and
-  the plugin on the runtimepath by absolute path (a test may change directory), with
-  `plugin/tuna.lua` sourced by hand, since `-u NONE` sources no plugin files. Each file prints
-  `N checks, M failures` through `tests/harness.lua` (`ok`/`eq`/`has`/`report`).
+- Run `tests/run.sh` (all files, one headless nvim each, side by side, non-zero exit on
+  failure) or `tests/run.sh runner`. Keep it passing: it ships with the plugin. While a change
+  is being made, run the files covering it; run the whole suite once the batch is done. Files
+  run at the same time, so a file shares nothing on disk with another (`t.tempdir()` is per
+  process). Each file gets a throwaway `XDG_STATE_HOME` (tests open problems, which tuna
+  records into `recent.json` on exit) and the plugin on the runtimepath by absolute path (a
+  test may change directory), with `plugin/tuna.lua` sourced by hand, since `-u NONE` sources
+  no plugin files. Each file prints `N checks, M failures` through `tests/harness.lua`
+  (`ok`/`eq`/`has`/`report`, and `drain`).
 - Files:
   - `surfaces.lua`: conformance of every surface to the `surface.lua` contract, every float
     tagged before it is entered and its title centred, no float drawing a statusline of its own
     unless the statusline is global (read off the screen), every `runner_ui.mappings` key still
-    resolving to an action, a menu's starting row and preview, a menu's search (opened typing,
-    narrowing the list before `<CR>` reads it, `j` typed and `<Down>` moving, the pane walk,
+    resolving to an action, the key legend's two columns closing together when one is closed
+    with `:q`, a menu's starting row and preview, a menu's search (opened typing, narrowing the
+    list before `<CR>` reads it, `j` typed and `<Down>` moving, the pane walk,
     typing again only where it was left typing, completion turned off in it and in `input`,
     nvim-cmp told whether loaded already or loading on the prompt's `InsertEnter`, a resize
     keeping the search, nothing found choosing nothing), a menu's panes beside its list (the
@@ -171,6 +175,15 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
   `interactive`, `scratch`, `menu`, `runner_ui`, `navigate`), and `tools` a way to forget the
   session's builds, for a test whose stubbed compiler answers differently for a source that has
   not changed. They are not public interface.
+- **Wait on a condition, never a clock**: `vim.wait(ms, cond)` returns as soon as `cond`
+  holds, while a wait that times out costs its whole `ms` and still lets the test go on, so
+  no test sleeps. `t.drain(busy?)` runs ticks until what was scheduled has run, chains of
+  callbacks included, and `busy` (a timer the caller knows of) is false: what a sleep "to let
+  the render land" was for. In `runner.lua`, `drain(ui)` adds the board's own pending work
+  (a render, a re-tiling, the settle pass), and `settled(runner)` waits for the run to be over
+  (idle, no row running or being judged), never for words on the rows, which a run can
+  legitimately leave blank or `NOT RUN`. A test that something does *not* happen relies on
+  these to have waited long enough, so mutation-check it.
 - **Mutation-check new tests**: break the rule each test describes and confirm it fails, and
   confirm a harmless edit doesn't.
 - The suite doesn't cover real processes, verdicts coming back, or most UI interaction. Verify

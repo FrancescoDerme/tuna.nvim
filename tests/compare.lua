@@ -82,9 +82,7 @@ do
     for _ = 1, 3 do
         t.eq("an unknown method judges nothing", compare.compare_output("1", "1", "sideways"), nil)
     end
-    vim.wait(50, function()
-        return false
-    end)
+    t.drain()
     vim.notify = quiet
     t.eq("and is said once", #said, 1)
 end
@@ -129,9 +127,7 @@ do
     vim.wait(200, function()
         return got ~= nil
     end)
-    vim.wait(50, function()
-        return false
-    end)
+    t.drain()
     vim.notify = quiet
     t.eq("a checker that did not build gives no verdict, and says why", got, { nil, "checker did not compile" })
     t.eq("without a notification", said, {})
