@@ -152,8 +152,12 @@ problems and remembering them. The rules that hold everywhere are in the root `C
   Neovim's directory comes along (`recent.change_dir`, with the new problem's `cd_command`) only
   when it was the problem left or a folder inside it (`working_in`, by real path): working in a
   problem, `:e` and a file finder would point at the one left, while a contest's folder, where
-  `:Tuna last contest` puts you, is kept. `recent` is required lazily, as it requires
+  `:Tuna go contest` puts you, is kept. `recent` is required lazily, as it requires
   `navigate`.
+  - `:Tuna next scaffold` (`step_scaffold`) goes round the problem's own files instead:
+    `tools.sources_in`, its solutions and helpers in name order, wrapping, since a handful
+    of files is a ring to go round rather than a line with ends. From a file outside it (a
+    header, a testcase) the step starts where that file would sort.
 - **`library.lua`**: snippets are regions between `library.marker` guard comments in plain
   source files; files without guards are offered whole. Only files with the current buffer's
   extension are shown, dotfiles and dot-directories left out at every depth, and `library.path`

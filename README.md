@@ -44,7 +44,7 @@ It loads the rest of itself only when you use it, so there is no need to lazy-lo
    The four panes show output, expected output, input and stderr.
    This UI can do a lot, for example `d` toggles a diff of the two outputs.
 4. **[`:Tuna submit`](REFERENCE.md#submit)** hands the solution to whichever submit tool you have configured, reads that tool's output as it runs, and puts the judge's verdict in your statusline.
-5. **[`:Tuna pin`](REFERENCE.md#pin)** and **[`:Tuna last`](REFERENCE.md#last)** help you move between problems as you upsolve, and **[`:Tuna clean`](REFERENCE.md#clean)** keeps your directories tidy.
+5. **[`:Tuna pin`](REFERENCE.md#pin)** and **[`:Tuna go`](REFERENCE.md#go)** help you move between problems as you upsolve, and **[`:Tuna clean`](REFERENCE.md#clean)** keeps your directories tidy.
 
 ## Features
 
@@ -180,7 +180,8 @@ A step-by-step guide on setting this up, from pointing tuna at your tool to read
 ### Getting around
 
 - [`:Tuna next`](REFERENCE.md#next-and-prev) / [`:Tuna prev`](REFERENCE.md#next-and-prev) step between the problems of a contest.
-- `:Tuna last problem` / `:Tuna last contest` go back to what you were working on.
+  `:Tuna next scaffold` goes round the files of the problem you are on, its solutions and helpers.
+- `:Tuna go problem` / `:Tuna go contest` move you back to what you were working on.
   The menu also provides access to your recent contests and problems.
 - `:Tuna pin` puts the problem you are on aside to solve later, and pinning it again lets it go.
   The menu provides access to your pinned problems.

@@ -3,7 +3,7 @@
 -- The `:Tuna` menu — the single entry point opened by a bare `:Tuna` (and by
 -- `:Tuna menu`). Two columns, side by side:
 --
---   * **Contests** over **Problems** — the recent ones `:Tuna last …` returns to, most
+--   * **Contests** over **Problems** — the recent ones `:Tuna go …` returns to, most
 --     recent first — over **Pinned**, the problems put aside to solve later (`:Tuna pin`),
 --     each with how it went. `<CR>` goes there. Pinned has no limit, so it is the list
 --     that scrolls when the column runs out of rows.
@@ -218,7 +218,7 @@ local function problem_names(problems)
 end
 
 ---The recent contests and the recent problems, most recent first, as `recent` has them, so
----the board says exactly what `:Tuna last` would do, and the pinned problems.
+---the board says exactly what `:Tuna go` would do, and the pinned problems.
 ---@return table[] contests, table[] problems, table[] pinned
 local function recent_entries()
     local recent = require("tuna.workspace.recent")

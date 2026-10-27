@@ -37,10 +37,12 @@ M.actions = {
     download_contest = "Tuna download contest",
     clean = "Tuna clean",
     pin = "Tuna pin", -- put a problem aside to solve later, or take it back
-    next_problem = "Tuna next", -- step to the next/previous problem of a contest
-    prev_problem = "Tuna prev",
-    last_problem = "Tuna last problem", -- back to the problem/contest last worked on
-    last_contest = "Tuna last contest",
+    next_problem = "Tuna next problem", -- step to the next/previous problem of a contest
+    prev_problem = "Tuna prev problem",
+    next_scaffold = "Tuna next scaffold", -- step through the problem's source files
+    prev_scaffold = "Tuna prev scaffold",
+    go_problem = "Tuna go problem", -- back to the problem/contest last worked on
+    go_contest = "Tuna go contest",
     scratch = "Tuna scratch", -- scratch solution to write in before the problem exists
     -- A download like the others, except it folds the `:Tuna scratch` file into the
     -- problem it opens — hence its name and its place in the download group.
@@ -97,8 +99,8 @@ M.preset = {
         -- "go to": back to where you were working. Global, and deliberately so —
         -- these are what you press right after starting Neovim, with no solution
         -- open yet.
-        last_problem = "gp",
-        last_contest = "gc",
+        go_problem = "gp",
+        go_contest = "gc",
     },
 }
 
@@ -114,8 +116,8 @@ M.preset_labels = {
     download_problem = "Problem",
     download_contest = "Contest",
     download_sync = "Sync",
-    last_problem = "Problem", -- under "Go to"
-    last_contest = "Contest",
+    go_problem = "Problem", -- under "Go to"
+    go_contest = "Contest",
 }
 
 ---Expand `M.preset` against a prefix, with the user's own tables layered on top so a

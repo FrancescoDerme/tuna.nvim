@@ -97,7 +97,8 @@ hold everywhere are in the root `CLAUDE.md`.
   command list, `:Tuna pin`), and `find` never takes a header for a helper. Only C-family
   headers are known: a module file of another language beside a solution (a Rust `mod`, a
   Python import) still reads as one, since competitive solutions in those languages are
-  single files.
+  single files. `solutions_in` is `sources_in` without the helpers, the problem's own files
+  that `:Tuna next scaffold` goes round.
 - `solution_bufnr` redirects a run started from a support file to the sibling solution. Loading
   a buffer the user never opened must not leave a swapfile: `swapfile` is turned off *before*
   `bufload`, only for buffers tuna loads itself, and restored with a one-shot `BufWinEnter`

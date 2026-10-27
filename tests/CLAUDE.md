@@ -42,7 +42,7 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     dropping deleted directories, reading the state file back, opening any entry, what is
     written, nothing under `ignored_directories` remembered, at any depth, through `~`, as a
     contest or on entering it, while a directory merely sharing its name as a prefix is, and
-    what was remembered there before forgotten by `:Tuna last problem`, `last contest` and the
+    what was remembered there before forgotten by `:Tuna go problem`, `go contest` and the
     menu each) and the pins (most recent first, uncapped, toggling, a deleted solution
     unpinned, `:Tuna pin` refusing a non-solution and pinning a helper's solution);
   - `library.lua`: the files listed for a language (no dotfiles at any depth, `~` in
@@ -87,8 +87,11 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     used;
   - `navigate.lua`: the next and previous problem opened, Neovim's directory moving along only
     from the problem left or a folder inside it (by real path), staying in the contest's folder
-    and with `cd_command = false`, and from a runner UI pane the window under it opening the
-    problem and taking an `lcd`;
+    and with `cd_command = false`, from a runner UI pane the window under it opening the
+    problem and taking an `lcd`, and `next scaffold` going round the problem's sources in name
+    order both ways, passing over a header and stepping from where it sorts, and staying on a
+    lone source, and `next`, `prev` and `go` completing their words, bare `next` stepping
+    between problems;
   - `download.lua`: the listener's boundary, a request handled while its sender is still
     connected, and what is stored (an empty answer kept, no file refused, a typed `~` path,
     the solution's template filled in, tuna's starter with none configured, a scratch folded

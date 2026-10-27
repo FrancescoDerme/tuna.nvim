@@ -48,11 +48,11 @@ Every command is a subcommand of `:Tuna` with tab-completion, and a lowercase `:
   <td>submit or cancel a running submit and dismiss the verdict</td>
 </tr>
 <tr>
-  <td><a href="#next-and-prev"><code>:Tuna next</code> / <code>:Tuna prev</code></a></td>
-  <td>go to the problem either side of this one in a contest</td>
+  <td><a href="#next-and-prev"><code>:Tuna next [problem|scaffold]</code> / <code>:Tuna prev [problem|scaffold]</code></a></td>
+  <td>go to the problem either side of this one in a contest, or to this problem's next source file</td>
 </tr>
 <tr>
-  <td><a href="#last"><code>:Tuna last [problem|contest]</code></a></td>
+  <td><a href="#go"><code>:Tuna go [problem|contest]</code></a></td>
   <td>go back to what you were working on</td>
 </tr>
 <tr>
@@ -231,19 +231,28 @@ Setting it up is described in the [Submitting](#submitting) guide below.
 
 ## next and prev
 
-`:Tuna next` and `:Tuna prev` open the problem either side of this one in its contest, preferring the file name you are leaving (`A/main.cpp` to `B/main.cpp`).
+```
+:Tuna next [problem|scaffold]
+:Tuna prev [problem|scaffold]
+```
+
+`:Tuna next problem` and `:Tuna prev problem` open the problem either side of this one in its contest, preferring the file name you are leaving (`A/main.cpp` to `B/main.cpp`).
 If Neovim's directory is the problem you are leaving, or a folder inside it, it moves to the new problem with you.
 From the contest's folder, or anywhere else, it stays.
 At either end of the contest they say so rather than wrapping around.
 
-## last
+`:Tuna next scaffold` and `:Tuna prev scaffold` go round the source files of the problem you are on instead, its solutions and helpers, in name order, wrapping around.
+
+Bare `:Tuna next` and `:Tuna prev` mean the problem.
+
+## go
 
 ```
-:Tuna last [problem|contest]
+:Tuna go [problem|contest]
 ```
 
 Goes back to the problem, or the contest, you were last working on, across restarts, and moves Neovim's directory there with you.
-Bare `:Tuna last` means the problem.
+Bare `:Tuna go` means the problem.
 
 ## pin
 
@@ -445,7 +454,7 @@ keymaps = {
 
 `mappings` are buffer-local, set for the solution filetypes in `keymaps.filetypes`, and `global` are set once and always there.
 
-Every action can be mapped this way. An action is a name for a `:Tuna` command with its arguments fixed. Actions are defined in `M.actions` in [`lua/tuna/keymaps.lua`](lua/tuna/keymaps.lua): `menu`, `run`, `run_all`, `run_stress`, `run_interactive`, `show_ui`, `add_testcase`, `edit_testcase`, `delete_testcase`, `submit`, `submit_clear`, `download_testcases`, `download_problem`, `download_contest`, `download_sync`, `clean`, `pin`, `next_problem`, `prev_problem`, `last_problem`, `last_contest`, `scratch` and `library`.
+Every action can be mapped this way. An action is a name for a `:Tuna` command with its arguments fixed. Actions are defined in `M.actions` in [`lua/tuna/keymaps.lua`](lua/tuna/keymaps.lua): `menu`, `run`, `run_all`, `run_stress`, `run_interactive`, `show_ui`, `add_testcase`, `edit_testcase`, `delete_testcase`, `submit`, `submit_clear`, `download_testcases`, `download_problem`, `download_contest`, `download_sync`, `clean`, `pin`, `next_problem`, `prev_problem`, `next_scaffold`, `prev_scaffold`, `go_problem`, `go_contest`, `scratch` and `library`.
 
 ## Highlights
 

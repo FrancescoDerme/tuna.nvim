@@ -595,7 +595,7 @@ for _, interface in ipairs({ "split", "popup" }) do
         local drawn = vim.api.nvim_win_get_config(ui.windows.so.winid).title
         t.eq("popup: and drawn as Output again", drawn and drawn[1][1], " Output (o) ")
     end
-    -- A file opened from inside the board (`:Tuna next`, `:Tuna last`, a starter) opens in the
+    -- A file opened from inside the board (`:Tuna next`, `:Tuna go`, a starter) opens in the
     -- window the board was opened over, the board put away: its panes are pinned to their own
     -- buffers, and a file shown in one would be lost with it.
     local opened_over = ui.restore_winid

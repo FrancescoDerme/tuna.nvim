@@ -12,9 +12,12 @@
 -- different language is still reachable, while `checker.cpp` and friends never are.
 --
 -- Neovim's directory comes along when it was the problem being left, or a folder inside it,
--- as `:Tuna last problem` leaves it: working *in* a problem, `:e` and a file finder would
+-- as `:Tuna go problem` leaves it: working *in* a problem, `:e` and a file finder would
 -- otherwise keep pointing at the one left behind. From the contest's folder, or anywhere
 -- else, it stays, so a contest opened to be worked from as a whole stays that way.
+--
+-- `:Tuna next scaffold` / `:Tuna prev scaffold` step within the problem instead, round its
+-- own files: the solutions and the helpers beside them.
 
 local utils = require("tuna.utils")
 local config = require("tuna.config")
@@ -75,7 +78,7 @@ end
 ---Step `offset` problems from the current one.
 ---@param offset integer -1 (previous) or +1 (next)
 ---@param bufnr integer? defaults to the current buffer
-function M.go(offset, bufnr)
+function M.step(offset, bufnr)
     bufnr = bufnr or vim.api.nvim_get_current_buf()
     local path = vim.api.nvim_buf_get_name(bufnr)
     if path == "" then
@@ -119,16 +122,50 @@ function M.go(offset, bufnr)
     utils.notify(("problem %d/%d: %s"):format(target_idx, #names, target), "INFO")
 end
 
----`:Tuna next`
----@param bufnr integer?
-function M.next(bufnr)
-    M.go(1, bufnr)
+---Step `offset` source files within the problem: its solutions and helpers, in name order,
+---wrapping around, since a problem's files are a handful to go round rather than a line with
+---ends. From a file that is none of them (a header, a testcase) the step starts where it would
+---stand in that order.
+---@param offset integer -1 (previous) or +1 (next)
+---@param bufnr integer? defaults to the current buffer
+function M.step_scaffold(offset, bufnr)
+    bufnr = bufnr or vim.api.nvim_get_current_buf()
+    local path = vim.api.nvim_buf_get_name(bufnr)
+    if path == "" then
+        utils.notify("this buffer has no file, so there is no problem to walk.", "WARN")
+        return
+    end
+    path = vim.fs.normalize(vim.fn.fnamemodify(path, ":p"))
+    config.load_buffer_config(bufnr)
+    local files = tools.sources_in(vim.fs.dirname(path), config.get_buffer_config(bufnr))
+    if not vim.tbl_contains(files, path) then
+        files[#files + 1] = path
+        table.sort(files)
+    end
+    local index = 1
+    while files[index] ~= path do
+        index = index + 1
+    end
+    local target = files[(index - 1 + offset) % #files + 1]
+    if target == path then
+        utils.notify("no other source file beside '" .. vim.fn.fnamemodify(path, ":t") .. "'.", "WARN")
+        return
+    end
+    require("tuna.ui.surface").edit(target)
 end
 
----`:Tuna prev`
+---`:Tuna next`, and `:Tuna next scaffold`
 ---@param bufnr integer?
-function M.prev(bufnr)
-    M.go(-1, bufnr)
+---@param scaffold boolean? the next source file of the problem rather than the next problem
+function M.next(bufnr, scaffold)
+    (scaffold and M.step_scaffold or M.step)(1, bufnr)
+end
+
+---`:Tuna prev`, and `:Tuna prev scaffold`
+---@param bufnr integer?
+---@param scaffold boolean?
+function M.prev(bufnr, scaffold)
+    (scaffold and M.step_scaffold or M.step)(-1, bufnr)
 end
 
 M._test = { working_in = working_in }

@@ -596,7 +596,7 @@ local function store_single_problem(task, cfg, finished)
 
             local function proceed()
                 local template = store_downloaded_task(filepath, task, local_cfg)
-                -- Recorded even when the problem isn't opened, so `:Tuna last problem`
+                -- Recorded even when the problem isn't opened, so `:Tuna go problem`
                 -- takes you to what was just downloaded either way.
                 require("tuna.workspace.recent").record_problem(filepath, local_cfg)
                 if local_cfg.open_downloaded_problems then
@@ -721,7 +721,7 @@ local function store_contest(tasks, cfg, finished)
                             require("tuna.workspace.recent").change_dir(directory, local_cfg)
                         end
                         -- This is the one moment the contest directory is known for
-                        -- certain, so record it for `:Tuna last contest` — whether or
+                        -- certain, so record it for `:Tuna go contest` — whether or
                         -- not a problem was opened.
                         local judge, contest_name = judges.parse(tasks[1], local_cfg.judge_parsers)
                         require("tuna.workspace.recent").record_contest(directory, contest_name, first_problem, judge)

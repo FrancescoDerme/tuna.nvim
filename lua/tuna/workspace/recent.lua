@@ -1,6 +1,6 @@
 -- lua/tuna/workspace/recent.lua
 --
--- `:Tuna last problem` / `:Tuna last contest` — go back to what you were working on.
+-- `:Tuna go problem` / `:Tuna go contest` — go back to what you were working on.
 --
 -- Between contests (and between editor sessions) the thing one actually wants is
 -- "put me back where I was": the solution file, with Neovim's directory pointing at
@@ -195,7 +195,7 @@ local function forget_ignored()
 end
 
 ---The recent problems and contests, most recent first (the first of each being what
----`:Tuna last problem` and `last contest` return to), and the pinned problems, most recently
+---`:Tuna go problem` and `go contest` return to), and the pinned problems, most recently
 ---pinned first, hydrated from disk if this session has not read them yet. Exported so the menu
 ---can *show* what those commands would do without doing it — the state itself is `M.state`,
 ---but reading that directly would see an empty table until something else happened to load it.
@@ -243,7 +243,7 @@ local SIBLING_LIMIT = 40
 ---Infer the contest a problem belongs to: its parent directory, but only when a
 ---sibling problem carries the same sidecar `group`. Without that agreement the
 ---parent is just "some directory holding problems" (a judge folder, say), which is
----not somewhere `:Tuna last contest` should take anyone.
+---not somewhere `:Tuna go contest` should take anyone.
 ---@param dir string problem directory
 ---@param cfg table
 ---@return tuna.RecentContest?
@@ -536,7 +536,7 @@ local function open_remembered(p, what)
     utils.notify("problem: " .. pretty(file), "INFO")
 end
 
----`:Tuna last problem` — reopen the solution last worked on and cd to its directory.
+---`:Tuna go problem` — reopen the solution last worked on and cd to its directory.
 ---@param index integer? which recent problem, 1 (the default) being the most recent
 function M.open_problem(index)
     load()
@@ -545,10 +545,10 @@ function M.open_problem(index)
     end
     local p = (M.state.problems or {})[index or 1]
     if not p then
-        utils.notify("last: no problem visited yet, download one or open a solution with its testcases.", "WARN")
+        utils.notify("go: no problem visited yet, download one or open a solution with its testcases.", "WARN")
         return
     end
-    open_remembered(p, "last")
+    open_remembered(p, "go")
 end
 
 ---Reopen a pinned problem and cd to its directory.
@@ -610,7 +610,7 @@ function M.contest_problems(dir, like, cfg)
     return files
 end
 
----`:Tuna last contest` — cd to the contest last worked on and open a problem in it.
+---`:Tuna go contest` — cd to the contest last worked on and open a problem in it.
 ---@param index integer? which recent contest, 1 (the default) being the most recent
 function M.open_contest(index)
     load()
@@ -619,11 +619,11 @@ function M.open_contest(index)
     end
     local c = (M.state.contests or {})[index or 1]
     if not c then
-        utils.notify("last: no contest visited yet, get one with `:Tuna download contest`.", "WARN")
+        utils.notify("go: no contest visited yet, get one with `:Tuna download contest`.", "WARN")
         return
     end
     if not utils.directory_exists(c.dir) then
-        utils.notify("last: '" .. pretty(c.dir) .. "' no longer exists.", "WARN")
+        utils.notify("go: '" .. pretty(c.dir) .. "' no longer exists.", "WARN")
         return
     end
 

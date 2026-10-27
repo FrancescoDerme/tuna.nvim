@@ -50,7 +50,7 @@ vim.api.nvim_create_autocmd("VimResized", {
     desc = "Resize Tuna's UI when the window geometry changes",
 })
 
--- Track the problem/contest to come back to with `:Tuna last …`. A buffer that is not a
+-- Track the problem/contest to come back to with `:Tuna go …`. A buffer that is not a
 -- file on disk is never a problem, and deciding whether one is takes `recent`.
 vim.api.nvim_create_autocmd("BufEnter", {
     group = augroup,
@@ -59,7 +59,7 @@ vim.api.nvim_create_autocmd("BufEnter", {
             require("tuna.workspace.recent").track(ev.buf)
         end
     end,
-    desc = "Remember the problem Tuna should return to with `:Tuna last problem`",
+    desc = "Remember the problem Tuna should return to with `:Tuna go problem`",
 })
 
 vim.api.nvim_create_autocmd("VimLeavePre", {

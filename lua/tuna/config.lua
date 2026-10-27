@@ -255,7 +255,7 @@ M.defaults = {
     judge_parsers = {},
     -- Where the cursor lands whenever tuna opens a solution itself: a downloaded problem or
     -- contest, a problem stepped onto with `:Tuna next`/`prev`, one reopened with
-    -- `:Tuna last` or from the menu's recent and pinned lists, a new solution of
+    -- `:Tuna go` or from the menu's recent and pinned lists, a new solution of
     -- `:Tuna scaffold solution`, and the scratch file of `:Tuna scratch`. Templates
     -- open on their header, which is never where one starts typing.
     --   false                          leave the cursor at the top
@@ -267,8 +267,8 @@ M.defaults = {
     -- `def solve():`), as in tuna's own starters. A pattern that matches nothing leaves
     -- the cursor alone, so one written for a given language does no harm in another.
     template_cursor = { pattern = "^%a[%w_ ]* solve%(", offset = 1 },
-    -- How tuna changes Neovim's directory when it takes you somewhere — `:Tuna last
-    -- problem` / `:Tuna last contest`, `:Tuna next` / `:Tuna prev` when it was the
+    -- How tuna changes Neovim's directory when it takes you somewhere — `:Tuna go
+    -- problem` / `:Tuna go contest`, `:Tuna next` / `:Tuna prev` when it was the
     -- problem being left, and a freshly downloaded contest (see
     -- `cd_downloaded_contests`): "cd" (global), "tcd" (this tab), "lcd" (this window),
     -- or false to go to the file without touching the directory. Global by default, so
@@ -294,7 +294,7 @@ M.defaults = {
         header = nil,
     },
 
-    -- `:Tuna last` and the menu: how many problems and contests are remembered, most
+    -- `:Tuna go` and the menu: how many problems and contests are remembered, most
     -- recent first. The menu lists them all, and a list too long to fit scrolls.
     recent = {
         problems = 5,

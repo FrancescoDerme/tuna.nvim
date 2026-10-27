@@ -139,15 +139,13 @@ function M.is_support(path, cfg)
     return M.is_helper(path, cfg) or M.is_header(path)
 end
 
----Every solution in `dir`, in name order: each file there, dotfiles aside, whose language
----has a `run_command` and that is not a support file. What every place that picks
----solutions goes by (run-all, `:Tuna next`, a contest's problems, a run from a helper file,
----sharing a folder's testcases).
+---Every source in `dir`, in name order: each file there, dotfiles aside, whose language has a
+---`run_command` and that is not a header, the solutions and the helpers.
 ---@param dir string
 ---@param cfg table
 ---@param filetype (fun(path: string): string)? a file's language, by its name unless given
 ---@return string[] # normalized absolute paths
-function M.solutions_in(dir, cfg, filetype)
+function M.sources_in(dir, cfg, filetype)
     filetype = filetype or filetype_of
     local out = {}
     if vim.fn.isdirectory(dir) == 0 then
@@ -156,7 +154,7 @@ function M.solutions_in(dir, cfg, filetype)
     dir = vim.fs.normalize(dir)
     for name, typ in vim.fs.dir(dir) do
         local path = dir .. "/" .. name
-        if typ ~= "directory" and name:sub(1, 1) ~= "." and not M.is_support(path, cfg) then
+        if typ ~= "directory" and name:sub(1, 1) ~= "." and not M.is_header(path) then
             local ft = filetype(path)
             if ft ~= "" and (cfg.run_command or {})[ft] then
                 out[#out + 1] = path
@@ -165,6 +163,19 @@ function M.solutions_in(dir, cfg, filetype)
     end
     table.sort(out)
     return out
+end
+
+---Every solution in `dir`, in name order: its sources that are not helpers. What every place
+---that picks solutions goes by (run-all, `:Tuna next`, a contest's problems, a run from a
+---helper file, sharing a folder's testcases).
+---@param dir string
+---@param cfg table
+---@param filetype (fun(path: string): string)? a file's language, by its name unless given
+---@return string[] # normalized absolute paths
+function M.solutions_in(dir, cfg, filetype)
+    return vim.tbl_filter(function(path)
+        return not M.is_helper(path, cfg)
+    end, M.sources_in(dir, cfg, filetype))
 end
 
 ---Resolve the buffer a run should target. Normally that's `bufnr` itself, but if

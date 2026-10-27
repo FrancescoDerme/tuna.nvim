@@ -83,7 +83,7 @@ QUICK START                                                  *tuna-quickstart*
 4. `:Tuna submit` hands the solution to whichever submit tool you have
    configured, reads that tool's output as it runs, and puts the judge's
    verdict in your statusline.
-5. `:Tuna pin` and `:Tuna last` help you move between problems as you upsolve,
+5. `:Tuna pin` and `:Tuna go` help you move between problems as you upsolve,
    and `:Tuna clean` keeps your directories tidy.
 
 ==============================================================================
@@ -289,7 +289,9 @@ reading the verdict, is in |tuna-submit-setup|.
 GETTING AROUND                                               *tuna-navigation*
 
 - `:Tuna next` / `:Tuna prev` step between the problems of a contest.
-- `:Tuna last problem` / `:Tuna last contest` go back to what you were working
+  `:Tuna next scaffold` goes round the files of the problem you are on, its
+  solutions and helpers.
+- `:Tuna go problem` / `:Tuna go contest` go back to what you were working
   on. The menu also provides access to your recent contests and problems.
 - `:Tuna pin` puts the problem you are on aside to solve later, and pinning it
   again lets it go. The menu provides access to your pinned problems.
@@ -539,19 +541,26 @@ Every command is a subcommand of `:Tuna` with tab-completion, and a lowercase
         dismisses the verdict, and cancels a submission still being watched.
         Setting it up is described in |tuna-submit-setup|.
 
-:Tuna next
-:Tuna prev
-        Open the problem either side of this one in its contest, preferring
-        the file name you are leaving (`A/main.cpp` to `B/main.cpp`). If
-        Neovim's directory is the problem you are leaving, or a folder inside
-        it, it moves to the new problem with you. From the contest's folder,
-        or anywhere else, it stays. At either end of the contest they say so
-        rather than wrapping around.
+:Tuna next [problem/scaffold]
+:Tuna prev [problem/scaffold]
+        `:Tuna next problem` and `:Tuna prev problem` open the problem either
+        side of this one in its contest, preferring the file name you are
+        leaving (`A/main.cpp` to `B/main.cpp`). If Neovim's directory is the
+        problem you are leaving, or a folder inside it, it moves to the new
+        problem with you. From the contest's folder, or anywhere else, it
+        stays. At either end of the contest they say so rather than wrapping
+        around.
 
-:Tuna last [problem/contest]
+        `:Tuna next scaffold` and `:Tuna prev scaffold` go round the source
+        files of the problem you are on instead, its solutions and helpers,
+        in name order, wrapping around.
+
+        Bare `:Tuna next` and `:Tuna prev` mean the problem.
+
+:Tuna go [problem/contest]
         Go back to the problem, or the contest, you were last working on,
         across restarts, and move Neovim's directory there with you. Bare
-        `:Tuna last` means the problem.
+        `:Tuna go` means the problem.
 
                                                                  *tuna-pinned*
 :Tuna pin
@@ -747,8 +756,8 @@ with its arguments fixed. Actions are defined in `M.actions` in
 `run_interactive`, `show_ui`, `add_testcase`, `edit_testcase`,
 `delete_testcase`, `submit`, `submit_clear`, `download_testcases`,
 `download_problem`, `download_contest`, `download_sync`, `clean`, `pin`,
-`next_problem`, `prev_problem`, `last_problem`, `last_contest`, `scratch`
-and `library`.
+`next_problem`, `prev_problem`, `next_scaffold`, `prev_scaffold`,
+`go_problem`, `go_contest`, `scratch` and `library`.
 
 ------------------------------------------------------------------------------
 HIGHLIGHTS                                                   *tuna-highlights*

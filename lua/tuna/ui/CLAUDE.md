@@ -30,7 +30,7 @@ specific Vim error about a buffer the user never opened.
   Neovim 0.12 a float with a `statusline` of its own draws it inside its border, showing the
   pane's `tuna://` name.
 - `group(wins, on_close)`: windows that close together, keyed on `WinClosed`.
-- `edit(path)`: how tuna opens a file (`:Tuna next`, `:Tuna last`, starters, the scratch,
+- `edit(path)`: how tuna opens a file (`:Tuna next`, `:Tuna go`, starters, the scratch,
   downloads). From a runner UI pane or zoom, whose windows are pinned to their buffers (a file
   would land in a float, or the split interface's `winfixbuf` refuse it), the board is put away
   first (`runner_ui.step_out`, which keeps unwritten edits on its runner as a run's hiding

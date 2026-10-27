@@ -24,7 +24,9 @@ local subcommand_args = {
     scaffold = tools.SCAFFOLDS,
     checker = { "auto", "off" },
     submit = { "clear" },
-    last = { "problem", "contest" },
+    go = { "problem", "contest" },
+    next = { "problem", "scaffold" },
+    prev = { "problem", "scaffold" },
 }
 
 -- Third-level completions: `:Tuna run interactive <Tab>` offers its input sources.
@@ -842,20 +844,22 @@ M.subcommands = {
     clean = function()
         require("tuna.workspace.clean").clean(M.target_buffer())
     end,
-    -- Contest navigation: step to the sibling problem directory either side of this
-    -- one. Deliberately not routed through `solution_bufnr`, since navigating away
-    -- from a helper file (say `gen.cpp`) is a perfectly reasonable thing to do.
-    next = function()
-        require("tuna.workspace.navigate").next(M.target_buffer())
+    -- Navigation: to the sibling problem directory either side of this one (`problem`), or
+    -- with `scaffold` to the problem's next source file. Bare, they step between problems,
+    -- the move made most often, as bare `go` is the problem. Deliberately not routed
+    -- through `solution_bufnr`, since navigating away from a helper file (say `gen.cpp`)
+    -- is a perfectly reasonable thing to do.
+    next = function(args)
+        require("tuna.workspace.navigate").next(M.target_buffer(), args[1] == "scaffold")
     end,
-    prev = function()
-        require("tuna.workspace.navigate").prev(M.target_buffer())
+    prev = function(args)
+        require("tuna.workspace.navigate").prev(M.target_buffer(), args[1] == "scaffold")
     end,
     -- Back to what you were working on, across restarts: the solution itself, or the
     -- contest it belongs to. Both also move Neovim's directory there (`cd_command`),
-    -- since coming back to a problem means working *in* it. Bare `:Tuna last` is the
+    -- since coming back to a problem means working *in* it. Bare `:Tuna go` is the
     -- problem — the one reached for most often.
-    last = function(args)
+    go = function(args)
         local recent = require("tuna.workspace.recent")
         if args[1] == "contest" then
             recent.open_contest()

@@ -1,6 +1,6 @@
 -- tests/recent.lua
 --
--- What `:Tuna last` and the menu remember: the last problems and contests, most recent
+-- What `:Tuna go` and the menu remember: the last problems and contests, most recent
 -- first and as many of each as `recent.problems`/`recent.contests` ask, a revisited one
 -- moving back to the top, one whose directory is gone forgotten, and the histories read back
 -- from the state file; and the pinned problems, most recently pinned first with no limit,
@@ -202,7 +202,7 @@ do
     t.eq("before it is ignored, a library file is remembered like any other", recent.state.problems[1].file, norm(lib .. "/fenwick.cpp"))
     ignoring(true)
     recent.open_problem(1)
-    t.ok("once ignored, :Tuna last problem does not go back to it", not vim.startswith(vim.api.nvim_buf_get_name(0), lib))
+    t.ok("once ignored, :Tuna go problem does not go back to it", not vim.startswith(vim.api.nvim_buf_get_name(0), lib))
     ignoring(false)
     recent.record_problem(lib .. "/fenwick.cpp")
     ignoring(true)
@@ -214,7 +214,7 @@ do
     vim.notify = function() end
     recent.open_contest(1)
     vim.notify = notify
-    t.ok("and :Tuna last contest forgets a contest there", not vim.tbl_contains(vim.tbl_map(function(c)
+    t.ok("and :Tuna go contest forgets a contest there", not vim.tbl_contains(vim.tbl_map(function(c)
         return c.dir
     end, recent.state.contests or {}), norm(lib)))
     recent.record_contest(outside, "Outside", nil, "judge") -- the history is not left empty

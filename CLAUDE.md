@@ -159,7 +159,7 @@ lua/tuna/
     clean.lua           remove unused templated files and emptied directories
     library.lua         snippet library
     navigate.lua        :Tuna next / prev
-    recent.lua          :Tuna last problem / contest, pinned problems, cwd changes
+    recent.lua          :Tuna go problem / contest, pinned problems, cwd changes
 scaffolds/            the shipped starters, `<role>.<ext>`
 doc/tuna.txt          vimdoc
 REFERENCE.md          the reference (commands, configuration) the README links into
