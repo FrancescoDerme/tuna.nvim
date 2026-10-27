@@ -63,7 +63,9 @@ problems and remembering them. The rules that hold everywhere are in the root `C
     window it was over. Only a helper that is *absent* is offered: `tools.helper` returns a
     note for a configured one that is broken, and a starter beside the solution would not be
     the one used, so that is still reported. A saved forced mode giving way to the automatic
-    one is not a run asking for the mode, and offers nothing.
+    one is not a run asking for the mode, and offers nothing. `instead` adds a way on without
+    them between Create and Stop (stress's search for crashes, when only the bruteforce is
+    missing).
 - **`clean.lua`**
   - "Unused" means a file still similar to the template that would produce it: a line-LCS
     ratio (`similarity`, with modifier lines matched as wildcards) at or above a threshold.

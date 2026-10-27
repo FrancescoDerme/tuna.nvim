@@ -486,8 +486,9 @@ end
 ---@param roles string[] the roles missing, in the order they are written
 ---@param bufnr integer the solution's buffer
 ---@param title string what the run needs, the menu's title
----@param opts { win: integer?, before: fun()? }? `before` runs once Create is chosen,
----before anything is written (a runner UI closing, so files open in the editor)
+---@param opts { win: integer?, before: fun()?, instead: { label: string, choose: fun() }? }?
+---`before` runs once Create is chosen, before anything is written (a runner UI closing, so files
+---open in the editor); `instead` is a way on without them, offered between Create and Stop
 function M.create_missing(roles, bufnr, title, opts)
     opts = opts or {}
     local cfg = config.get_buffer_config(bufnr)
@@ -495,8 +496,15 @@ function M.create_missing(roles, bufnr, title, opts)
     local names = vim.tbl_map(function(role)
         return file_name(role, ext, cfg)
     end, roles)
-    local label = "Create " .. table.concat(names, " and ")
-    widgets.menu({ label, "Stop" }, title, function(idx)
+    local items = { "Create " .. table.concat(names, " and ") }
+    if opts.instead then
+        items[#items + 1] = opts.instead.label
+    end
+    items[#items + 1] = "Stop"
+    widgets.menu(items, title, function(idx)
+        if opts.instead and idx == 2 then
+            return opts.instead.choose()
+        end
         if idx ~= 1 then
             return
         end

@@ -16,7 +16,7 @@ Every command is a subcommand of `:Tuna` with tab-completion, and a lowercase `:
   <td>open the runner UI</td>
 </tr>
 <tr>
-  <td><a href="#testcase"><code>:Tuna testcase [add|edit|delete] [n]</code></a></td>
+  <td><a href="#testcase"><code>:Tuna testcase [add|edit|delete|generate] [n]</code></a></td>
   <td>manage testcases</td>
 </tr>
 <tr>
@@ -103,6 +103,7 @@ A keyword forces that mode for the problem, and it is remembered across restarts
 - `stress` hunts for an input where your solution and the bruteforce disagree, and saves it as a testcase.
   A number after it is how many inputs to try: `:Tuna run stress 500`.
   Each run tries new inputs, and the runner UI shows the seed of the input being tried.
+  Asked for with no bruteforce, it offers to search without one: it keeps an input your solution crashes on, runs out of time on or exits with an error on, with no answer, and turns back into a stress run once a bruteforce is there.
 - `interactive` lets your solution talk to something over stdin and stdout.
   A word after it picks the other side: `live` (you type), `feed` (the testcase input, a line at a time) or `interactor` (an interactor program).
 
@@ -116,13 +117,16 @@ Opens the runner UI in the mode the problem is set to.
 ## testcase
 
 ```
-:Tuna testcase [add|edit|delete] [n]
+:Tuna testcase [add|edit|delete|generate] [n]
 ```
 
 - `add` opens the testcase editor on a new testcase.
 - `edit` opens it on testcase `n`.
   Bare `:Tuna testcase` and `:Tuna testcase n` do the same.
 - `delete` removes testcase `n`, after asking.
+- `generate` writes a testcase from your generator, the one stress uses, handed a seed of its own that the message names.
+  It has an input and no answer, so it reads `DONE` unless your solution crashes, runs out of time or a checker judges it.
+  On the runner UI, `t` does the same.
 
 Without a number, `edit` and `delete` act on the only testcase when there is one, and ask which when there are several.
 The editor shows the input and the expected output side by side: `:w` saves, `:wq` saves and closes, and `q` closes, asking first about an edit not saved.
@@ -454,7 +458,7 @@ keymaps = {
 
 `mappings` are buffer-local, set for the solution filetypes in `keymaps.filetypes`, and `global` are set once and always there.
 
-Every action can be mapped this way. An action is a name for a `:Tuna` command with its arguments fixed. Actions are defined in `M.actions` in [`lua/tuna/keymaps.lua`](lua/tuna/keymaps.lua): `menu`, `run`, `run_all`, `run_stress`, `run_interactive`, `show_ui`, `add_testcase`, `edit_testcase`, `delete_testcase`, `submit`, `submit_clear`, `download_testcases`, `download_problem`, `download_contest`, `download_sync`, `clean`, `pin`, `next_problem`, `prev_problem`, `next_scaffold`, `prev_scaffold`, `go_problem`, `go_contest`, `scratch` and `library`.
+Every action can be mapped this way. An action is a name for a `:Tuna` command with its arguments fixed. Actions are defined in `M.actions` in [`lua/tuna/keymaps.lua`](lua/tuna/keymaps.lua): `menu`, `run`, `run_all`, `run_stress`, `run_interactive`, `show_ui`, `add_testcase`, `edit_testcase`, `delete_testcase`, `generate_testcase`, `submit`, `submit_clear`, `download_testcases`, `download_problem`, `download_contest`, `download_sync`, `clean`, `pin`, `next_problem`, `prev_problem`, `next_scaffold`, `prev_scaffold`, `go_problem`, `go_contest`, `scratch` and `library`.
 
 ## Highlights
 

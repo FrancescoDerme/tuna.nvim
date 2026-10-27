@@ -30,6 +30,7 @@ M.actions = {
     add_testcase = "Tuna testcase add",
     edit_testcase = "Tuna testcase edit",
     delete_testcase = "Tuna testcase delete",
+    generate_testcase = "Tuna testcase generate",
     submit = "Tuna submit",
     submit_clear = "Tuna submit clear", -- dismiss a lingering lualine verdict / cancel a submit
     download_testcases = "Tuna download testcases",
@@ -68,7 +69,8 @@ M.actions = {
 --
 -- Testcases have no keys: they are added, edited and deleted on the runner UI, where
 -- they are seen (`n`, typing in a pane, `x`), and downloads bring most of them. The
--- `add_testcase`, `edit_testcase` and `delete_testcase` actions are still there to map.
+-- `add_testcase`, `edit_testcase`, `delete_testcase` and `generate_testcase` actions are still
+-- there to map.
 --
 -- No group prefix is itself a mapping, so none of them costs a `timeoutlen` wait.
 -- `:Tuna clean` is deliberately absent: it is run once in a while, not during a

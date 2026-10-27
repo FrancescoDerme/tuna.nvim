@@ -62,6 +62,18 @@ The rules that hold everywhere are in the root `CLAUDE.md`.
   and the solution's limit is not a statement about it.
 - A counterexample whose bruteforce output is empty is saved with `expect_empty_output`, an
   answer that is empty rather than absent, or the row would come back unjudged.
+- **A search with no bruteforce** (`hunt`) looks for an input the solution crashes on, runs
+  out of time on or exits with an error on (`core.ending`), and saves it with no answer. Only
+  how the run ended counts: a checker would be handed an empty answer and reject every output,
+  so it is neither built nor asked (`search_helpers`), while the testcases re-running beside
+  the search are judged as ever. It is offered, never assumed: `detect_mode` still wants both
+  helpers, and a stress run asked for (typed, from the menu, or a rerun on the board) with only
+  the bruteforce missing offers it beside the bruteforce's starter (`offer_helpers`, through
+  `create_missing`'s `instead`), so a half-written generator does not turn every `:Tuna run`
+  into a search. `stress_helpers` hands back the generator even then. Every run looks the
+  bruteforce up again, and one found makes the board a stress run again (`hunt` follows it).
+  The Run pane's `brute` row, on every stress board so the rows stay put, says `none`, and the
+  legend says what is kept instead.
 - `idle()` means the search has stopped, so every path that ends a run has to `finish()`,
   a failed build and a helper that didn't compile included.
 

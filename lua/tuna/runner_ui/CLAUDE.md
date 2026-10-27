@@ -93,10 +93,12 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
   and without the time rather than cutting a number in half (the conversation layout's selector
   takes a 4 share).
 - `status_lines()`: mode, judge (the checker file, else the compare method), the mode's settings
-  (`status_settings`, interactive's source), forced, diff on/off, runner tail, `help: ?`, rows
-  fixed per runner. `forced` names the settings that are the user's choice (`mode`, `judge`,
-  `source`), else `none`, rather than marking each value (the pane is too narrow): `judge` is
-  forced when the checker is off or the comparison overridden, never for a checker found.
+  (`status_settings`, interactive's source), diff on/off, runner tail, `help: ?`, rows fixed
+  per runner. A setting that is the user's choice (`mode`, `judge`, `source`) has a `*` after
+  its name, explained in the `?` legend: one column, where a word after the value is what the
+  narrow pane cuts off first, and a row naming the forced settings repeated the rows above it
+  and said `none` most of the time. `judge` is forced when the checker is off or the comparison
+  overridden, never for a checker found.
 
 **Inline editing**
 - Editable panes are always-modifiable `acwrite` buffers. `:w` from **any** pane saves the row
@@ -112,8 +114,9 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
   blocks quitting with E37/E162.
 - `capture_pending` runs before anything repoints the panes. `discard_pending` clears `pending`
   and the flags together.
-- Keys with no text to author: `n` adds a row, `x` deletes, `u` restores, `c` splits;
-  structural keys wait for `idle()`. A split reads the unwritten pane text without saving it
+- Keys with no text to author: `n` adds a row, `t` generates one, `x` deletes, `u` restores,
+  `c` splits; structural keys wait for `idle()`. Generating takes `t`, not `g`: `gg` and `G`
+  walk the list, and every key takes both cases. A split reads the unwritten pane text without saving it
   (that would run the marked-up input); the cases run once the case-count question settles.
 - **The board lists what is on disk, as a load would.** A row added, restored, split off or
   renumbered goes into number order (`RunnerCore:sort_testcase_rows`).

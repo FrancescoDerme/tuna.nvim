@@ -138,6 +138,7 @@ lua/tuna/
     checker.lua         builtin vs external testlib-style checker
     compare.lua         exact/squish/float and the user's named verdict comparisons
     diff.lua            positional diff marks for the runner UI
+    generate.lua        one testcase from the generator, with no stress around it
     modes/              the modes beyond the normal one
       stress.lua          stress testing
       interactive.lua     interactive problems (live / feed / interactor)

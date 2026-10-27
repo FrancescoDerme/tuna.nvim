@@ -416,12 +416,14 @@ t.eq("an interactor rerun with the interactor gone offers to write it", asked, {
 })
 t.eq("and runs no session", ir.sol_handle, nil)
 t.eq("stopping writes nothing", vim.fn.glob(idir .. "/interactor.*"), "")
-local sasked, sr = rerun_after_deleting("stress", "brute.py")
-t.eq("a stress restart with its bruteforce gone offers that one", sasked, {
+local sasked, sr = rerun_after_deleting("stress", "brute.py", 3)
+t.eq("a stress restart with its bruteforce gone offers that one, or a search for crashes without it", sasked, {
     title = "Stress needs a bruteforce",
-    items = { "Create brute.py", "Stop" },
+    items = { "Create brute.py", "Search for crashes without one", "Stop" },
 })
-t.eq("and searches nothing", sr.iter, 0)
+t.eq("stopping searches nothing", sr.iter, 0)
+local _, hunted = rerun_after_deleting("stress", "brute.py", 2)
+t.eq("searching without one goes on with the generator alone", { hunted.iter > 0, hunted.ref, hunted.hunt }, { true, nil, true })
 -- Created from the board, the starter opens in the editor the board was over, not in a pane.
 local _, _, _, after = rerun_after_deleting("stress", "gen.py", 1)
 t.eq("a starter created from the board puts the board away", after.board, false)
@@ -439,8 +441,8 @@ t.eq("and the forcing is still remembered for this session", tools.get_mode("tun
 -- What the "Run" pane says about the settings
 --------------------------------------------------------------------------------
 
--- Each fact on its own row: the mode alone, and whatever you forced named on a row of its
--- own, since a word appended to every value is what a narrow pane cuts off first.
+-- Each fact on its own row, and a setting you forced marked on its own with a `*`: one column,
+-- where a word appended to the value is what a narrow pane cuts off first.
 local pdir, psol = problem({ "checker.py" })
 local pbuf = open(psol)
 local pr = require("tuna.run").new(pbuf)
@@ -452,23 +454,22 @@ pr:show_ui()
 local function status()
     return pr.ui:status_lines()
 end
-t.eq("nothing forced: the mode stands alone, and the row says so", status(), {
-    "mode  : normal",
-    "judge : checker.py",
-    "forced: none",
-    "diff  : off",
-    "help  : ?",
+t.eq("nothing forced: nothing marked", status(), {
+    "mode : normal",
+    "judge: checker.py",
+    "diff : off",
+    "help : ?",
 })
 
 tools.set_mode(psol, "normal")
 pr:run_testcases(ptcs)
 settle()
-t.eq("a forced mode is named there, the mode row unchanged", { status()[1], status()[3] }, { "mode  : normal", "forced: mode" })
+t.eq("a forced mode is marked on its own row", status()[1], "mode*: normal")
 
 tools.set_checker(psol, "off")
 pr:run_testcases(ptcs)
 settle()
-t.eq("a checker forced off forces the judge, which then reads as the comparison", { status()[2], status()[3] }, { "judge : squish", "forced: mode, judge" })
+t.eq("a checker forced off forces the judge, which then reads as the comparison", { status()[1], status()[2] }, { "mode* : normal", "judge*: squish" })
 
 tools.set_mode(psol, nil)
 tools.set_checker(psol, "auto")
@@ -479,20 +480,20 @@ tools.set_compare(psol, "exact")
 os.remove(pdir .. "/checker.py")
 pr:run_testcases(ptcs)
 settle()
-t.eq("an overridden comparison forces the judge on its own", { status()[2], status()[3] }, { "judge : exact", "forced: judge" })
+t.eq("an overridden comparison forces the judge on its own", { status()[1], status()[2] }, { "mode  : normal", "judge*: exact" })
 
 tools.set_compare(psol, nil)
 t.write(pdir, "checker.py", "print()\n")
 pr:run_testcases(ptcs)
 settle()
-t.eq("handing it back, with a checker of its own, is no forcing", { status()[2], status()[3] }, { "judge : checker.py", "forced: none" })
+t.eq("handing it back, with a checker of its own, is no forcing", status()[2], "judge: checker.py")
 
 -- An override the checker makes no use of is not what the judge row shows, so it forces
 -- nothing: a checker is only ever found.
 tools.set_compare(psol, "exact")
 pr:run_testcases(ptcs)
 settle()
-t.eq("an override a checker overrules forces nothing", { status()[2], status()[3] }, { "judge : checker.py", "forced: none" })
+t.eq("an override a checker overrules forces nothing", status()[2], "judge: checker.py")
 tools.set_compare(psol, nil)
 
 -- `:Tuna compare` reaches the board that is open before any run, and leaves the buffer its
@@ -505,11 +506,11 @@ commands.runners[pbuf] = pr
 local quiet = vim.notify
 vim.notify = function() end
 commands.set_compare(pbuf, { "exact" })
-t.eq("`:Tuna compare` shows on the open board at once", { status()[2], status()[3] }, { "judge : exact", "forced: judge" })
+t.eq("`:Tuna compare` shows on the open board at once", status()[2], "judge*: exact")
 t.eq("and the buffer keeps the board's runner", commands.runners[pbuf], pr)
 commands.set_compare(pbuf, { "squish" })
 vim.notify = quiet
-t.eq("and so does handing it back", { status()[2], status()[3] }, { "judge : squish", "forced: none" })
+t.eq("and so does handing it back", status()[2], "judge: squish")
 commands.runners[pbuf] = nil
 pr.ui:delete()
 
@@ -547,10 +548,9 @@ tools.set_source(vsol, "live")
 require("tuna.run.modes.interactive").run(vbuf, {}, { show_only = true })
 local vr = require("tuna.run.modes.interactive").active[vbuf]
 settle()
-t.eq("the source sits under the judge, and is named on the forced row below it", vim.list_slice(vr.ui:status_lines(), 2, 4), {
-    "judge : squish",
-    "source: live",
-    "forced: source",
+t.eq("the source sits under the judge, marked when forced as the others are", vim.list_slice(vr.ui:status_lines(), 2, 3), {
+    "judge  : squish",
+    "source*: live",
 })
 vr:delete_ui()
 

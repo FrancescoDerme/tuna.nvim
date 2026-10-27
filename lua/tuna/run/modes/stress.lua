@@ -64,10 +64,11 @@ M.active = {}
 
 local StressRunner = core.extend()
 
----The generator and bruteforce of a solution, or nil and what to tell the user about the
----ones that are missing: in words, and as the roles a starter can stand in for, which is
----every missing one only when none of them is a configured helper that is broken (a starter
----written beside the solution would not be the one used).
+---The generator and bruteforce of a solution, and what to tell the user about the ones that are
+---missing: in words, and as the roles a starter can stand in for, which is every missing one
+---only when none of them is a configured helper that is broken (a starter written beside the
+---solution would not be the one used). A generator found is handed back with a bruteforce
+---missing, which a search for crashes alone can go without.
 ---@param solution string
 ---@param cfg table
 ---@return table? gen, table? ref, string? missing, string[]? absent
@@ -90,15 +91,24 @@ local function stress_helpers(solution, cfg)
         absent[#absent + 1] = "bruteforce"
     end
     local broken = (not gen and gen_note) or (not ref and ref_note)
-    return nil, nil, "stress needs a generator and a bruteforce, " .. table.concat(missing, " and "), not broken and absent or nil
+    return gen, nil, "stress needs a generator and a bruteforce, " .. table.concat(missing, " and "), not broken and absent or nil
 end
 
----What stress asks for when its helpers are simply not there: to write their starters.
+---What stress asks for when its helpers are simply not there: to write their starters, or, when
+---only the bruteforce is missing, to search without one (`hunt`), with nothing to compare
+---against, for an input the solution crashes or runs out of time on. Asked of a run you asked
+---for, never assumed: a half-written generator should not turn every run into a search.
 ---@param absent string[]
 ---@param bufnr integer
 ---@param opts { win: integer?, before: fun()? }?
-local function offer_helpers(absent, bufnr, opts)
+---@param hunt fun()? the search without a bruteforce, offered when that is all that is missing
+local function offer_helpers(absent, bufnr, opts, hunt)
     local title = "Stress needs a " .. table.concat(absent, " and a ")
+    opts = vim.tbl_extend("force", opts or {}, {
+        instead = hunt and #absent == 1 and absent[1] == "bruteforce"
+            and { label = "Search for crashes without one", choose = hunt }
+            or nil,
+    })
     require("tuna.workspace.scaffold").create_missing(absent, bufnr, title, opts)
 end
 
@@ -106,16 +116,27 @@ end
 ---keys that act on a whole run do to the search.
 ---@return { title: string, rows: string[][] }
 function StressRunner:legend_rows()
-    return {
-        title = "STRESS",
-        rows = {
-            { "the search row", "the last one, the input being tried and both outputs," },
-            { " ", "numbered as the counterexample it is looking for" },
-            { "run again on it", "does nothing, it is not a testcase" },
-            { "stop", "ends the search and the testcases re-running beside it" },
-            { "run all again", "searches again, from a new seed" },
-        },
+    local rows = {
+        { "the search row", "the last one, the input being tried and " .. (self.ref and "both outputs," or "its output,") },
+        { " ", "numbered as the counterexample it is looking for" },
+        { "run again on it", "does nothing, it is not a testcase" },
+        { "stop", "ends the search and the testcases re-running beside it" },
+        { "run all again", "searches again, from a new seed" },
     }
+    if not self.ref then
+        vim.list_extend(rows, {
+            { "with no bruteforce", "an input is kept when the solution crashes," },
+            { " ", "runs out of time or exits with an error" },
+        })
+    end
+    return { title = "STRESS", rows = rows }
+end
+
+---The bruteforce the search compares with, on a row of its own under the judge: `none` in a
+---search for crashes alone. On every stress board, so the rows stay put when one comes back.
+---@return string[][]
+function StressRunner:status_settings()
+    return { { "brute", self.ref and vim.fn.fnamemodify(self.ref.source or self.ref.exec, ":t") or "none" } }
 end
 
 ---Extra "Run" pane rows below mode/judge: the live stress counters, as
@@ -284,7 +305,8 @@ end
 ---Save a counterexample as a new testcase and add it to the UI.
 ---@param i integer the iteration that produced it
 ---@param input string
----@param expected string the bruteforce's (correct) output, stored as expected output
+---@param expected string? the bruteforce's (correct) output, stored as expected output; nil in
+---  a search with no bruteforce, saved with no answer
 ---@param sol_out string the solution's (wrong) output
 ---@param sol_err string the solution's stderr
 ---@param status string the verdict it earned, in a testcase's words (`WRONG`, `TIMEOUT`, `SIG n`…)
@@ -307,15 +329,15 @@ function StressRunner:record_counterexample(i, input, expected, sol_out, sol_err
     -- an *empty* answer (`expect_empty_output`), the solution has to print nothing
     -- too. Dropped instead, the testcase would have no answer file at all, and the row
     -- would come back unjudged on every re-run.
-    testcases.buf_save_testcase(self.bufnr, n, input, expected or "", true)
+    testcases.buf_save_testcase(self.bufnr, n, input, expected or "", expected ~= nil)
     self.saved_this_run = self.saved_this_run + 1
     -- Before the search row, which stays last and moves on to the next number.
     table.insert(self.tcdata, #self.tcdata + (self.search_entry and 0 or 1), {
         tcnum = n,
         stdin = input,
         -- What was stored: an empty answer is a real one here, so unlike typed text it
-        -- is not folded into "no answer".
-        expected = expected or "",
+        -- is not folded into "no answer"; a search with no bruteforce has none.
+        expected = expected,
         stdout = sol_out,
         stderr = sol_err,
         status = status,
@@ -414,6 +436,14 @@ function StressRunner:generation(i)
         self:spawn("solution", i, argv(self.r.rc), { stdin = input, timeout = self.timeout }, function(sres)
             row.stdout, row.stderr = sres.stdout or "", sres.stderr or ""
             self:update_ui(false)
+            -- With no bruteforce there is no answer to compare with, only how the run ended.
+            if not self.ref then
+                local ended, ended_hl = core.ending(sres, self.timeout)
+                if ended then
+                    return self:record_counterexample(i, input, nil, row.stdout, row.stderr, ended, ended_hl)
+                end
+                return self:generation(i + 1)
+            end
             -- The bruteforce on its own budget: it is slow on purpose, and `maximum_time` is
             -- what the solution is being held to.
             self:spawn("bruteforce", i, argv(self.ref), { stdin = input, timeout = self.ref_timeout }, function(rres)
@@ -462,9 +492,13 @@ end
 ---bruteforce, and the checker when it is a program of its own.
 ---@return tuna.HelperSpec[]
 function StressRunner:search_helpers()
-    local specs = { self.gen, self.ref }
-    if type(self.checker) == "table" then
-        specs[#specs + 1] = self.checker
+    local specs = { self.gen }
+    -- A search for crashes alone judges no output, so it builds neither.
+    if self.ref then
+        specs[#specs + 1] = self.ref
+        if type(self.checker) == "table" then
+            specs[#specs + 1] = self.checker
+        end
     end
     return specs
 end
@@ -569,7 +603,7 @@ function StressRunner:run_testcases()
     -- helper that is gone is reported and nothing runs: `:Tuna run` picks the mode again.
     local solution = vim.api.nvim_buf_get_name(self.bufnr)
     local gen, ref, missing, absent = stress_helpers(solution, self.config)
-    if not gen then
+    if not (gen and (ref or self.hunt)) then
         self.finished = true
         self:update_ui(true)
         if absent then
@@ -580,7 +614,10 @@ function StressRunner:run_testcases()
                 before = function()
                     self:delete_ui()
                 end,
-            })
+            }, function()
+                self.hunt = true
+                self:run_testcases()
+            end)
         elseif self.ui then
             self.ui:show_message(" stress: a helper is missing ", missing .. ".\n\n:Tuna run picks the run mode again.")
         else
@@ -588,18 +625,17 @@ function StressRunner:run_testcases()
         end
         return
     end
-    self.gen, self.ref = gen, ref
+    self.gen, self.ref, self.hunt = gen, ref, ref == nil
     self:refresh_judge(solution)
-    self:plan_builds({ gen, ref, self.checker })
+    self:plan_builds(self:search_helpers())
     -- The checker is built with the generator and the bruteforce, and waited for like them:
     -- the search judges every input with it, so one that did not build stops it before any
     -- input is tried.
     self.stopped = false
     self.finished = false
     self.iter = 0
-    -- A base new for every run, so a run after one that found nothing tries new inputs: the
-    -- clock's microseconds, kept small enough to read in the Run pane.
-    self.seed_base = math.floor(vim.uv.hrtime() / 1000) % 1000000
+    -- A base new for every run, so a run after one that found nothing tries new inputs.
+    self.seed_base = require("tuna.run.generate").seed()
     self.saved_this_run = 0
     self:load_testcases()
     self:update_ui(true)
@@ -642,9 +678,11 @@ function M.run(bufnr, count_override, opts)
     end
 
     local gen, ref, missing, absent = stress_helpers(vim.api.nvim_buf_get_name(bufnr), cfg)
-    if not gen then
+    if not (gen and (ref or opts.hunt)) then
         if absent then
-            offer_helpers(absent, bufnr)
+            offer_helpers(absent, bufnr, nil, function()
+                M.run(bufnr, count_override, vim.tbl_extend("force", opts, { hunt = true }))
+            end)
         else
             utils.notify(missing .. ".", "WARN")
         end
@@ -672,6 +710,9 @@ function M.run(bufnr, count_override, opts)
 
         gen = gen,
         ref = ref,
+        -- Searching for crashes alone, chosen with no bruteforce there: a bruteforce found
+        -- later makes it a stress run again.
+        hunt = ref == nil,
         rundir = rundir,
         timeout = timeout,
         -- The bruteforce is slow on purpose, so it is not held to the solution's limit.
@@ -695,7 +736,7 @@ function M.run(bufnr, count_override, opts)
     -- What this run compiles, declared before the board opens so the build step is laid out
     -- once: the solution is the Compile row itself, and the generator, the bruteforce and a
     -- checker each get a pane beside it.
-    sr:plan_builds({ gen, ref, sr.checker })
+    sr:plan_builds(sr:search_helpers())
 
     -- Open the runner UI with the rows listed (the Compile row, the testcases on disk and the
     -- search's row) right away.

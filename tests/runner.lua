@@ -1640,6 +1640,68 @@ do
     t.eq("a failed build leaves the compile row saying so", broken.tcdata[1].status, "RET 1")
     t.ok("and finishes the search, which is what lets the rows be edited", broken:idle(), broken.finished)
 
+    -- With no bruteforce a run of stress asked for offers to search for crashes alone, which
+    -- `:Tuna run` never picks by itself. Only how the solution ended counts, and an input it
+    -- crashed on is saved with no answer. The Run pane names no bruteforce, and one written
+    -- later makes the board a stress run again.
+    require("tuna.run.tools")._test.forget_builds()
+    for _, f in ipairs(vim.fn.globpath(sdir2, "main_*.txt", false, true)) do
+        vim.fn.delete(f)
+    end
+    require("tuna.config").setup({
+        compile_command = { cpp = { exec = ccx, args = { "$(FNAME)" } } },
+        run_command = { cpp = { exec = solx } },
+        stress = { generator = { exec = genx, args = {} }, count = 3 },
+    })
+    local tools = require("tuna.run.tools")
+    t.eq("a generator alone is no stress run unless asked for", tools.detect_mode(sdir2 .. "/main.cpp", require("tuna.config").current_setup), "normal")
+    local widgets = require("tuna.ui.widgets")
+    local real_menu, offered = widgets.menu, nil
+    widgets.menu = function(items, title, on_choice)
+        offered = { title, items }
+        on_choice(2)
+    end
+    local runs = 0
+    script, held, calls = {
+        ccx = {},
+        genx = seeded,
+        solx = function()
+            runs = runs + 1
+            return runs == 2 and { signal = 11 } or { stdout = "5\n" }
+        end,
+    }, nil, {}
+    stress.run(sbuf, 3)
+    widgets.menu = real_menu
+    local hunt = stress.active[sbuf]
+    vim.wait(5000, function()
+        return hunt ~= nil and hunt.finished
+    end, 10)
+    t.eq("asked for, it offers the bruteforce's starter or a search for crashes without one", offered, {
+        "Stress needs a bruteforce",
+        { "Create brute.cpp", "Search for crashes without one", "Stop" },
+    })
+    t.eq("which runs no bruteforce, and keeps the input the solution crashed on", {
+        vim.tbl_contains(calls, "refx"),
+        saved_rows(hunt),
+        testcase_files(),
+    }, { false, { { 0, "SIG 11" } }, { "main_input0.txt" } })
+    local function brute_row(r2)
+        for _, line in ipairs(r2.ui:status_lines()) do
+            if line:match("^brute") then
+                return line
+            end
+        end
+    end
+    t.eq("the Run pane says there is no bruteforce", brute_row(hunt), "brute: none")
+    t.has("and the legend what is kept instead", legend_line(hunt.ui, "with no bruteforce"), "crashes")
+    t.write(sdir2, "brute.cpp", "int main(){}\n")
+    hunt:run_testcases()
+    vim.wait(5000, function()
+        return hunt.finished
+    end, 10)
+    t.eq("a bruteforce written since makes it a stress run again", { hunt.hunt, brute_row(hunt) }, { false, "brute: brute.cpp" })
+    vim.fn.delete(sdir2 .. "/brute.cpp")
+
     if stress.active[sbuf] then
         stress.active[sbuf]:delete_ui()
     end
@@ -3679,6 +3741,120 @@ do
     }, { 3, 1 })
     vim.api.nvim_buf_delete(b, { force = true })
     t.eq("and is forgotten when its buffer unloads", reg[b], nil)
+end
+
+
+--------------------------------------------------------------------------------
+-- Generating a testcase: the generator run once, with no stress around it
+--------------------------------------------------------------------------------
+
+-- The generator writes a testcase's input, with no answer, under the lowest free number, from a
+-- seed of its own that the message names. From the command it is a file; on a board, and from
+-- the command while a board is open, a row, selected and run, reading DONE. A generator that
+-- fails writes nothing, and one that is missing offers its starter.
+do
+    local gdir = t.tempdir()
+    t.write(gdir, "main.cpp", "int main(){}\n")
+    local function program(name)
+        t.write(gdir, name, "#!/bin/sh\n")
+        vim.fn.setfperm(gdir .. "/" .. name, "rwxr-xr-x")
+        return gdir .. "/" .. name
+    end
+    local ccx, solx, genx = program("ccx"), program("solx"), program("genx")
+    local function configure(pass_seed, generator)
+        require("tuna.config").setup({
+            compile_command = { cpp = { exec = ccx, args = { "$(FNAME)" } } },
+            run_command = { cpp = { exec = solx } },
+            stress = { generator = generator, pass_seed = pass_seed },
+        })
+    end
+    configure(true, { exec = genx, args = {} })
+    vim.cmd("edit " .. gdir .. "/main.cpp")
+    vim.bo.filetype = "cpp"
+    local buf = vim.api.nvim_get_current_buf()
+    local gen_argv, gen_result = nil, nil
+    vim.system = function(argv, _, on_exit)
+        local name = vim.fn.fnamemodify(argv[1], ":t")
+        local res = { stdout = name == "solx" and "6\n" or "" }
+        if name == "genx" then
+            gen_argv, res = argv, gen_result
+        end
+        if on_exit then
+            vim.schedule(function()
+                on_exit(vim.tbl_extend("keep", res, { code = 0, signal = 0, stdout = "", stderr = "" }))
+            end)
+        end
+        return { kill = function() end, wait = function() return { code = 0 } end, pid = 0 }
+    end
+    local quiet = vim.notify
+    local said = t.capture_notifications()
+    local C3 = require("tuna.commands")
+    local function stored(n)
+        return gtcs.buf_get_testcases(buf)[n]
+    end
+
+    gen_result = { stdout = "3\n1 2 3\n" }
+    C3.generate_testcase()
+    t.drain()
+    t.eq("the command writes the generator's input as a testcase with no answer", stored(0), { input = "3\n1 2 3\n" })
+    local seed = gen_argv and gen_argv[#gen_argv]
+    t.ok("handed a seed of its own", tonumber(seed) ~= nil, gen_argv)
+    t.eq("which the message names", said[#said], "Tuna: testcase 0 generated, seed " .. tostring(seed) .. ".")
+
+    C3.execute({ "run" })
+    local r = C3.runners[buf]
+    settled(r)
+    gen_result = { stdout = "4\n" }
+    r.ui:generate_testcase()
+    t.drain()
+    settled(r)
+    drain(r.ui)
+    local function row(n)
+        return r.tcdata[r:rows_for(n)[1] or 0]
+    end
+    t.eq("on a board it is a row of its own, run, with no answer to judge it by", {
+        row(1) and row(1).stdin,
+        row(1) and row(1).status,
+        stored(1),
+    }, { "4\n", "DONE", { input = "4\n" } })
+    t.eq("selected", r.tcdata[r.ui:selected_index()] == row(1), true)
+
+    C3.generate_testcase()
+    t.drain()
+    t.eq("the command hands it to a board open on the solution", row(2) ~= nil and stored(2) ~= nil, true)
+    r:delete_ui()
+    drain(r.ui)
+
+    gen_result = { code = 1, stderr = "boom" }
+    C3.generate_testcase()
+    t.drain()
+    t.eq("a generator that fails writes nothing", stored(3), nil)
+    t.has("and says how it ended", said[#said], "exited with code 1")
+
+    configure(false, { exec = genx, args = {} })
+    gen_result = { stdout = "5\n" }
+    C3.generate_testcase()
+    t.drain()
+    t.eq("with pass_seed off it is handed none, and none is named", { #gen_argv, said[#said] }, { 1, "Tuna: testcase 3 generated." })
+
+    configure(true, nil)
+    local scaffold = require("tuna.workspace.scaffold")
+    local real_create, offered = scaffold.create_missing, nil
+    scaffold.create_missing = function(absent)
+        offered = absent
+    end
+    C3.generate_testcase()
+    t.drain()
+    scaffold.create_missing = real_create
+    t.eq("a missing generator offers its starter", offered, { "generator" })
+
+    vim.notify = quiet
+    vim.system = real_system
+    C3.runners[buf] = nil
+    require("tuna.config").setup({})
+    vim.cmd("enew")
+    vim.cmd("silent! bwipeout! " .. buf)
+    vim.fn.delete(gdir, "rf")
 end
 
 t.report()

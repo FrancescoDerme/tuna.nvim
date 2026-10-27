@@ -113,11 +113,13 @@ Where the testcases are stored can be set in `testcases_directory`: it's
 relative to the source by default, but can be an absolute path unrelated to
 the problem.
 
-Add, edit, and delete testcases with `:Tuna testcase add/edit/delete`. This
-can also be done in place in the runner UI, which is usually where you want to
-be. `:Tuna testcase split` breaks one testcase into several: mark the cases
-inside it with a line of `-`, and each bracketed region becomes a testcase of
-its own.
+Add, edit, and delete testcases with `:Tuna testcase add/edit/delete`.
+`:Tuna testcase generate` writes one from your generator, an input with no
+answer, to read your solution's output on or to time it. This can also be done
+in place in the runner UI, which is usually where you want to be.
+`:Tuna testcase split` breaks one testcase into several: mark the cases inside
+it with a line of `-`, and each bracketed region becomes a testcase of its
+own.
 
 ------------------------------------------------------------------------------
                                                               *tuna-runner-ui*
@@ -139,7 +141,7 @@ behave in them as in any buffer. From the read-only panes you can:
 
 - toggle the diff view with `d`,
 - rerun a testcase or all of them with `r` and `<C-r>`,
-- add or delete a testcase with `n` and `x`,
+- add, generate or delete a testcase with `n`, `t` and `x`,
 - and more.
 
 The key in each pane's title zooms it, and `<C-hjkl>` move you between panes,
@@ -175,6 +177,11 @@ by filename beside your solution.
 Interactive mode is not tied to having an interactor present, in fact it has
 three sources that can provide the input: `live` (you), `interactor` (your
 interactor program) and `feed` (a stored testcase).
+
+A generator is useful on its own too: `:Tuna testcase generate` (`t` on the
+runner UI) writes a testcase from it, and `:Tuna run stress` without a
+bruteforce offers to search for an input your solution crashes or runs out of
+time on.
 
 Every helper is found the same way: a file named after it beside your solution
 (with the names in the table above or those specified in `tool_names`), or one
@@ -412,7 +419,11 @@ Every command is a subcommand of `:Tuna` with tab-completion, and a lowercase
         - `stress` hunts for an input where your solution and the bruteforce
           disagree, and saves it as a testcase. A number after it is how many
           inputs to try: `:Tuna run stress 500`. Each run tries new inputs,
-          and the runner UI shows the seed of the input being tried.
+          and the runner UI shows the seed of the input being tried. Asked
+          for with no bruteforce, it offers to search without one: it keeps
+          an input your solution crashes on, runs out of time on or exits
+          with an error on, with no answer, and turns back into a stress run
+          once a bruteforce is there.
         - `interactive` lets your solution talk to something over stdin and
           stdout. A word after it picks the other side: `live` (you type),
           `feed` (the testcase input, a line at a time) or `interactor` (an
@@ -426,11 +437,16 @@ Every command is a subcommand of `:Tuna` with tab-completion, and a lowercase
 :Tuna show_ui
         Open the runner UI in the mode the problem is set to.
 
-:Tuna testcase [add/edit/delete] [n]
+:Tuna testcase [add/edit/delete/generate] [n]
         - `add` opens the testcase editor on a new testcase.
         - `edit` opens it on testcase `n`. Bare `:Tuna testcase` and
           `:Tuna testcase n` do the same.
         - `delete` removes testcase `n`, after asking.
+        - `generate` writes a testcase from your generator, the one stress
+          uses, handed a seed of its own that the message names. It has an
+          input and no answer, so it reads `DONE` unless your solution
+          crashes, runs out of time or a checker judges it. On the runner UI,
+          `t` does the same.
 
         Without a number, `edit` and `delete` act on the only testcase when
         there is one, and ask which when there are several. The editor shows
@@ -754,10 +770,10 @@ Every action can be mapped this way. An action is a name for a `:Tuna` command
 with its arguments fixed. Actions are defined in `M.actions` in
 `lua/tuna/keymaps.lua`: `menu`, `run`, `run_all`, `run_stress`,
 `run_interactive`, `show_ui`, `add_testcase`, `edit_testcase`,
-`delete_testcase`, `submit`, `submit_clear`, `download_testcases`,
-`download_problem`, `download_contest`, `download_sync`, `clean`, `pin`,
-`next_problem`, `prev_problem`, `next_scaffold`, `prev_scaffold`,
-`go_problem`, `go_contest`, `scratch` and `library`.
+`delete_testcase`, `generate_testcase`, `submit`, `submit_clear`,
+`download_testcases`, `download_problem`, `download_contest`, `download_sync`,
+`clean`, `pin`, `next_problem`, `prev_problem`, `next_scaffold`,
+`prev_scaffold`, `go_problem`, `go_contest`, `scratch` and `library`.
 
 ------------------------------------------------------------------------------
 HIGHLIGHTS                                                   *tuna-highlights*

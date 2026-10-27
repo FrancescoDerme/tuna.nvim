@@ -65,6 +65,7 @@ testcases_input_file_format = { "$(FNOEXT)_input$(TCNUM).txt", "input$(TCNUM).tx
 Where the testcases are stored can be set in `testcases_directory`: it's relative to the source by default, but can be an absolute path unrelated to the problem.
 
 Add, edit, and delete testcases with [`:Tuna testcase add|edit|delete`](REFERENCE.md#testcase).
+`:Tuna testcase generate` writes one from your generator, an input with no answer, to read your solution's output on or to time it.
 This can also be done in place in the runner UI, which is usually where you want to be.
 [`:Tuna testcase split`](REFERENCE.md#testcase-split) breaks one testcase into several: mark the cases inside it with a line of `-`, and each bracketed region becomes a testcase of its own.
 
@@ -84,7 +85,7 @@ From the read-only panes you can:
 
 - toggle the diff view with `d`,
 - rerun a testcase or all of them with `r` and `<C-r>`,
-- add or delete a testcase with `n` and `x`,
+- add, generate or delete a testcase with `n`, `t` and `x`,
 - and more.
 
 The key in each pane's title zooms it, and `<C-hjkl>` move you between panes, also customizable.
@@ -104,6 +105,8 @@ Comparison between Output and Expected Output is driven by `output_compare_metho
 | `checker.*`         | _(any of the above)_ | a special judge decides correctness instead of string comparison                                                                     |
 
 Interactive mode is not tied to having an interactor present, in fact it has three sources that can provide the input: `live` (you), `interactor` (your interactor program) and `feed` (a stored testcase).
+
+A generator is useful on its own too: `:Tuna testcase generate` (`t` on the runner UI) writes a testcase from it, and `:Tuna run stress` without a bruteforce offers to search for an input your solution crashes or runs out of time on.
 
 Every helper is found the same way: a file named after it beside your solution (with the names in the table above or those specified in `tool_names`), or one of your own that you point to with its option (`checker`, `stress.generator`, `stress.bruteforce` or `interactive.interactor`), which can be specified in a `.tuna.lua` file beside the solution.
 

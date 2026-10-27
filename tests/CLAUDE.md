@@ -73,7 +73,8 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     configured method, old or nonsense sidecar values reading as automatic, a configured
     command with no arguments getting its role's, stress/interactor reruns offering the starter
     of a helper gone (Stop writing nothing, Create putting the board away and opening it in the
-    editor), and a folder's solutions found whatever its name holds (a comma);
+    editor, and a stress rerun with its bruteforce gone searching for crashes without it when
+    that is chosen), and a folder's solutions found whatever its name holds (a comma);
   - `scaffold.lua`: the shipped starters, names from `tool_names` (and found by discovery), the
     user's templates over the shipped one for their own language only, adding a language by
     adding a file, every shape of `scaffold.templates` (a role's list in order, a path naming
@@ -137,7 +138,11 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     when it is listed and that it stays last and numbered past every testcase while the board is
     edited, a helper that failed reported on that row and on the Compile row rather than in a
     float, the search running beside the testcases on disk rather than after them, every run
-    searching from a seed of its own and the Run pane showing the one being tried, a checker
+    searching from a seed of its own and the Run pane showing the one being tried, a search with
+    no bruteforce (never picked by a bare `:Tuna run`, offered beside the bruteforce's starter,
+    spawning no bruteforce, keeping an input the solution crashed on with no answer, the Run
+    pane's `brute: none` and the legend's lines, and a bruteforce written later making it a
+    stress run again), a checker
     that did not build or gives no verdict stopping it and a restart judging with the checker as
     it is now, a failed build finishing it and spawning nothing behind it, in every mode that
     builds a solution of its own), a stop in every mode (nothing started after it, the rows it
@@ -166,7 +171,11 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     the selection following its row after a fresh run built the rows anew, run-all laid out
     again keeping the numbers its rows were renumbered to, run-all with no testcases running
     every solution on a bare testcase 0 that saving makes every solution's first testcase,
-    and a testcase added there added under every solution, the selection staying under the
+    and a testcase added there added under every solution, a testcase generated (from the
+    command, written with no answer under the lowest free number and handed a seed the
+    message names, or none with `pass_seed` off; on a board, a row selected and run reading
+    `DONE`; the command handing it to a board open on the solution; a failed generator writing
+    nothing; a missing one offering its starter), the selection staying under the
     solution it is on through a delete, a restore and an add, a delete taking the edit typed and
     not yet captured, a cursor event before the render that follows rows moved being no move by
     hand, and a move back before a render selecting the row moved back to,

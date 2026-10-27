@@ -231,6 +231,16 @@ hold everywhere are in the root `CLAUDE.md`.
   the last row): a row added after a run (`n`, `u`, a split) would otherwise read as one a
   lane has still to start, and `check_complete` would never settle the run.
 
+**Generating a testcase (`generate.lua`)** is a way of adding one, not a run mode: the
+generator stress uses (`tools.helper`, built by `prepare`, handed `seed()`, which stress's
+`seed_base` is too) runs once, and its output is saved as the next testcase's input with no
+answer. Being no mode, it leaves `detect_mode` and what `:Tuna run` does alone: a folder with
+a generator and no bruteforce still runs normally. A missing generator offers its starter, as
+stress does, and a failed one writes nothing. The command hands the job to a board open on the
+solution (`RunnerUI:generate_testcase`), which numbers the testcase when the input arrives
+(`next_tcnum`, counting rows added and not saved), adds its row and runs it; written straight
+to disk under a number such a row holds, it would be overwritten by that row's save.
+
 **Checker (`checker.lua`)**: `"builtin"` (what `resolve_checker` returns when there is no
 checker) delegates to `compare.lua`. An external checker runs
 as `checker <input> <output> <answer>` (exit 0 means correct) and is compiled via

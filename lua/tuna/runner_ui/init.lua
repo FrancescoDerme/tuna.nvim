@@ -379,6 +379,7 @@ function RunnerUI:legend_sections()
     vim.list_extend(rows, {
         { "", "" },
         { "new testcase", keys("add_testcase") },
+        { "generate testcase", keys("generate_testcase") },
         { "delete testcase", keys("delete_testcase") },
         { "lift out marked cases", keys("split_testcase") },
         { "restore last deleted", keys("restore_testcase") },
@@ -386,6 +387,8 @@ function RunnerUI:legend_sections()
         { "switch pane", switch },
         { "close", keys("close") },
         { "this legend", keys("help") },
+        { "", "" },
+        { "* in the Run pane", "a setting you forced, auto gives it back" },
     })
     local readonly = align(rows)
     -- What the mode adds: how its own rows and keys behave, in a section of its own.
@@ -1131,6 +1134,32 @@ function RunnerUI:add_testcase()
             api.nvim_set_current_win(w.winid)
             vim.cmd("startinsert")
         end
+    end)
+end
+
+---Add a testcase the generator writes: a new row, selected and run, with no answer to judge
+---it by. Numbered when the input arrives, so a row added meanwhile keeps its number; with a
+---run started meanwhile it is only written, and the run of the set after it lists it.
+function RunnerUI:generate_testcase()
+    if not self.runner.editable_testcases then
+        return
+    end
+    if not self.runner:idle() then
+        utils.notify("wait for the run to finish before generating a testcase.", "WARN")
+        return
+    end
+    local generate = require("tuna.run.generate")
+    generate.input(self.runner:edit_bufnr(), self.config, function(input, seed)
+        local n = self.runner:next_tcnum()
+        if self.runner:idle() then
+            self:capture_pending()
+            self.runner:add_testcase_row(n)
+            self.runner:save_testcase(n, input, "")
+            self:goto_row(self.runner:row_for(n, self:current_row()))
+        else
+            require("tuna.problem.testcases").buf_save_testcase(self.runner:edit_bufnr(), n, input)
+        end
+        generate.said(n, seed)
     end)
 end
 
@@ -1983,6 +2012,9 @@ function RunnerUI:show_ui()
     map_tc("add_testcase", function()
         self:add_testcase()
     end)
+    map_tc("generate_testcase", function()
+        self:generate_testcase()
+    end)
     map_tc("delete_testcase", function()
         self:delete_testcase()
     end)
@@ -2741,34 +2773,31 @@ function RunnerUI:status_lines()
     local mode = self.runner.mode or "normal"
     local bufnr = self.runner.bufnr
     local path = (bufnr and api.nvim_buf_is_valid(bufnr)) and api.nvim_buf_get_name(bufnr) or ""
-    -- Which settings are your choice rather than tuna's, on a row of their own: this is one
-    -- fact about the run, not one per setting, and a word appended to each value is the
-    -- first thing a pane this narrow cuts off. The names are the rows they speak for.
+    -- Which settings are your choice rather than tuna's: a `*` after the name, one column, where
+    -- a word after the value would be the first thing a pane this narrow cuts off, and a row
+    -- naming them would repeat the rows above it.
     local tools = require("tuna.run.tools")
     local forced = {}
     if path ~= "" then
-        if tools.get_mode(path) == mode then
-            forced[#forced + 1] = "mode"
-        end
+        forced.mode = tools.get_mode(path) == mode
         -- A checker is only ever found, never forced on, so the judge is your choice when you
         -- turned the checker off, or when the comparison it falls back to is overridden.
-        if type(self.runner.checker) ~= "table" and (tools.checker_setting(path) == "off" or tools.get_compare(path)) then
-            forced[#forced + 1] = "judge"
-        end
-        if self.runner.source and tools.get_source(path) == self.runner.source then
-            forced[#forced + 1] = "source"
-        end
+        forced.judge = type(self.runner.checker) ~= "table"
+            and (tools.checker_setting(path) == "off" or tools.get_compare(path) ~= nil)
+        forced.source = self.runner.source ~= nil and tools.get_source(path) == self.runner.source
     end
     local entries = {
         { "mode", mode },
         { "judge", self.runner:judge_label() },
     }
-    -- A mode's own settings stand with the others, above the row saying which were forced
-    -- (interactive's input source). Counters and the like come after, in `status_tail`.
+    -- A mode's own settings stand with the others (interactive's input source). Counters and
+    -- the like come after, in `status_tail`.
     if self.runner.status_settings then
         vim.list_extend(entries, self.runner:status_settings())
     end
-    entries[#entries + 1] = { "forced", #forced > 0 and table.concat(forced, ", ") or "none" }
+    for _, e in ipairs(entries) do
+        e[1] = forced[e[1]] and (e[1] .. "*") or e[1]
+    end
     entries[#entries + 1] = { "diff", diff_state }
     if self.runner.status_tail then
         vim.list_extend(entries, self.runner:status_tail())

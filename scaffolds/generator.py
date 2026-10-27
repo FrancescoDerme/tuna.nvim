@@ -1,4 +1,4 @@
-# Generator for stress-testing.
+# Generator for stress-testing, and for one testcase at a time with `t` on the runner UI.
 # tuna's starter, replace it with scaffold.templates (:h tuna-scaffold).
 
 import random

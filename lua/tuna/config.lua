@@ -96,11 +96,12 @@ M.defaults = {
     -- every run plus the iteration, so each run tries new inputs, and the Run pane shows
     -- the seed of the one being tried, to reproduce it.
     stress = {
-        -- override discovery, e.g. { exec = "python3", args = { "$(ABSDIR)/gen.py" } }
+        -- override discovery, e.g. { exec = "python3", args = { "$(ABSDIR)/gen.py" } }; also
+        -- the one `:Tuna testcase generate` runs
         generator = nil,
         bruteforce = nil, -- override discovery: a correct-but-slow solution
         count = 100, -- maximum generator iterations before giving up
-        pass_seed = true, -- append the seed as the generator's last argument
+        pass_seed = true, -- append the seed as the generator's last argument, when generating too
         -- How many counterexamples a single `:Tuna run stress` may save before it
         -- stops, and the hard cap on the total number of testcases stress will let
         -- accumulate on disk. The search stops as soon as either is reached; each
@@ -643,6 +644,9 @@ M.defaults = {
             -- key: the Input and Expected Output panes are ordinary editable buffers
             -- and `:w` saves the testcase and re-runs it.
             add_testcase = { "n", "N" },
+            -- One the generator writes, a fresh seed each time. `t` because `g` begins `gg`
+            -- and `G` is the list's last row.
+            generate_testcase = { "t", "T" },
             delete_testcase = { "x", "X" },
             -- `c` for cases: `s` is stop, and every other letter this action could
             -- want is either a cursor key (`j`/`k`) or already an action.

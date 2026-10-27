@@ -18,7 +18,7 @@ local M = {}
 -- Sub-argument completions for subcommands that take a second word.
 local subcommand_args = {
     run = vim.list_extend({ "auto" }, vim.deepcopy(tools.MODES)),
-    testcase = { "add", "edit", "delete", "split" },
+    testcase = { "add", "edit", "delete", "split", "generate" },
     convert = { "files", "single_file", "directory" },
     download = { "testcases", "problem", "contest", "sync", "persistently", "status", "stop" },
     scaffold = tools.SCAFFOLDS,
@@ -383,6 +383,31 @@ local function runners_of(bufnr)
         list[#list + 1] = runners[bufnr]
     end
     return list
+end
+
+---Write a testcase from the generator. A board open on the solution adds it as a row, run and
+---selected, rather than having a file appear under it: a row added there and not saved may hold
+---the number the file would take.
+function M.generate_testcase()
+    local bufnr = M.solution_bufnr()
+    if not bufnr then
+        return
+    end
+    for _, r in ipairs(runners_of(bufnr)) do
+        if r.ui and r.ui.ui_visible and r.editable_testcases then
+            return r.ui:generate_testcase()
+        end
+    end
+    local generate = require("tuna.run.generate")
+    generate.input(bufnr, config.get_buffer_config(bufnr), function(input, seed)
+        local tctbl = testcases.buf_get_testcases(bufnr)
+        local n = 0
+        while tctbl[n] do
+            n = n + 1
+        end
+        testcases.buf_save_testcase(bufnr, n, input)
+        generate.said(n, seed)
+    end)
 end
 
 ---Every live runner, of every buffer and mode.
@@ -756,6 +781,8 @@ M.subcommands = {
             M.edit_testcase(true)
         elseif mode == "delete" then
             M.delete_testcase(tonumber(args[2]))
+        elseif mode == "generate" then
+            M.generate_testcase()
         elseif mode == "split" then
             -- `:Tuna testcase split -` — a first argument that is not a number is the
             -- marker, since the testcase it would otherwise name can be implied. Spelled
@@ -772,7 +799,7 @@ M.subcommands = {
             -- what the bare form does.
             M.edit_testcase(false, tonumber(mode))
         else
-            utils.notify("testcase: unknown mode '" .. tostring(mode) .. "' (add | edit | delete | split).")
+            utils.notify("testcase: unknown mode '" .. tostring(mode) .. "' (add | edit | delete | split | generate).")
         end
     end,
     convert = function(args)
