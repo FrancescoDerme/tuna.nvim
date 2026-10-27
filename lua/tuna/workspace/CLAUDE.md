@@ -110,11 +110,13 @@ problems and remembering them. The rules that hold everywhere are in the root `C
   scratch, go to the template question, opened straight from the first menu's choice (which
   fires after that menu has closed) so no frame is drawn without a dialog, a menu with a body
   preview: `template_choices` offers the solution's `scaffold.templates` (a task-only modifier
-  read as a glob wildcard, since no problem exists yet), plus an empty file. Dismissing creates
-  nothing, and with no template at all the scratch opens empty. `download sync` sets
-  `M.pending`; `M.absorb(filepath, cfg, template)` keeps as many header lines as the template
-  the problem was written from (returned by `store_downloaded_task`), replaces the body with
-  the scratch *buffer* lines, saves, moves the cursor, and deletes the scratch.
+  read as a glob wildcard, since no problem exists yet), the general one first (`template_path`,
+  the one a solution with no problem known gets): the configured order puts a judge's ahead of
+  it for downloads, which know the judge, and a scratch does not. Then an empty file.
+  Dismissing creates nothing, and with no template at all the scratch opens empty. `download
+  sync` sets `M.pending`; `M.absorb(filepath, cfg, template)` keeps as many header lines as
+  the template the problem was written from (returned by `store_downloaded_task`), replaces
+  the body with the scratch *buffer* lines, saves, moves the cursor, and deletes the scratch.
 - **`recent.lua`**: `stdpath("state")/tuna/recent.json`, written with a debounce and flushed on
   `VimLeavePre`, read once per session. It holds `problems` and `contests`, most recent first
   and capped by `recent.problems`/`recent.contests` (read from `config.current_setup` when

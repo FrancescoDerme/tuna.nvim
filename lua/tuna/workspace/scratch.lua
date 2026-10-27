@@ -43,12 +43,22 @@ end
 
 ---Every template a scratch could start from. No problem exists yet, so a modifier only a
 ---problem fills in (`$(JUDGE)` in `~/cp/template.$(JUDGE).cpp`) matches any text in its
----place, and each judge's template is offered on its own.
+---place, and each judge's template is offered on its own. The general one comes first, the
+---template a solution started with no problem known is written from: the configured order
+---puts a judge's ahead of it so a download for that judge gets it, but a scratch has no judge.
 ---@param ext string
 ---@param cfg table
 ---@return string[] paths
 local function template_choices(ext, cfg)
-    return require("tuna.workspace.scaffold").templates("solution", cfg, stand_in(ext), ext)
+    local choices = require("tuna.workspace.scaffold").templates("solution", cfg, stand_in(ext), ext)
+    local general = template_path(ext, cfg)
+    for i, path in ipairs(choices) do
+        if path == general then
+            table.insert(choices, 1, table.remove(choices, i))
+            break
+        end
+    end
+    return choices
 end
 
 ---Whether a scratch holds anything to resume: its loaded buffer, or else its file, has

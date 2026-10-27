@@ -25,17 +25,23 @@ local cfg = require("tuna.config").current_setup
 --------------------------------------------------------------------------------
 
 -- No problem exists yet, so `$(JUDGE)` can't be filled in: it matches any judge, and each
--- judge's template is offered on its own, before the general one.
-t.eq("every judge's template, then the general one", T.template_choices("cpp", cfg), {
+-- judge's template is offered on its own, after the general one, which a scratch with no
+-- judge most likely wants, though the configured order puts the judges' first.
+t.eq("the general template, then every judge's", T.template_choices("cpp", cfg), {
+    tdir .. "/template.cpp",
     tdir .. "/template.atcoder.cpp",
     tdir .. "/template.codeforces.cpp",
-    tdir .. "/template.cpp",
 })
 t.eq("only templates in the scratch's language", T.template_choices("py", cfg), { tdir .. "/template.py" })
 local function choices_with(templates, ext)
     return T.template_choices(ext, vim.tbl_extend("force", cfg, { scaffold = { templates = templates } }))
 end
 t.eq("a solution configured false offers none", choices_with({ solution = false }, "cpp"), {})
+t.eq(
+    "with no general template, the judges' alone, in order",
+    choices_with({ solution = tdir .. "/template.$(JUDGE).$(FEXT)" }, "cpp"),
+    { tdir .. "/template.atcoder.cpp", tdir .. "/template.codeforces.cpp" }
+)
 local shipped = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h:h") .. "/scaffolds"
 t.eq("none existing, tuna's own starter is offered", choices_with({ solution = tdir .. "/none.cpp" }, "cpp"), {
     shipped .. "/solution.cpp",
@@ -71,12 +77,12 @@ vim.cmd("enew")
 scratch.start()
 t.eq("starting a scratch asks which template", asked and #asked.items, 4)
 t.eq("with an empty file as the last choice", asked and asked.items[4], "Empty file")
-t.eq("previewing the body the scratch would get", asked and asked.preview.content(2).lines, { "#define CF", "" })
+t.eq("previewing the body the scratch would get", asked and asked.preview.content(3).lines, { "#define CF", "" })
 asked.dismiss()
 t.eq("dismissing it writes nothing", vim.uv.fs_stat(scratch_file), nil)
 
 scratch.start()
-asked.choose(2)
+asked.choose(3)
 t.eq("the chosen template's body becomes the scratch", lines_of(scratch_file), { "#define CF" })
 t.eq("and it is opened", vim.fn.resolve(vim.api.nvim_buf_get_name(0)), vim.fn.resolve(scratch_file))
 
@@ -107,7 +113,7 @@ t.eq("dismissing that leaves the scratch as it was", lines_of(scratch_file), { "
 
 scratch.start()
 asked.choose(2)
-asked.choose(1)
+asked.choose(2)
 t.eq("choosing a template starts the scratch over from it", lines_of(scratch_file), { "#define AC" })
 
 -- Emptied by hand, it is started over, and the blank buffer still loaded out of sight is
@@ -118,7 +124,7 @@ vim.cmd("enew")
 asked = nil
 scratch.start()
 t.eq("an emptied scratch goes straight to the template question", asked and asked.items[#asked.items], "Empty file")
-asked.choose(2)
+asked.choose(3)
 t.eq("and gets the newly chosen template", vim.api.nvim_buf_get_lines(0, 0, -1, false), { "#define CF" })
 widgets.menu = real_menu
 
