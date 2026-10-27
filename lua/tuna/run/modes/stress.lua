@@ -154,21 +154,13 @@ function StressRunner:row_label(tc)
 end
 
 ---A testcase added, restored or split off while the board is idle goes above the search row,
----which stays last, and moves the number the search would save under past it: the search row
----wears that number, and would otherwise read the same as the row just added. Every search
----rebuilds its rows from disk first, so this is what keeps the board honest in between.
+---which stays last (the base class puts it among the testcases), and moves the number the
+---search would save under past it: the search row wears that number, and would otherwise read
+---the same as the row just added. Every search rebuilds its rows from disk first, so this is
+---what keeps the board honest in between.
 ---@param tcnum integer
 function StressRunner:add_testcase_row(tcnum)
     core.RunnerCore.add_testcase_row(self, tcnum)
-    if self.search_entry then
-        local row = table.remove(self.tcdata)
-        for i, tc in ipairs(self.tcdata) do
-            if tc == self.search_entry then
-                table.insert(self.tcdata, i, row)
-                break
-            end
-        end
-    end
     self.next_num = math.max(self.next_num, tcnum + 1)
 end
 

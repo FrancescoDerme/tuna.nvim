@@ -34,9 +34,10 @@ The rules that hold everywhere are in the root `CLAUDE.md`.
   kept last, a counterexample is inserted above it, and `row_label` gives it the number
   that counterexample would take (`next_num`). Every search rebuilds its rows from disk
   first (`load_testcases`), but the row also exists while the board is idle (listed only, or
-  left carrying a helper's failure), where add, undo and split can put rows beside it: the
-  `add_testcase_row` override puts them above it and moves `next_num` past the number taken,
-  or the board would read one number twice until the next run.
+  left carrying a helper's failure), where add, restore and split can put rows beside it: the
+  base `add_testcase_row` puts them among the testcases, above it, and the override moves
+  `next_num` past the number taken, or the board would read one number twice until the next
+  run.
 - **The generator and the bruteforce are judged on the signal too** (`core.ending`), not
   on the exit code alone: a crash (a sanitizer abort, a segfault) exits 0 and reports the
   signal, so reading the code alone would pass an empty output off as the bruteforce's
@@ -119,7 +120,14 @@ The rules that hold everywhere are in the root `CLAUDE.md`.
   of any language, each with its own filetype's commands. The directory is the buffer's parent,
   or the cwd for a scratch buffer.
 - `MultiRunner` is a flattened matrix: solution header rows (`row_label`, live `correct/total`)
-  above indented testcase rows.
+  above indented testcase rows. Its testcases are those a normal run from the buffer reads,
+  and its rows are the one record of them (`testcase_numbers`): `lay_out` builds the matrix
+  for a list of numbers, keeping every row already there, so an add, a delete and a row
+  renumbered by a restore leave nothing behind to disagree with the grid. Keep no copy of the
+  list beside the rows: renumbering a row leaves it stale, and the next add brings the old
+  number back. With no testcases it lists a `bare` testcase 0 under every solution, labelled
+  `No input`, as the normal board does, and a testcase added or saved on the board is every
+  solution's, written as the buffer's own.
 - `opts.list` (`:Tuna run all 2 3`) runs every solution on those testcases alone, a missing
   one reported as normal mode reports it.
 - All solutions compile first, then everything runs in one shared pool of `multiple_testing`.
@@ -129,6 +137,5 @@ The rules that hold everywhere are in the root `CLAUDE.md`.
   as its killed cases are in. A header's `correct/total` counts judged rows only
   (`core.judged`), so a row with no answer, stopped or never run is not a failure. A board
   launched from a buffer that is not a solution reads its testcases through
-  `testcases.get_testcases`, by path. Its `save_testcase` override keeps the shared `tctbl` in
-  step. The checker comes from `tools.resolve_checker` against `solution` (the buffer's file,
-  else the first solution), so `:Tuna checker off` applies.
+  `testcases.get_testcases`, by path. The checker comes from `tools.resolve_checker` against
+  `solution` (the buffer's file, else the first solution), so `:Tuna checker off` applies.

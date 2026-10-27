@@ -270,6 +270,7 @@ function M.run_testcases(bufnr, list, only_show)
     else
         r:kill_all_processes()
         r:choose_row_again()
+        r.subset = list ~= nil -- named testcases: a re-run adds no others it finds on disk
         r:run_testcases(tctbl)
     end
     r:show_ui()

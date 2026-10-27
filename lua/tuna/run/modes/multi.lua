@@ -44,10 +44,15 @@ end
 
 ---The selector's left column: solution names at column 0, their testcases indented.
 ---@param tc table
+---@param unsaved boolean? the row has an edit not yet written
 ---@return string
-function MultiRunner:row_label(tc)
+function MultiRunner:row_label(tc, unsaved)
     if tc.kind == "solution" then
         return tc.name
+    end
+    -- Named as the normal board names it, until it has an edit or a file behind it.
+    if tc.bare and not unsaved then
+        return "  No input"
     end
     return "  TC " .. tostring(tc.tcnum)
 end
@@ -91,35 +96,63 @@ local function header_row(sol)
     return { kind = "solution", name = sol.name, sol = sol, status = "", hlgroup = "TunaRunning", time_label = "" }
 end
 
----The row of testcase `n` for `sol`, with the status it starts on.
----@param sol table
----@param n integer
----@param status string
----@param hlgroup string
----@return table
-function MultiRunner:case_row(sol, n, status, hlgroup)
-    local tc = self.tctbl[n]
-    return {
-        kind = "case",
-        tcnum = n,
-        sol = sol,
-        stdin = tc.input or "",
-        expected = tc.output,
-        status = status,
-        hlgroup = hlgroup,
-    }
+---The testcases the matrix shows, read off its rows, the one record of them: every solution
+---shows the same ones.
+---@return integer[] ascending
+function MultiRunner:testcase_numbers()
+    local seen, nums = {}, {}
+    for _, tc in ipairs(self.tcdata) do
+        if tc.kind == "case" and not seen[tc.tcnum] then
+            seen[tc.tcnum] = true
+            nums[#nums + 1] = tc.tcnum
+        end
+    end
+    table.sort(nums)
+    return nums
 end
 
----Build the matrix rows: for each solution, a header row then one row per testcase.
-function MultiRunner:load_rows()
+---Lay the matrix out for testcases `nums`: for each solution, its header row, then one row
+---per testcase. A row already on the board is kept, result and all; a new one takes its text
+---from `tctbl` when given (the first load), else starts empty for a save or a sync to fill.
+---One the first load has no testcase for is `bare`, the normal board's row of a run with
+---nothing to test.
+---@param nums integer[] ascending
+---@param tctbl table<integer, tuna.StoredTestcase>?
+---@param status string what a new row reads
+---@param hlgroup string
+function MultiRunner:lay_out(nums, tctbl, status, hlgroup)
+    local headers, cases = {}, {}
+    for _, tc in ipairs(self.tcdata) do
+        if tc.kind == "solution" then
+            headers[tc.name] = tc
+        else
+            cases[tc.sol.name .. "\0" .. tc.tcnum] = tc
+        end
+    end
     self.tcdata = {}
     for _, sol in ipairs(self.files) do
-        table.insert(self.tcdata, header_row(sol))
+        local header = headers[sol.name]
+        table.insert(self.tcdata, header or header_row(sol))
         sol.header_idx = #self.tcdata
         sol.case_idxs = {}
-        for _, n in ipairs(self.nums) do
-            table.insert(self.tcdata, self:case_row(sol, n, "", "TunaRunning"))
+        for _, n in ipairs(nums) do
+            local stored = tctbl and tctbl[n] or {}
+            local row = cases[sol.name .. "\0" .. n]
+                or {
+                    kind = "case",
+                    tcnum = n,
+                    sol = sol,
+                    bare = tctbl ~= nil and tctbl[n] == nil or nil,
+                    stdin = stored.input or "",
+                    expected = stored.output,
+                    status = status,
+                    hlgroup = hlgroup,
+                }
+            table.insert(self.tcdata, row)
             table.insert(sol.case_idxs, #self.tcdata)
+        end
+        if header then
+            self:recompute_header(sol)
         end
     end
 end
@@ -146,67 +179,36 @@ function MultiRunner:edit_bufnr()
     return vim.fn.bufadd(self.edit_anchor)
 end
 
----@private
----Re-create the matrix after a testcase was added or removed, reusing each
----solution's existing rows so the results already on screen survive; only the row
----for a brand-new testcase starts empty.
-function MultiRunner:rebuild_rows()
-    local headers, cases = {}, {}
-    for _, tc in ipairs(self.tcdata) do
-        if tc.kind == "solution" then
-            headers[tc.name] = tc
-        else
-            cases[tostring(tc.sol and tc.sol.name) .. "\0" .. tostring(tc.tcnum)] = tc
-        end
-    end
-
-    self.tcdata = {}
-    for _, sol in ipairs(self.files) do
-        table.insert(self.tcdata, headers[sol.name] or header_row(sol))
-        sol.header_idx = #self.tcdata
-        sol.case_idxs = {}
-        for _, n in ipairs(self.nums) do
-            local row = cases[sol.name .. "\0" .. tostring(n)] or self:case_row(sol, n, "NOT RUN", "TunaDone")
-            table.insert(self.tcdata, row)
-            table.insert(sol.case_idxs, #self.tcdata)
-        end
-        self:recompute_header(sol)
-    end
-end
-
 ---A testcase added from the runner UI belongs to every solution in the matrix.
 ---@param tcnum integer
 function MultiRunner:add_testcase_row(tcnum)
-    self.tctbl[tcnum] = { input = "", output = "" }
-    table.insert(self.nums, tcnum)
-    table.sort(self.nums)
-    self:rebuild_rows()
+    local nums = self:testcase_numbers()
+    nums[#nums + 1] = tcnum
+    table.sort(nums)
+    self:lay_out(nums, nil, "NOT RUN", "TunaDone")
 end
 
 ---…and deleting one removes it from every solution.
 ---@param tcnum integer
 function MultiRunner:remove_testcase_rows(tcnum)
-    self.tctbl[tcnum] = nil
-    for i, n in ipairs(self.nums) do
-        if n == tcnum then
-            table.remove(self.nums, i)
-            break
-        end
-    end
-    self:rebuild_rows()
+    self:lay_out(vim.tbl_filter(function(n)
+        return n ~= tcnum
+    end, self:testcase_numbers()), nil, "NOT RUN", "TunaDone")
 end
 
----Keep the shared testcase table in step with an edit, so a later rebuild (or a
----full re-run) uses the saved text rather than what was loaded at startup.
+---The row of `tcnum` under the solution of `beside`, so adding or restoring a testcase
+---leaves the user in the section they were working in.
 ---@param tcnum integer
----@param input string
----@param expected string
----@return boolean
-function MultiRunner:save_testcase(tcnum, input, expected, expect_empty_output)
-    -- The same answer the base class stores.
-    local stored = expect_empty_output and "" or core.answer(expected)
-    self.tctbl[tcnum] = { input = input, output = stored }
-    return core.RunnerCore.save_testcase(self, tcnum, input, expected, expect_empty_output)
+---@param beside table?
+---@return integer?
+function MultiRunner:row_for(tcnum, beside)
+    local rows = self:rows_for(tcnum)
+    for _, i in ipairs(rows) do
+        if beside and self.tcdata[i].sol == beside.sol then
+            return i
+        end
+    end
+    return rows[1]
 end
 
 ---Recompute a solution header row's `correct/total` from its testcase rows.
@@ -573,10 +575,6 @@ function M.run(bufnr, opts)
     local tctbl = curpath and testcases.buf_get_testcases(bufnr) or testcases.get_testcases(paths[1].path, cfg)
     local nums = vim.tbl_keys(tctbl)
     table.sort(nums)
-    if #nums == 0 then
-        utils.notify("run_all: no testcases to run (looked in " .. dir .. ").", "WARN")
-        return
-    end
     if opts.list then
         -- Named testcases, as `:Tuna run 2 3` names them in normal mode: each missing one
         -- is reported, and with none left there is nothing to run.
@@ -594,6 +592,10 @@ function M.run(bufnr, opts)
         if #nums == 0 then
             return
         end
+    elseif #nums == 0 then
+        -- Nothing to test, as in a normal run: every solution runs once on empty stdin, on a
+        -- bare testcase 0 that typing into and saving makes the first testcase.
+        nums = { 0 }
     end
 
     -- Resolve each solution's run/compile commands from *its own* filetype, and the
@@ -626,8 +628,7 @@ function M.run(bufnr, opts)
         compare_method = tools.get_compare(vim.api.nvim_buf_get_name(bufnr)), -- per-buffer `:Tuna compare` override
         mode = "all",
         files = files,
-        nums = nums,
-        tctbl = tctbl,
+        subset = opts.list ~= nil,
         -- Testcase edits from the UI are resolved against a real solution: the
         -- invoking buffer may be a scratch one that owns no testcases of its own.
         edit_anchor = not curpath and paths[1].path or nil,
@@ -642,7 +643,7 @@ function M.run(bufnr, opts)
 
     -- Rows first, and marked before the board opens, so it opens on the row it will show
     -- (see interactive).
-    mr:load_rows()
+    mr:lay_out(nums, tctbl, "", "TunaRunning")
     if opts.show_only then
         mr:mark_not_run()
     end

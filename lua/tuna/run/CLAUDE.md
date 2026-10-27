@@ -121,7 +121,7 @@ hold everywhere are in the root `CLAUDE.md`.
   local). The judge callback re-checks the token.
 - **UI seams** keep `tuna.runner_ui` mode-agnostic:
   - `pane_content(tc, name)` returns text, or `core.SKIP` to leave a pane alone;
-  - `row_label(tc)`, `status_settings()` (rows with the mode and judge) and `status_tail()`
+  - `row_label(tc, unsaved)`, `status_settings()` (rows with the mode and judge) and `status_tail()`
     (rows after them);
   - `on_ui_shown(ui)` and `owns_pane(name)`;
   - `layout()` supplies a mode-specific grid that replaces the configured one;
@@ -134,8 +134,12 @@ hold everywhere are in the root `CLAUDE.md`.
 - **Editing contract**:
   - `editable_testcases` is a class flag. `row_editable(tc)` is true only for numeric `tcnum`,
     which excludes Compile and run-all headers.
-  - Other members: `row_id`, `edit_bufnr`, `rows_for`, `next_tcnum`, `add_testcase_row`,
-    `remove_testcase_rows`, `split_testcase`, `run_rows`, `sync_rows(nums, tctbl)`.
+  - Other members: `row_id`, `edit_bufnr`, `rows_for`, `row_for`, `next_tcnum`, `free_number`,
+    `add_testcase_row`, `remove_testcase_rows`, `split_testcase`, `run_rows`,
+    `sync_rows(nums, tctbl)`.
+  - `add_testcase_row` puts the row among the testcase rows and `sort_testcase_rows` orders
+    them by number, each unbroken run of them on its own, so the rows that are not testcases
+    (the build step, stress's search, run-all's headers) stay where they are.
   - `idle()` reads `completed`, and structural edits wait for it.
   - `save_testcase(tcnum, input, expected, expect_empty_output)` writes, updates every row
     showing that testcase, clears `bare`, and re-runs, unless the runner is `preloaded`.

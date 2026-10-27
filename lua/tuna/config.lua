@@ -652,8 +652,9 @@ M.defaults = {
             -- `c` for cases: `s` is stop, and every other letter this action could
             -- want is either a cursor key (`j`/`k`) or already an action.
             split_testcase = { "c", "C" },
-
-            undo_delete = { "u", "U" },
+            -- Restores the testcase deleted last, whatever was done since, and the one
+            -- before it on the next press.
+            restore_testcase = { "u", "U" },
             help = "?",
         },
         -- A pane zoomed by the `zoom_*` keys, a float over the grid: its size as a share of the

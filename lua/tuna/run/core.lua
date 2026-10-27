@@ -51,6 +51,7 @@ M.SKIP = setmetatable({}, {
 ---@field ui tuna.RunnerUI? the runner UI, once shown
 ---@field last_row_id any? the row the UI was last on (`row_id`)
 ---@field deleted_testcases table[]? what `u` restores
+---@field subset boolean? the rows are the testcases a run named, so a re-run adds no others
 ---@field run_single fun(self: tuna.RunnerCore, idx: integer) re-run one row
 ---@field run_testcases fun(self: tuna.RunnerCore) re-run every row
 ---@field mode string? the run mode the UI shows
@@ -63,7 +64,7 @@ M.SKIP = setmetatable({}, {
 ---@field on_details_rendered fun(self: tuna.RunnerCore, ui: tuna.RunnerUI, tc: table)? after the detail panes are drawn
 ---@field status_settings (fun(self: tuna.RunnerCore): string[][])? its settings rows in the Run pane
 ---@field status_tail (fun(self: tuna.RunnerCore): string[][])? rows after them
----@field row_label (fun(self: tuna.RunnerCore, tc: table): string)? a row's header in the selector
+---@field row_label (fun(self: tuna.RunnerCore, tc: table, unsaved: boolean?): string)? a row's header in the selector, told whether it has an edit not yet written
 ---@field owns_pane (fun(self: tuna.RunnerCore, name: string): boolean)? whether it types into a pane itself
 local RunnerCore = {}
 RunnerCore.__index = RunnerCore
@@ -922,6 +923,16 @@ function RunnerCore:rows_for(tcnum)
     return idxs
 end
 
+---The row of testcase `tcnum` the board puts the user on when it adds or restores it, from
+---`beside`, the row they are on. Run-all, which shows a testcase once per solution, picks the
+---one under the same solution.
+---@param tcnum integer
+---@param beside table?
+---@return integer?
+function RunnerCore:row_for(tcnum, beside)
+    return self:rows_for(tcnum)[1]
+end
+
 ---The lowest unused testcase number, counting both what is on disk and the rows
 ---already added in this session but not yet saved.
 ---@return integer
@@ -942,11 +953,56 @@ function RunnerCore:next_tcnum()
     return n
 end
 
----Append a row for a new testcase. Modes whose rows are a plain list just add one;
----run-all overrides this to add the testcase to every solution.
+---The number a testcase coming back as `n` is written under: `n` while it is free, else the
+---lowest free one, so it never overwrites a testcase saved under its number since.
+---@param n integer
+---@param own boolean? the rows wearing `n` are the testcase coming back (one restored after
+---  going missing from disk), so only a file can have taken it
+---@return integer
+function RunnerCore:free_number(n, own)
+    local on_disk = testcases.buf_get_testcases(self:edit_bufnr())[n] ~= nil
+    if not on_disk and (own or not self:rows_for(n)[1]) then
+        return n
+    end
+    return self:next_tcnum()
+end
+
+---Put the testcase rows back in number order, the order a load from disk lists them in, so
+---a row added or renumbered does not jump on the next run. Each unbroken run of testcase
+---rows is ordered on its own, so the rows that are not testcases stay where they are (the
+---build step, stress's search, run-all's header of each solution).
+function RunnerCore:sort_testcase_rows()
+    local i = 1
+    while i <= #self.tcdata do
+        local j = i
+        while j <= #self.tcdata and type(self.tcdata[j].tcnum) == "number" do
+            j = j + 1
+        end
+        if j - i > 1 then
+            local run = vim.list_slice(self.tcdata, i, j - 1)
+            table.sort(run, function(a, b)
+                return a.tcnum < b.tcnum
+            end)
+            for k, tc in ipairs(run) do
+                self.tcdata[i + k - 1] = tc
+            end
+        end
+        i = j + 1
+    end
+end
+
+---Add a row for a new testcase, in number order among the others: after the last testcase
+---row, else after the build step, then sorted into place. Run-all overrides this to add the
+---testcase to every solution.
 ---@param tcnum integer
 function RunnerCore:add_testcase_row(tcnum)
-    table.insert(self.tcdata, {
+    local at = 1
+    for i, tc in ipairs(self.tcdata) do
+        if type(tc.tcnum) == "number" or tc.compile then
+            at = i + 1
+        end
+    end
+    table.insert(self.tcdata, at, {
         tcnum = tcnum,
         stdin = "",
         expected = nil,
@@ -954,6 +1010,7 @@ function RunnerCore:add_testcase_row(tcnum)
         status = "NOT RUN",
         hlgroup = "TunaDone",
     })
+    self:sort_testcase_rows()
     self.tc_size = #self.tcdata
 end
 

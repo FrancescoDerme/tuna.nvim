@@ -96,7 +96,8 @@ local detail_windows = { "so", "eo", "si", "se" }
 ---@field ui_visible boolean
 ---@field update_windows boolean redraw the selector on next update
 ---@field update_details boolean redraw the detail panes on next update
----@field update_testcase integer? selected testcase (selector line)
+---@field selected_row table? the row selected, the one the detail panes show
+---@field selected_line integer? the line the selector last drew the selected row on
 ---@field diff_view boolean
 ---@field zoom_winid integer?
 ---@field zoomed string? which detail pane is zoomed
@@ -127,7 +128,7 @@ function M.new(runner)
         ui_visible = false,
         update_windows = false,
         update_details = false,
-        update_testcase = nil,
+        selected_row = nil,
         -- Whether the selector has been moved by hand. Until it has, the UI picks the row
         -- worth looking at (`follow_row`); afterwards the choice is the user's and nothing
         -- moves it out from under them.
@@ -220,10 +221,24 @@ end
 --------------------------------------------------------------------------------
 
 ---@private
----The row currently shown in the detail panes.
+---The row selected, which the detail panes show. The selection is a row, not a line, so it
+---stays on its row when rows are added, removed or renumbered around it. Once its row is gone
+---(deleted, or the rows built anew by a run) it takes the row now on its line.
 ---@return table?
 function RunnerUI:current_row()
-    return self.runner.tcdata[self.update_testcase or 1]
+    local rows = self.runner.tcdata
+    if rows[1] and not (self.selected_row and self:row_index(self.selected_row)) then
+        self.selected_row = rows[math.min(self.selected_line or 1, #rows)]
+        self.update_details = true
+    end
+    return self.selected_row
+end
+
+---The selected row's line.
+---@return integer?
+function RunnerUI:selected_index()
+    local tc = self:current_row()
+    return tc and self:row_index(tc)
 end
 
 ---@private
@@ -366,7 +381,7 @@ function RunnerUI:legend_sections()
         { "new testcase", keys("add_testcase") },
         { "delete testcase", keys("delete_testcase") },
         { "lift out marked cases", keys("split_testcase") },
-        { "undo delete", keys("undo_delete") },
+        { "restore last deleted", keys("restore_testcase") },
         { "", "" },
         { "switch pane", switch },
         { "close", keys("close") },
@@ -550,12 +565,14 @@ end
 ---`:Tuna clean`, a checkout, a plain `rm`) leaves rows describing a state that is no
 ---longer there. A fresh `:Tuna run` reloads from disk and the question never arises.
 ---
----Two kinds of disagreement, and they have different answers. **Missing**: the
+---Three kinds of disagreement, and they have different answers. **Missing**: the
 ---testcase is gone, and the row holds the only copy of its text, so the user decides.
 ---**Changed**: the file is still there and says something else, and the file is the
----truth while the row is a cache of it, so it is simply reloaded.
+---truth while the row is a cache of it, so it is simply reloaded. **Added**: a testcase
+---on disk with no row, which gets one, unless the board lists the testcases it was asked
+---for (`runner.subset`, `:Tuna run 2 3`), whose others are left out on purpose.
 ---
----Three kinds of row legitimately have no file and are neither: the `bare` row of a
+---Three kinds of row legitimately have no file and are none of these: the `bare` row of a
 ---run with nothing to test, a row added with `n` and never written, and one whose
 ---unwritten edit is still pending — all of them are testcases being *written*, not
 ---testcases that drifted. A pending row is excluded from `changed` for the stronger
@@ -563,14 +580,15 @@ end
 ---@param tcnum integer? only this testcase
 ---@return integer[] missing ascending
 ---@return integer[] changed ascending
+---@return integer[] added ascending
 ---@return table<integer, table> disk what was read, so a caller need not read it again
 function RunnerUI:disk_drift(tcnum)
     if not self.runner.editable_testcases or self.runner.preloaded then
-        return {}, {}, {}
+        return {}, {}, {}, {}
     end
     local ok, disk = pcall(require("tuna.problem.testcases").buf_get_testcases, self.runner:edit_bufnr())
     if not ok then
-        return {}, {}, {}
+        return {}, {}, {}, {}
     end
     local seen, missing, changed = {}, {}, {}
     for _, tc in ipairs(self.runner.tcdata) do
@@ -590,9 +608,16 @@ function RunnerUI:disk_drift(tcnum)
             end
         end
     end
+    local added = {}
+    for n in pairs(self.runner.subset and {} or disk) do
+        if (tcnum == nil or n == tcnum) and not self.runner:rows_for(n)[1] then
+            added[#added + 1] = n
+        end
+    end
     table.sort(missing)
     table.sort(changed)
-    return missing, changed, disk
+    table.sort(added)
+    return missing, changed, added, disk
 end
 
 ---@private
@@ -608,37 +633,15 @@ end
 function RunnerUI:restore_missing(nums)
     local testcases = require("tuna.problem.testcases")
     local bufnr = self.runner:edit_bufnr()
-    local ok, disk = pcall(testcases.buf_get_testcases, bufnr)
-    disk = ok and disk or {}
-    -- Every number already spoken for: what is on disk now, plus the rows that are not
-    -- themselves being restored.
-    local restoring, used = {}, {}
-    for _, n in ipairs(nums) do
-        restoring[n] = true
-    end
-    for n in pairs(disk) do
-        used[n] = true
-    end
-    for _, tc in ipairs(self.runner.tcdata) do
-        if type(tc.tcnum) == "number" and not restoring[tc.tcnum] then
-            used[tc.tcnum] = true
-        end
-    end
-
     local moved = {}
     for _, n in ipairs(nums) do
         local rows = self.runner:rows_for(n)
         local tc = rows[1] and self.runner.tcdata[rows[1]]
         if tc then
-            local target = n
-            if used[target] then
-                target = 0
-                while used[target] do
-                    target = target + 1
-                end
+            local target = self.runner:free_number(n, true)
+            if target ~= n then
                 moved[#moved + 1] = n .. " as " .. target
             end
-            used[target] = true
             local written =
                 pcall(testcases.buf_save_testcase, bufnr, target, tc.stdin or "", tc.expected or "", tc.expected == "")
             if written then
@@ -652,6 +655,7 @@ function RunnerUI:restore_missing(nums)
     end
     if #moved > 0 then
         utils.notify("restored testcase " .. table.concat(moved, ", ") .. ", the original number was taken.", "WARN")
+        self.runner:sort_testcase_rows() -- renumbered, the rows go back into number order
     end
     self.update_windows = true
 end
@@ -674,7 +678,7 @@ end
 ---@param what string the action, for the prompt's options
 ---@param proceed fun()
 function RunnerUI:with_disk_settled(tcnum, what, proceed)
-    local nums, changed, disk = self:disk_drift(tcnum)
+    local nums, changed, added, disk = self:disk_drift(tcnum)
     if #changed > 0 then
         self.runner:sync_rows(changed, disk)
         self.update_windows = true
@@ -684,8 +688,20 @@ function RunnerUI:with_disk_settled(tcnum, what, proceed)
             "INFO"
         )
     end
+    if #added > 0 then
+        for _, n in ipairs(added) do
+            self.runner:add_testcase_row(n)
+        end
+        self.runner:sync_rows(added, disk)
+        self.update_windows = true
+        utils.notify(
+            "added testcase" .. (#added > 1 and "s " or " ") .. table.concat(added, ", ")
+                .. ", found on disk since the last run.",
+            "INFO"
+        )
+    end
     if #nums == 0 then
-        if #changed > 0 then
+        if #changed > 0 or #added > 0 then
             self:update_ui()
         end
         proceed()
@@ -712,7 +728,6 @@ function RunnerUI:with_disk_settled(tcnum, what, proceed)
                     self.pending[n] = nil
                     self.runner:remove_testcase_rows(n)
                 end
-                self.update_testcase = nil
                 self.update_windows = true
                 self:update_ui()
             end
@@ -962,13 +977,13 @@ function RunnerUI:select_row(idx)
     -- A row has been chosen, so the opening choice is settled: it must not overrule a row
     -- selected between the UI being built and its first render.
     self.opening = false
-    if idx == self.update_testcase then
+    local tc = self.runner.tcdata[idx]
+    if tc == self.selected_row then
         return
     end
     self:capture_pending()
-    self.update_testcase = idx
+    self.selected_row = tc
     self.update_details = true
-    local tc = self.runner.tcdata[idx]
     if tc then
         -- Remembered on the *runner*, so re-opening the UI (which builds a new one)
         -- returns to the row last looked at. An identity rather than a line number,
@@ -1105,18 +1120,11 @@ function RunnerUI:add_testcase()
         -- behind it, so it stays pending even while its (empty) panes match their render.
         self.pending[n] = { stdin = "", expected = "", fresh = true }
     end
-    self.update_windows = true
-    self:update_ui()
-    -- The row only exists on screen after the scheduled render.
+    self:goto_row(self.runner:row_for(n, self:current_row()))
+    -- Typed into once the scheduled render has put the row in the panes.
     vim.schedule(function()
         if not self.ui_visible then
             return
-        end
-        for i, tc in ipairs(self.runner.tcdata) do
-            if tc.tcnum == n and self.runner:row_editable(tc) then
-                self:goto_row(i)
-                break
-            end
         end
         local w = self.windows.si
         if w and w.winid and api.nvim_win_is_valid(w.winid) then
@@ -1179,6 +1187,8 @@ function RunnerUI:delete_testcase(tcnum)
         return
     end
     local n = tc.tcnum
+    -- What is typed into the panes and not yet captured is part of what is being lost.
+    self:capture_pending()
     local testcases = require("tuna.problem.testcases")
     local stored = testcases.buf_get_testcases(self.runner:edit_bufnr())[n]
     -- Remember what is being lost — the pane text if it was never written, the file's
@@ -1202,25 +1212,32 @@ function RunnerUI:delete_testcase(tcnum)
         -- so which of the two it was has to survive the round trip.
         expect_empty = stored ~= nil and stored.output == "",
     })
+    -- A selection deleted moves to the testcase after it, else to the row before it: in run-all,
+    -- both are in the deleted row's own solution, where every solution's rows above it lose one.
+    local sel = self:current_row()
+    local keep
+    if sel and sel.tcnum == n then
+        local at = self:row_index(sel)
+        local after = self.runner.tcdata[at + 1]
+        keep = after and self.runner:row_editable(after) and after or self.runner.tcdata[at - 1]
+    end
     self.pending[n] = nil
     self.runner:remove_testcase_rows(n)
-
-    -- Nothing left to show the pane content of; land on a real row again.
-    self.update_testcase = nil
+    self:goto_row(keep and self:row_index(keep))
     self.update_windows = true
     self:update_ui()
-    vim.schedule(function()
-        self:goto_row(math.min(self:cursor_tc(), #self.runner.tcdata))
-    end)
     -- Name the key the user actually has: this is the one message that hands out a
-    -- mapping, so it must not go stale when `undo_delete` is remapped.
-    local undo = as_list(self.config.runner_ui.mappings.undo_delete or {})[1] or "u"
-    utils.notify("testcase " .. n .. " deleted (" .. undo .. " to undo).", "INFO")
+    -- mapping, so it must not go stale when `restore_testcase` is remapped.
+    local restore = as_list(self.config.runner_ui.mappings.restore_testcase or {})[1] or "u"
+    utils.notify("testcase " .. n .. " deleted (" .. restore .. " to restore it).", "INFO")
 end
 
 ---@private
----Restore the most recently deleted testcase.
-function RunnerUI:undo_delete()
+---Restore the testcase deleted last, whatever was done since: it undoes deletions only, one
+---at a time, newest first. It goes back to its own number if that is still free, else to the
+---lowest free one, as `restore_missing` does: a testcase added since under the number would
+---otherwise be overwritten. Either way it is written under the number its row wears.
+function RunnerUI:restore_testcase()
     local stack = self.runner.deleted_testcases
     if not (stack and #stack > 0) then
         return -- nothing to restore: a key that has nothing to do says nothing
@@ -1231,26 +1248,27 @@ function RunnerUI:undo_delete()
     end
     local last = table.remove(stack)
     self:capture_pending()
-    self.runner:add_testcase_row(last.tcnum)
-    self.runner:save_testcase(last.tcnum, last.input, last.expected, last.expect_empty)
-    self.update_windows = true
-    self:update_ui()
-    utils.notify("testcase " .. last.tcnum .. " restored.", "INFO")
+    local n = self.runner:free_number(last.tcnum)
+    self.runner:add_testcase_row(n)
+    self.runner:save_testcase(n, last.input, last.expected, last.expect_empty)
+    self:goto_row(self.runner:row_for(n, self:current_row()))
+    utils.notify(
+        n == last.tcnum and ("testcase " .. n .. " restored.")
+            or ("testcase " .. last.tcnum .. " restored as " .. n .. ", the original number was taken."),
+        "INFO"
+    )
 end
 
 ---@private
----Put the selector cursor on `idx` (and make that the shown row).
----@param idx integer
+---Select row `idx` for the user. The cursor follows on the next render, which draws the
+---selector with the row in it.
+---@param idx integer?
 function RunnerUI:goto_row(idx)
-    local w = self.windows.tc
-    if not (w and w.winid and api.nvim_win_is_valid(w.winid)) then
-        return
+    if idx and self.runner.tcdata[idx] then
+        self:select_row(idx)
+        self.update_windows = true
+        self:update_ui()
     end
-    local count = api.nvim_buf_line_count(w.bufnr)
-    idx = math.max(1, math.min(idx, count))
-    pcall(api.nvim_win_set_cursor, w.winid, { idx, 0 })
-    self:select_row(idx)
-    self:update_ui()
 end
 
 ---Take the choice of row back from a selector moved by hand, and make it again: a run of the
@@ -1284,7 +1302,7 @@ function RunnerUI:follow_after_compile()
     if not (first and first.compile and self.runner.tcdata[2]) then
         return -- no build step, or nothing to move on to
     end
-    if self.update_testcase ~= 1 or first.judging then
+    if self:current_row() ~= first or first.judging then
         return
     end
     -- The build step is every source this run compiles, the solution and the helpers its
@@ -1565,7 +1583,7 @@ end
 ---selected while `show_ui` waits a tick to choose it.
 ---@param idx integer?
 function RunnerUI:lay_out(idx)
-    local row = self.runner.tcdata[idx or self.update_testcase or 1]
+    local row = idx and self.runner.tcdata[idx] or self:current_row()
     local grid = self:grid(row)
     self.drawn_layout, self.drawn_row = grid, row
     for name, title in pairs(self:titles_for(row)) do
@@ -1971,8 +1989,8 @@ function RunnerUI:show_ui()
     map_tc("split_testcase", function()
         self:split_testcase()
     end)
-    map_tc("undo_delete", function()
-        self:undo_delete()
+    map_tc("restore_testcase", function()
+        self:restore_testcase()
     end)
 
     -- Keys that would start an edit are inert on a read-only pane. Left alone they
@@ -2081,10 +2099,11 @@ function RunnerUI:show_ui()
                 return -- the grid is being laid out again; the cursor is following it
             end
             local idx = self:cursor_tc()
-            -- Anything the UI moves selects the row before the cursor event arrives, so a
-            -- selection that changes *here* is one the user made.
-            if idx ~= self.update_testcase then
+            -- The render puts the cursor on the selected row and notes its line, so a cursor
+            -- that has left that line is one the user moved.
+            if idx ~= self.selected_line then
                 self.user_moved = true
+                self.selected_line = idx
                 self:select_row(idx)
                 self:update_ui()
             end
@@ -2093,12 +2112,12 @@ function RunnerUI:show_ui()
 
     api.nvim_set_current_win(self.windows.tc.winid)
     self.update_windows = true
-    -- The row under the cursor, which is line 1 until the selector has lines to put it on.
-    -- Choosing here would leave the two disagreeing, and the first cursor event the editor
+    -- Nothing is selected, and the cursor's line is 1, until the selector has lines to put it
+    -- on. Choosing here would leave the two disagreeing, and the first cursor event the editor
     -- sends would then read as a move made by hand. `opening` says the choice is still to be
     -- made: the first render makes it, by which time the rows exist (interactive and run-all
     -- open their UI and *then* build them).
-    self.update_testcase = 1
+    self.selected_row, self.selected_line = nil, 1
     -- Opening is the board choosing again, and what it chooses is the row last looked at
     -- (`opening_row`) — which is the user's own choice, kept on the runner rather than here.
     self.opening = true
@@ -2221,7 +2240,7 @@ function RunnerUI:render_diff()
         -- the right ones, so neither the walk nor the repaint has anything to do. This
         -- runs on *every* detail render, and diffing a large output is the one cost here
         -- worth skipping whenever a render didn't change the texts.
-        local tc = self.runner.tcdata[self.update_testcase or 1]
+        local tc = self:current_row()
         local c = self.diff_cache
         if c and tc and c.tc == tc then
             local out, exp = self:diff_texts(tc)
@@ -2240,7 +2259,7 @@ function RunnerUI:render_diff()
         return nil
     end
 
-    local tc = self.runner.tcdata[self.update_testcase or 1]
+    local tc = self:current_row()
     if not tc then
         return nil
     end
@@ -2885,7 +2904,7 @@ function RunnerUI:render_selector()
         -- either an unwritten edit or, once `bare` is cleared, a saved file.
         local header
         if self.runner.row_label then
-            header = self.runner:row_label(tc)
+            header = self.runner:row_label(tc, unsaved[tc.tcnum])
         elseif tc.bare and not unsaved[tc.tcnum] then
             header = "No input"
         else
@@ -2922,18 +2941,17 @@ function RunnerUI:render_selector()
 
     local buf = self.windows.tc.bufnr
     surface.render(buf, lines)
-    -- While the choice is still the UI's, its row stays under the cursor, and follows the
-    -- list when a rebuild is shorter than it: Vim would otherwise clamp the cursor onto
-    -- another row, which is indistinguishable from a move made by hand.
+    -- The one place the cursor is put: on the selected row, whenever that row is on another
+    -- line than it was last drawn on (rows moved around it, or another row was chosen), and
+    -- while the choice is still the UI's, where Vim would otherwise clamp the cursor of a
+    -- shorter list onto another row. A row the user moved to is under the cursor already.
     local tc_win = self.windows.tc.winid
-    if not self.user_moved and self.update_testcase and tc_win and api.nvim_win_is_valid(tc_win) then
-        local want = math.max(1, math.min(self.update_testcase, #lines))
-        if want ~= self.update_testcase then
-            self:select_row(want)
-        end
-        if api.nvim_win_get_cursor(tc_win)[1] ~= want then
+    local want = self:selected_index()
+    if want and tc_win and api.nvim_win_is_valid(tc_win) then
+        if (want ~= self.selected_line or not self.user_moved) and api.nvim_win_get_cursor(tc_win)[1] ~= want then
             pcall(api.nvim_win_set_cursor, tc_win, { want, 0 })
         end
+        self.selected_line = want
     end
     api.nvim_buf_clear_namespace(buf, ns, 0, -1)
     for _, r in ipairs(regions) do
@@ -2974,9 +2992,10 @@ function RunnerUI:update_ui()
         if self.opening and next(self.runner.tcdata) ~= nil then
             self.opening = false
             if not self.user_moved then
-                self.update_testcase = self:opening_row()
+                self.selected_row, self.update_details = self.runner.tcdata[self:opening_row()], true
             end
         end
+        self:follow_after_compile()
         -- The row on screen decides the grid (the build step gets its sources and nothing
         -- else), so a row of another kind means the panes are laid out again before anything
         -- is drawn into them. The redraw renders on its own tick.
@@ -2996,11 +3015,10 @@ function RunnerUI:update_ui()
             self.update_details = true
             self:render_selector()
         end
-        self:follow_after_compile()
 
         if self.update_details then
             self.update_details = false
-            local tc = self.runner.tcdata[self.update_testcase or 1]
+            local tc = self:current_row()
             if tc then
                 local editable = self.runner:row_editable(tc)
                 -- An edit typed but not written wins over what is on disk: results

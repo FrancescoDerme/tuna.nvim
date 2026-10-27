@@ -1123,6 +1123,7 @@ function M.run(bufnr, args, opts)
         editable_testcases = source == "feed",
         interactor = interactor,
         list = list,
+        subset = list ~= nil,
         rundir = rundir,
         timeout = timeout,
         mode = "interactive",

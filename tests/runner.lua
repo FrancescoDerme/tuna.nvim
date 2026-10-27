@@ -760,7 +760,7 @@ do
     require("tuna.run.modes.multi").run(buf, { list = { "0", "7" } })
     local picked = require("tuna.run.modes.multi").active[buf]
     settled(picked)
-    t.eq("run all with numbers runs only those testcases", picked and picked.nums, { 0 })
+    t.eq("run all with numbers runs only those testcases", picked and picked:testcase_numbers(), { 0 })
     t.has("and reports one that doesn't exist", table.concat(said, "\n"), "run: testcase 7 doesn't exist.")
     require("tuna.run.modes.multi").run(buf, { list = { "7" } })
     vim.system = real_system
@@ -874,12 +874,12 @@ if iui then
     end, 20)
     -- One row *is* the session, so it is the row the UI shows: its columns are where the
     -- conversation appears, and in live it is the only row that can be typed into.
-    t.eq("the row being talked to is the row the UI shows", iui.update_testcase, 2)
+    t.eq("the row being talked to is the row the UI shows", iui:selected_index(), 2)
     local row
-    for i, r in ipairs(ir.tcdata) do
+    for _, r in ipairs(ir.tcdata) do
         if r.tcnum ~= "Compile" then
             row = r
-            iui.update_testcase = i
+            iui.selected_row = r
         end
     end
     row.log = nil
@@ -968,7 +968,7 @@ local fr = require("tuna.run.modes.interactive").active[buf]
 -- A run opens on its build step, which is shown with Errors alone, so the panes of the mode
 -- are there once the build has handed the row over.
 vim.wait(2000, function()
-    return fr ~= nil and fr.ui ~= nil and fr.ui.ui_visible and fr.ui.update_testcase ~= 1
+    return fr ~= nil and fr.ui ~= nil and fr.ui.ui_visible and fr.ui:selected_index() ~= 1
 end, 20)
 vim.wait(200, function()
     return false
@@ -1063,7 +1063,7 @@ vim.wait(200, function()
 end)
 t.eq(
     "it opens on the conversation, its columns unwrapped and scroll-bound",
-    { lr.ui.update_testcase, column(lr.ui, "se"), column(lr.ui, "so") },
+    { lr.ui:selected_index(), column(lr.ui, "se"), column(lr.ui, "so") },
     { 2, { false, true }, { false, true } }
 )
 typing_keys.i()
@@ -1169,7 +1169,7 @@ require("tuna.run.modes.interactive").run(buf, { "interactor" })
 local xr = require("tuna.run.modes.interactive").active[buf]
 -- Once the build has handed the row over, so the mode's own panes are the ones drawn.
 vim.wait(2000, function()
-    return xr ~= nil and xr.ui ~= nil and xr.ui.ui_visible and xr.ui.update_testcase ~= 1
+    return xr ~= nil and xr.ui ~= nil and xr.ui.ui_visible and xr.ui:selected_index() ~= 1
 end, 20)
 vim.wait(200, function()
     return false
@@ -1598,7 +1598,7 @@ do
     listed.ui:add_testcase()
     t.eq("a testcase added goes above the search row, which moves on", labels(), { "Compile", "TC 0", "TC 1" })
     listed.ui:delete_testcase(0)
-    listed.ui:undo_delete()
+    listed.ui:restore_testcase()
     vim.notify = quiet
     t.eq("and so does one restored", labels(), { "Compile", "TC 0", "TC 1" })
     t.eq("the search row last throughout", listed.tcdata[#listed.tcdata], listed.search_entry)
@@ -1690,6 +1690,8 @@ do
     vim.cmd("edit " .. bdir .. "/main.cpp")
     vim.bo.filetype = "cpp"
     local bbuf = vim.api.nvim_get_current_buf()
+    -- A testcase on disk, so the board keeps a testcase row once the search row is gone.
+    require("tuna.problem.testcases").buf_save_testcase(bbuf, 0, "1\n", "1\n")
     require("tuna.config").setup({
         compile_command = { cpp = { exec = bdir .. "/ccx", args = { "$(FNAME)" } } },
         run_command = { cpp = { exec = bdir .. "/solx" } },
@@ -2337,7 +2339,323 @@ gtcs.buf_save_testcase(gbuf, 1, "brand new\n", "brand new\n")
 gui:restore_missing(still_missing)
 t.eq("the newer testcase is untouched", gtcs.buf_get_testcases(gbuf)[1], { input = "brand new\n", output = "brand new\n" })
 t.eq("and the restored one takes the lowest free number", gtcs.buf_get_testcases(gbuf)[3], { input = "in1\n", output = "in1\n" })
-t.eq("with the row renumbered to match", gr.tcdata[2].tcnum, 3)
+t.eq("with the row renumbered to match, in number order", vim.tbl_map(function(tc)
+    return tc.tcnum
+end, gr.tcdata), { 0, 2, 3 })
+
+-- What the board shows stays what is on disk through the editing keys: a row added or
+-- restored goes into number order, as the next run would list it, and is selected; undo
+-- restores the testcase deleted last whatever was done since, under its own number while
+-- that is free, else under the lowest free one, never over a testcase saved there since.
+do
+    local udir = t.tempdir()
+    t.write(udir, "sol.cpp", "int main(){}\n")
+    vim.cmd("edit " .. udir .. "/sol.cpp")
+    vim.bo.filetype = "cpp"
+    local ubuf = vim.api.nvim_get_current_buf()
+    for i = 0, 2 do
+        gtcs.buf_save_testcase(ubuf, i, "in" .. i .. "\n", "out" .. i .. "\n")
+    end
+    stub_system()
+    local ur = require("tuna.run").new(ubuf)
+    ur.cc = nil
+    ur:run_testcases(gtcs.buf_get_testcases(ubuf))
+    settled(ur)
+    ur:show_ui()
+    vim.wait(400, function()
+        return false
+    end)
+    local uui = ur.ui
+    local function nums()
+        return vim.tbl_map(function(tc)
+            return tc.tcnum
+        end, ur.tcdata)
+    end
+    local function selected()
+        return ur.tcdata[uui:selected_index()].tcnum
+    end
+    local quiet = vim.notify
+    local said = t.capture_notifications()
+
+    uui:goto_row(3)
+    uui:delete_testcase(1)
+    uui:restore_testcase()
+    settled(ur) -- a restore is a save, which runs what it saved
+    t.eq("a testcase restored goes back in number order, selected", { nums(), selected() }, { { 0, 1, 2 }, 1 })
+
+    uui:delete_testcase(1)
+    uui:add_testcase()
+    vim.wait(100, function()
+        return false
+    end)
+    t.eq("a testcase added takes the lowest free number, in number order, selected", { nums(), selected() }, { { 0, 1, 2 }, 1 })
+
+    -- The number is held by the row just added though nothing is saved under it yet.
+    uui:restore_testcase()
+    settled(ur)
+    local disk = gtcs.buf_get_testcases(ubuf)
+    t.eq("undo after another action still restores the deletion, past a number an unsaved row holds", {
+        disk[1] == nil,
+        disk[3] and disk[3].input,
+        nums(),
+        selected(),
+        uui.pending[1] ~= nil,
+    }, { true, "in1\n", { 0, 1, 2, 3 }, 3, true })
+    t.has("and says where it went", table.concat(said, "\n"), "testcase 1 restored as 3, the original number was taken.")
+
+    -- And never over a testcase saved under its number since, wherever the cursor was moved.
+    uui:delete_testcase(2)
+    uui:add_testcase()
+    vim.wait(100, function()
+        return false
+    end)
+    uui.pending[2] = nil
+    ur:save_testcase(2, "brand new\n", "brand new\n")
+    settled(ur)
+    uui.user_moved = true
+    uui:restore_testcase()
+    settled(ur)
+    vim.wait(100, function()
+        return false
+    end)
+    disk = gtcs.buf_get_testcases(ubuf)
+    t.eq("a testcase saved under the number since is left as it is", { disk[2].input, disk[4] and disk[4].input }, { "brand new\n", "in2\n" })
+    t.eq("the cursor on the row restored", {
+        selected(),
+        vim.api.nvim_win_get_cursor(uui.windows.tc.winid)[1],
+    }, { 4, uui:selected_index() })
+
+    -- A testcase written to disk from elsewhere gets a row on the next re-run of the set, in
+    -- number order and with its text, the selection staying on its row; unless the board was
+    -- asked for named testcases, whose others it leaves out.
+    gtcs.buf_save_testcase(ubuf, 6, "elsewhere\n", "answer\n")
+    ur.subset = true
+    uui:with_disk_settled(nil, "re-run all", function() end)
+    t.eq("a board of named testcases adds none found on disk", nums(), { 0, 1, 2, 3, 4 })
+    ur.subset = nil
+    uui:delete_testcase(0)
+    vim.wait(100, function()
+        return false
+    end)
+    uui:goto_row(ur:rows_for(4)[1])
+    gtcs.buf_save_testcase(ubuf, 0, "also elsewhere\n", "")
+    local before = ur.tcdata[uui:selected_index()]
+    uui:with_disk_settled(nil, "re-run all", function() end)
+    local added = ur.tcdata[ur:rows_for(0)[1]]
+    t.eq("a re-run adds a row for each testcase found on disk, the selection staying on its row", {
+        nums(),
+        added and added.stdin,
+        ur.tcdata[uui:selected_index()] == before,
+    }, { { 0, 1, 2, 3, 4, 6 }, "also elsewhere\n", true })
+    t.has("and says so", table.concat(said, "\n"), "added testcases 0, 6, found on disk since the last run.")
+
+    -- Rows built anew by a fresh run leave the selection only its line, so the row on it is
+    -- the one followed from then on, and a row added above it does not take its place.
+    uui.pending[1] = nil
+    uui.user_moved = true
+    ur:run_testcases(gtcs.buf_get_testcases(ubuf))
+    settled(ur)
+    vim.wait(100, function()
+        return false
+    end)
+    local held = ur.tcdata[uui:selected_index()]
+    gtcs.buf_save_testcase(ubuf, 1, "from elsewhere\n", "")
+    uui:with_disk_settled(nil, "re-run all", function() end)
+    t.eq("after a fresh run, the selection still follows its row", ur.tcdata[uui:selected_index()] == held, true)
+
+    vim.system = real_system
+    vim.notify = quiet
+    uui:delete()
+    vim.cmd("buffer " .. gbuf)
+    vim.cmd("silent! bwipeout! " .. ubuf)
+    vim.fn.delete(udir, "rf")
+end
+
+-- With no testcases, run-all does what a normal run does: every solution runs once on empty
+-- stdin, on a bare testcase 0 named `No input`, and saving it writes the first testcase,
+-- which every solution then shows. A testcase added on the board is every solution's too.
+do
+    local edir = t.tempdir()
+    t.write(edir, "a.cpp", "int main(){}\n")
+    t.write(edir, "b.cpp", "int main(){}\n")
+    vim.cmd("edit " .. edir .. "/a.cpp")
+    vim.bo.filetype = "cpp"
+    local ebuf = vim.api.nvim_get_current_buf()
+    local quiet = vim.notify
+    vim.notify = function() end
+    stub_system()
+    require("tuna.run.modes.multi").run(ebuf)
+    local mr = require("tuna.run.modes.multi").active[ebuf]
+    settled(mr)
+    local function cases()
+        local out = {}
+        for _, tc in ipairs(mr and mr.tcdata or {}) do
+            if tc.kind == "case" then
+                out[#out + 1] = { tc.sol.name, mr:row_label(tc), tc.status }
+            end
+        end
+        return out
+    end
+    t.eq("run-all with no testcases runs every solution on a bare testcase 0", cases(), {
+        { "a.cpp", "  No input", "DONE" },
+        { "b.cpp", "  No input", "DONE" },
+    })
+    -- Named for what is typed into it from the first keystroke, as on the normal board.
+    mr.ui:goto_row(2)
+    vim.wait(100, function()
+        return false
+    end)
+    local si = mr.ui.windows.si.bufnr
+    vim.api.nvim_buf_set_lines(si, 0, -1, false, { "typed" })
+    vim.api.nvim_exec_autocmds("TextChanged", { buffer = si })
+    t.has("typing into it names it a testcase at once", vim.api.nvim_buf_get_lines(mr.ui.windows.tc.bufnr, 1, 2, false)[1], "TC 0")
+    mr.ui:discard_pending()
+    mr:save_testcase(0, "5\n", "6\n")
+    settled(mr)
+    t.eq("saved, it is the first testcase, every solution's", {
+        gtcs.buf_get_testcases(ebuf)[0],
+        vim.tbl_map(function(c)
+            return c[2]
+        end, cases()),
+    }, { { input = "5\n", output = "6\n" }, { "  TC 0", "  TC 0" } })
+    mr.ui:add_testcase()
+    vim.wait(100, function()
+        return false
+    end)
+    t.eq("and a testcase added on the board is added under every solution", vim.tbl_map(function(c)
+        return c[1] .. " " .. c[2]
+    end, cases()), { "a.cpp   TC 0", "a.cpp   TC 1", "b.cpp   TC 0", "b.cpp   TC 1" })
+    vim.system = real_system
+    vim.notify = quiet
+    mr:kill_all_processes()
+    mr:delete_ui()
+    vim.cmd("buffer " .. gbuf)
+    vim.cmd("silent! bwipeout! " .. ebuf)
+    vim.fn.delete(edir, "rf")
+end
+
+-- Run-all keeps the user under the solution they are on: a testcase deleted there selects the
+-- next one under it, though every solution above lost a row too, and one restored or added
+-- there is selected under it, the cursor with it. A delete takes what was typed and not yet
+-- captured with it, and leaves no edit behind for a testcase that is gone.
+do
+    local sdir = t.tempdir()
+    for _, name in ipairs({ "a.cpp", "b.cpp", "c.cpp" }) do
+        t.write(sdir, name, "int main(){}\n")
+    end
+    vim.cmd("edit " .. sdir .. "/a.cpp")
+    vim.bo.filetype = "cpp"
+    local sbuf = vim.api.nvim_get_current_buf()
+    for n = 0, 2 do
+        gtcs.buf_save_testcase(sbuf, n, "in" .. n .. "\n", "")
+    end
+    local quiet = vim.notify
+    vim.notify = function() end
+    stub_system()
+    require("tuna.run.modes.multi").run(sbuf)
+    local mr = require("tuna.run.modes.multi").active[sbuf]
+    settled(mr)
+    local ui = mr.ui
+    local function rest()
+        vim.wait(100, function()
+            return false
+        end)
+    end
+    local function named(idx)
+        local tc = mr.tcdata[idx]
+        return tc.sol.name .. " " .. tostring(tc.tcnum)
+    end
+    local function on()
+        return { named(ui:selected_index()), named(vim.api.nvim_win_get_cursor(ui.windows.tc.winid)[1]) }
+    end
+    for i, tc in ipairs(mr.tcdata) do
+        if tc.kind == "case" and tc.sol.name == "b.cpp" and tc.tcnum == 1 then
+            ui:goto_row(i)
+        end
+    end
+    rest()
+    ui:delete_testcase()
+    rest()
+    t.eq("a testcase deleted in run-all selects the next one under the same solution", on(), { "b.cpp 2", "b.cpp 2" })
+    ui:restore_testcase()
+    settled(mr)
+    rest()
+    t.eq("one restored is selected under the solution the user is on", on(), { "b.cpp 1", "b.cpp 1" })
+
+    vim.api.nvim_buf_set_lines(ui.windows.si.bufnr, 0, -1, false, { "typed" })
+    ui:delete_testcase()
+    rest()
+    t.eq("a testcase deleted with an edit typed into it leaves no edit behind", ui.pending[1], nil)
+    ui:restore_testcase()
+    settled(mr)
+    t.eq("and restoring it brings the edit back", gtcs.buf_get_testcases(sbuf)[1].input, "typed")
+
+    -- Rows leaving above the selection, before the render moves the cursor after its row: a
+    -- cursor event then, the cursor still on its old line, is no move by hand.
+    rest()
+    ui.user_moved = true
+    ui:delete_testcase(0)
+    vim.api.nvim_exec_autocmds("CursorMoved", { buffer = ui.windows.tc.bufnr })
+    t.eq("a cursor event before the render is not a move", named(ui:selected_index()), "b.cpp 1")
+    rest()
+    t.eq("and the cursor follows its row once drawn", on(), { "b.cpp 1", "b.cpp 1" })
+
+    ui:add_testcase()
+    rest()
+    t.eq("one added is selected under the solution the user is on", on(), { "b.cpp 0", "b.cpp 0" })
+    vim.system = real_system
+    vim.notify = quiet
+    mr:kill_all_processes()
+    mr:delete_ui()
+    vim.cmd("stopinsert")
+    vim.cmd("buffer " .. gbuf)
+    vim.cmd("silent! bwipeout! " .. sbuf)
+    vim.fn.delete(sdir, "rf")
+end
+
+-- Run-all keeps no list of its testcases beside its rows: a row renumbered by a restore is
+-- the number the grid goes on showing when it is laid out again, in every solution.
+do
+    local mdir = t.tempdir()
+    t.write(mdir, "a.cpp", "int main(){}\n")
+    t.write(mdir, "b.cpp", "int main(){}\n")
+    vim.cmd("edit " .. mdir .. "/a.cpp")
+    vim.bo.filetype = "cpp"
+    local abuf = vim.api.nvim_get_current_buf()
+    for i = 0, 2 do
+        gtcs.buf_save_testcase(abuf, i, "in" .. i .. "\n", "in" .. i .. "\n")
+    end
+    local quiet = vim.notify
+    vim.notify = function() end
+    stub_system()
+    require("tuna.run.modes.multi").run(abuf)
+    local mr = require("tuna.run.modes.multi").active[abuf]
+    settled(mr)
+    gtcs.buf_delete_testcase(abuf, 1)
+    local missing = mr.ui:disk_drift()
+    gtcs.buf_save_testcase(abuf, 1, "brand new\n", "brand new\n")
+    mr.ui:restore_missing(missing)
+    mr:remove_testcase_rows(0)
+    local by_solution = {}
+    for _, tc in ipairs(mr.tcdata) do
+        if tc.kind == "case" then
+            by_solution[#by_solution + 1] = tc.sol.name .. " " .. tc.tcnum .. " " .. tc.stdin
+        end
+    end
+    t.eq("run-all laid out again shows the numbers its rows were renumbered to", by_solution, {
+        "a.cpp 2 in2\n",
+        "a.cpp 3 in1\n",
+        "b.cpp 2 in2\n",
+        "b.cpp 3 in1\n",
+    })
+    vim.system = real_system
+    vim.notify = quiet
+    mr:kill_all_processes()
+    mr:delete_ui()
+    vim.cmd("buffer " .. gbuf)
+    vim.cmd("silent! bwipeout! " .. abuf)
+    vim.fn.delete(mdir, "rf")
+end
 
 -- `sync_rows` takes the disk's answer as it is rather than through `answer`, which
 -- normalizes *typed* text: squashing a stored empty answer to nil would turn "expect no
@@ -2626,7 +2944,7 @@ do
     settle_ms(200)
     t.eq(
         "a listed board opens on a testcase, its editable panes accented",
-        { nr.ui.update_testcase, accented(nr.ui, "eo"), accented(nr.ui, "si") },
+        { nr.ui:selected_index(), accented(nr.ui, "eo"), accented(nr.ui, "si") },
         { 2, true, true }
     )
     nr:run_single(2)
@@ -2760,12 +3078,12 @@ local boards = {
 ---Let the rows, the build and the scheduled renders settle, then say which row is shown.
 local function shown_row(r, want)
     vim.wait(3000, function()
-        return r.ui ~= nil and r.ui.ui_visible and #r.tcdata > 0 and r.ui.update_testcase == want
+        return r.ui ~= nil and r.ui.ui_visible and #r.tcdata > 0 and r.ui:selected_index() == want
     end, 20)
     vim.wait(150, function()
         return false
     end)
-    return r.ui and r.ui.update_testcase
+    return r.ui and r.ui:selected_index()
 end
 
 for _, board in ipairs(boards) do
@@ -2787,7 +3105,7 @@ for _, board in ipairs(boards) do
         return false
     end)
     local want = board.run_row and board.run_row(r) or first_real_row(r)
-    t.eq(board.name .. ": run, a silent build hands over the row the run is about", r.ui.update_testcase, want)
+    t.eq(board.name .. ": run, a silent build hands over the row the run is about", r.ui:selected_index(), want)
     r:kill_all_processes()
     r:delete_ui()
     vim.system = real_system
@@ -2826,7 +3144,7 @@ for _, board in ipairs(boards) do
             return false
         end)
         t.eq(board.name .. ": read on the build step itself, nothing opened over the board", {
-            r.ui.update_testcase,
+            r.ui:selected_index(),
             r.ui.zoom_winid,
         }, { 1, nil })
         local ran = 0
@@ -3019,9 +3337,9 @@ fresh:load_testcases(wtcs)
 fresh:show_ui()
 vim.api.nvim_exec_autocmds("CursorMoved", { buffer = fresh.ui.windows.tc.bufnr })
 vim.wait(1000, function()
-    return fresh.ui.update_testcase == 2
+    return fresh.ui:selected_index() == 2
 end, 20)
-t.eq("a cursor event while the board opens is not a move by hand", { fresh.ui.update_testcase, fresh.ui.user_moved }, { 2, false })
+t.eq("a cursor event while the board opens is not a move by hand", { fresh.ui:selected_index(), fresh.ui.user_moved }, { 2, false })
 fresh:delete_ui()
 vim.system = real_system
 
@@ -3036,7 +3354,7 @@ end, 20)
 local held_tc = held.ui.windows.tc
 vim.api.nvim_win_set_cursor(held_tc.winid, { 1, 0 })
 vim.api.nvim_exec_autocmds("CursorMoved", { buffer = held_tc.bufnr })
-t.eq("the selector can be taken over mid-conversation", held.ui.update_testcase, 1)
+t.eq("the selector can be taken over mid-conversation", held.ui:selected_index(), 1)
 held:run_testcases()
 vim.wait(200, function()
     return false
@@ -3047,7 +3365,7 @@ end, 20)
 vim.wait(200, function()
     return false
 end)
-t.eq("and the sessions that follow leave it where it was put", held.ui.update_testcase, 1)
+t.eq("and the sessions that follow leave it where it was put", held.ui:selected_index(), 1)
 held:kill_all_processes()
 held:delete_ui()
 vim.system = real_system
@@ -3059,10 +3377,10 @@ local shrink = require("tuna.run").new(wbuf)
 shrink:load_testcases(wtcs)
 shrink:show_ui()
 vim.wait(1000, function()
-    return shrink.ui ~= nil and shrink.ui.update_testcase == 2
+    return shrink.ui ~= nil and shrink.ui:selected_index() == 2
 end, 20)
 shrink.ui:follow_row(3) -- as a conversation does, ending on the row it was held on
-t.eq("the board can choose the last row", { shrink.ui.update_testcase, shrink.ui.user_moved }, { 3, false })
+t.eq("the board can choose the last row", { shrink.ui:selected_index(), shrink.ui.user_moved }, { 3, false })
 shrink:load_testcases({ [0] = { input = "1\n", output = "1\n" } })
 vim.wait(1000, function()
     return #shrink.tcdata == 2
@@ -3070,7 +3388,7 @@ end, 20)
 vim.wait(200, function()
     return false
 end)
-t.eq("a shorter list moves the choice down with it", { shrink.ui.update_testcase, shrink.ui.user_moved }, { 2, false })
+t.eq("a shorter list moves the choice down with it", { shrink.ui:selected_index(), shrink.ui.user_moved }, { 2, false })
 t.eq("with the cursor on it", vim.api.nvim_win_get_cursor(shrink.ui.windows.tc.winid)[1], 2)
 shrink:delete_ui()
 vim.system = real_system
@@ -3084,7 +3402,7 @@ local opening = require("tuna.run").new(wbuf)
 opening:load_testcases(wtcs)
 opening:show_ui()
 vim.wait(1000, function()
-    return opening.ui.update_testcase == 2
+    return opening.ui:selected_index() == 2
 end, 20)
 local build_row = opening.tcdata[1]
 t.eq("listed, with nothing built, the board opens on the first testcase", opening.ui:initial_row(), 2)
@@ -3148,16 +3466,16 @@ for _, building in ipairs({
         return false
     end)
     t.eq(building.name .. ": a run opens on the build while it is still going", {
-        r.ui.update_testcase,
+        r.ui:selected_index(),
         r.compile_entry.running,
     }, { 1, true })
     held_exit({ code = 0, signal = 0, stdout = "", stderr = "" })
     vim.wait(2000, function()
-        return r.ui.update_testcase ~= 1
+        return r.ui:selected_index() ~= 1
     end, 20)
     -- Off the build and onto a real row: which one is the mode's business (interactive walks
     -- its sessions from there), the point being that it waited for the build to end.
-    t.ok(building.name .. ": and moves on once it ends with nothing to say", r.ui.update_testcase >= 2, r.ui.update_testcase)
+    t.ok(building.name .. ": and moves on once it ends with nothing to say", r.ui:selected_index() >= 2, r.ui:selected_index())
     t.eq(building.name .. ": the build stops saying it is running", r.compile_entry.running, false)
     r:kill_all_processes()
     r:delete_ui()
@@ -3182,7 +3500,7 @@ end, 20)
 vim.wait(200, function()
     return false
 end)
-t.eq("a build that printed something keeps the row, so it can be read", noisy.ui.update_testcase, 1)
+t.eq("a build that printed something keeps the row, so it can be read", noisy.ui:selected_index(), 1)
 noisy:delete_ui()
 vim.system = real_system
 
@@ -3207,26 +3525,29 @@ local function move_to(row)
     vim.api.nvim_exec_autocmds("CursorMoved", { buffer = w.bufnr })
 end
 move_to(3)
-t.eq("moving the selector by hand selects that row", { chosen.ui.update_testcase, chosen.ui.user_moved }, { 3, true })
+move_to(2)
+t.eq("moving back before a render selects the row moved back to", chosen.ui:selected_index(), 2)
+move_to(3)
+t.eq("moving the selector by hand selects that row", { chosen.ui:selected_index(), chosen.ui.user_moved }, { 3, true })
 chosen:update_ui(true)
 vim.wait(300, function()
     return false
 end)
-t.eq("and results landing leave it where it was put", chosen.ui.update_testcase, 3)
+t.eq("and results landing leave it where it was put", chosen.ui:selected_index(), 3)
 
 C3.execute({ "run" })
 vim.wait(3000, function()
-    return chosen.completed and chosen.ui.update_testcase == 2
+    return chosen.completed and chosen.ui:selected_index() == 2
 end, 20)
-t.eq("a run asked for hands the choice back", { chosen.ui.update_testcase, chosen.ui.user_moved }, { 2, false })
+t.eq("a run asked for hands the choice back", { chosen.ui:selected_index(), chosen.ui.user_moved }, { 2, false })
 
 move_to(3)
 chosen.ui:delete()
 C3.show_runner_ui(wbuf)
 vim.wait(2000, function()
-    return chosen.ui.ui_visible and chosen.ui.update_testcase == 3
+    return chosen.ui.ui_visible and chosen.ui:selected_index() == 3
 end, 20)
-t.eq("and reopening the board returns to the row last looked at", chosen.ui.update_testcase, 3)
+t.eq("and reopening the board returns to the row last looked at", chosen.ui:selected_index(), 3)
 chosen:kill_all_processes()
 chosen:delete_ui()
 C3.runners[wbuf] = nil
@@ -3260,7 +3581,7 @@ local grid = require("tuna.run").new(wbuf)
 grid:load_testcases(wtcs)
 grid:show_ui()
 vim.wait(1000, function()
-    return grid.ui.update_testcase == 2
+    return grid.ui:selected_index() == 2
 end, 20)
 t.eq("a testcase row is shown with the mode's panes", drawn_panes(grid.ui), FULL_GRID)
 local pane_buffers = {}

@@ -146,6 +146,18 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     diff mode, what a diff paints (only the disagreeing tokens on a line that disagrees, a cell
     where a line ends short, a line the other lacks coloured whole), `:w` from a read-only pane,
     a file opened from the board opening where the board was opened over and the board put away,
+    a row added or restored going into number order and selected, the cursor with it, a
+    restore after another action restoring the deletion under a free number when its own was
+    taken, never over the testcase saved there or past a row added and not saved, a row
+    renumbered by a restore moving into order, a testcase written elsewhere given a row by a
+    re-run of the set, in order and keeping the selection, and not on a board of named ones,
+    the selection following its row after a fresh run built the rows anew, run-all laid out
+    again keeping the numbers its rows were renumbered to, run-all with no testcases running
+    every solution on a bare testcase 0 that saving makes every solution's first testcase,
+    and a testcase added there added under every solution, the selection staying under the
+    solution it is on through a delete, a restore and an add, a delete taking the edit typed and
+    not yet captured, a cursor event before the render that follows rows moved being no move by
+    hand, and a move back before a render selecting the row moved back to,
     a board kept between runs closing back to the window it was last shown over, and a zoom
     key doing nothing in a zoom). `testcases.lua` also covers the `single_file` rewrite keeping
     untouched testcases, a conversion through every backend keeping an answer

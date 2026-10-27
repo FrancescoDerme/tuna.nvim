@@ -53,19 +53,32 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
   interfaces skip a pane whose buffer was wiped (`:%bwipeout`).
 - Rendering is **coalesced to one per tick** (`render_scheduled`, flags `update_windows` and
   `update_details`).
-- **Which row is shown** is the UI's choice until the selector is moved by hand: `user_moved` is
-  set only when a `CursorMoved` actually *changes* the selection, which a code-driven move never
-  does (those select first). `follow_row` is how the UI chooses, a no-op once the user has.
-  Three things choose: `show_ui` takes `opening_row()` on its scheduled tick, *after* the rows
+- **The selection is a row, not a line** (`selected_row`, read through `current_row`): it stays
+  on its row when rows are added, removed or renumbered around it, so nothing that moves rows
+  has to remember it. A row gone (deleted, or the rows built anew by a run) leaves it the row
+  now on `selected_line`, the line the selector last drew it on. A delete of the selected row
+  picks its neighbour first (the testcase after it, else the row before it): in run-all every
+  solution above loses a row too, and the line would land in the next solution. A row the
+  board puts there for the user (added, restored) is `RunnerCore:row_for`, in run-all the one
+  under the solution the user is on.
+- **The cursor is put in one place**, `render_selector`, on the selected row: whenever that row
+  is drawn on another line than `selected_line` (rows moved around it, or code chose another),
+  and always while the choice is the UI's, where Vim would clamp the cursor of a shorter list
+  onto another row. `goto_row` only selects, and the cursor follows once the selector holds
+  the row. A move by hand is a `CursorMoved` that leaves `selected_line`, which the handler
+  sets at once, or a move back before the render would read as none. It is the line that is
+  compared, not the row: an event between rows moving and the render finds the cursor on its
+  old line, and that is no move.
+- **Which row is shown** is the UI's choice until the selector is moved by hand (`user_moved`).
+  `follow_row` is how the UI chooses, a no-op once the user has. Three things choose: `show_ui` takes `opening_row()` on its scheduled tick, *after* the rows
   exist (interactive and run-all build theirs after opening, so deciding earlier lands on line
   1); every render calls `follow_after_compile`, leaving a Compile row that ended with exit 0
   and printed nothing (a failed or talkative build is what answers the run, and one still
   running must not move under the user); and interactive's `run_one_session` follows the row it
   talks to (one session at a time, live's row the only typable one). While the choice is the
   UI's, cursor and selection must agree, or the editor's own cursor event reads as a move by
-  hand: `show_ui` leaves `update_testcase` on line 1 until the tick chooses, and
-  `render_selector` puts the cursor back on the chosen row where a rebuild would clamp it
-  elsewhere. The choice returns to the UI through `choose_row_again` (`user_moved` off,
+  hand: `show_ui` selects nothing, `selected_line` on 1, until the tick chooses. The choice
+  returns to the UI through `choose_row_again` (`user_moved` off,
   `opening` on) on a run of the whole set that was *asked for* (`commands.run_testcases`, the
   UI's `run_all_again`, not a single row's `built_first`), so every run starts as the first did,
   and in `show_ui`, which reopens on `last_row_id`, kept on the runner.
@@ -99,9 +112,17 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
   blocks quitting with E37/E162.
 - `capture_pending` runs before anything repoints the panes. `discard_pending` clears `pending`
   and the flags together.
-- Keys with no text to author: `n` adds a row, `x` deletes, `u` undoes a delete, `c` splits;
+- Keys with no text to author: `n` adds a row, `x` deletes, `u` restores, `c` splits;
   structural keys wait for `idle()`. A split reads the unwritten pane text without saving it
   (that would run the marked-up input); the cases run once the case-count question settles.
+- **The board lists what is on disk, as a load would.** A row added, restored, split off or
+  renumbered goes into number order (`RunnerCore:sort_testcase_rows`).
+- `u` (`restore_testcase`) restores the testcase deleted last, whatever was done since (a
+  stack on the runner, newest first), and is named for that, as it is not Vim's undo of the
+  last action. It and `restore_missing` write a testcase back through
+  `RunnerCore:free_number`: its own number while that is free, else the lowest free one. `n`
+  takes the lowest free number, the one just deleted included, and a restore over it would
+  overwrite what was saved there since.
 
 **Gates** (all menus, all ending in `Keep editing`/`Stop`, which is also what dismissal gives)
 - `with_pending_settled(tcnum, what, proceed, after_save)`: re-running with unsaved edits asks
@@ -122,8 +143,13 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
 - `with_disk_settled` / `disk_drift` compare rows with disk in one read. It excludes `bare`
   rows, unsaved `n` rows and pending rows.
   - **Changed** on disk: reload silently via `sync_rows` and say so once.
+  - **Added** on disk, a testcase with no row: on a re-run of the set (`<C-r>`), give it one,
+    silently and said once, the file being the only copy. Not on a board of the testcases a
+    run named (`runner.subset`: `:Tuna run 2 3`, run-all's and interactive's numbers), which
+    leaves the others out on purpose.
   - **Missing**: ask `Restore and re-run` / `Discard` / `Stop`. `restore_missing` writes back to
-    the original number if it is free, else the lowest free number, renumbering the row.
+    the original number if it is free, else the lowest free number, renumbering the row,
+    which then moves into number order.
   - Every branch renders, and the re-run finds rows by identity (`row_index`).
 
 **Quitting and focus**

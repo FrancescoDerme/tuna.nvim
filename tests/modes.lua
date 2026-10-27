@@ -372,7 +372,7 @@ do
     C.execute({ "run", "all", "1" })
     settle()
     local ar = require("tuna.run.modes.multi").active[abuf]
-    t.eq(":Tuna run all with a number runs that testcase alone", ar and ar.nums, { 1 })
+    t.eq(":Tuna run all with a number runs that testcase alone", ar and ar:testcase_numbers(), { 1 })
     if ar then
         ar:kill_all_processes()
         ar:delete_ui()
