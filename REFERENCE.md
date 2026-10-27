@@ -124,7 +124,7 @@ Opens the runner UI in the mode the problem is set to.
 - `edit` opens it on testcase `n`.
   Bare `:Tuna testcase` and `:Tuna testcase n` do the same.
 - `delete` removes testcase `n`, after asking.
-- `generate` writes a testcase from your generator, the one stress uses, handed a seed of its own that the message names.
+- `generate` writes a testcase from your generator, the same one that stress uses.
   It has an input and no answer, so it reads `DONE` unless your solution crashes, runs out of time or a checker judges it.
   On the runner UI, `t` does the same.
 

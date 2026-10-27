@@ -65,7 +65,7 @@ testcases_input_file_format = { "$(FNOEXT)_input$(TCNUM).txt", "input$(TCNUM).tx
 Where the testcases are stored can be set in `testcases_directory`: it's relative to the source by default, but can be an absolute path unrelated to the problem.
 
 Add, edit, and delete testcases with [`:Tuna testcase add|edit|delete`](REFERENCE.md#testcase).
-`:Tuna testcase generate` writes one from your generator, an input with no answer, to read your solution's output on or to time it.
+`:Tuna testcase generate` writes one from your generator, an input with no answer, to debug your solution on it.
 This can also be done in place in the runner UI, which is usually where you want to be.
 [`:Tuna testcase split`](REFERENCE.md#testcase-split) breaks one testcase into several: mark the cases inside it with a line of `-`, and each bracketed region becomes a testcase of its own.
 

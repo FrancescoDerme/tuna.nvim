@@ -115,8 +115,8 @@ the problem.
 
 Add, edit, and delete testcases with `:Tuna testcase add/edit/delete`.
 `:Tuna testcase generate` writes one from your generator, an input with no
-answer, to read your solution's output on or to time it. This can also be done
-in place in the runner UI, which is usually where you want to be.
+answer, to debug your solution on it. This can also be done in place in the
+runner UI, which is usually where you want to be.
 `:Tuna testcase split` breaks one testcase into several: mark the cases inside
 it with a line of `-`, and each bracketed region becomes a testcase of its
 own.
@@ -442,11 +442,10 @@ Every command is a subcommand of `:Tuna` with tab-completion, and a lowercase
         - `edit` opens it on testcase `n`. Bare `:Tuna testcase` and
           `:Tuna testcase n` do the same.
         - `delete` removes testcase `n`, after asking.
-        - `generate` writes a testcase from your generator, the one stress
-          uses, handed a seed of its own that the message names. It has an
-          input and no answer, so it reads `DONE` unless your solution
-          crashes, runs out of time or a checker judges it. On the runner UI,
-          `t` does the same.
+        - `generate` writes a testcase from your generator, the same one that
+          stress uses. It has an input and no answer, so it reads `DONE`
+          unless your solution crashes, runs out of time or a checker judges
+          it. On the runner UI, `t` does the same.
 
         Without a number, `edit` and `delete` act on the only testcase when
         there is one, and ask which when there are several. The editor shows
