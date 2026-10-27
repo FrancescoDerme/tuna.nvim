@@ -241,7 +241,7 @@ If Neovim's directory is the problem you are leaving, or a folder inside it, it 
 From the contest's folder, or anywhere else, it stays.
 At either end of the contest they say so rather than wrapping around.
 
-`:Tuna next scaffold` and `:Tuna prev scaffold` go round the source files of the problem you are on instead, its solutions and helpers, in name order, wrapping around.
+`:Tuna next scaffold` and `:Tuna prev scaffold` go round the source files of the problem you are on instead, in name order, wrapping around.
 
 Bare `:Tuna next` and `:Tuna prev` mean the problem.
 

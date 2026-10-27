@@ -289,10 +289,10 @@ reading the verdict, is in |tuna-submit-setup|.
 GETTING AROUND                                               *tuna-navigation*
 
 - `:Tuna next` / `:Tuna prev` step between the problems of a contest.
-  `:Tuna next scaffold` goes round the files of the problem you are on, its
-  solutions and helpers.
-- `:Tuna go problem` / `:Tuna go contest` go back to what you were working
-  on. The menu also provides access to your recent contests and problems.
+  `:Tuna next scaffold` goes round the files of the problem you are on.
+- `:Tuna go problem` / `:Tuna go contest` move you back to what you were
+  working on. The menu also provides access to your recent contests and
+  problems.
 - `:Tuna pin` puts the problem you are on aside to solve later, and pinning it
   again lets it go. The menu provides access to your pinned problems.
 
@@ -552,8 +552,8 @@ Every command is a subcommand of `:Tuna` with tab-completion, and a lowercase
         around.
 
         `:Tuna next scaffold` and `:Tuna prev scaffold` go round the source
-        files of the problem you are on instead, its solutions and helpers,
-        in name order, wrapping around.
+        files of the problem you are on instead, in name order, wrapping
+        around.
 
         Bare `:Tuna next` and `:Tuna prev` mean the problem.
 
