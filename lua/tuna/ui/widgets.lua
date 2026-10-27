@@ -446,7 +446,8 @@ function M.editor(bufnr, tcnum, input_content, output_content, callback, restore
     local ui = cfg.editor_ui
     local vim_width, vim_height = utils.get_ui_size()
     local band_row, band_h = utils.float_band()
-    local width = math.floor(ui.width * vim_width)
+    -- `width` is the two panes together, borders included, as every board's size is.
+    local width = math.max(1, math.floor(ui.width * vim_width / 2) - 2)
     local height = math.max(1, math.min(math.floor(ui.height * vim_height), band_h - 2))
     -- Centred on the *footprint*: a bordered float's `row` is where its border is
     -- drawn, so the two border rows count towards the height being centred (see the
@@ -656,12 +657,33 @@ local function wrapped_rows(lines, width)
     return rows
 end
 
+---One `preview.width` for a menu whose preview varies (see `lua/tuna/ui/CLAUDE.md`): the
+---widest of its `names` and its `previews`, between half and seven tenths of the editor.
+---@param names string[] its titles and items
+---@param previews { title: string?, lines: string[]? }[] every preview it will show
+---@return integer
+function M.sequence_width(names, previews)
+    local widest = 0
+    for _, name in ipairs(names) do
+        widest = math.max(widest, api.nvim_strwidth(name))
+    end
+    for _, p in ipairs(previews) do
+        widest = math.max(widest, api.nvim_strwidth(p.title or "") + 2) -- drawn with a space each side
+        for _, line in ipairs(p.lines or {}) do
+            widest = math.max(widest, api.nvim_strwidth(line))
+        end
+    end
+    local vim_width = utils.get_ui_size()
+    return math.max(math.floor(vim_width * 0.5), math.min(widest + 4, math.floor(vim_width * 0.7)))
+end
+
 ---Open a generic single-choice menu. `on_choice`
 ---receives the 1-based index of the picked item. An optional `preview` renders a
 ---read-only pane *under* the menu (used by `:Tuna clean` to show the file about to
 ---be deleted): scroll it with `<C-d>`/`<C-u>`, or step into it with the pane-switch
 ---keys (`switch_window_keys`) and back. Pass `preview.width` to pin the whole float
----to a fixed width so a sequence of menus doesn't jump size between items.
+---to a fixed width so a sequence of menus doesn't jump size between items
+---(`sequence_width`).
 ---@param items string[]? menu labels, or `nil` to re-render after a resize
 ---@param title string? floating window title
 ---@param on_choice fun(idx: integer)? called with the chosen index

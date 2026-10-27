@@ -74,10 +74,12 @@ problems and remembering them. The rules that hold everywhere are in the root `C
     its role's templates is never offered, an empty one included; any other empty file is
     always unused.
   - The flow is floats only: a `form` for directory, depth and threshold, then one
-    `Delete`/`Keep`/`Stop` menu per file with a preview, sorted by match, at a fixed width,
-    each starting on the answer last given (`ui.row`), and the same for directories. A
-    pinned file (`scan` marks it) comes after the other files, is titled `pinned, …` and
-    starts on `Keep` whatever was answered last, so a run of Deletes cannot carry it along.
+    `Delete`/`Keep`/`Stop` menu per file with a preview, sorted by match, at one width for the
+    pass (`widgets.sequence_width`, over every title and preview, each preview read again at its
+    prompt, since the pass deletes as it goes), each starting on the answer last given
+    (`ui.row`), and the same for directories. A pinned file (`scan` marks it) comes after the other files, is
+    titled `pinned, …` and starts on `Keep` whatever was answered last, so a run of Deletes
+    cannot carry it along.
   - **Scan cost is bounded**: pruning at traversal (`descend_into`, `clean.skip_directories`,
     dot-directories, judged by the directory's own name at every depth: `vim.fs.dir` hands
     `skip` the path relative to the root), a shared `clean.max_entries` budget reported through
@@ -183,8 +185,9 @@ problems and remembering them. The rules that hold everywhere are in the root `C
   complexity has a pane of its own, without its label, because at the end of the notes it would
   move from entry to entry and long notes would push it out of view. Notes and Complexity are
   `fit` panes, as tall as the longest of theirs in the library, so they do not jump between
-  entries. The picker's size is `library.width`/`height`, defaulting to the runner UI's
-  `popup_ui` share: options of its own, since `popup_ui` names the runner UI. Don't add a
+  entries. The picker's size is `library.width`/`height`, options of its own, since `popup_ui`
+  names the runner UI, and the runner UI's share while unset (read in `preview_opts`, so a
+  `popup_ui` set by the user carries over). Don't add a
   file-then-snippet route or a telescope picker beside it: the search covers a file (its name
   finds its snippets), and telescope's preview cannot be entered to read the code. Arguments
   after `:Tuna lib` are ignored, so a mapping written with `snippet` or `search` still opens it.

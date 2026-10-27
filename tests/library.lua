@@ -158,12 +158,17 @@ do
         width = math.floor(cols * 0.5 + 0.5),
         height = math.floor(rows * 0.6 + 0.5),
     })
-    local defaults = require("tuna.config").defaults
-    t.eq(
-        "by default the runner UI's",
-        { defaults.library.width, defaults.library.height },
-        { defaults.popup_ui.total_width, defaults.popup_ui.total_height }
-    )
+    -- Unset, the runner UI's, the other board tuna draws over the editor, however it is set.
+    require("tuna").setup({ library = { path = lib }, popup_ui = { width = 0.7, height = 0.5 } })
+    widgets.menu = function(_, _, _, _, _, preview)
+        got = { preview = preview }
+    end
+    library.open()
+    widgets.menu = real_menu
+    t.eq("unset, it is the runner UI's size", got.preview.beside, {
+        width = math.floor(cols * 0.7 + 0.5),
+        height = math.floor(rows * 0.5 + 0.5),
+    })
     t.eq("beside the list, notes and complexity that fit over the code", {
         vim.tbl_map(function(p)
             return { p.title, p.fit, p.wrap }

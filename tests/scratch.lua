@@ -76,6 +76,7 @@ end
 vim.cmd("enew")
 scratch.start()
 t.eq("starting a scratch asks which template", asked and #asked.items, 4)
+t.eq("as wide as the widest template it names", asked and asked.preview.width, require("tuna.ui.widgets").sequence_width(asked.items, {}))
 t.eq("with an empty file as the last choice", asked and asked.items[4], "Empty file")
 t.eq("previewing the body the scratch would get", asked and asked.preview.content(3).lines, { "#define CF", "" })
 asked.dismiss()
@@ -126,6 +127,16 @@ scratch.start()
 t.eq("an emptied scratch goes straight to the template question", asked and asked.items[#asked.items], "Empty file")
 asked.choose(3)
 t.eq("and gets the newly chosen template", vim.api.nvim_buf_get_lines(0, 0, -1, false), { "#define CF" })
+
+-- What a question previews counts towards its width as its names do.
+local wide = string.rep("x", 50)
+vim.api.nvim_buf_set_lines(0, 0, -1, false, { wide })
+vim.cmd("silent write")
+vim.cmd("enew")
+scratch.start()
+local cols = require("tuna.utils").get_ui_size()
+t.eq("the resume question is as wide as what the scratch holds", asked and asked.preview.width, math.max(math.floor(cols * 0.5), math.min(#wide + 4, math.floor(cols * 0.7))))
+asked.dismiss()
 widgets.menu = real_menu
 
 --------------------------------------------------------------------------------

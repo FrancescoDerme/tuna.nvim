@@ -880,39 +880,22 @@ local function confirm_title(files, i)
     return ("[%d/%d] %s%s"):format(i, #files, f.pinned and "pinned, " or "", f.reason)
 end
 
----A single width to use for *every* confirmation menu in a pass, so the float doesn't
----jump size as names and contents vary from one item to the next. It fits the longest
----thing shown — a menu title, or a preview-pane title (+2 for its surrounding spaces)
----— then clamps to `clean.min_width`/`clean.max_width` (fractions of the editor
----width); anything longer truncates and the preview scrolls horizontally.
----@param titles string[] the menu titles this pass will show
----@param subtitles string[] the preview-pane titles this pass will show
----@param cfg table
----@return integer
-local function menu_width(titles, subtitles, cfg)
-    local longest = 0
-    for _, t in ipairs(titles) do
-        longest = math.max(longest, #t)
-    end
-    for _, t in ipairs(subtitles) do
-        longest = math.max(longest, #t + 2)
-    end
-    local vim_width = utils.get_ui_size()
-    local clean = cfg.clean or {}
-    local lo = math.floor(vim_width * (clean.min_width or 0.5))
-    local hi = math.floor(vim_width * (clean.max_width or 0.7))
-    return math.max(lo, math.min(longest + 4, hi))
-end
-
----@param files { path: string, rel: string, reason: string, sim: number, pinned: boolean? }[]
----@param cfg table
----@return integer
-local function confirm_width(files, cfg)
-    local titles, subtitles = {}, {}
-    for i = 1, #files do
-        titles[i], subtitles[i] = confirm_title(files, i), files[i].rel
-    end
-    return menu_width(titles, subtitles, cfg)
+---What a file's prompt shows below it: the file, or for a build, which has no text, how big
+---and how old it is.
+---@param f { path: string, rel: string, build: boolean? }
+---@return table preview
+local function file_preview(f)
+    local stat = f.build and vim.uv.fs_stat(f.path)
+    local about = stat
+        and ("A compiled program, %d KiB, built %s."):format(
+            math.ceil(stat.size / 1024),
+            os.date("%Y-%m-%d %H:%M", stat.mtime.sec)
+        )
+    return {
+        title = f.rel,
+        lines = about and { about } or vim.split(utils.read_file(f.path) or "", "\n", { plain = true }),
+        filetype = not f.build and vim.filetype.match({ filename = f.path }) or nil,
+    }
 end
 
 ---Confirm and delete the candidate files one at a time, via a menu per file.
@@ -928,21 +911,10 @@ local function confirm_each(files, i, restore, stats, ui, done)
         return done()
     end
     local f = files[i]
-    -- Preview the file to be deleted in a pane below the prompt: scroll it with
-    -- <C-d>/<C-u>, or step into it with the pane-switch keys (`switch_window_keys`). A build
-    -- has no text to show, so it says how big and how old it is.
-    local stat = f.build and vim.uv.fs_stat(f.path)
-    local about = stat
-        and ("A compiled program, %d KiB, built %s."):format(
-            math.ceil(stat.size / 1024),
-            os.date("%Y-%m-%d %H:%M", stat.mtime.sec)
-        )
-    local preview = {
-        title = f.rel,
-        lines = about and { about } or vim.split(utils.read_file(f.path) or "", "\n", { plain = true }),
-        filetype = not f.build and vim.filetype.match({ filename = f.path }) or nil,
-        width = ui.width,
-    }
+    -- Read now rather than kept from the pass's start, which only measured it: scroll it with
+    -- <C-d>/<C-u>, or step into it with the pane-switch keys (`switch_window_keys`).
+    local preview = file_preview(f)
+    preview.width = ui.width
     -- A pinned file starts on Keep, whatever was answered last: a run of Deletes must not carry
     -- a problem put aside on purpose along with it.
     local start = f.pinned and 2 or ui.row
@@ -1046,6 +1018,7 @@ local function confirm_dirs(dirs, i, restore, stats, ui, done)
     if d.skip then
         return confirm_dirs(dirs, i + 1, restore, stats, ui, done)
     end
+    -- Listed now: a child the pass has deleted since its start is gone from it.
     local preview = { title = d.rel .. "/", lines = dir_listing(d.path), width = ui.width }
     local title = ("[%d/%d] %s"):format(i, #dirs, prune_reason(d))
     widgets.menu({ "Delete", "Keep", "Stop" }, title, function(idx)
@@ -1141,13 +1114,14 @@ local function prune_dirs(root, cfg, bufnr, restore, stats, depth, done)
     if #found == 0 then
         return done()
     end
-    local titles, subtitles = {}, {}
+    local titles, previews = {}, {}
     for i, d in ipairs(found) do
         d.rel = d.path:sub(#root + 2) -- path relative to the scanned root
-        titles[i], subtitles[i] = ("[%d/%d] %s"):format(i, #found, prune_reason(d)), d.rel .. "/"
+        titles[i] = ("[%d/%d] %s"):format(i, #found, prune_reason(d))
+        previews[i] = { title = d.rel .. "/", lines = dir_listing(d.path) }
     end
     confirm_dirs(found, 1, restore, stats, {
-        width = menu_width(titles, subtitles, cfg),
+        width = widgets.sequence_width(titles, previews),
         notice = truncation_notice(stats, root, cfg),
     }, done)
 end
@@ -1304,8 +1278,12 @@ local function scan_and_confirm(dir, cfg, restore, depth, threshold, bufnr)
     else
         -- A partial scan is reported as a pane above each prompt (see
         -- `truncation_notice`), not as a command-line message.
+        local titles, previews = {}, {}
+        for i, f in ipairs(files) do
+            titles[i], previews[i] = confirm_title(files, i), file_preview(f)
+        end
         confirm_each(files, 1, restore, stats, {
-            width = confirm_width(files, cfg),
+            width = widgets.sequence_width(titles, previews),
             notice = truncation_notice(stats, dir, cfg),
         }, then_dirs)
     end

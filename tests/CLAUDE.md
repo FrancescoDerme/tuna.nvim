@@ -17,7 +17,9 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
   - `surfaces.lua`: conformance of every surface to the `surface.lua` contract, every float
     tagged before it is entered and its title centred, no float drawing a statusline of its own
     unless the statusline is global (read off the screen), every `runner_ui.mappings` key still
-    resolving to an action, the key legend's two columns closing together when one is closed
+    resolving to an action, the testcase editor's two panes together `editor_ui.width` of the
+    editor, a menu of varying previews as wide as the widest, between half and seven tenths
+    of the editor, the key legend's two columns closing together when one is closed
     with `:q`, a menu's starting row and preview, a menu's search (opened typing, narrowing the
     list before `<CR>` reads it, `j` typed and `<Down>` moving, the pane walk,
     typing again only where it was left typing, completion turned off in it and in `input`,
@@ -86,8 +88,8 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     them, Stop writing nothing, a broken configured helper only reported), `clean` recognising
     an untouched scaffold, and completion of roles and languages;
   - `scratch.lua`: the templates a scratch can start from, when a scratch is resumed, the
-    resume/restart and template menus, and absorbing keeping the header of the template actually
-    used;
+    resume/restart and template menus (the latter as wide as the templates it names), and
+    absorbing keeping the header of the template actually used;
   - `navigate.lua`: the next and previous problem opened, Neovim's directory moving along only
     from the problem left or a folder inside it (by real path), staying in the contest's folder
     and with `cd_command = false`, from a runner UI pane the window under it opening the

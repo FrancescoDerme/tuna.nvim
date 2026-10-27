@@ -103,8 +103,8 @@ function M.relayout(windows, config, init_winid, status_rows, layout)
     if config.split_ui.relative_to_editor then
         total_width, total_height = utils.get_ui_size()
     end
-    total_width = math.floor(total_width * config.split_ui.total_width + 0.5)
-    total_height = math.floor(total_height * config.split_ui.total_height + 0.5)
+    total_width = math.floor(total_width * config.split_ui.width + 0.5)
+    total_height = math.floor(total_height * config.split_ui.height + 0.5)
 
     -- Outer frame window off the editor edge.
     local fw = get_first_window(layout)

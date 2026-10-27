@@ -111,6 +111,14 @@ specific Vim error about a buffer the user never opened.
 - Geometry: everything sits inside `utils.float_band()` (one-row margin top and bottom).
   Stacked panes touch (`PANE_STEP = 2`), and heights are allotted notice → list → preview.
   Widgets use zindex 80.
+- **Sizes come in two kinds.** A board, something worked in (the runner UI, the library, the
+  testcase editor, the zoom), is a share of the editor with an option, `width`/`height` for
+  the whole of it, borders included, the editor's two panes together. A question fits its
+  content and has no option. A menu whose preview varies, from row to row or question to
+  question (the scratch's templates, `clean`'s files), pins one width for all of it
+  (`sequence_width`: the widest of its names and its previews' titles and lines, between half
+  and seven tenths of the editor), or it would resize at every step. `input` is half the editor, room for a path, whatever its
+  title.
 - Widgets are module singletons: `resize_widgets()` rebuilds them (with a `skip_close` guard),
   opening one over an existing instance closes the old windows, and buffers use
   `bufhidden = wipe`.

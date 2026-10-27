@@ -123,8 +123,8 @@ local function compute_layout(config, status_rows, layout)
     -- Everything is laid out inside the float band: a row is kept clear above the grid
     -- and below it, so the frame never sits against the statusline (see `float_band`).
     local band_row, band_h = utils.float_band()
-    local total_width = math.floor(vim_width * config.popup_ui.total_width + 0.5)
-    local total_height = math.min(math.floor(vim_height * config.popup_ui.total_height + 0.5), band_h)
+    local total_width = math.floor(vim_width * config.popup_ui.width + 0.5)
+    local total_height = math.min(math.floor(vim_height * config.popup_ui.height + 0.5), band_h)
     local col0 = math.floor((vim_width - total_width) / 2 + 0.5)
     local row0 = band_row + math.floor((band_h - total_height) / 2 + 0.5)
 

@@ -325,7 +325,7 @@ end
 ---its own, so it is in the same place for every entry and long notes never push it out of
 ---view. The notes and complexity panes are as tall as the longest of theirs in the library,
 ---so they do not jump from entry to entry, and neither is drawn when nothing in the library
----has one. The picker's size is `library.width`/`height`.
+---has one. The picker's size is `library.width`/`height`, else the runner UI's (`popup_ui`).
 ---@param ext string extension whose language colours the code
 ---@param all tuna.Snippet[]
 ---@param cfg table
@@ -334,8 +334,8 @@ local function preview_opts(ext, all, cfg)
     local cols, rows = utils.get_ui_size()
     return {
         beside = {
-            width = math.floor(cols * cfg.library.width + 0.5),
-            height = math.floor(rows * cfg.library.height + 0.5),
+            width = math.floor(cols * (cfg.library.width or cfg.popup_ui.width) + 0.5),
+            height = math.floor(rows * (cfg.library.height or cfg.popup_ui.height) + 0.5),
         },
         panes = {
             { title = "Notes", fit = true, wrap = true },

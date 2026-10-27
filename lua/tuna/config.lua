@@ -163,13 +163,8 @@ M.defaults = {
         language = nil,
     },
 
-    -- clean (:Tuna clean) — remove created-but-unused files. All of a run's per-file
-    -- confirmation menus share one width, sized to the longest title (file path +
-    -- match reason) it will show, then clamped to this fraction of the editor width so
-    -- the float neither shrinks to nothing nor balloons; a longer title is truncated.
+    -- clean (:Tuna clean) — remove created-but-unused files.
     clean = {
-        min_width = 0.5, -- floor, as a fraction of the editor width
-        max_width = 0.7, -- ceiling, as a fraction of the editor width
         -- Safety rail for a scan pointed at a huge tree (a whole home directory holds
         -- hundreds of thousands of entries). The walk stops after this many filesystem
         -- entries and reports that it was cut short, rather than blocking the editor.
@@ -326,10 +321,10 @@ M.defaults = {
         path = false, -- false | "~/cp/snippets" | { dir, dir, … }
         marker = "TUNALIB",
         depth = 5, -- how deep to search below each path
-        -- The picker's share of the editor, borders included: the runner UI's size
-        -- (`popup_ui`) by default, the other board tuna draws over the editor.
-        width = 0.8,
-        height = 0.8,
+        -- The picker's share of the editor, borders included. Unset, it follows the
+        -- runner UI's (`popup_ui`), the other board tuna draws over the editor.
+        width = nil,
+        height = nil,
     },
     -- Where downloads land, as paths built from the modifiers ($(JUDGE), $(CONTEST),
     -- $(PROBLEM), …, see REFERENCE.md's Modifiers section), evaluated per problem.
@@ -565,12 +560,12 @@ M.defaults = {
         insert = {},
     },
     -- The standalone testcase editor (`:Tuna testcase add`/`edit`): input and expected
-    -- output side by side, each pane `width` × `height` of the editor, moved between with
+    -- output side by side, together `width` × `height` of the editor, moved between with
     -- `switch_window_keys` (left and right). As in the runner UI, `:w` saves, `:wq` and
     -- `:x` save and close, and `q` or `cancel_keys` close, asking first about an edit not
     -- saved.
     editor_ui = {
-        width = 0.4,
+        width = 0.8,
         height = 0.6,
         show_nu = true, -- line numbers
         show_rnu = false, -- relative line numbers
@@ -673,8 +668,8 @@ M.defaults = {
     -- The runner UI as floats (`runner_ui.interface = "popup"`): the grid's share of the
     -- editor, and its layout.
     popup_ui = {
-        total_width = 0.8,
-        total_height = 0.8,
+        width = 0.8,
+        height = 0.8,
         -- A layout is a list of `{ ratio, pane-or-sub-layout }` pairs; nesting
         -- alternates direction (the top level splits into columns). Panes:
         -- `tc` testcases, `so` output, `eo` expected output, `si` input, `se` errors.
@@ -691,13 +686,13 @@ M.defaults = {
         },
     },
     -- The runner UI as real windows (`runner_ui.interface = "split"`): where the frame
-    -- opens, and its share of the editor, `total_width` beside it (left, right) or
-    -- `total_height` below it (top, bottom). `relative_to_editor` takes that share of the
-    -- whole editor, false of the window it opens from.
+    -- opens, and its share of the editor, `width` beside it (left, right) or `height`
+    -- below it (top, bottom). `relative_to_editor` takes that share of the whole editor,
+    -- false of the window it opens from.
     split_ui = {
         position = "right", -- "top" | "bottom" | "left" | "right"
         relative_to_editor = true,
-        total_width = 0.3,
+        width = 0.3,
         -- Same format and same freedom as `popup_ui.layout` above; the layout used
         -- depends on whether `position` puts the frame beside or below the editor.
         vertical_layout = {
@@ -705,7 +700,7 @@ M.defaults = {
             { 1, { { 1, "so" }, { 1, "eo" } } },
             { 1, { { 1, "se" }, { 1, "si" } } },
         },
-        total_height = 0.4,
+        height = 0.4,
         horizontal_layout = {
             { 2, "tc" },
             { 3, { { 1, "so" }, { 1, "se" } } },

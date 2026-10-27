@@ -229,6 +229,20 @@ settle()
 conforms("widgets.menu")
 close_layer(80)
 
+-- A menu whose preview varies takes one width for all of it: what it shows fits, between half
+-- and seven tenths of the editor.
+do
+    local cols = require("tuna.utils").get_ui_size()
+    local got = {
+        widgets.sequence_width({ "short" }, { { title = "t", lines = { "short" } } }),
+        widgets.sequence_width({ "short", string.rep("x", math.floor(cols * 0.6)) }, {}),
+        widgets.sequence_width({ "short" }, { { title = "t", lines = { "", string.rep("x", math.floor(cols * 0.6)) } } }),
+        widgets.sequence_width({ string.rep("x", cols) }, {}),
+    }
+    ok("a sequence of previews is as wide as the widest name or preview line, between half and seven tenths of the editor",
+        vim.deep_equal(got, { math.floor(cols * 0.5), math.floor(cols * 0.6) + 4, math.floor(cols * 0.6) + 4, math.floor(cols * 0.7) }), vim.inspect(got))
+end
+
 widgets.input("type here", "", function() end)
 settle()
 conforms("widgets.input")
@@ -255,6 +269,18 @@ close_layer(80)
 widgets.editor(api.nvim_get_current_buf(), 0, "1\n", "1\n", function() end)
 settle()
 conforms("widgets.editor")
+-- Its size is the two panes together, borders included, as every board's is.
+do
+    local left, right, panes = math.huge, 0, 0
+    for _, f in ipairs(floats()) do
+        if f.zindex == 80 then
+            local c = api.nvim_win_get_config(f.win)
+            left, right, panes = math.min(left, c.col), math.max(right, c.col + c.width + 2), panes + 1
+        end
+    end
+    local cols = require("tuna.utils").get_ui_size()
+    ok("the editor's two panes together are editor_ui.width of the editor", panes == 2 and right - left == 2 * math.floor(cols * 0.8 / 2), vim.inspect({ panes, left, right, cols }))
+end
 close_layer(80)
 
 -- A resize rebuilds the editor where the user was: the pane being typed in, the cursor in

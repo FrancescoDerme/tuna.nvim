@@ -216,24 +216,23 @@ local function start_over(path, ext, cfg)
         return
     end
 
-    local items = {}
+    local widgets = require("tuna.ui.widgets")
+    local title = "Start the scratch from"
+    local items, previews = {}, {}
     for i, tmpl in ipairs(choices) do
         items[i] = vim.fn.fnamemodify(tmpl, ":~")
+        local lines = vim.split(utils.read_file(tmpl) or "", "\n", { plain = true })
+        local header, blanks = split_template(lines)
+        previews[i] = { title = vim.fn.fnamemodify(tmpl, ":t"), lines = vim.list_slice(lines, header + blanks + 1) }
     end
     items[#items + 1] = "Empty file"
-    require("tuna.ui.widgets").menu(items, "Start the scratch from", function(idx)
+    widgets.menu(items, title, function(idx)
         create(path, cfg, choices[idx])
     end, vim.api.nvim_get_current_win(), function() end, {
-        width = math.max(40, math.floor(vim.o.columns * 0.6)),
+        width = widgets.sequence_width(vim.list_extend({ title }, items), previews),
         filetype = vim.filetype.match({ filename = "scratch." .. ext }),
         content = function(idx)
-            local tmpl = choices[idx]
-            if not tmpl then
-                return { title = " empty ", lines = { "" } }
-            end
-            local lines = vim.split(utils.read_file(tmpl) or "", "\n", { plain = true })
-            local header, blanks = split_template(lines)
-            return { title = " " .. vim.fn.fnamemodify(tmpl, ":t") .. " ", lines = vim.list_slice(lines, header + blanks + 1) }
+            return previews[idx] or { title = "empty", lines = { "" } }
         end,
     })
 end
@@ -255,7 +254,14 @@ function M.start(bufnr)
         start_over(path, ext, cfg)
         return
     end
-    require("tuna.ui.widgets").menu({ "Resume", "Restart" }, "A scratch already exists", function(idx)
+    local widgets = require("tuna.ui.widgets")
+    local held = {
+        title = vim.fn.fnamemodify(path, ":t"),
+        lines = scratch_lines(path),
+        filetype = vim.filetype.match({ filename = "scratch." .. ext }),
+    }
+    held.width = widgets.sequence_width({ "A scratch already exists", "Resume", "Restart" }, { held })
+    widgets.menu({ "Resume", "Restart" }, "A scratch already exists", function(idx)
         if idx == 1 then
             resume(path, ext, cfg)
         else
@@ -263,12 +269,7 @@ function M.start(bufnr)
             -- no frame is drawn without a dialog on screen.
             start_over(path, ext, cfg)
         end
-    end, vim.api.nvim_get_current_win(), function() end, {
-        title = " " .. vim.fn.fnamemodify(path, ":t") .. " ",
-        lines = scratch_lines(path),
-        filetype = vim.filetype.match({ filename = "scratch." .. ext }),
-        width = math.max(40, math.floor(vim.o.columns * 0.6)),
-    })
+    end, vim.api.nvim_get_current_win(), function() end, held)
 end
 
 ---`:Tuna download sync` — download the problem this scratch was written for and fold the
