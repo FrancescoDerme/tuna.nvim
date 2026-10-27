@@ -50,8 +50,11 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     and files fuzzily in either case and word order, then code however it is spaced), an
     unclosed guard warned about once, a snippet's notes (in its comment syntax, kept out of its
     code, ended by a blank line, the complexity from `Complexity:` to their end however it was
-    wrapped), notes searched between names and code, and the picker's panes and size (options of
-    its own, the runner UI's by default);
+    wrapped), notes searched between names and code, the picker's panes and size (options of
+    its own, the runner UI's by default), and a snippet inserted a level inside a block from its
+    opening line or a blank line in it (by `indentexpr`, evaluated with the cursor on that line,
+    over `cindent`, else the line above's, in tabs where the buffer uses them), its nesting kept
+    and one undo taking it back;
   - `modes.lua`: the helper and run-setting rule end to end: availability (files, configured
     paths and commands, missing ones), automatic choices, forcing and `auto`, forced settings
     giving way and coming back, old sidecar entries, runners refreshing the checker per run,

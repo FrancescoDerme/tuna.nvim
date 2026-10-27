@@ -161,10 +161,14 @@ problems and remembering them. The rules that hold everywhere are in the root `C
 - **`library.lua`**: snippets are regions between `library.marker` guard comments in plain
   source files; files without guards are offered whole. Only files with the current buffer's
   extension are shown, dotfiles and dot-directories left out at every depth, and `library.path`
-  goes through `expand_home`/`normalize_path`. Snippets are inserted dedented and re-indented to
-  the cursor line. A snippet's **notes** are the lines right under its start guard that begin
-  with the guard's own comment leader (what precedes the marker on its line), up to the first
-  that does not, so a blank line ends them in any language; from the line starting `Complexity:`
+  goes through `expand_home`/`normalize_path`. Snippets are inserted below the cursor, dedented
+  and indented as a line typed there would be, by the buffer's own rules (`indentexpr`, else
+  `cindent`, else `lisp`, else the line above's), measured once the snippet is in place, since
+  a C rule reads the line it indents, with the cursor on it, as `indentexpr` expects. Not the
+  cursor line's indentation: a block's opening line, or a blank one inside it, has none. A
+  snippet's **notes** are the lines right under its start guard that begin with the guard's
+  own comment leader (what precedes the marker on its line), up to the first that does not, so
+  a blank line ends them in any language; from the line starting `Complexity:`
   to their end they are its complexity, so a complexity a formatter wrapped stays whole. They
   are kept out of `lines`, never inserted, and `first` is the code's first line. `:Tuna lib` is
   one picker, a `widgets.menu` with a `search` and its panes `beside` (`open`): the `catalogue`

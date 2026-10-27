@@ -178,4 +178,38 @@ do
     t.eq("and a whole file has neither", { pv.content(1)[1].lines, pv.content(1)[2].lines }, { {}, {} })
 end
 
+-- A snippet goes in below the cursor at the indentation a line typed there would get, by the
+-- buffer's own rules, not the cursor line's: the opening line of a block, and a blank line
+-- inside it, have none, while what goes under them belongs a level deeper. Its own nesting is
+-- kept, its blank lines stay blank, and one undo takes it all back.
+do
+    local quiet = vim.notify
+    vim.notify = function() end
+    local snippet = { name = "read graph", lines = { "    vector<int> g(n);", "", "    for (;;) {", "        read();", "    }" } }
+    local function insert_at(lnum, opts)
+        vim.cmd("enew!")
+        vim.bo.cindent, vim.bo.expandtab, vim.bo.shiftwidth, vim.bo.tabstop = true, true, 4, 4
+        for k, v in pairs(opts or {}) do
+            vim.bo[k] = v
+        end
+        vim.api.nvim_buf_set_lines(0, 0, -1, false, { "void solve() {", "    ll n;", "", "}" })
+        vim.cmd("let &undolevels = &undolevels")
+        vim.api.nvim_win_set_cursor(0, { lnum, 0 })
+        library.insert(snippet, vim.api.nvim_get_current_buf())
+        return vim.api.nvim_buf_get_lines(0, lnum, lnum + #snippet.lines, false)
+    end
+    local inside = { "    vector<int> g(n);", "", "    for (;;) {", "        read();", "    }" }
+    t.eq("from the line opening a block, a level inside it", insert_at(1), inside)
+    t.eq("with the cursor on its first line", vim.api.nvim_win_get_cursor(0), { 2, 4 })
+    vim.cmd("undo")
+    t.eq("which one undo takes back", vim.api.nvim_buf_get_lines(0, 0, -1, false), { "void solve() {", "    ll n;", "", "}" })
+    t.eq("from a blank line inside the block, the same", insert_at(3), inside)
+    t.eq("from a statement in it, the same", insert_at(2), inside)
+    t.eq("written with tabs where the buffer indents with them", insert_at(1, { expandtab = false })[1], "\tvector<int> g(n);")
+    t.eq("by `indentexpr` over `cindent`", insert_at(1, { indentexpr = "8" })[1], "        vector<int> g(n);")
+    t.eq("evaluated with the cursor on the line it indents", insert_at(1, { indentexpr = "line('.') == 2 ? 6 : 0" })[1], "      vector<int> g(n);")
+    t.eq("and with no rule at all, the indentation of the line above", insert_at(3, { cindent = false })[1], "    vector<int> g(n);")
+    vim.notify = quiet
+end
+
 t.report()

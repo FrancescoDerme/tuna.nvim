@@ -25,8 +25,8 @@
 -- piece of its code ("the one with `parent[`"), and the notes, complexity and code under
 -- the cursor are shown beside the list, in panes that can be entered and read like a buffer
 -- before it is inserted. Only files with the current file's extension are listed (a C++ problem
--- gets the C++ library), and a snippet is pasted below the cursor re-indented to the
--- current line.
+-- gets the C++ library), and a snippet is pasted below the cursor at the indentation a line
+-- typed there would get.
 
 local utils = require("tuna.utils")
 local config = require("tuna.config")
@@ -192,9 +192,9 @@ end
 -- Insertion
 --------------------------------------------------------------------------------
 
----Strip the snippet's own indentation and re-apply the current line's, so a helper
----stored at top level lands correctly inside a function (and vice versa). Blank lines
----stay blank rather than collecting trailing whitespace.
+---Strip the snippet's own indentation and apply `indent`, so a helper stored at top level
+---lands correctly inside a function (and vice versa). Blank lines stay blank rather than
+---collecting trailing whitespace.
 ---@param lines string[]
 ---@param indent string
 ---@return string[]
@@ -220,14 +220,48 @@ local function reindent(lines, indent)
     return out
 end
 
----Insert a snippet below the cursor and leave the cursor on its first line.
+---The indentation, in columns, the current buffer's own rules give line `lnum`, the one a line
+---typed there would get: `indentexpr`, else `cindent`, else `lisp`, else the line above's, as
+---`autoindent` copies it. Not the cursor line's: a block's opening line, or a blank line inside
+---it, has none, where what goes under it belongs a level deeper.
+---@param lnum integer
+---@return integer
+local function indent_for(lnum)
+    local cols = -1
+    if vim.bo.indentexpr ~= "" then
+        vim.v.lnum = lnum
+        local ok, got = pcall(vim.api.nvim_eval, vim.bo.indentexpr)
+        cols = ok and tonumber(got) or -1
+    elseif vim.bo.cindent then
+        cols = vim.fn.cindent(lnum)
+    elseif vim.bo.lisp then
+        cols = vim.fn.lispindent(lnum)
+    end
+    if cols < 0 then
+        local above = vim.fn.prevnonblank(lnum - 1)
+        cols = above > 0 and vim.fn.indent(above) or 0
+    end
+    return cols
+end
+
+---`cols` of indentation as the current buffer writes it: spaces, or tabs then spaces.
+---@param cols integer
+---@return string
+local function indent_text(cols)
+    if vim.bo.expandtab then
+        return string.rep(" ", cols)
+    end
+    local ts = vim.bo.tabstop
+    return string.rep("\t", math.floor(cols / ts)) .. string.rep(" ", cols % ts)
+end
+
+---Insert a snippet below the cursor, at the indentation a line typed there would get, and
+---leave the cursor on its first line.
 ---@param snippet tuna.Snippet
 ---@param bufnr integer
 function M.insert(snippet, bufnr)
     local win = vim.fn.bufwinid(bufnr)
     local row = win ~= -1 and vim.api.nvim_win_get_cursor(win)[1] or vim.api.nvim_buf_line_count(bufnr)
-    local current = vim.api.nvim_buf_get_lines(bufnr, row - 1, row, false)[1] or ""
-    local indent = current:match("^[ \t]*") or ""
 
     -- Trim blank lines at either end: where the snippet sits is the caller's business.
     local lines = vim.deepcopy(snippet.lines)
@@ -242,7 +276,21 @@ function M.insert(snippet, bufnr)
         return
     end
 
-    vim.api.nvim_buf_set_lines(bufnr, row, row, false, reindent(lines, indent))
+    -- In place first, then indented: a C rule reads the line it indents (a `}`, a label).
+    local body = reindent(lines, "")
+    vim.api.nvim_buf_set_lines(bufnr, row, row, false, body)
+    -- On the line it measures, where `indentexpr` expects the cursor (some read `line('.')`).
+    local function measure()
+        return indent_text(indent_for(row + 1))
+    end
+    local indent
+    if win ~= -1 then
+        vim.api.nvim_win_set_cursor(win, { row + 1, 0 })
+        indent = vim.api.nvim_win_call(win, measure)
+    else
+        indent = vim.api.nvim_buf_call(bufnr, measure)
+    end
+    vim.api.nvim_buf_set_lines(bufnr, row, row + #body, false, reindent(body, indent))
     if win ~= -1 then
         pcall(vim.api.nvim_win_set_cursor, win, { row + 1, #indent })
     end
