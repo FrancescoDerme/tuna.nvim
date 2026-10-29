@@ -286,6 +286,7 @@ do
         "// submit at: https://codeforces.com/contest/1/problem/A",
         "int main() { $(date); } // $5",
     })
+    t.eq("the problem is recorded as the file's own", (require("tuna.problem.sidecar").get_entry(dir .. "/A/main.cpp", "task") or {}).url, "https://codeforces.com/contest/1/problem/A")
     t.eq("a template is for its own language", download_into(dir, "A/main.py")[1], "# contest: codeforces 1")
 
     require("tuna").setup({ open_downloaded_problems = false, cd_downloaded_problems = false })

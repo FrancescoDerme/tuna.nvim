@@ -137,8 +137,8 @@ problems and remembering them. The rules that hold everywhere are in the root `C
     `clean` also unpins what it deletes. `open_pinned(i)` opens one the way
     `open_problem` does (`open_remembered`).
   - `plugin/tuna.lua`'s `BufEnter` hands a file buffer to `track`, which records it only when
-    it looks like a problem (runnable, not a support file, with testcases or a sidecar
-    beside it); its `VimLeavePre` flushes only a session that loaded `recent`.
+    it looks like a problem (runnable, not a support file, with testcases beside it or a
+    problem in its sidecar); its `VimLeavePre` flushes only a session that loaded `recent`.
   - Nothing under `recent.ignored_directories` is ever recorded (`ignored`, checked in
     `record_problem` and `record_contest`, which every way in goes through, and first in
     `track`), so a snippet library can be tested with tuna. What was remembered there before is
@@ -148,15 +148,23 @@ problems and remembering them. The rules that hold everywhere are in the root `C
     files are offered whole). Pinning is not affected.
   - Recording a problem inside a remembered contest moves that contest to the top with the
     problem as its `problem`, even when the problem was already on top. A contest is
-    otherwise recorded by downloads, or inferred when a sibling problem shares the sidecar
-    `group`. Both store the `judge` and contest `judges.parse` gives, which is how the menu
-    names a contest.
+    otherwise recorded by downloads, or inferred (`infer_contest`) when another problem's
+    sidecar task agrees on its `group`: in its own folder, which then holds the contest's
+    problems as files, else in a sibling folder. Both store the `judge` and contest
+    `judges.parse` gives, which is how the menu names a contest. `contest_of(file)` is the same
+    lookup, remembered then inferred.
   - `change_dir` honours `cd_command` (`cd`/`tcd`/`lcd`/`false`). `snapshot()` returns the
     loaded state for the menu. `contest_problems` lists a contest's solutions in both
     layouts (plain files in the contest directory, and one per problem directory).
-- **`navigate.lua`**: the next or previous sibling problem directory in name order.
-  `solution_in` prefers the same file name, then the same extension, then any runnable file that
-  is not a support file (`tools.is_support`). The ends of a contest warn instead of wrapping.
+- **`navigate.lua`**: the next or previous problem of the file's contest (`recent.contest_of`:
+  remembered, else inferred), in `recent.contest_problems`' order, which holds both layouts;
+  with no contest known, or the file not among its problems, the next or previous sibling
+  directory in name order. A folder of plain files is a contest only when remembered or when its
+  sidecar names two of the contest's problems: by its files alone it cannot be told from one
+  problem's attempts. Within one folder Neovim's directory does not move, since an `lcd`
+  to it would give the window a directory of its own. `solution_in` prefers the same file name,
+  then the same extension, then any runnable file that is not a support file
+  (`tools.is_support`). The ends of a contest warn instead of wrapping.
   Neovim's directory comes along (`recent.change_dir`, with the new problem's `cd_command`) only
   when it was the problem left or a folder inside it (`working_in`, by real path): working in a
   problem, `:e` and a file finder would point at the one left, while a contest's folder, where

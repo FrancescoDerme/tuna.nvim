@@ -43,6 +43,8 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     editor, under the other two) with the pin/unpin command;
   - `recent.lua`: both histories (default and configured sizes, move to top, a problem
     bringing its contest back, contests named by the judge and contest recorded with them,
+    a folder whose sidecar names two of a contest's problems inferred as it, one problem's
+    attempts not,
     dropping deleted directories, reading the state file back, opening any entry, what is
     written, nothing under `ignored_directories` remembered, at any depth, through `~`, as a
     contest or on entering it, while a directory merely sharing its name as a prefix is, and
@@ -96,14 +98,16 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
   - `navigate.lua`: the next and previous problem opened, Neovim's directory moving along only
     from the problem left or a folder inside it (by real path), staying in the contest's folder
     and with `cd_command = false`, from a runner UI pane the window under it opening the
-    problem and taking an `lcd`, and `next scaffold` going round the problem's sources in name
-    order both ways, passing over a header and stepping from where it sorts, and staying on a
-    lone source, `next`, `prev` and `go` completing their words, bare `next` stepping between
-    problems, and the cursor placed under `solve(` before the file is drawn;
+    problem and taking an `lcd`, a contest of plain files stepped file by file, remembered or
+    told apart by its sidecar, with no directory of its own given to the window, and
+    `next scaffold` going round the problem's sources in name order both ways, passing over a
+    header and stepping from where it sorts, and staying on a lone source, `next`, `prev` and
+    `go` completing their words, bare `next` stepping between problems, and the cursor placed
+    under `solve(` before the file is drawn;
   - `download.lua`: the listener's boundary, a request handled while its sender is still
     connected, and what is stored (an empty answer kept, no file refused, a typed `~` path,
-    the solution's template filled in, tuna's starter with none configured, a scratch folded
-    in under the header of the template used);
+    the solution's template filled in, the problem recorded as the file's own, tuna's starter
+    with none configured, a scratch folded in under the header of the template used);
   - `startup.lua`: what a session that never uses tuna pays and that it works without `setup()`:
     `tuna` alone loaded at startup with `:Tuna` and the highlight groups defined, a verdict
     restored for the first file read (before anything loads `config`), entering or writing any
@@ -113,7 +117,10 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     rules (`compare.lua` also: an unknown method reported once, diff marks following the verdict
     and marking a token or character missing where it is missing, a checker that did not build
     giving no verdict and no notification; `submit.lua` also: an edit hiding a shown verdict and
-    keeping it stored, and a write of the source submitted bringing it back; `clean.lua` also:
+    keeping it stored, a write of the source submitted bringing it back, and the problem a
+    file is a solution of: its own URL and mirror, a second attempt's the folder's, none in a
+    folder of several, a top-level task the folder's, outliving its file, and recorded as the
+    file's own by a submit; `clean.lua` also:
     the templates a file is compared with, a judge's matched without a sidecar and the best
     match deciding, tuna's starter recognised, a template never offered, an empty one included,
     a pinned file offered last, named, starting on Keep, and unpinned when deleted, a build

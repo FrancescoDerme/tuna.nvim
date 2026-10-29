@@ -30,27 +30,29 @@ local sidecar = require("tuna.problem.sidecar")
 -- rule that decides what "expired" means lives with the other URL logic further down.
 local live_mirror
 
----Persist a downloaded task's metadata (url/name/group) beside its source, so submit
----can recover the URL even when the file has no header marker. Merges into any
----existing sidecar (keeps stored submit verdicts). No-op without a URL.
----@param dir string problem directory
+---Persist a downloaded task's metadata (url/name/group) as the problem of the source written
+---for it, so submit can recover the URL even when the file has no header marker. Kept per file,
+---as a contest's problems may be files of one folder. No-op without a URL.
+---@param filepath string the solution written for the task
 ---@param task tuna.CCTask
 ---@param cfg table
-function M.write_task_store(dir, task, cfg)
+function M.write_task_store(filepath, task, cfg)
     if not task.url or task.url == "" then
         return
     end
-    local store = sidecar.read(dir, cfg)
-    store.url, store.name, store.group = task.url, task.name, task.group
-    -- Where the problem was browsed from, when that is not where its URL points: a
-    -- Codeforces mirror carries a live round but has no per-problem pages, so `url` is
-    -- the canonical one and this is what a submission is routed through while the
-    -- round lasts. Absent for an ordinary download. `mirror_at` is when that was true —
-    -- a mirror stops carrying the contest a day or two after the round, so the routing
-    -- has to expire (see `live_mirror`).
-    store.mirror = task.mirror
-    store.mirror_at = task.mirror and os.time() or nil
-    sidecar.write(dir, cfg, store)
+    sidecar.set_task(filepath, {
+        url = task.url,
+        name = task.name,
+        group = task.group,
+        -- Where the problem was browsed from, when that is not where its URL points: a
+        -- Codeforces mirror carries a live round but has no per-problem pages, so `url` is
+        -- the canonical one and this is what a submission is routed through while the
+        -- round lasts. Absent for an ordinary download. `mirror_at` is when that was true —
+        -- a mirror stops carrying the contest a day or two after the round, so the routing
+        -- has to expire (see `live_mirror`).
+        mirror = task.mirror,
+        mirror_at = task.mirror and os.time() or nil,
+    }, cfg)
 end
 
 ---First capture of a Lua `pattern` over a buffer's first `scan_lines` header lines,
@@ -72,46 +74,52 @@ local function scan_header(bufnr, pattern, scan_lines)
     return nil
 end
 
----Ensure a problem's sidecar records its metadata, creating the sidecar if the
----problem was set up outside the download flow (e.g. a hand-made file that only has
----the template header markers). Merges — the submit-verdict map is preserved — and
----is cheap when nothing changed. The `url` is synced from the resolved value; the
+---Ensure the sidecar records the submitted file's problem as its own, creating the sidecar if
+---the problem was set up outside the download flow (e.g. a hand-made file that only has
+---the template header markers), and taking the folder's problem for a file that has none of its
+---own. Cheap when nothing changed. The `url` is synced from the resolved value; the
 ---`group` (contest) and `name` (problem) are backfilled from the header markers
 ---**only when the sidecar lacks them**, so a downloaded problem keeps the authoritative
 ---Competitive Companion values.
 ---@param ctx table submit context (bufnr/filepath/url/cfg)
 local function persist_task(ctx)
     local scfg = ctx.cfg.submit
-    local dir = vim.fn.fnamemodify(ctx.filepath, ":h")
-    local store = sidecar.read(dir, ctx.cfg)
-    local dirty = false
+    local own = sidecar.get_entry(ctx.filepath, "task", ctx.cfg)
+    local task = vim.deepcopy(own or sidecar.task(ctx.filepath, ctx.cfg) or {})
+    local dirty = own == nil
 
-    if ctx.url and ctx.url ~= "" and store.url ~= ctx.url then
-        store.url, dirty = ctx.url, true
+    if ctx.url and ctx.url ~= "" and task.url ~= ctx.url then
+        task.url, dirty = ctx.url, true
     end
-    if not store.group then
+    if not task.group then
         local g = scan_header(ctx.bufnr, scfg.group, scfg.url_scan_lines)
         if g then
-            store.group, dirty = g, true
+            task.group, dirty = g, true
         end
     end
-    if not store.name then
+    if not task.name then
         local n = scan_header(ctx.bufnr, scfg.name, scfg.url_scan_lines)
         if n then
-            store.name, dirty = n, true
+            task.name, dirty = n, true
         end
     end
 
     -- Drop a mirror that has aged out, so the problem stops carrying dead routing and
     -- the fallback is announced exactly once — a submission quietly changing where it
     -- goes is worth one line, and after this there is nothing left to announce.
-    if store.mirror and select(2, live_mirror(dir, ctx.cfg)) then
-        store.mirror, store.mirror_at, dirty = nil, nil, true
+    if task.mirror and select(2, live_mirror(ctx.filepath, ctx.cfg)) then
+        task.mirror, task.mirror_at, dirty = nil, nil, true
         utils.notify("submit: this contest's mirror has expired, submitting to codeforces.com.", "INFO")
     end
 
     if dirty then
-        sidecar.write(dir, ctx.cfg, store)
+        sidecar.set_task(ctx.filepath, {
+            url = task.url,
+            name = task.name,
+            group = task.group,
+            mirror = task.mirror,
+            mirror_at = task.mirror_at,
+        }, ctx.cfg)
     end
 end
 
@@ -125,8 +133,8 @@ local function display_name(ctx)
     if marked then
         return marked
     end
-    local store = sidecar.read_or_nil(vim.fn.fnamemodify(ctx.filepath, ":h"), ctx.cfg)
-    local nm = store and store.name
+    local task = sidecar.task(ctx.filepath, ctx.cfg)
+    local nm = task and task.name
     if type(nm) == "string" and nm ~= "" then
         return nm
     end
@@ -220,8 +228,8 @@ local function resolve_url(bufnr, filepath, cfg)
         candidates[#candidates + 1] = scfg.url({ bufnr = bufnr, filepath = filepath })
     else
         candidates[#candidates + 1] = scan_header(bufnr, scfg.url, scfg.url_scan_lines)
-        local store = sidecar.read_or_nil(vim.fn.fnamemodify(filepath, ":h"), cfg)
-        candidates[#candidates + 1] = store and store.url or nil
+        local task = sidecar.task(filepath, cfg)
+        candidates[#candidates + 1] = task and task.url or nil
     end
 
     local invalid
@@ -252,12 +260,12 @@ local MIRROR_TTL = 24 * 60 * 60 -- a round is hours; its mirror lasts a day or t
 ---`submit.mirror_ttl_seconds` is the window in seconds (`false` never to expire, `0` never to
 ---use a mirror). A `mirror` with no `mirror_at` beside it counts as expired: the pair is
 ---written together, so one without the other is not a case to reason about.
----@param dir string problem directory
+---@param filepath string the solution
 ---@param cfg table
 ---@return string? mirror, boolean expired
-function live_mirror(dir, cfg)
-    local store = sidecar.read_or_nil(dir, cfg) or {}
-    local mirror = store.mirror
+function live_mirror(filepath, cfg)
+    local task = sidecar.task(filepath, cfg) or {}
+    local mirror = task.mirror
     if type(mirror) ~= "string" or not mirror:match("^m%d+$") then
         return nil, false
     end
@@ -265,7 +273,7 @@ function live_mirror(dir, cfg)
     if ttl == false then
         return mirror, false
     end
-    local at = tonumber(store.mirror_at)
+    local at = tonumber(task.mirror_at)
     if not at or (os.time() - at) >= (tonumber(ttl) or MIRROR_TTL) then
         return nil, true
     end
@@ -298,7 +306,7 @@ function M.builtin_url_rewrite(url, ctx)
     -- goes back through it, for as long as the round lasts.
     local id = url:match("^https?://codeforces%.com/contest/(%d+)/problem/")
     if id and ctx and ctx.filepath then
-        local mirror = live_mirror(vim.fn.fnamemodify(ctx.filepath, ":h"), ctx.cfg)
+        local mirror = live_mirror(ctx.filepath, ctx.cfg)
         if mirror then
             return ("https://%s.codeforces.com/contest/%s/problem/"):format(mirror, id)
         end
@@ -799,8 +807,8 @@ function M.reports_verdict(path)
         return false
     end
     local cfg = config.current_setup
-    local store = sidecar.read_or_nil(vim.fn.fnamemodify(path, ":h"), cfg) or {}
-    local scfg = judge_scfg(cfg.submit or {}, store.url)
+    local task = sidecar.task(path, cfg) or {}
+    local scfg = judge_scfg(cfg.submit or {}, task.url)
     if (scfg.provider or "command") ~= "command" then
         return false
     end
@@ -1280,7 +1288,7 @@ local function browser_submit_url(url, ctx)
     -- the main site, which is where submitting works from then on.
     local cid = url:match("^https?://codeforces%.com/contest/(%d+)/")
     if cid and ctx and ctx.filepath then
-        local mirror = live_mirror(vim.fn.fnamemodify(ctx.filepath, ":h"), ctx.cfg)
+        local mirror = live_mirror(ctx.filepath, ctx.cfg)
         if mirror then
             return ("https://%s.codeforces.com/contest/%s/submit"):format(mirror, cid)
         end

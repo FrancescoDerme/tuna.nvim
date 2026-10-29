@@ -90,7 +90,8 @@ local function contest_of(group)
     for _, p in ipairs({ "A", "B" }) do
         vim.fn.mkdir(dir .. "/" .. p, "p")
         t.write(dir .. "/" .. p, "main.cpp", "int main() {}\n")
-        t.write(dir .. "/" .. p, ".tuna.json", vim.json.encode({ group = group }))
+        local task = { url = "https://judge/" .. group .. "/" .. p, group = group }
+        t.write(dir .. "/" .. p, ".tuna.json", vim.json.encode({ task = { ["main.cpp"] = task } }))
     end
     return norm(dir)
 end
@@ -120,6 +121,24 @@ t.eq("a contest whose directory is gone is forgotten", contests(), { cs[3], cs[2
 recent.open_contest(2)
 t.eq("any of them can be opened, at the problem last visited in it", norm(vim.api.nvim_buf_get_name(0)), cs[2] .. "/B/main.cpp")
 t.eq("which brings it back to the top", contests(), { cs[2], cs[3] })
+
+-- A contest's problems as files of one folder are its contest once its sidecar names two of the
+-- contest's problems, and one problem's two attempts there are none.
+do
+    local submit = require("tuna.problem.submit")
+    local cf = "https://codeforces.com/contest/8/problem/"
+    local flat, attempts = norm(t.tempdir()), norm(t.tempdir())
+    for _, p in ipairs({ "A", "B" }) do
+        t.write(flat, p .. ".cpp", "int main() {}\n")
+        submit.write_task_store(flat .. "/" .. p .. ".cpp", { url = cf .. p, name = p, group = "Codeforces - Round 8" }, cfg)
+        t.write(attempts, p .. ".cpp", "int main() {}\n")
+        submit.write_task_store(attempts .. "/" .. p .. ".cpp", { url = cf .. "C", name = "C", group = "Codeforces - Round 80" }, cfg)
+    end
+    t.eq("a folder of a contest's problems is its contest, and one problem's attempts none", {
+        (recent.contest_of(flat .. "/B.cpp", cfg) or {}).dir,
+        recent.contest_of(attempts .. "/B.cpp", cfg),
+    }, { flat, nil })
+end
 
 --------------------------------------------------------------------------------
 -- Pinned

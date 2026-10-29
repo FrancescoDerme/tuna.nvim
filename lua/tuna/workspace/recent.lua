@@ -213,46 +213,49 @@ end
 -- Recording
 --------------------------------------------------------------------------------
 
----The task recorded beside a problem by `download` (`url`, `group`, …), or nil when there is
----no sidecar or it names no contest group.
----@param dir string problem directory
----@param cfg table
----@return table?
-local function sidecar_task(dir, cfg)
-    local store = require("tuna.problem.sidecar").read_or_nil(dir, cfg)
-    if store and type(store.group) == "string" and store.group ~= "" then
-        return store
-    end
-    return nil
-end
-
----The `group` recorded beside a problem (its contest, as the judge names it), or nil.
----@param dir string problem directory
----@param cfg table
----@return string?
-local function sidecar_group(dir, cfg)
-    local task = sidecar_task(dir, cfg)
-    return task and task.group
-end
-
 -- How many sibling directories to look at when inferring a contest. A contest has
 -- a handful of problems; anything past this is not one, and the walk stays bounded
 -- even if the problem sits in a directory with thousands of neighbours.
 local SIBLING_LIMIT = 40
 
----Infer the contest a problem belongs to: its parent directory, but only when a
----sibling problem carries the same sidecar `group`. Without that agreement the
----parent is just "some directory holding problems" (a judge folder, say), which is
----not somewhere `:Tuna go contest` should take anyone.
----@param dir string problem directory
+---Whether one of the problems the sidecar of `dir` names is of `group`, and not `url`.
+---@param dir string
+---@param group string
+---@param url string?
+---@param cfg table
+---@return boolean
+local function names_another(dir, group, url, cfg)
+    for _, task in ipairs(require("tuna.problem.sidecar").tasks(dir, cfg)) do
+        if task.group == group and task.url ~= url then
+            return true
+        end
+    end
+    return false
+end
+
+---Infer the contest a problem belongs to, when another problem agrees on its sidecar `group`:
+---its own folder, when that holds the contest's problems as files, else its parent, when a
+---sibling problem folder does. Without that agreement the parent is just "some directory
+---holding problems" (a judge folder, say), which is not somewhere `:Tuna go contest` should
+---take anyone.
+---@param file string the problem's solution
 ---@param cfg table
 ---@return tuna.RecentContest?
-local function infer_contest(dir, cfg)
-    local task = sidecar_task(dir, cfg)
-    if not task then
+local function infer_contest(file, cfg)
+    local task = require("tuna.problem.sidecar").task(file, cfg)
+    local group = task and task.group
+    if type(group) ~= "string" or group == "" then
         return nil
     end
-    local group = task.group
+    -- Named the way a download names it, so both show the same contest.
+    local function contest_at(dir)
+        local judge, contest = require("tuna.problem.judges").parse(task, cfg.judge_parsers)
+        return { dir = dir, name = contest, judge = judge }
+    end
+    local dir = vim.fs.dirname(file)
+    if names_another(dir, group, task.url, cfg) then
+        return contest_at(dir)
+    end
     local parent = vim.fs.dirname(dir)
     local self_name = vim.fn.fnamemodify(dir, ":t")
     local seen = 0
@@ -262,14 +265,33 @@ local function infer_contest(dir, cfg)
             if seen > SIBLING_LIMIT then
                 break
             end
-            if sidecar_group(parent .. "/" .. name, cfg) == group then
-                -- Named the way a download names it, so both show the same contest.
-                local judge, contest = require("tuna.problem.judges").parse(task, cfg.judge_parsers)
-                return { dir = parent, name = contest, judge = judge }
+            if names_another(parent .. "/" .. name, group, nil, cfg) then
+                return contest_at(parent)
             end
         end
     end
     return nil
+end
+
+---The remembered contest `file` is inside, if any.
+---@param file string normalized absolute path
+---@return tuna.RecentContest?
+local function remembered_contest(file)
+    for _, c in ipairs(M.state.contests or {}) do
+        if c.dir and file:sub(1, #c.dir + 1) == c.dir .. "/" then
+            return c
+        end
+    end
+end
+
+---The contest `file` is a problem of: the remembered one it is inside, which every download
+---records, else one another problem's sidecar task agrees on (`infer_contest`).
+---@param file string normalized absolute path
+---@param cfg table
+---@return tuna.RecentContest?
+function M.contest_of(file, cfg)
+    load()
+    return remembered_contest(file) or infer_contest(file, cfg)
 end
 
 ---Record `file` as the problem most recently worked on.
@@ -284,14 +306,7 @@ function M.record_problem(file, cfg)
     local dir = vim.fs.dirname(file)
     cfg = cfg or config.load_local_config_and_extend(dir)
 
-    -- The remembered contest this problem is in, if any.
-    local contest
-    for _, c in ipairs(M.state.contests or {}) do
-        if c.dir and file:sub(1, #c.dir + 1) == c.dir .. "/" then
-            contest = c
-            break
-        end
-    end
+    local contest = remembered_contest(file)
     local problems = M.state.problems or {}
     if problems[1] and problems[1].file == file and (not contest or contest == M.state.contests[1]) then
         return -- already the current one; nothing to write
@@ -309,7 +324,7 @@ function M.record_problem(file, cfg)
     -- the contest being worked in, and otherwise a sibling agreeing on a contest group adds
     -- one. Anything else leaves them alone: opening an unrelated problem is no reason to
     -- forget a contest.
-    contest = contest or infer_contest(dir, cfg)
+    contest = contest or infer_contest(file, cfg)
     if contest then
         contest.problem = file
         M.state.contests = push_front(M.state.contests, contest, function(c)
@@ -434,7 +449,7 @@ local function is_problem_buffer(bufnr, path)
     if require("tuna.run.tools").is_support(path, cfg) then
         return false
     end
-    if sidecar_group(vim.fs.dirname(vim.fs.normalize(path)), cfg) then
+    if require("tuna.problem.sidecar").task(vim.fs.normalize(path), cfg) then
         return true
     end
     local ok, tctbl = pcall(require("tuna.problem.testcases").buf_get_testcases, bufnr)

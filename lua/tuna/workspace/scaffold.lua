@@ -262,12 +262,12 @@ function M.render(template, role, ext, cfg, target, task)
     return utils.fill_modifiers(text, mods, target)
 end
 
----The problem a folder was downloaded for, from its sidecar.
----@param dir string
+---The problem a file is a solution of, from its sidecar.
+---@param file string
 ---@param cfg table
 ---@return tuna.CCTask?
-local function task_of(dir, cfg)
-    local data = require("tuna.problem.sidecar").read_or_nil(dir, cfg)
+local function task_of(file, cfg)
+    local data = require("tuna.problem.sidecar").task(file, cfg)
     return (data and data.url) and { name = data.name or "", group = data.group or "", url = data.url } or nil
 end
 
@@ -421,7 +421,6 @@ function M.create(role, bufnr, ext, opts)
     end
     local current = vim.api.nvim_buf_get_name(bufnr)
     local dir = vim.fn.fnamemodify(current, ":p:h")
-    local task = task_of(dir, cfg)
 
     -- A new solution is written beside this file, else the folder's solution, and in its
     -- language; it starts empty in a language with no template, as a downloaded one does.
@@ -436,6 +435,8 @@ function M.create(role, bufnr, ext, opts)
     else
         ext = ext or default_language(cfg, current)
     end
+    -- The problem of the solution it is written beside, else of the file it is written from.
+    local task = task_of(solution or current, cfg)
     if not ext or ext == "" then
         utils.notify("scaffold: no language to write it in, open a solution file or pass an extension.")
         return nothing()

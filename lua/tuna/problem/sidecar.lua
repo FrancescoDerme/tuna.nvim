@@ -11,7 +11,8 @@
 -- which keeps "where was I" in `stdpath("state")` — that genuinely *is* per-machine.
 --
 -- Current keys:
---   url / name / group  — the downloaded task's metadata (download.lua, submit.lua)
+--   task   = { [basename] = { url, name, group, mirror, mirror_at } }
+--                         — the problem each file is a solution of (download.lua, submit.lua)
 --   submit = { [basename] = { state, text, url, hash } } — last verdict per file
 --   run    = { [basename] = { mode, source, checker, compare } }
 --                         — the per-problem run state of `tools.lua`
@@ -32,8 +33,13 @@ local utils = require("tuna.utils")
 
 local M = {}
 
--- The sections holding one entry per file, keyed by its basename.
+-- The sections holding one entry per file, keyed by its basename, that go with their file. A
+-- file's `task` outlives it: a solution deleted and written again in a downloaded problem's
+-- folder is still that problem's.
 local PER_FILE = { "submit", "run", "results" }
+
+-- A task at the sidecar's top level, which names the folder's problem.
+local FOLDER_TASK = { "url", "name", "group", "mirror", "mirror_at" }
 
 ---@param cfg table? resolved config (falls back to the current setup, then defaults)
 ---@return string
@@ -141,6 +147,69 @@ function M.set_entry(filepath, section, entry, cfg)
     local store = M.read(dir, cfg)
     store[section] = type(store[section]) == "table" and store[section] or {}
     store[section][name] = entry
+    M.write(dir, cfg, store, name)
+end
+
+---The problems a sidecar names: each file's task, or the folder's.
+---@param store table?
+---@return table[]
+local function tasks_of(store)
+    if not store then
+        return {}
+    end
+    if type(store.task) ~= "table" then
+        return type(store.url) == "string" and { store } or {}
+    end
+    return vim.tbl_filter(function(entry)
+        return type(entry) == "table"
+    end, vim.tbl_values(store.task))
+end
+
+---The problems the sidecar of `dir` names: each file's task, or the folder's.
+---@param dir string
+---@param cfg table?
+---@return table[]
+function M.tasks(dir, cfg)
+    return tasks_of(M.read_or_nil(dir, cfg))
+end
+
+---The problem `filepath` is a solution of, as downloaded (`url`, `name`, `group`, and the
+---`mirror` it came through with `mirror_at`): its own `task` entry, else the folder's one
+---problem when every entry there names the same, so a second attempt beside a downloaded
+---solution is that problem's. A folder of several problems, a contest's plain files, names none
+---for a file it has no entry for.
+---@param filepath string absolute path of the source file
+---@param cfg table?
+---@return table?
+function M.task(filepath, cfg)
+    local store = M.read_or_nil(vim.fn.fnamemodify(filepath, ":h"), cfg)
+    local own = store and type(store.task) == "table" and store.task[vim.fn.fnamemodify(filepath, ":t")]
+    if type(own) == "table" then
+        return own
+    end
+    local only
+    for _, entry in ipairs(tasks_of(store)) do
+        if only and entry.url ~= only.url then
+            return nil
+        end
+        only = entry
+    end
+    return only
+end
+
+---Record the problem `filepath` is a solution of as its own. A task at the top level goes, the
+---folder's files being told apart from then on.
+---@param filepath string absolute path of the source file
+---@param entry table
+---@param cfg table?
+function M.set_task(filepath, entry, cfg)
+    local dir, name = vim.fn.fnamemodify(filepath, ":h"), vim.fn.fnamemodify(filepath, ":t")
+    local store = M.read(dir, cfg)
+    for _, key in ipairs(FOLDER_TASK) do
+        store[key] = nil
+    end
+    store.task = type(store.task) == "table" and store.task or {}
+    store.task[name] = entry
     M.write(dir, cfg, store, name)
 end
 

@@ -478,7 +478,7 @@ local function store_downloaded_task(filepath, task, cfg)
     testcases.write_testcases(filepath, cfg, task_to_tctbl(task))
     -- Persist the task's URL beside the source so `:Tuna submit` can find it even
     -- when the file carries no header marker.
-    require("tuna.problem.submit").write_task_store(vim.fn.fnamemodify(filepath, ":h"), task, cfg)
+    require("tuna.problem.submit").write_task_store(filepath, task, cfg)
     return template
 end
 

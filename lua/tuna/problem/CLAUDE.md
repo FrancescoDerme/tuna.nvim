@@ -71,7 +71,8 @@ submissions. The rules that hold everywhere are in the root `CLAUDE.md`.
 ## Sidecar (`sidecar.lua`)
 
 - `problem_store_file` (`.tuna.json`) beside the source. Keys:
-  - `url`/`name`/`group`/`mirror`/`mirror_at`, the downloaded task;
+  - `task = { [basename] = { url, name, group, mirror, mirror_at } }`, the problem each file is
+    a solution of, as downloaded (`submit.write_task_store`) or backfilled by a submit;
   - `submit = { [basename] = { state, text, url, hash } }`;
   - `run = { [basename] = { mode, source, checker, compare } }`, holding only what was forced,
     each value validated on read;
@@ -86,6 +87,13 @@ submissions. The rules that hold everywhere are in the root `CLAUDE.md`.
   written anew in a deleted one's place (`scaffold`, with `tools.forget` for the session's
   copy), as no write may have come between. This is problem state that travels with the
   folder; machine state belongs in `stdpath("state")` (`recent.lua`).
+- **A file's problem** is read through `task(file)`, by every reader (submit's URL, name and
+  mirror, scaffold's modifiers, `recent`): its own entry, else the folder's one problem when
+  every entry names the same (a second attempt beside a downloaded solution), else none, as in
+  a folder of a contest's problems, which is why it is kept per file: one folder-level task
+  would name whichever problem was written last. A task at the sidecar's top level is read as
+  the folder's, and `set_task` removes it once a file has its own. `task` is not pruned with
+  its file: a solution written again in its place is still that problem's.
 
 ## Download and judges
 
@@ -183,5 +191,5 @@ submissions. The rules that hold everywhere are in the root `CLAUDE.md`.
   submitted brings it back, and it is never deleted there: Vim reports more than edits, and
   deleting on such a report would lose the verdict of a source that never changed.
   `verdict_for(path)` reads a verdict without an open buffer (the menu).
-- `persist_task` backfills the sidecar's `url`, and `name`/`group` from header markers when
-  missing.
+- `persist_task` records the submitted file's problem as its own (`url`, and `name`/`group` from
+  header markers when missing), taking the folder's when it has none.

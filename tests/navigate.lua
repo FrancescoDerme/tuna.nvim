@@ -3,7 +3,8 @@
 -- `:Tuna next` / `:Tuna prev`: the sibling problem opened, and Neovim's directory brought
 -- along only when it was the problem left, or a folder inside it, however that folder's path
 -- is spelt; from the contest's folder it stays, and `cd_command = false` keeps it anywhere. From
--- a runner UI pane the problem opens in the window under the board, which takes the `lcd`.
+-- a runner UI pane the problem opens in the window under the board, which takes the `lcd`. A
+-- contest tuna knows is stepped in its problems' order, plain files in one folder as well.
 
 local t = dofile("tests/harness.lua")
 require("tuna").setup({})
@@ -35,6 +36,55 @@ vim.uv.fs_symlink(contest, link)
 vim.cmd("silent cd " .. vim.fn.fnameescape(a))
 t.eq("however its path is spelt", navigate._test.working_in(link .. "/A"), true)
 t.eq("from the contest's folder the directory stays", at(contest, 1), { "B", contest })
+
+-- A contest of plain files, as a download writes one by default, steps between its files, not to
+-- the folders beside its own, and Neovim's directory, the one folder they share, stays.
+local recent = require("tuna.workspace.recent")
+local files = real(t.tempdir())
+vim.fn.mkdir(files .. "/Notes", "p")
+local round = files .. "/Round"
+vim.fn.mkdir(round, "p")
+for _, name in ipairs({ "A", "B", "C" }) do
+    t.write(round, name .. ".cpp", "int main() {}\n")
+end
+recent.record_contest(round, "Round")
+vim.cmd("silent cd " .. vim.fn.fnameescape(round))
+local said = {}
+vim.notify = function(msg)
+    said[#said + 1] = msg
+end
+local function from(name, offset)
+    vim.cmd.edit(vim.fn.fnameescape(round .. "/" .. name .. ".cpp"))
+    navigate.step(offset)
+    return vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t") .. " " .. said[#said]
+end
+t.eq("a contest of files steps between them, and says where it is at its end", {
+    from("B", 1),
+    from("B", -1),
+    from("C", 1),
+    real(vim.fn.getcwd()),
+}, { "C.cpp Tuna: problem 3/3: C", "A.cpp Tuna: problem 1/3: A", "C.cpp Tuna: problem 3/3 is the last one.", round })
+require("tuna").setup({ cd_command = "lcd" })
+from("A", 1)
+t.eq("and stepping within its folder leaves the window without a directory of its own", vim.fn.haslocaldir(), 0)
+require("tuna").setup({})
+-- One tuna does not remember is told apart by its sidecar, which names each file's problem.
+local forgotten = real(t.tempdir())
+for _, name in ipairs({ "A", "B" }) do
+    t.write(forgotten, name .. ".cpp", "int main() {}\n")
+    require("tuna.problem.submit").write_task_store(forgotten .. "/" .. name .. ".cpp", {
+        url = "https://codeforces.com/contest/9/problem/" .. name,
+        name = name,
+        group = "Codeforces - Round 9",
+    }, require("tuna.config").current_setup)
+end
+vim.cmd.edit(vim.fn.fnameescape(forgotten .. "/A.cpp"))
+navigate.step(1)
+t.eq("and so does one tuna does not remember, by what its sidecar says of each file", vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t"), "B.cpp")
+vim.notify = function() end
+-- A contest of problem folders tuna knows goes in the same order as one it does not.
+recent.record_contest(contest, "Folders")
+t.eq("a known contest of folders steps between them as before", at(a, 1), { "B", b })
 
 -- From a runner UI pane (stood in for by a split the board's step out closes), the file opens in
 -- the window under it, and an `lcd` lands there rather than on the pane put away.

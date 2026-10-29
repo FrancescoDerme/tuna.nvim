@@ -1,10 +1,12 @@
 -- lua/tuna/workspace/navigate.lua
 --
 -- Contest navigation: `:Tuna next` / `:Tuna prev` step from one problem of a contest
--- to the next, without leaving the editor to find the file. A contest downloaded by
--- `:Tuna download contest` is a directory of problem directories, so "the next
--- problem" is simply the next sibling directory in name order, and the file to open
--- in it is the solution beside its testcases.
+-- to the next, without leaving the editor to find the file. A contest tuna knows (one it
+-- remembers, as every download is, or whose problems' sidecars agree on it) is stepped in the
+-- order of its problems (`recent.contest_problems`), plain files in its folder as well as a
+-- folder per problem. Elsewhere "the next problem" is the next sibling directory in name order,
+-- and the file to open in it is the solution beside its testcases: a folder of plain files no
+-- sidecar names problems in cannot be told from one problem's several attempts.
 --
 -- The solution is picked to match what is currently open: the same file name first
 -- (a contest of `A/main.cpp`, `B/main.cpp`, … keeps you on `main.cpp`), then the same
@@ -25,19 +27,36 @@ local tools = require("tuna.run.tools")
 
 local M = {}
 
----The sibling directories of `dir`, in name order, and the index of `dir` among them.
----@param dir string absolute problem directory
----@return string[] names, integer? index
-local function siblings(dir)
-    local self_name = vim.fn.fnamemodify(dir, ":t")
-    -- Dot-directories are never problems (a `.git` in a contest folder, say).
-    local names = utils.subdirectories(vim.fs.dirname(dir))
-    for i, name in ipairs(names) do
-        if name == self_name then
-            return names, i
+---The problems `path` steps between, in order, and its place among them: its contest's when it
+---has one, each named by its file in the contest's folder or by its own folder, else the folders
+---beside its own, whose solution is picked once one is stepped to.
+---@param path string normalized absolute path
+---@param cfg table
+---@return { file: string?, dir: string, name: string }[] problems, integer? index
+local function problems_around(path, cfg)
+    local recent = require("tuna.workspace.recent")
+    local contest = recent.contest_of(path, cfg)
+    if contest then
+        local problems, index = {}, nil
+        for i, file in ipairs(recent.contest_problems(contest.dir, path, cfg)) do
+            local dir = vim.fs.dirname(file)
+            local name = dir == contest.dir and vim.fn.fnamemodify(file, ":t:r") or vim.fn.fnamemodify(dir, ":t")
+            problems[i] = { file = file, dir = dir, name = name }
+            index = file == path and i or index
+        end
+        if index then
+            return problems, index
         end
     end
-    return names, nil
+    local dir = vim.fs.dirname(path)
+    local parent = vim.fs.dirname(dir)
+    local problems, index = {}, nil
+    -- Dot-directories are never problems (a `.git` in a contest folder, say).
+    for i, name in ipairs(utils.subdirectories(parent)) do
+        problems[i] = { dir = parent .. "/" .. name, name = name }
+        index = problems[i].dir == dir and i or index
+    end
+    return problems, index
 end
 
 ---The solution file to open inside `dir`, preferring the one that matches the file
@@ -90,36 +109,36 @@ function M.step(offset, bufnr)
     local cfg = config.get_buffer_config(bufnr)
 
     local dir = vim.fs.dirname(path)
-    local names, index = siblings(dir)
+    local problems, index = problems_around(path, cfg)
     if not index then
         utils.notify("'" .. vim.fn.fnamemodify(dir, ":t") .. "' is not inside a contest directory.", "WARN")
         return
     end
 
     local target_idx = index + offset
-    local target = names[target_idx]
+    local target = problems[target_idx]
     if not target then
         -- Said the way arriving at a problem is ("problem 3/7: C"), from the one you are on.
-        utils.notify(("problem %d/%d is the %s one."):format(index, #names, offset < 0 and "first" or "last"), "WARN")
+        utils.notify(("problem %d/%d is the %s one."):format(index, #problems, offset < 0 and "first" or "last"), "WARN")
         return
     end
 
-    local target_dir = vim.fs.dirname(dir) .. "/" .. target
-    local file = M.solution_in(target_dir, path, cfg)
+    local file = target.file or M.solution_in(target.dir, path, cfg)
     if not file then
-        utils.notify("no solution file in '" .. target .. "'.", "WARN")
+        utils.notify("no solution file in '" .. target.name .. "'.", "WARN")
         return
     end
 
     -- Decided where the user is, and done once the file is open, in the window showing it
-    -- (an `lcd` set from a runner UI pane would go with the pane).
-    local follow = working_in(dir)
+    -- (an `lcd` set from a runner UI pane would go with the pane). Problems that are files of
+    -- one folder share it, so there is nowhere to move.
+    local follow = target.dir ~= dir and working_in(dir)
     require("tuna.ui.surface").edit(file)
     if follow then
-        require("tuna.workspace.recent").change_dir(target_dir, config.load_local_config_and_extend(target_dir))
+        require("tuna.workspace.recent").change_dir(target.dir, config.load_local_config_and_extend(target.dir))
     end
     utils.place_cursor(cfg)
-    utils.notify(("problem %d/%d: %s"):format(target_idx, #names, target), "INFO")
+    utils.notify(("problem %d/%d: %s"):format(target_idx, #problems, target.name), "INFO")
 end
 
 ---Step `offset` source files within the problem: its solutions and helpers, in name order,
