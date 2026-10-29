@@ -231,7 +231,8 @@ local function follow_overflow(winid)
     })
 end
 
--- The floats whose bar lualine is told to draw as they take focus, and the autocmds doing it.
+-- The floats whose bar lualine is told to draw as they take focus or change mode, and the
+-- autocmds doing it.
 local floats, bar_group = {}, nil
 
 ---Have lualine draw the global bar for the current window now rather than from its queue.
@@ -239,8 +240,10 @@ local function refresh_bar()
     pcall(require("lualine").refresh, { scope = "window", place = { "statusline" }, force = true })
 end
 
----Redraw lualine's bar whenever `winid` takes focus. The autocmds are made with the first float,
----so a session whose bar is not lualine's has none.
+---Redraw lualine's bar whenever `winid` takes focus or changes mode. lualine's own refresh on a
+---mode change redraws every window but the floats, so a float's bar would otherwise keep the old
+---mode until lualine's timer comes round. The autocmds are made with the first float, so a
+---session whose bar is not lualine's has none.
 ---@param winid integer
 local function bar_follows(winid)
     floats[winid] = true
@@ -248,7 +251,7 @@ local function bar_follows(winid)
         return
     end
     bar_group = api.nvim_create_augroup("tuna_bar", { clear = true })
-    api.nvim_create_autocmd("WinEnter", {
+    api.nvim_create_autocmd({ "WinEnter", "ModeChanged" }, {
         group = bar_group,
         callback = function()
             if floats[api.nvim_get_current_win()] and vim.o.laststatus == 3 then

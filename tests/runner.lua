@@ -534,6 +534,40 @@ for _, interface in ipairs({ "split", "popup" }) do
             walk[#walk + 1] = names[vim.api.nvim_get_current_win()]
         end
         t.eq("popup: the pane keys move from the cursor", walk, { "so", "eo", "so", "se", "tc" })
+        -- From insert mode typing carries on into a pane that can be typed into, and stops in
+        -- one that cannot. Insert mode cannot be held open in a headless test, so the key's
+        -- insert-mode mapping is called as it would be, and asking to leave it is recorded.
+        local keys = require("tuna.config").current_setup.switch_window_keys
+        local function from_insert(key)
+            local code = vim.api.nvim_replace_termcodes(key, true, false, true)
+            local map
+            for _, m in ipairs(vim.api.nvim_buf_get_keymap(0, "i")) do
+                if vim.api.nvim_replace_termcodes(m.lhs, true, false, true) == code then
+                    map = m
+                end
+            end
+            local real_cmd, stopped = vim.cmd, false
+            vim.cmd = setmetatable({}, {
+                __call = function(_, c)
+                    stopped = stopped or c == "stopinsert"
+                    return real_cmd(c)
+                end,
+                __index = real_cmd,
+            })
+            map.callback()
+            vim.cmd = real_cmd
+            return { names[vim.api.nvim_get_current_win()], stopped }
+        end
+        vim.api.nvim_set_current_win(ui.windows.si.winid)
+        t.eq("popup: from insert mode, typing carries on into Expected Output, and stops in Output", {
+            from_insert(keys[3]),
+            from_insert(keys[1]),
+        }, { { "eo", false }, { "so", true } })
+        -- From a zoom the key puts the zoom away and moves on from the selector, where nothing
+        -- lies to its left: typing stops there too, with nowhere moved to.
+        ui:zoom("si")
+        t.eq("popup: from insert mode in a zoom, a key with no pane that way stops typing in the selector",
+            from_insert(keys[1]), { "tc", true })
         vim.o.lines = lines
         ui:redraw_grid()
     end

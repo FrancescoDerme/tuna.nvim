@@ -1818,11 +1818,18 @@ function RunnerUI:show_ui()
                 end
                 vim.keymap.set("n", key, go, { buffer = w.bufnr, nowait = true })
                 -- Editable panes are left mid-typing, so the same keys have to work
-                -- from insert mode too (as they do in the widgets).
+                -- from insert mode too (as they do in the widgets). Typing carries on into a
+                -- pane that can be typed into, Input to Expected Output, and stops in one that
+                -- cannot: the buffer decides, since on the build step these same panes are
+                -- a compiler's read-only words. It is the window the key leaves the cursor in
+                -- that is asked, moved or not: from a zoom the key puts the zoom away and
+                -- lands on the selector even with no pane that way.
                 if self:writable_pane(name) then
                     vim.keymap.set("i", key, function()
-                        vim.cmd("stopinsert")
                         go()
+                        if not vim.bo.modifiable then
+                            vim.cmd("stopinsert")
+                        end
                     end, { buffer = w.bufnr, nowait = true })
                 end
             end

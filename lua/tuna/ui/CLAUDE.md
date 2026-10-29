@@ -30,9 +30,12 @@ specific Vim error about a buffer the user never opened.
   timer, so a copy shows a moment past (the COMMAND of the `:Tuna` that opened the float) and a
   float taking focus shows the bar it holds until the queue is served. With lualine loaded
   nothing is copied, and lualine is told to refresh with `force = true` as a float opens
-  focused and whenever one takes focus (`bar_follows`, its `WinEnter` made with the first
-  float), so the bar is right the moment it shows. With any other `laststatus` a float keeps
-  the empty one `style = "minimal"` gives it, because from Neovim 0.12 a float with a
+  focused, whenever one takes focus and whenever the mode changes in one (`bar_follows`, its
+  `WinEnter` and `ModeChanged` made with the first float), so the bar is right the moment it
+  shows. lualine's own refresh on those events means to redraw the current window but names
+  the option `kind`, not `scope`, so it redraws the tab's windows, which leave out floats: a
+  float's bar would otherwise wait for lualine's timer. With any other `laststatus` a float
+  keeps the empty one `style = "minimal"` gives it, because from Neovim 0.12 a float with a
   `statusline` of its own draws it inside its border, showing the pane's `tuna://` name.
 - `group(wins, on_close)`: windows that close together, keyed on `WinClosed`.
 - `edit(path)`: how tuna opens a file (`:Tuna next`, `:Tuna go`, starters, the scratch,
@@ -107,10 +110,9 @@ specific Vim error about a buffer the user never opened.
   reads the pane itself, since keys arriving together (`fen<CR>`) run before the event is
   delivered. While typing, only the list keys that type nothing (`<Down>`/`<Up>`) move the list,
   so `j` and `k` can be searched for; the pane keys walk search, list and preview, and arriving
-  back in the search pane types again only if it was left typing (`inserting`), as an editable
-  runner UI pane keeps the mode it was left in. Closing any of its panes by hand closes the
-  whole menu, as closing the list does. A resize keeps the search, the pane focused and whether
-  it was typing.
+  back in the search pane types again only if it was left typing (`inserting`). Closing any of
+  its panes by hand closes the whole menu, as closing the list does. A resize keeps the search,
+  the pane focused and whether it was typing.
 - `panels`: lists in columns where `<CR>` acts on the focused list only (the `:Tuna` menu).
   `form`: stacked lists where `<CR>` submits every selection (clean). A `panels` section may
   carry `highlights`, byte-range spans drawn as extmarks in `tuna_panels`. They differ in what

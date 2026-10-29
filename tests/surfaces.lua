@@ -751,6 +751,15 @@ do
     ok("with lualine, a float taking focus has it draw the bar at once, and copies none",
         opened >= 1 and #asked > opened and not vim.tbl_contains(asked, false) and not copied, vim.inspect({ opened, asked, copied }))
     close_layer(80)
+    -- lualine's own refresh on a mode change passes the floats over, so tuna asks for it there too.
+    widgets.input("a prompt", "", function() end)
+    settle()
+    asked = {}
+    api.nvim_feedkeys("a" .. api.nvim_replace_termcodes("<Esc>", true, false, true), "x", false)
+    settle()
+    ok("with lualine, a mode change in a float has it draw the bar at once",
+        #asked >= 2 and not vim.tbl_contains(asked, false), vim.inspect(asked))
+    close_layer(80)
     package.loaded["lualine"] = nil
 end
 vim.o.laststatus = laststatus

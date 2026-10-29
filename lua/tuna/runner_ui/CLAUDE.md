@@ -176,7 +176,11 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
   `switch_window_keys` (default `<C-hjkl>`, a top-level option shared with widgets) also work in
   insert mode and move from the cursor, as Vim's own window moves do (`focus_dir`): the pane
   level with the cursor in that direction, else the nearest, so right from the selector's first
-  rows is Output; `st` is never a focus target.
+  rows is Output; `st` is never a focus target. From insert mode typing carries on into a pane
+  whose buffer is modifiable (Input to Expected Output) and stops in one that is not: the buffer
+  decides, not `writable_pane`, since on the build step those panes hold a compiler's words, and
+  it is the buffer the key leaves the cursor in, since from a zoom the key lands on the selector
+  even with no pane that way.
 - `RunnerUI:writable_pane` decides which panes are typed into. The legend (`?`, `show_help`) and
   messages render keys from the config.
 - The `zoom_*` keys (`zoom_input`, `zoom_expected`, `zoom_stdout`, `zoom_stderr`) zoom a pane
