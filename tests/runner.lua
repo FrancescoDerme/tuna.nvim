@@ -563,11 +563,38 @@ for _, interface in ipairs({ "split", "popup" }) do
             from_insert(keys[3]),
             from_insert(keys[1]),
         }, { { "eo", false }, { "so", true } })
-        -- From a zoom the key puts the zoom away and moves on from the selector, where nothing
-        -- lies to its left: typing stops there too, with nowhere moved to.
+        -- A zoom is the pane it shows, larger: a key there moves from that pane, from the line
+        -- the zoom was on, and with no pane that way leaves the cursor on the pane.
+        local function from_zoom(name, dir)
+            ui:zoom(name)
+            ui:focus_dir(dir)
+            return names[vim.api.nvim_get_current_win()]
+        end
+        t.eq("popup: a pane key in a zoom moves as it would from the pane", {
+            from_zoom("so", "l"),
+            from_zoom("si", "h"),
+            from_zoom("eo", "k"),
+        }, { "eo", "se", "eo" })
+        local si = ui.windows.si
+        local text = vim.api.nvim_buf_get_lines(si.bufnr, 0, -1, false)
+        vim.api.nvim_buf_set_lines(si.bufnr, 0, -1, false, { "1", "2", "3", "4", "5" })
         ui:zoom("si")
-        t.eq("popup: from insert mode in a zoom, a key with no pane that way stops typing in the selector",
+        vim.api.nvim_win_set_cursor(0, { 4, 0 })
+        ui:focus_dir("h")
+        t.eq("popup: leaving a zoom, its pane's cursor is on the line the zoom was on",
+            vim.api.nvim_win_get_cursor(si.winid), { 4, 0 })
+        vim.api.nvim_buf_set_lines(si.bufnr, 0, -1, false, text)
+        vim.bo[si.bufnr].modified = false
+        -- A pane the grid leaves out is zoomed all the same, the one way to read it, and a key
+        -- there moves from the selector: from insert mode, with nothing to its left, typing
+        -- stops in the selector it lands on.
+        local layout = ui.config.popup_ui.layout
+        ui.config.popup_ui.layout = { { 3, "tc" }, { 4, { { 1, "so" }, { 1, "se" } } }, { 4, "eo" } }
+        ui:redraw_grid()
+        ui:zoom("si")
+        t.eq("popup: from insert mode in the zoom of a pane the grid leaves out, typing stops in the selector",
             from_insert(keys[1]), { "tc", true })
+        ui.config.popup_ui.layout = layout
         vim.o.lines = lines
         ui:redraw_grid()
     end

@@ -1822,8 +1822,8 @@ function RunnerUI:show_ui()
                 -- pane that can be typed into, Input to Expected Output, and stops in one that
                 -- cannot: the buffer decides, since on the build step these same panes are
                 -- a compiler's read-only words. It is the window the key leaves the cursor in
-                -- that is asked, moved or not: from a zoom the key puts the zoom away and
-                -- lands on the selector even with no pane that way.
+                -- that is asked, moved or not: from the zoom of a pane the grid leaves out the
+                -- key lands on the selector even with no pane that way.
                 if self:writable_pane(name) then
                     vim.keymap.set("i", key, function()
                         go()
@@ -2882,11 +2882,17 @@ function RunnerUI:focus_dir(dir)
         end
     end
     if not from then
-        -- The zoom isn't part of the grid, so there is no direction to move in from
-        -- it. Rather than doing nothing (a big float you can only leave one way), take
-        -- a directional key as "done looking": close it and move on from the selector.
+        -- The zoom is the pane it shows, larger: a key there puts it away and moves from that
+        -- pane, the cursor where it was read, as it would from the pane itself. A pane the grid
+        -- leaves out moves from the selector, where putting the zoom away lands.
         if self.zoom_winid and cur == self.zoom_winid then
+            local cursor = api.nvim_win_get_cursor(cur)
+            local pane = self.windows[self.zoomed]
             self:unzoom()
+            if pane and pane.winid and api.nvim_win_is_valid(pane.winid) then
+                api.nvim_set_current_win(pane.winid)
+                pcall(api.nvim_win_set_cursor, pane.winid, cursor)
+            end
             return self:focus_dir(dir)
         end
         return

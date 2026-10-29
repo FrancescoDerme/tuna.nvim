@@ -24,9 +24,9 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
   kinds whose vocabularies do not mix (`layout.kinds`): a testcase row's grid (`run`) places
   `tc` and the detail panes, the build step's (`build`) `tc` and one `build` cell, since the
   detail panes' names would say stdout or stdin there. A pane the grid omits keeps its
-  **buffer** (content kept, still zoomable) but no window (`winid` nil), and which ones changes
-  with the row on screen, so every window call goes through
-  `w.winid and api.nvim_win_is_valid(w.winid)`, never the second half alone.
+  **buffer** (content kept, still zoomable, the zoom being the one way to read it) but no window
+  (`winid` nil), and which ones changes with the row on screen, so every window call goes
+  through `w.winid and api.nvim_win_is_valid(w.winid)`, never the second half alone.
 - **The grid follows the row on screen.** `grid(row)` answers the build step with
   `runner_ui.compile_layout` (checked as a `build` grid) and other rows with the mode's
   `layout()` or the interface's configured grid (`configured_grid`); `titles_for(row)` gives
@@ -179,14 +179,17 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
   rows is Output; `st` is never a focus target. From insert mode typing carries on into a pane
   whose buffer is modifiable (Input to Expected Output) and stops in one that is not: the buffer
   decides, not `writable_pane`, since on the build step those panes hold a compiler's words, and
-  it is the buffer the key leaves the cursor in, since from a zoom the key lands on the selector
-  even with no pane that way.
+  it is the buffer the key leaves the cursor in, moved or not: the zoom of a pane the grid omits
+  lands on the selector even with no pane that way.
 - `RunnerUI:writable_pane` decides which panes are typed into. The legend (`?`, `show_help`) and
   messages render keys from the config.
 - The `zoom_*` keys (`zoom_input`, `zoom_expected`, `zoom_stdout`, `zoom_stderr`) zoom a pane
   (`zoom`, a large float over the grid showing its buffer) until a close key, `:q` or a pane key
-  (`unzoom`). A zoom key does nothing in a zoom, nor unzooms: an editable pane's letters are
-  text, and a key that acted in one zoom and typed in another would be learned wrong.
+  (`unzoom`). The zoom is its pane larger, so a pane key there moves as from the pane, its
+  window given the zoom's cursor first (`focus_dir`); the zoom of a pane the grid omits moves
+  from the selector, where `unzoom` lands. A zoom key does nothing in a zoom, nor unzooms: an
+  editable pane's letters are text, and a key that acted in one zoom and typed in another would
+  be learned wrong.
   `ZOOM_ACTIONS` binds them and, with `runner_ui.show_title_keys`, names them in the titles
   (`titled_with_keys`), so the two cannot disagree. They zoom what the row holds
   (`zoom_target`): on a testcase row the pane they name, on the build step the source whose role

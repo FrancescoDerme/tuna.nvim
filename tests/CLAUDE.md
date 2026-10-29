@@ -159,12 +159,13 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     `solution_in`, a contest's problems, `:Tuna pin` and, in `menu.lua`, the command list), the
     ending vocabulary, and run-all's headers counting judged rows only, using real UI windows,
     in both interfaces where the grid changes (focus, the selector's row and line numbers,
-    titles and a bad grid said once as the board re-tiles, the pane keys moving from the cursor
-    and, from insert mode, typing on into an editable pane and stopping in a read-only one,
-    the selector's cursorline always and a pane's or the zoom's only while focused, a row
-    reading `EDITED` for what is typed and not for a pane's own filling, the cursorline kept in
-    diff mode, what a diff paints (only the disagreeing tokens on a line that disagrees, a cell
-    where a line ends short, a line the other lacks coloured whole), `:w` from a read-only pane,
+    titles and a bad grid said once as the board re-tiles, the pane keys moving from the cursor,
+    from a zoom as from its pane and, from insert mode, typing on into an editable pane and
+    stopping in a read-only one, the selector's cursorline always and a pane's or the zoom's
+    only while focused, a row reading `EDITED` for what is typed and not for a pane's own
+    filling, the cursorline kept in diff mode, what a diff paints (only the disagreeing tokens on
+    a line that disagrees, a cell where a line ends short, a line the other lacks coloured
+    whole), `:w` from a read-only pane,
     a file opened from the board opening where the board was opened over and the board put away,
     a row added or restored going into number order and selected, the cursor with it, a
     restore after another action restoring the deletion under a free number when its own was
