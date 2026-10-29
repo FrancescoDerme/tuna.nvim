@@ -290,7 +290,8 @@ do
         sidecar.get_entry(gone, "run") or "none",
     }, { true, "auto", "none" })
 
-    t.write(dir, ".tuna.json", vim.json.encode({ name = "B. Second", group = "Codeforces - Round 9", url = "https://codeforces.com/contest/9/problem/B" }))
+    local second = { name = "B. Second", group = "Codeforces - Round 9", url = "https://codeforces.com/contest/9/problem/B" }
+    t.write(dir, ".tuna.json", vim.json.encode({ task = { ["main.cpp"] = second } }))
     scaffold.create("solution", buf)
     t.eq("a downloaded problem's own details fill the header", vim.list_slice(vim.fn.readfile(dir .. "/main4.cpp"), 1, 2), {
         "// contest: codeforces 9",

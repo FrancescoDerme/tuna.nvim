@@ -91,9 +91,8 @@ submissions. The rules that hold everywhere are in the root `CLAUDE.md`.
   mirror, scaffold's modifiers, `recent`): its own entry, else the folder's one problem when
   every entry names the same (a second attempt beside a downloaded solution), else none, as in
   a folder of a contest's problems, which is why it is kept per file: one folder-level task
-  would name whichever problem was written last. A task at the sidecar's top level is read as
-  the folder's, and `set_task` removes it once a file has its own. `task` is not pruned with
-  its file: a solution written again in its place is still that problem's.
+  would name whichever problem was written last. `task` is not pruned with its file: a
+  solution written again in its place is still that problem's.
 
 ## Download and judges
 

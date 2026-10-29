@@ -232,7 +232,7 @@ t.eq("whatever the code", s.watch_outcome(101), "error")
 
 -- A contest's problems may be files of one folder, so the problem a submit reads is the file's
 -- own: each file its own URL and mirror, a second attempt beside a solution that solution's, and
--- a file of a folder of several problems none. A task at a sidecar's top level is the folder's.
+-- a file of a folder of several problems none.
 do
     local submit, sidecar = require("tuna.problem.submit"), require("tuna.problem.sidecar")
     local cfg = require("tuna.config").current_setup
@@ -247,22 +247,18 @@ do
     t.write(one, "main.cpp", "int main() {}\n")
     t.write(one, "main2.cpp", "int main() {}\n")
     submit.write_task_store(one .. "/main.cpp", { url = cf .. "D", name = "D", group = "Codeforces - Round 7" }, cfg)
-    local folder = t.tempdir()
-    t.write(folder, "main.cpp", "int main() {}\n")
-    t.write(folder, ".tuna.json", vim.json.encode({ url = cf .. "E", name = "E" }))
     local function context(path)
         vim.cmd.edit(vim.fn.fnameescape(path))
         vim.bo.filetype = "cpp"
         local ctx, err = submit.context(vim.api.nvim_get_current_buf())
         return ctx and ctx.url or err
     end
-    t.eq("each file's problem is its own, a second attempt takes the folder's one, and a top-level task is the folder's", {
+    t.eq("each file's problem is its own, and a second attempt takes the folder's one", {
         context(round .. "/A.cpp"),
         context(round .. "/B.cpp"),
         context(round .. "/C.cpp"):match("^no submission URL") ~= nil,
         context(one .. "/main2.cpp"),
-        context(folder .. "/main.cpp"),
-    }, { cf .. "A", cf .. "B", true, cf .. "D", cf .. "E" })
+    }, { cf .. "A", cf .. "B", true, cf .. "D" })
     t.eq("and a mirror is the file's it was downloaded with", {
         submit.builtin_url_rewrite(cf .. "A", { filepath = round .. "/A.cpp", cfg = cfg }),
         submit.builtin_url_rewrite(cf .. "B", { filepath = round .. "/B.cpp", cfg = cfg }),
@@ -272,19 +268,13 @@ do
     t.eq("a file's problem outlives it, for a solution written again in its place", (sidecar.task(round .. "/A.cpp", cfg) or {}).url, cf .. "A")
 
     -- A submit records the problem as the file's own, so the file keeps it whatever is added
-    -- beside it, and the top-level task goes once it is.
+    -- beside it.
     submit.providers.stub = function() end
     require("tuna").setup({ submit = { provider = "stub" } })
-    for _, path in ipairs({ one .. "/main2.cpp", folder .. "/main.cpp" }) do
-        vim.cmd.edit(vim.fn.fnameescape(path))
-        vim.bo.filetype = "cpp"
-        submit.submit(vim.api.nvim_get_current_buf())
-    end
-    t.eq("a submit records the problem as the file's own, and the top-level task goes", {
-        (sidecar.get_entry(one .. "/main2.cpp", "task") or {}).url,
-        (sidecar.get_entry(folder .. "/main.cpp", "task") or {}).url,
-        sidecar.read(folder).url,
-    }, { cf .. "D", cf .. "E", nil })
+    vim.cmd.edit(vim.fn.fnameescape(one .. "/main2.cpp"))
+    vim.bo.filetype = "cpp"
+    submit.submit(vim.api.nvim_get_current_buf())
+    t.eq("a submit records the problem as the file's own", (sidecar.get_entry(one .. "/main2.cpp", "task") or {}).url, cf .. "D")
     submit.providers.stub = nil
     require("tuna").setup({})
 end

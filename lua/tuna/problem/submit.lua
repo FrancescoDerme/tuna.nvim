@@ -40,7 +40,7 @@ function M.write_task_store(filepath, task, cfg)
     if not task.url or task.url == "" then
         return
     end
-    sidecar.set_task(filepath, {
+    sidecar.set_entry(filepath, "task", {
         url = task.url,
         name = task.name,
         group = task.group,
@@ -113,7 +113,7 @@ local function persist_task(ctx)
     end
 
     if dirty then
-        sidecar.set_task(ctx.filepath, {
+        sidecar.set_entry(ctx.filepath, "task", {
             url = task.url,
             name = task.name,
             group = task.group,

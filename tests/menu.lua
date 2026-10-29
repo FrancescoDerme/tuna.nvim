@@ -77,7 +77,7 @@ for _, name in ipairs({ "A", "B", "C" }) do
     t.write(
         blind .. "/" .. name,
         ".tuna.json",
-        vim.json.encode({ url = "https://atcoder.jp/contests/abc1/tasks/abc1_" .. name:lower() })
+        vim.json.encode({ task = { ["main.cpp"] = { url = "https://atcoder.jp/contests/abc1/tasks/abc1_" .. name:lower() } } })
     )
 end
 core.save_local_verdict(blind .. "/A/main.cpp", { { tcnum = 0, status = "CORRECT" } })

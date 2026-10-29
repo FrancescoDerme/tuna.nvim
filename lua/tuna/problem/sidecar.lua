@@ -38,9 +38,6 @@ local M = {}
 -- folder is still that problem's.
 local PER_FILE = { "submit", "run", "results" }
 
--- A task at the sidecar's top level, which names the folder's problem.
-local FOLDER_TASK = { "url", "name", "group", "mirror", "mirror_at" }
-
 ---@param cfg table? resolved config (falls back to the current setup, then defaults)
 ---@return string
 local function store_file(cfg)
@@ -150,22 +147,19 @@ function M.set_entry(filepath, section, entry, cfg)
     M.write(dir, cfg, store, name)
 end
 
----The problems a sidecar names: each file's task, or the folder's.
+---The problems a sidecar names, each file's task.
 ---@param store table?
 ---@return table[]
 local function tasks_of(store)
-    if not store then
+    if not (store and type(store.task) == "table") then
         return {}
-    end
-    if type(store.task) ~= "table" then
-        return type(store.url) == "string" and { store } or {}
     end
     return vim.tbl_filter(function(entry)
         return type(entry) == "table"
     end, vim.tbl_values(store.task))
 end
 
----The problems the sidecar of `dir` names: each file's task, or the folder's.
+---The problems the sidecar of `dir` names, each file's task.
 ---@param dir string
 ---@param cfg table?
 ---@return table[]
@@ -195,22 +189,6 @@ function M.task(filepath, cfg)
         only = entry
     end
     return only
-end
-
----Record the problem `filepath` is a solution of as its own. A task at the top level goes, the
----folder's files being told apart from then on.
----@param filepath string absolute path of the source file
----@param entry table
----@param cfg table?
-function M.set_task(filepath, entry, cfg)
-    local dir, name = vim.fn.fnamemodify(filepath, ":h"), vim.fn.fnamemodify(filepath, ":t")
-    local store = M.read(dir, cfg)
-    for _, key in ipairs(FOLDER_TASK) do
-        store[key] = nil
-    end
-    store.task = type(store.task) == "table" and store.task or {}
-    store.task[name] = entry
-    M.write(dir, cfg, store, name)
 end
 
 ---Forget everything stored about a file, for one written anew in its place.
