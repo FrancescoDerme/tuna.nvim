@@ -6,7 +6,7 @@
 
 </div>
 
-https://github.com/user-attachments/assets/7f2523ab-8bc1-46eb-9e54-11b80cae18d1
+https://github.com/user-attachments/assets/83424d80-9559-45a1-8716-862163a48086
 
 tuna.nvim is a competitive programming plugin that integrates with [Competitive Companion](https://github.com/jmerle/competitive-companion) to download contests, runs your solution against testcases, supports stress testing, and much more.
 
