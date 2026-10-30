@@ -93,6 +93,26 @@ The key in each pane's title zooms it, and `<C-hjkl>` move you between panes, al
 Comparison between Output and Expected Output is driven by `output_compare_method`: `"exact"`, `"squish"` (whitespace-insensitive, the default), `{ "float", tol = 1e-6 }` for problems with a tolerance, or a method of your own in `compare_methods`.
 [`:Tuna compare <method>`](REFERENCE.md#compare) overrides it for one problem.
 
+### Your algorithms library
+
+https://github.com/user-attachments/assets/649c04a7-5682-4286-a96e-5e47abd794d3
+
+[`:Tuna lib`](REFERENCE.md#lib) copies a piece of your own library into the file you are writing.
+The library is plain source files in the folder `library.path` points at, with the parts worth copying marked in place, and notes about them right under the opening mark:
+
+```cpp
+// TUNALIB: binary exp start
+// b to the power e, modulo m
+// Complexity: O(log e)
+long long bexp(long long b, long long e, long long m) { ... }
+// TUNALIB: binary exp end
+```
+
+It lists every snippet in files matching the current buffer's extension, and narrows the list as you type, matching a snippet's name, its file, its notes or a piece of its code.
+Beside the list are the highlighted snippet's notes, its complexity and its code, which you can step into and read before inserting it.
+Only the code is inserted.
+Since only the marked parts are copied, each library file can also be a program that tests its snippets against testcases, as the [reference](REFERENCE.md#lib) explains.
+
 ### Run modes and scaffolding
 
 `:Tuna run` can do four different things based on helper programs discovered by filename beside your solution.
@@ -197,26 +217,6 @@ A step-by-step guide on setting this up, from pointing tuna at your tool to read
 Every deletion is confirmed one at a time, with the file in front of you.
 
 <img width="1920" height="1080" alt="clean" src="https://github.com/user-attachments/assets/de4f558c-9fe4-41e5-a002-70031b36f2d2" />
-
-### Your algorithms library
-
-https://github.com/user-attachments/assets/649c04a7-5682-4286-a96e-5e47abd794d3
-
-[`:Tuna lib`](REFERENCE.md#lib) copies a piece of your own library into the file you are writing.
-The library is plain source files in the folder `library.path` points at, with the parts worth copying marked in place, and notes about them right under the opening mark:
-
-```cpp
-// TUNALIB: binary exp start
-// b to the power e, modulo m
-// Complexity: O(log e)
-long long bexp(long long b, long long e, long long m) { ... }
-// TUNALIB: binary exp end
-```
-
-It lists every snippet in files matching the current buffer's extension, and narrows the list as you type, matching a snippet's name, its file, its notes or a piece of its code.
-Beside the list are the highlighted snippet's notes, its complexity and its code, which you can step into and read before inserting it.
-Only the code is inserted.
-Since only the marked parts are copied, each library file can also be a program that tests its snippets against testcases, as the [reference](REFERENCE.md#lib) explains.
 
 ### Keymaps
 
