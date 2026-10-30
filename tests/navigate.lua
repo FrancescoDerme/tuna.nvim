@@ -133,7 +133,7 @@ t.eq("next, prev and go complete what they go to", {
     commands.complete("", "Tuna next ", 10),
     commands.complete("", "Tuna prev ", 10),
     commands.complete("", "Tuna go ", 8),
-}, { { "problem", "scaffold" }, { "problem", "scaffold" }, { "contest", "judge", "problem" } })
+}, { { "problem", "scaffold" }, { "problem", "scaffold" }, { "contest", "judge", "problem", "search" } })
 local function run(...)
     vim.cmd.edit(vim.fn.fnameescape(a .. "/main.cpp"))
     commands.execute({ ... })

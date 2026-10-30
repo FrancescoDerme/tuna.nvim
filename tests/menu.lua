@@ -394,7 +394,7 @@ for _, w in ipairs(api.nvim_list_wins()) do
         if type(c.title) == "table" then
             titles[#titles + 1] = vim.trim(c.title[1][1])
             lists_top = math.min(lists_top, c.row)
-        else
+        elseif borderless(c) then
             banner = { win = w, config = c }
         end
     end
@@ -485,6 +485,96 @@ do
         return tools.checker_setting(pinned[30]) == "off" and "off" or "auto"
     end
     t.eq("the menu's Checker entry switches it off and back", { choose_checker(), choose_checker() }, { "off", "auto" })
+
+    -- The hint over the commands: read, never walked to, and `/` does what it says.
+    local function commands_list()
+        require("tuna.menu").open()
+        local b = board()
+        return api.nvim_buf_get_lines(api.nvim_win_get_buf(b["Catch of the day"].win), 0, -1, false)
+    end
+    commands_list()
+    local hint
+    for _, w in ipairs(api.nvim_list_wins()) do
+        local c = api.nvim_win_get_config(w)
+        local line = c.relative ~= "" and api.nvim_buf_get_lines(api.nvim_win_get_buf(w), 0, 1, false)[1] or ""
+        if line:find("Press / to search", 1, true) then
+            hint = { win = w, config = c, line = line }
+        end
+    end
+    local b = board()
+    t.ok("a hint is drawn", hint ~= nil)
+    if hint then
+        t.eq("over the commands", { hint.config.col, hint.config.width }, { b["Catch of the day"].col, b["Catch of the day"].width })
+        t.eq("level with the top of the board", hint.config.row, b.Contests.row)
+        t.eq("one row tall, its border touching the list under it", b["Catch of the day"].row, hint.config.row + hint.config.height + 2)
+        t.ok("and centred", hint.line:match("^%s+") ~= nil, hint.line)
+        t.eq("with no cursorline to walk", vim.wo[hint.win].cursorline, false)
+    end
+    local cfg = require("tuna.config").get_buffer_config(0)
+    api.nvim_set_current_win(b["Catch of the day"].win)
+    press(cfg.switch_window_keys[3])
+    t.eq("the pane keys do not stop on it", api.nvim_get_current_win(), b["Catch of the day"].win)
+    api.nvim_set_current_win(b.Contests.win)
+    press(cfg.switch_window_keys[4])
+    t.eq("and go past it across the board", api.nvim_get_current_win(), b["Catch of the day"].win)
+    local searched
+    local search = require("tuna.workspace.search")
+    local open_search = search.open
+    search.open = function(bufnr)
+        searched = bufnr
+    end
+    press("/")
+    search.open = open_search
+    t.eq("`/` searches from the buffer the board was over", searched, api.nvim_get_current_buf())
+    t.eq("having closed the board", board().Contests, nil)
+
+    -- The list stays short: what does not apply to this problem has no row.
+    local dir = vim.fs.dirname(pinned[30])
+    local cmds2 = commands_list()
+    press("<Esc>")
+    t.ok("a problem with no helpers offers no stress test", not vim.tbl_contains(cmds2, "Stress test"), cmds2)
+    t.ok("one solution has no versions to run", not vim.tbl_contains(cmds2, "Run all versions"), cmds2)
+    t.ok("interactive stays, as it can run live", vim.tbl_contains(cmds2, "Interactive"), cmds2)
+    t.ok("a dozen rows for a plain problem", #cmds2 <= 12, cmds2)
+    for _, gone in ipairs({ "Add testcase", "Generate testcase", "Next problem", "Previous problem", "Scaffold checker", "Download problem" }) do
+        t.ok(gone .. " has no row of its own", not vim.tbl_contains(cmds2, gone), cmds2)
+    end
+    t.write(dir, "main2.cpp", "int main() {}\n")
+    t.write(dir, "gen.cpp", "int main() {}\n")
+    cmds2 = commands_list()
+    press("<Esc>")
+    t.ok("a second solution offers run all", vim.tbl_contains(cmds2, "Run all versions"), cmds2)
+    tools.set_mode(pinned[30], "all")
+    local running_all = commands_list()
+    press("<Esc>")
+    tools.set_mode(pinned[30], nil)
+    t.ok("unless it already runs that way", not vim.tbl_contains(running_all, "Run all versions"), running_all)
+    t.ok("a generator offers a stress test", vim.tbl_contains(cmds2, "Stress test"), cmds2)
+    t.write(dir, "brute.cpp", "int main() {}\n")
+    cmds2 = commands_list()
+    press("<Esc>")
+    t.ok("and a mode a problem already runs in is not offered twice", cmds2[1]:find("stress", 1, true) and not vim.tbl_contains(cmds2, "Stress test"), cmds2)
+    for _, f in ipairs({ "main2.cpp", "gen.cpp", "brute.cpp" }) do
+        os.remove(dir .. "/" .. f)
+    end
+
+    -- Scaffold and Download open their own choices.
+    local function open_row(label)
+        commands_list()
+        local win = board()["Catch of the day"].win
+        api.nvim_set_current_win(win)
+        for i, line in ipairs(api.nvim_buf_get_lines(api.nvim_win_get_buf(win), 0, -1, false)) do
+            if line == label then
+                api.nvim_win_set_cursor(win, { i, 0 })
+            end
+        end
+        press("<CR>")
+        local rows = api.nvim_buf_get_lines(0, 0, -1, false)
+        press("<Esc>")
+        return rows
+    end
+    t.eq("Scaffold offers every role", open_row("Scaffold"), { "Solution", "Checker", "Generator", "Bruteforce", "Interactor" })
+    t.eq("Download what can be downloaded", open_row("Download"), { "Testcases", "Problem", "Contest" })
 end
 
 vim.fn.delete(contest, "rf")

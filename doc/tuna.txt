@@ -301,6 +301,8 @@ GETTING AROUND                                               *tuna-navigation*
   working on. The menu also provides access to your recent contests and
   problems.
 - `:Tuna go judge` opens the problem you are on in your browser.
+- `:Tuna go search`, or `/` in the menu, finds any problem or contest you have
+  downloaded, by name.
 - `:Tuna pin` puts the problem you are on aside to solve later, and pinning it
   again lets it go. The menu provides access to your pinned problems.
 
@@ -394,8 +396,8 @@ Every command is a subcommand of `:Tuna` with tab-completion, and a lowercase
 :Tuna menu
         Open the menu. On the left are recent contests, recent problems and
         pinned problems. On the right is what tuna can do from the file you
-        are on. `<CR>` acts on the list you are in, and `<C-hjkl>` (by
-        default) move between the lists.
+        are on. `<CR>` acts on the list you are in, `<C-hjkl>` (by default)
+        move between the lists, and `/` runs `:Tuna go search`.
 
 :Tuna run [auto/normal/all/stress/interactive] [n...]
         Compile the solution, run the testcases in parallel (as many at once
@@ -573,12 +575,18 @@ Every command is a subcommand of `:Tuna` with tab-completion, and a lowercase
 
         Bare `:Tuna next` and `:Tuna prev` mean the problem.
 
-:Tuna go [problem/contest/judge]
+:Tuna go [problem/contest/judge/search]
         `:Tuna go problem` and `:Tuna go contest` go back to the problem, or
         the contest, you were last working on, across restarts, and move
         Neovim's directory there with you. Bare `:Tuna go` means the problem.
 
         `:Tuna go judge` opens the problem you are on in your browser.
+
+        `:Tuna go search` finds any problem or contest by name and takes you
+        there, with a preview of each solution. It looks under
+        `downloaded_problems_path` and `downloaded_contests_directory`, and
+        lists what tuna knows the name of, so a problem you downloaded or
+        submitted.
 
                                                                  *tuna-pinned*
 :Tuna pin
@@ -745,6 +753,7 @@ one prefix: >lua
     `<leader>tw`                   scratch
     `<leader>tdp`, `tdc`, `tds`    download a problem, a contest, sync
     `<leader>tgp`, `tgc`           back to the last problem, contest
+    `<leader>tgs`                  search every problem and contest
 
 The preset groups keys by subject: `d` for downloads and `g` for "go to". A
 key inside a group has a short label that leaves out the group's word
@@ -776,8 +785,8 @@ with its arguments fixed. Actions are defined in `M.actions` in
 `delete_testcase`, `generate_testcase`, `submit`, `submit_clear`,
 `download_testcases`, `download_problem`, `download_contest`, `download_sync`,
 `clean`, `pin`, `next_problem`, `prev_problem`, `next_scaffold`,
-`prev_scaffold`, `go_problem`, `go_contest`, `go_judge`, `scratch` and
-`library`.
+`prev_scaffold`, `go_problem`, `go_contest`, `go_judge`, `go_search`,
+`scratch` and `library`.
 
 ------------------------------------------------------------------------------
 HIGHLIGHTS                                                   *tuna-highlights*

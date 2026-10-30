@@ -174,6 +174,28 @@ problems and remembering them. The rules that hold everywhere are in the root `C
     `tools.sources_in`, its solutions and helpers in name order, wrapping, since a handful
     of files is a ring to go round rather than a line with ends. From a file outside it (a
     header, a testcase) the step starts where that file would sort.
+- **`search.lua`**: `:Tuna go search`, a `widgets.menu` with a `search` and one pane `beside`,
+  sized as the runner UI. `root_of` takes the fixed start of `downloaded_problems_path` and
+  `downloaded_contests_directory`, up to the first modifier other than `$(HOME)` and `$(CWD)`,
+  so where it looks takes no option and leaves out what sits beside them (a snippet folder).
+  `walk` finds the
+  sidecars off the main loop (`fs_scandir`, then `read_async`), bounded by `search.max_entries`,
+  not following symlinks. The picker opens before it, empty, and the rows arrive through
+  `widgets.menu_items`: opened after the walk, a frame with nothing on it goes by when it
+  replaces the board, and what is typed meanwhile lands on the buffer underneath.
+  Nothing is cached: a walk is cheap and an index could go stale.
+  - **Sidecars are the source, not paths.** A `task` entry says a file is a solution and gives
+    its name and contest whatever the folders are called, where a path means something only under
+    a template that happens to spell them out. So a file with no `task` (never downloaded or
+    submitted) is not listed, and a sidecar holding only `results` has no name to list it by.
+  - A problem is a `task` entry whose file the walk saw beside the sidecar, as `task` outlives
+    its file. A contest is a `group` naming two problems by `url`, in the folder holding them
+    (`contest_dir`) and not listed when they are scattered. Rows are recent first (`recent`'s
+    lists), then by path, so a contest leads its problems. `rank` is `matchfuzzy` over `name
+    group`.
+  - It shows no verdicts: it is for reaching a known problem, nothing typed can match one, and
+    checking one hashes every solution. Not a search of the recent lists either: they hold a
+    handful of rows already on screen.
 - **`library.lua`**: snippets are regions between `library.marker` guard comments in plain
   source files; files without guards are offered whole. Only files with the current buffer's
   extension are shown, dotfiles and dot-directories left out at every depth, and `library.path`

@@ -7,7 +7,8 @@
 --   * `editor` — side-by-side input/output buffers for editing a testcase
 --   * `menu`   — a single-choice list (confirmations, templates, the testcase to act
 --                on), with an optional read-only preview beneath it and notice above it,
---                and optionally a search pane that narrows it as you type (the library)
+--                and optionally a search pane that narrows it as you type (the library,
+--                `:Tuna go search`)
 --   * `form`   — several single-choice lists answered together (clean's directory,
 --                depth and match threshold)
 --   * `panels` — lists in columns, each acted on alone (the `:Tuna` menu)
@@ -223,8 +224,11 @@ local function fill_preview(bufnr, winid, data, defaults)
     vim.bo[bufnr].modifiable = false
     vim.bo[bufnr].modified = false
 
-    local ft = data.filetype or defaults.filetype
-    if ft then
+    -- Cleared as well as set: a pane that follows the cursor would otherwise colour text with
+    -- no language as whatever the row before it was. Set only when it changes, as it reloads
+    -- the syntax file.
+    local ft = data.filetype or defaults.filetype or ""
+    if vim.bo[bufnr].syntax ~= ft then
         pcall(function()
             vim.bo[bufnr].syntax = ft
         end)
@@ -602,9 +606,10 @@ end
 ---  over it, as the runner UI's over its Run pane, and still lead out of it
 ---@field selectable boolean? worth pasting from, so Visual mode copies from it
 ---@field panes tuna.MenuPreview[]? the panes, with `content`
----@field beside { width: integer, height: integer }? the panes to the right of the search and
----  list rather than under them, the whole float this size, borders included, centred as the
----  runner UI's grid is (not with a `notice`)
+---@field beside { width: integer, height: integer, list_width: integer? }? the panes to the
+---  right of the search and list rather than under them, the whole float this size, borders
+---  included, centred as the runner UI's grid is (not with a `notice`); `list_width` pins the
+---  list's, for rows that arrive once it is open
 ---@field content (fun(idx: integer): table)? `{ title, lines, filetype }`, or with `panes` a
 ---  list of them
 
@@ -635,7 +640,10 @@ end
 ---@field focus_preview integer? which of `previews` it is
 ---@field inserting boolean? whether the search pane was left typing, so arriving back types again
 ---@field rebuilding boolean the windows are being closed to be opened again
-local menu = { ui_visible = false, query = "", shown = {}, previews = {}, rebuilding = false }
+---@field id integer which opening this is, for rows arriving later (`menu_items`)
+---@field relist fun()? shows `items` again for the search as it stands
+---@field dismiss fun()? closes the menu as a cancel does
+local menu = { ui_visible = false, query = "", shown = {}, previews = {}, rebuilding = false, id = 0 }
 
 ---The screen rows `lines` take in a window `width` columns wide that wraps them at word
 ---boundaries ('linebreak').
@@ -700,7 +708,9 @@ end
 ---  question over and over can leave the answer last given under the cursor
 ---@param search (fun(query: string): integer[])? adds a search pane above the list, focused
 ---  and typing: on every change the list shows the items `search` returns for what is typed,
----  in its order (indices into `items`, which `on_choice` and `preview.content` still get)
+---  in its order (indices into `items`, which `on_choice` and `preview.content` still get).
+---  With one, `items` may start empty, for `menu_items` to fill
+---@return integer? id the opening, for `menu_items`
 function M.menu(items, title, on_choice, restore_winid, on_close, preview, notice, row, search)
     ---Close every window of the open menu without it counting as a dismissal.
     local function take_down()
@@ -743,7 +753,7 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
         -- WinClosed from being mistaken for a user cancellation (firing on_close).
         take_down()
     else
-        if #items == 0 then
+        if #items == 0 and not search then
             return
         end
         if menu.ui_visible then
@@ -753,6 +763,7 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
             take_down()
             menu.skip_close = false
         end
+        menu.id = menu.id + 1
         menu.items = items
         menu.title = title and (" " .. title .. " ") or " Tuna "
         menu.on_choice = on_choice
@@ -868,7 +879,7 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
         for _, l in ipairs(menu.items) do
             list_w = math.max(list_w, api.nvim_strwidth(l))
         end
-        list_w = math.min(math.max(list_w + 2, 24), math.floor(width * 0.4))
+        list_w = beside.list_width or math.min(math.max(list_w + 2, 24), math.floor(width * 0.4))
         pane_w = math.max(1, width - list_w - 2)
         pane_col = col + list_w + 2
     end
@@ -1126,6 +1137,18 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
         end
     end
 
+    ---List what the search finds now, from the first row.
+    local function relist()
+        menu.shown = listed()
+        vim.bo[menu.menu_buf].modifiable = true
+        api.nvim_buf_set_lines(menu.menu_buf, 0, -1, false, labels())
+        vim.bo[menu.menu_buf].modifiable = false
+        api.nvim_win_set_cursor(menu.winid, { 1, 0 })
+        preview_row(1)
+    end
+    menu.relist = relist
+    menu.dismiss = close
+
     ---Narrow the list to what the search pane holds now, from its first row. Run on every
     ---change, and again before anything reads the list: keys typed faster than
     ---`TextChangedI` is delivered (`fen<CR>` in one go) would otherwise act on the list
@@ -1139,12 +1162,7 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
             return
         end
         menu.query = query
-        menu.shown = listed()
-        vim.bo[menu.menu_buf].modifiable = true
-        api.nvim_buf_set_lines(menu.menu_buf, 0, -1, false, labels())
-        vim.bo[menu.menu_buf].modifiable = false
-        api.nvim_win_set_cursor(menu.winid, { 1, 0 })
-        preview_row(1)
+        relist()
     end
 
     ---Choose the item on the list's highlighted row, if there is one.
@@ -1349,6 +1367,25 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
             close(nil)
         end,
     })
+    return menu.id
+end
+
+---Give an open menu with a search the rows it opened without, for a search over something
+---that takes a moment to gather: it is drawn at once, typing, and what was typed meanwhile
+---narrows these. None left to show closes it. Does nothing once that opening is gone.
+---@param id integer what `menu` returned
+---@param items string[]
+function M.menu_items(id, items)
+    if not menu.ui_visible or menu.id ~= id then
+        return
+    end
+    if #items == 0 then
+        menu.dismiss()
+        return
+    end
+    menu.items = items
+    menu.query = table.concat(api.nvim_buf_get_lines(menu.search_buf, 0, -1, false), " ")
+    menu.relist()
 end
 
 --------------------------------------------------------------------------------
@@ -1747,8 +1784,9 @@ end
 -- flag that changes both the layout and the meaning of the only key that acts.
 
 ---@class tuna.PanelSection
----@field title string border title
+---@field title string? border title
 ---@field items string[]? rows, pre-formatted by the caller
+---@field hint boolean? one row to read rather than a list: centred, and outside the pane keys
 ---@field format (fun(width: integer?): string[], table[]?)? rows (and `highlights`) laid out for
 ---a content width, nil meaning as wide as they need, in place of `items`: called again for
 ---whatever width the list ends up with, so a narrow editor shortens rows instead of cutting
@@ -1786,6 +1824,7 @@ end
 ---@field wins integer[]
 ---@field bufs integer[]
 ---@field header string[]? banner rows drawn above the lists
+---@field keys table<string, fun()>? keys of the whole board
 ---@field header_win integer?
 ---@field header_buf integer?
 ---@field focused integer
@@ -1803,7 +1842,8 @@ local panels = { ui_visible = false, sections = {}, wins = {}, bufs = {}, focuse
 ---@param restore_winid integer?
 ---@param on_close fun()?
 ---@param header string[]? a banner above the lists, drawn only when there is room for it
-function M.panels(sections, on_choice, restore_winid, on_close, header)
+---@param keys table<string, fun()>? keys of the whole board: each closes it and runs its function
+function M.panels(sections, on_choice, restore_winid, on_close, header, keys)
     if sections == nil then -- resize: keep each list's selection and the focused one
         if not panels.ui_visible then
             return
@@ -1838,6 +1878,7 @@ function M.panels(sections, on_choice, restore_winid, on_close, header)
                 items = sec.items or {},
                 highlights = sec.highlights,
                 format = sec.format,
+                hint = sec.hint,
                 column = sec.column or #panels.sections + 1,
                 sel = 1,
             }
@@ -1846,6 +1887,7 @@ function M.panels(sections, on_choice, restore_winid, on_close, header)
         panels.on_close = on_close
         panels.restore_winid = restore_winid
         panels.header = header
+        panels.keys = keys
         panels.focused = 1
     end
 
@@ -1863,6 +1905,13 @@ function M.panels(sections, on_choice, restore_winid, on_close, header)
         table.insert(stacks[sec.column], i)
     end
     table.sort(col_ids)
+    -- A hint is read, never walked to: the pane keys go by what is left.
+    local walkable = {}
+    for id, stack in pairs(stacks) do
+        walkable[id] = vim.tbl_filter(function(i)
+            return not panels.sections[i].hint
+        end, stack)
+    end
 
     -- A column is as wide as its widest list, so a stack reads as one column. When the editor
     -- cannot hold the board, a column whose lists all lay themselves out (`format`) gives up
@@ -1878,7 +1927,7 @@ function M.panels(sections, on_choice, restore_winid, on_close, header)
             local sec = panels.sections[i]
             lay_out(sec, nil)
             fits[c] = fits[c] and sec.format ~= nil
-            w = math.max(w, #sec.title + 4)
+            w = math.max(w, #(sec.title or "") + 4)
             for _, it in ipairs(sec.items) do
                 w = math.max(w, api.nvim_strwidth(it))
             end
@@ -2010,7 +2059,12 @@ function M.panels(sections, on_choice, restore_winid, on_close, header)
         for _, i in ipairs(stacks[id]) do
             local sec = panels.sections[i]
             local b = api.nvim_create_buf(false, true)
-            api.nvim_buf_set_lines(b, 0, -1, false, sec.items)
+            local lines = sec.items
+            if sec.hint then
+                local pad = string.rep(" ", math.floor((widths[c] - api.nvim_strwidth(lines[1])) / 2))
+                lines = { pad .. lines[1] }
+            end
+            api.nvim_buf_set_lines(b, 0, -1, false, lines)
             for _, h in ipairs(sec.highlights or {}) do
                 pcall(api.nvim_buf_set_extmark, b, panels_ns, h.row - 1, h.col, { end_col = h.end_col, hl_group = h.group })
             end
@@ -2022,12 +2076,12 @@ function M.panels(sections, on_choice, restore_winid, on_close, header)
                 col = col,
                 border = cfg.floating_border,
                 border_highlight = cfg.floating_border_highlight,
-                title = " " .. sec.title .. " ",
+                title = sec.title and (" " .. sec.title .. " ") or nil,
                 -- A list that has to scroll is read like a buffer, so the user's own
                 -- scrolloff applies; one that fits keeps the pin so its edge rows stay
                 -- reachable (the same rule the menu follows).
                 keep_scrolloff = heights[i] < #sec.items,
-                cursorline = true,
+                cursorline = not sec.hint,
             })
             pcall(api.nvim_win_set_cursor, w, { math.min(sec.sel, #sec.items), 0 })
             panels.wins[i], panels.bufs[i] = w, b
@@ -2087,7 +2141,7 @@ function M.panels(sections, on_choice, restore_winid, on_close, header)
     ---top (its first otherwise), which is the list beside it. Nil at the board's edge.
     local function neighbour(i, dcol, drow)
         local at = panels.place[i]
-        local stack = stacks[col_ids[at.column]]
+        local stack = walkable[col_ids[at.column]]
         if drow ~= 0 then
             for k, j in ipairs(stack) do
                 if j == i then
@@ -2100,8 +2154,8 @@ function M.panels(sections, on_choice, restore_winid, on_close, header)
         if not id then
             return nil
         end
-        local beside = stacks[id][1]
-        for _, j in ipairs(stacks[id]) do
+        local beside = walkable[id][1]
+        for _, j in ipairs(walkable[id]) do
             if panels.place[j].top <= at.top then
                 beside = j
             end
@@ -2132,6 +2186,12 @@ function M.panels(sections, on_choice, restore_winid, on_close, header)
         map_keys(cfg.picker_ui.mappings.submit, "n", b, function()
             choose(i)
         end)
+        for lhs, run in pairs(panels.keys or {}) do
+            map_keys(lhs, "n", b, function()
+                teardown()
+                run()
+            end)
+        end
         map_cancel(b, cancel, { normal = cfg.picker_ui.mappings.close })
         api.nvim_create_autocmd("WinClosed", {
             buffer = b,

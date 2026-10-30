@@ -71,8 +71,13 @@ function M.adopt(bufnr, kind, opts)
     -- aborts with E32 before `BufWriteCmd` without one.
     pcall(api.nvim_buf_set_name, bufnr, ("tuna://%s/%d/tuna"):format(kind, bufnr))
     -- Tagged so users (and other plugins) can target every tuna float at once — e.g.
-    -- lualine's `ignore_focus` or `disabled_filetypes`.
+    -- lualine's `ignore_focus` or `disabled_filetypes`. `FileType` fires for them, and `Syntax`
+    -- does not: no syntax file exists to find, and searching the runtimepath for one on
+    -- every float of a menu is a large part of what opening it costs.
+    local ignored = vim.o.eventignore
+    vim.o.eventignore = ignored == "" and "Syntax" or (ignored .. ",Syntax")
     vim.bo[bufnr].filetype = "tuna"
+    vim.o.eventignore = ignored
     vim.bo[bufnr].buftype = "acwrite"
     api.nvim_create_autocmd("BufWriteCmd", {
         buffer = bufnr,

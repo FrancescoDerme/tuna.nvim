@@ -79,6 +79,7 @@ local function ignored(path)
     end
     return false
 end
+M.ignored = ignored
 
 ---Put `entry` at the top of a most-recent-first list, keeping the rest in order but dropping
 ---its older copy (`same` says which) and any entry whose directory is gone, up to `limit`.
@@ -577,6 +578,12 @@ function M.open_pinned(index)
     open_remembered(p, "pin")
 end
 
+---Open a solution found by `:Tuna go search` and cd to its directory.
+---@param file string
+function M.open_solution(file)
+    open_remembered({ file = file, dir = vim.fs.dirname(file) }, "search")
+end
+
 ---The solution to open when entering a contest directory: the problem last visited
 ---in it, else the first problem in name order — handling both layouts, one
 ---directory per problem and the problems as plain files in the contest directory.
@@ -637,6 +644,12 @@ function M.open_contest(index)
         utils.notify("go: no contest visited yet, get one with `:Tuna download contest`.", "WARN")
         return
     end
+    M.enter_contest(c)
+end
+
+---cd to a contest and open a problem in it.
+---@param c { dir: string, name: string, problem: string? }
+function M.enter_contest(c)
     if not utils.directory_exists(c.dir) then
         utils.notify("go: '" .. pretty(c.dir) .. "' no longer exists.", "WARN")
         return

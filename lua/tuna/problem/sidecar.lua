@@ -62,9 +62,13 @@ end
 ---@return table?
 function M.read_or_nil(dir, cfg)
     local content = utils.read_file(M.path(dir, cfg))
-    if not content then
-        return nil
-    end
+    return content and M.decode(content) or nil
+end
+
+---A sidecar's text as a table, or `nil` when it is not a JSON object.
+---@param content string
+---@return table?
+function M.decode(content)
     local ok, decoded = pcall(vim.json.decode, content)
     return (ok and type(decoded) == "table") and decoded or nil
 end

@@ -14,7 +14,8 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
   no plugin files. Each file prints `N checks, M failures` through `tests/harness.lua`
   (`ok`/`eq`/`has`/`report`, and `drain`).
 - Files:
-  - `surfaces.lua`: conformance of every surface to the `surface.lua` contract, every float
+  - `surfaces.lua`: conformance of every surface to the `surface.lua` contract, `FileType` fired
+    for a surface and `Syntax` not, with `'eventignore'` put back, every float
     tagged before it is entered and its title centred, no float drawing a statusline of its own
     unless the statusline is global (read off the screen), every `runner_ui.mappings` key still
     resolving to an action, a menu's preview saying in its footer that it is cut off and not
@@ -41,8 +42,10 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     and stacked in a column of their own while every verdict ends on one edge, counted or not,
     names giving way to a narrow width (a contest's judge first), and `panels` stacking,
     scrolling, moving focus and squeezing a `format` column before the others, the real menu's
-    titles and free-standing banner, and its Pinned list (every pin, scrolling within the
-    editor, under the other two) with the pin/unpin command;
+    titles and free-standing banner, its Pinned list (every pin, scrolling within the
+    editor, under the other two) with the pin/unpin command, the hint over the commands (where
+    it sits, passed over by the pane keys, `/` searching), and the commands kept short (rows
+    that apply only where they do, Scaffold and Download opening their choices);
   - `recent.lua`: both histories (default and configured sizes, move to top, a problem
     bringing its contest back, contests named by the judge and contest recorded with them,
     a folder whose sidecar names two of a contest's problems inferred as it, one problem's
@@ -106,6 +109,13 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     header and stepping from where it sorts, and staying on a lone source, `next`, `prev` and
     `go` completing their words, bare `next` stepping between problems, and the cursor placed
     under `solve(` before the file is drawn;
+  - `search.lua`: the picker up before the walk ends and what was typed meanwhile narrowing the
+    rows, rows left out of a later menu, a contest's pane losing the colours of the source
+    before it, the roots a download path gives, what a sidecar lists (a task with its file
+    still there, a contest of two problems in one folder, no scattered group, no second attempt
+    taken for one), what the walk passes over (dot-directories, `skip_directories`, symlinks,
+    `ignored_directories`, a broken sidecar), the order, `rank`, picking going there and what
+    it says when it finds nothing or is cut short;
   - `download.lua`: the listener's boundary, a request handled while its sender is still
     connected, and what is stored (an empty answer kept, no file refused, a typed `~` path,
     the solution's template filled in, the problem recorded as the file's own, tuna's starter

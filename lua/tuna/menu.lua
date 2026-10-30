@@ -7,7 +7,8 @@
 --     recent first — over **Pinned**, the problems put aside to solve later (`:Tuna pin`),
 --     each with how it went. `<CR>` goes there. Pinned has no limit, so it is the list
 --     that scrolls when the column runs out of rows.
---   * **Catch of the day** — what tuna can do from the file you are on. `<CR>` runs it.
+--   * **Catch of the day** — what tuna can do from the file you are on. `<CR>` runs it. Over
+--     it a hint for `/`, which searches every problem and contest (`:Tuna go search`).
 --
 -- The split is the point. The left column is *where you were*, the right is *what to
 -- do*, and both are lists you walk with `j`/`k` and act on with `<CR>` — so the board
@@ -258,9 +259,26 @@ local function runnable(bufnr)
     return ft ~= "" and (cfg.run_command or {})[ft] ~= nil and not tools.is_support(api.nvim_buf_get_name(bufnr), cfg)
 end
 
----The commands offered, in the order they are reached for. The solution-only half is
----dropped for a buffer tuna cannot run: a scratch buffer has no testcases to add and no
----mode to switch, and offering them would be offering an error message.
+---A row that opens its own choices, for commands reached for too rarely to each hold a row.
+---@param title string
+---@param choices { label: string, run: fun() }[]
+---@return fun()
+local function choices_of(title, choices)
+    return function()
+        local labels = vim.tbl_map(function(c)
+            return c.label
+        end, choices)
+        require("tuna.ui.widgets").menu(labels, title, function(idx)
+            choices[idx].run()
+        end, api.nvim_get_current_win())
+    end
+end
+
+---The commands offered, in the order they are reached for, each only where it applies: the
+---solution-only half is dropped for a buffer tuna cannot run, and a run mode for a problem it
+---means nothing to or that already runs in it, so the list stays short enough to read. What
+---has a home elsewhere has no row here: testcases are added on the runner UI, and the
+---neighbouring problems are a key away.
 ---@param sol integer the solution buffer (a helper redirects to its sibling)
 ---@param cur integer the buffer the menu was opened from
 ---@return { label: string, run: fun() }[]
@@ -287,7 +305,7 @@ local function command_entries(sol, cur)
                 commands.dispatch_mode(m, {}, sol)
             end
         end
-        add(("Run  (%s, %s)"):format(mode, forced == mode and "forced" or "automatic"), function()
+        add(("Run (%s, %s)"):format(mode, forced == mode and "forced" or "automatic"), function()
             commands.dispatch_mode(mode, {}, sol)
         end)
         if forced then
@@ -296,20 +314,21 @@ local function command_entries(sol, cur)
                 commands.dispatch_mode((tools.resolve_mode(path, cfg)), {}, sol)
             end)
         end
-        add("Run all versions", switch("all"))
-        add("Stress test", switch("stress"))
-        add("Interactive", switch("interactive"))
+        if mode ~= "all" and #tools.solutions_in(vim.fs.dirname(path), cfg) > 1 then
+            add("Run all versions", switch("all"))
+        end
+        if mode ~= "stress" and tools.helper("generator", path, cfg) then
+            add("Stress test", switch("stress"))
+        end
+        -- With no interactor beside it, as an interactive problem can run live without one.
+        if mode ~= "interactive" then
+            add("Interactive", switch("interactive"))
+        end
         add("Show runner UI", function()
             commands.show_runner_ui(sol)
         end)
         add("Submit", function()
             require("tuna.problem.submit").submit(sol)
-        end)
-        add("Add testcase", function()
-            commands.execute({ "testcase", "add" })
-        end)
-        add("Generate testcase", function()
-            commands.execute({ "testcase", "generate" })
         end)
         local checker = tools.resolve_checker(path, cfg)
         local checker_label = tools.checker_setting(path) == "off" and "off"
@@ -320,32 +339,40 @@ local function command_entries(sol, cur)
         add("Compare: " .. cmp_label, function()
             commands.cycle_compare(sol)
         end)
-        for _, role in ipairs(require("tuna.run.tools").SCAFFOLDS) do
-            add("Scaffold " .. role, function()
-                require("tuna.workspace.scaffold").create(role, cur)
-            end)
-        end
-        add("Next problem", function()
-            require("tuna.workspace.navigate").go(1)
-        end)
-        add("Previous problem", function()
-            require("tuna.workspace.navigate").go(-1)
-        end)
+        add(
+            "Scaffold",
+            choices_of(
+                "Scaffold",
+                vim.tbl_map(function(role)
+                    return {
+                        label = role:sub(1, 1):upper() .. role:sub(2),
+                        run = function()
+                            require("tuna.workspace.scaffold").create(role, cur)
+                        end,
+                    }
+                end, tools.SCAFFOLDS)
+            )
+        )
         add(require("tuna.workspace.recent").is_pinned(path) and "Unpin this problem" or "Pin this problem", function()
             commands.toggle_pin(sol)
         end)
     end
 
     -- Always available: nothing here needs a solution to act on.
-    add("Download testcases", function()
-        commands.execute({ "download", "testcases" })
-    end)
-    add("Download problem", function()
-        commands.execute({ "download", "problem" })
-    end)
-    add("Download contest", function()
-        commands.execute({ "download", "contest" })
-    end)
+    add(
+        "Download",
+        choices_of(
+            "Download",
+            vim.tbl_map(function(what)
+                return {
+                    label = what:sub(1, 1):upper() .. what:sub(2),
+                    run = function()
+                        commands.execute({ "download", what })
+                    end,
+                }
+            end, { "testcases", "problem", "contest" })
+        )
+    )
     add("Scratch", function()
         require("tuna.workspace.scratch").start()
     end)
@@ -523,6 +550,7 @@ function M.open(bufnr)
         { title = "Contests", format = format(1), column = 1 },
         { title = "Problems", format = format(2), column = 1 },
         { title = "Pinned", format = format(3), column = 1 },
+        { items = { "Press / to search" }, hint = true, column = 2 },
         { title = "Catch of the day", items = labels, column = 2 },
     }, function(section, idx)
         if lists[section] then
@@ -536,7 +564,11 @@ function M.open(bufnr)
                 c.run()
             end
         end
-    end, api.nvim_get_current_win(), nil, banner(config.get_buffer_config(sol)))
+    end, api.nvim_get_current_win(), nil, banner(config.get_buffer_config(sol)), {
+        ["/"] = function()
+            require("tuna.commands").execute({ "go", "search" })
+        end,
+    })
 end
 
 M._test = {

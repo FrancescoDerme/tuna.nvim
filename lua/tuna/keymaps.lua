@@ -45,6 +45,7 @@ M.actions = {
     go_problem = "Tuna go problem", -- back to the problem/contest last worked on
     go_contest = "Tuna go contest",
     go_judge = "Tuna go judge", -- open the problem you are on in the browser
+    go_search = "Tuna go search", -- find any problem or contest by name
     scratch = "Tuna scratch", -- scratch solution to write in before the problem exists
     -- A download like the others, except it folds the `:Tuna scratch` file into the
     -- problem it opens — hence its name and its place in the download group.
@@ -63,6 +64,7 @@ M.actions = {
 --   <leader>tp  Prev problem                            <leader>tgp  Problem
 --                                                       <leader>tgc  Contest
 --                                                       <leader>tgj  Judge
+--                                                       <leader>tgs  Search
 --
 -- The labels above are the which-key entries. A key inside a group does not repeat
 -- what the group already says (`td` "Download" → `Problem`, `tg` "Go to" →
@@ -106,6 +108,7 @@ M.preset = {
         -- open yet.
         go_problem = "gp",
         go_contest = "gc",
+        go_search = "gs",
     },
 }
 
@@ -124,6 +127,7 @@ M.preset_labels = {
     go_problem = "Problem", -- under "Go to"
     go_contest = "Contest",
     go_judge = "Judge",
+    go_search = "Search",
 }
 
 ---Expand `M.preset` against a prefix, with the user's own tables layered on top so a

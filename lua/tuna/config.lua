@@ -290,6 +290,13 @@ M.defaults = {
         header = nil,
     },
 
+    -- `:Tuna go search`, which looks where downloads land, passing over dot-directories and
+    -- `clean.skip_directories`.
+    search = {
+        -- The walk stops after this many filesystem entries and says it was cut short.
+        max_entries = 100000,
+    },
+
     -- `:Tuna go` and the menu: how many problems and contests are remembered, most
     -- recent first. The menu lists them all, and a list too long to fit scrolls.
     recent = {

@@ -55,6 +55,10 @@ specific Vim error about a buffer the user never opened.
   does), landing in the window it was opened over. The runner UI is consulted only when loaded.
   A caller that also changes directory does so after it, so an `lcd` lands on the window showing
   the file, not on a pane put away.
+- `adopt` sets the `tuna` filetype with `Syntax` ignored: searching the runtimepath for a syntax
+  file nobody wrote, on every float, is a large part of what a menu of panes takes to open. A
+  pane's colours come from `'syntax'`, set by `fill_preview`, which clears them for content with
+  no language.
 - `no_completion(buf)`: a buffer typed into as a prompt (the search pane, `input`, the form's
   custom row) keeps completion plugins out: blink.cmp's `vim.b.completion = false`, and
   nvim-cmp's `setup.buffer({ enabled = false })`, given when nvim-cmp is loaded, which a lazily
@@ -123,7 +127,10 @@ specific Vim error about a buffer the user never opened.
   so `j` and `k` can be searched for; the pane keys walk search, list and preview, and arriving
   back in the search pane types again only if it was left typing (`inserting`). Closing any of
   its panes by hand closes the whole menu, as closing the list does. A resize keeps the search,
-  the pane focused and whether it was typing.
+  the pane focused and whether it was typing. With a search `items` may start empty, for
+  `menu_items(id, items)` to fill by the `id` `menu` returned (a later opening's list is left
+  alone), narrowed by what was typed meanwhile, and none closing it; `beside.list_width` keeps
+  the list's width from following rows that are not there yet.
 - `panels`: lists in columns where `<CR>` acts on the focused list only (the `:Tuna` menu).
   `form`: stacked lists where `<CR>` submits every selection (clean). A `panels` section may
   carry `highlights`, byte-range spans drawn as extmarks in `tuna_panels`. They differ in what
@@ -133,7 +140,9 @@ specific Vim error about a buffer the user never opened.
   `column` stacks it with others: a column is as wide as its widest list, its lists share the
   band's rows smallest first (a list given fewer rows than items scrolls, with the user's
   scrolloff), and `switch_window_keys` move by position (`neighbour`: within the stack, or to
-  the list level with this one in the next column).
+  the list level with this one in the next column). A `hint` section is one centred row in a
+  stack, read and not walked to: the pane keys go by `walkable`, the stacks without hints.
+  `keys` are the whole board's: each closes it and runs its function.
   A section's `format(width)` lays it out for a content width (nil: its natural one) in place
   of `items`, again on every build and resize. When the board is too wide, a column made
   only of such sections gives up width first, down to `FIT_MIN`, before the whole board

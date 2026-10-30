@@ -286,6 +286,34 @@ widgets.panels({ { title = "left", items = { "a", "b" } }, { title = "right", it
     nil, nil, { "BANNER", "BANNER" })
 settle()
 conforms("widgets.panels")
+
+-- A surface is tagged for every plugin that targets it, with no search for a syntax file.
+do
+    vim.cmd.syntax("on") -- what makes a filetype fire `Syntax`, before anything counts them
+    local fired = {}
+    local group = api.nvim_create_augroup("tuna_adopt_events", {})
+    api.nvim_create_autocmd({ "FileType", "Syntax" }, {
+        group = group,
+        pattern = "tuna",
+        callback = function(ev)
+            fired[#fired + 1] = ev.event
+        end,
+    })
+    local before = vim.o.eventignore
+    vim.o.eventignore = "CursorHold"
+    local buf = api.nvim_create_buf(false, true)
+    require("tuna.ui.surface").adopt(buf, "widget")
+    local adopted = { vim.bo[buf].filetype, fired, vim.o.eventignore }
+    ok(
+        "a surface fires FileType and not Syntax, leaving 'eventignore' as it was",
+        vim.deep_equal(adopted, { "tuna", { "FileType" }, "CursorHold" }),
+        vim.inspect(adopted)
+    )
+    vim.cmd.syntax("off")
+    vim.o.eventignore = before
+    api.nvim_del_augroup_by_id(group)
+    api.nvim_buf_delete(buf, { force = true })
+end
 -- `conforms` cannot demand this of every widget — the chooser form has a row that is
 -- typed into — but a board of lists has nothing to type, and a scratch buffer is
 -- modifiable until told otherwise. Left that way, `open_float` skips `read_only` and the

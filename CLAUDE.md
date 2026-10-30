@@ -161,6 +161,7 @@ lua/tuna/
     library.lua         snippet library
     navigate.lua        :Tuna next / prev
     recent.lua          :Tuna go problem / contest, pinned problems, cwd changes
+    search.lua          :Tuna go search, every problem and contest by their sidecars
 scaffolds/            the shipped starters, `<role>.<ext>`
 doc/tuna.txt          vimdoc
 REFERENCE.md          the reference (commands, configuration) the README links into
@@ -251,9 +252,17 @@ is relative. Every configured path goes through these: compile/running directori
     (`entry_name`: a contest's judge first) and never statuses. `problem_names` tells same-named problems apart by their contest directory (`2263/A`),
     and two attempts in one directory by file. An empty list gets a `—` row whose `<CR>`
     shows `recent`'s explanation.
-  - Commands that need a runnable buffer are dropped for other buffers. Run runs the resolved
+  - The commands stay short, so each row applies to the buffer: those needing a runnable
+    buffer are dropped for others, `Run all versions` needs a second solution, `Stress test` a
+    generator, and a mode is not offered beside the `Run` already in it. `Interactive` is kept
+    with no interactor, as a live session needs none. Scaffold and Download are one row each
+    that opens its choices (`choices_of`). Testcases (the runner UI's) and the neighbouring
+    problems (keys) have no row. Run runs the resolved
     mode without forcing it and shows whether it is forced; a forced mode adds an entry making
     it automatic, and the checker entry shows automatic (with the file in use) or off.
+  - A one-row hint over the commands names `/`, a board key (`panels`' `keys`) running
+    `:Tuna go search`. Search is a picker of its own rather than a pane of the board: three
+    stacked lists sharing `recent_layout`'s columns could not narrow together cheaply.
   - Modules are required lazily.
 - **`keymaps.lua`**: `M.actions` maps actions to `:Tuna` commands. `mappings` are buffer-local
   via a `FileType` autocmd over `keymaps.filetypes`; `global` are global. `setup()` can be
