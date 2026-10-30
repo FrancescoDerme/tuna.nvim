@@ -91,26 +91,50 @@ local function entry_status(path)
     return {}
 end
 
----How many of a contest's problems pass locally, for a judge whose verdicts never reach
----tuna: the same word and the same shape as a problem's own status, since that is what it is
----counting.
----@param files string[]
+---How many of a contest's problems pass locally, any of a problem's versions passing it, for a
+---judge whose verdicts never reach tuna: the same word and the same shape as a problem's own
+---status, since that is what it is counting.
+---@param problems string[][]
 ---@return { [1]: string, [2]: string? }[]
-local function local_status(files)
+local function local_status(problems)
     local passed = 0
-    for _, file in ipairs(files) do
-        local ran, total = require("tuna.run.core").local_verdict(file)
-        if ran and ran == total then
-            passed = passed + 1
+    for _, versions in ipairs(problems) do
+        for _, file in ipairs(versions) do
+            local ran, total = require("tuna.run.core").local_verdict(file)
+            if ran and ran == total then
+                passed = passed + 1
+                break
+            end
         end
     end
-    return { { passed .. "/" .. #files .. " " }, { "PASSED", passed > 0 and "TunaCorrect" or "TunaDone" } }
+    return { { passed .. "/" .. #problems .. " " }, { "PASSED", passed > 0 and "TunaCorrect" or "TunaDone" } }
+end
+
+-- Which verdict settles a problem with several versions, the higher rank winning: a rejected
+-- attempt says nothing about a problem another version got accepted on.
+local VERDICT_RANK = { rejected = 1, partial = 2, accepted = 3 }
+
+---The best current judge verdict among a problem's versions.
+---@param versions string[]
+---@return string? state
+local function best_verdict(versions)
+    local best
+    for _, file in ipairs(versions) do
+        local verdict = require("tuna.problem.submit").verdict_for(file)
+        local rank = verdict and VERDICT_RANK[verdict.state]
+        if rank and rank > (VERDICT_RANK[best] or 0) then
+            best = verdict.state
+        end
+    end
+    return best
 end
 
 ---How a contest is going, over every problem in it, as `{ text, highlight? }` segments: how
 ---many the judge accepted out of all of them, then how many it rejected or accepted in part,
----e.g. `2/5 ACCEPTED, 1 REJECTED`. Only judge verdicts count, a local verdict existing only
----for problems that were run. A count is never coloured, and a word is dimmed at zero.
+---e.g. `2/5 ACCEPTED, 1 REJECTED`. A problem counts once, by the best verdict of its versions
+---(`contest_versions`), so the count does not depend on which version was last opened. Only
+---judge verdicts count, a local verdict existing only for problems that were run. A count is
+---never coloured, and a word is dimmed at zero.
 ---Where no verdict can reach tuna at all — nothing reports one back for this judge
 ---(`submit.reports_verdict`) — it counts what passed locally instead: `0/7 ACCEPTED` would be
 ---a claim about an answer nobody can hear, and would stay at zero forever.
@@ -121,22 +145,22 @@ local function contest_status(contest)
         return {}
     end
     local cfg = config.load_local_config_and_extend(contest.dir)
-    local files = require("tuna.workspace.recent").contest_problems(contest.dir, contest.problem, cfg)
-    if #files == 0 then
+    local problems = require("tuna.workspace.recent").contest_versions(contest.dir, cfg)
+    if #problems == 0 then
         return {}
     end
     local submit = require("tuna.problem.submit")
     local counts = { accepted = 0, rejected = 0, partial = 0 }
     local answerable = false
-    for _, file in ipairs(files) do
-        answerable = answerable or submit.reports_verdict(file)
-        local verdict = submit.verdict_for(file)
-        if verdict and counts[verdict.state] then
-            counts[verdict.state] = counts[verdict.state] + 1
+    for _, versions in ipairs(problems) do
+        answerable = answerable or submit.reports_verdict(versions[1])
+        local state = best_verdict(versions)
+        if state then
+            counts[state] = counts[state] + 1
         end
     end
     if not answerable then
-        return local_status(files)
+        return local_status(problems)
     end
     local segments = {}
     local function add(count, label, word)
@@ -146,7 +170,7 @@ local function contest_status(contest)
         segments[#segments + 1] = { label .. " " }
         segments[#segments + 1] = { word[1], count > 0 and word[2] or "TunaDone" }
     end
-    add(counts.accepted, counts.accepted .. "/" .. #files, VERDICT.accepted)
+    add(counts.accepted, counts.accepted .. "/" .. #problems, VERDICT.accepted)
     if counts.rejected > 0 then
         add(counts.rejected, tostring(counts.rejected), VERDICT.rejected)
     end

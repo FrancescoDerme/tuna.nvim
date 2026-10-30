@@ -86,9 +86,9 @@ hold everywhere are in the root `CLAUDE.md`.
   `tpp`, any case). Neovim gives a header its language's filetype, so having a
   `run_command` does not tell one from a solution. A folder's solutions are listed in one
   place, `solutions_in` (`solution_bufnr`, run-all, `navigate.solution_in`,
-  `contest_problems`, sharing testcases), which reads the directory with `vim.fs.dir`
-  rather than a glob, since `globpath` takes a comma in a problem's name for a path
-  separator; `find`, a helper by role, reads it the same way, once for all the role's
+  `contest_problems`, `contest_versions`, sharing testcases), which reads the directory
+  with `vim.fs.dir` rather than a glob, since `globpath` takes a comma in a problem's name
+  for a path separator; `find`, a helper by role, reads it the same way, once for all the role's
   names, and `utils.subdirectories` lists a contest's problem folders. A file's language
   (`filetype_of`) is matched once per extension for the session, against a stand-in name:
   listing solutions asks it of every file in every problem folder the menu summarises, and

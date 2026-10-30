@@ -155,7 +155,10 @@ problems and remembering them. The rules that hold everywhere are in the root `C
     lookup, remembered then inferred.
   - `change_dir` honours `cd_command` (`cd`/`tcd`/`lcd`/`false`). `snapshot()` returns the
     loaded state for the menu. `contest_problems` lists a contest's solutions in both
-    layouts (plain files in the contest directory, and one per problem directory).
+    layouts (plain files in the contest directory, and one per problem directory, picked
+    like the file given), for stepping between them. `contest_versions` holds every solution
+    of each problem instead, for counting: a problem directory's, and in the contest
+    directory the files whose sidecar task names one problem.
 - **`navigate.lua`**: the next or previous problem of the file's contest (`recent.contest_of`:
   remembered, else inferred), in `recent.contest_problems`' order, which holds both layouts;
   with no contest known, or the file not among its problems, the next or previous sibling

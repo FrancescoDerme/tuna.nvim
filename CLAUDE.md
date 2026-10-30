@@ -228,9 +228,13 @@ is relative. Every configured path goes through these: compile/running directori
   - A problem's status (`entry_status`) is the judge's verdict from `submit.verdict_for` while
     it is current, else `core.local_verdict`, else nothing: the judge's answer settles a
     problem, so it always wins. A contest's (`contest_status`) counts current judge verdicts
-    over `recent.contest_problems`, like `2/5 ACCEPTED, 1 REJECTED`. Local verdicts don't
-    count there, because they exist only for problems that were run — unless no verdict can
-    reach the contest at all, where it counts what passes locally and says `PASSED`. That is
+    over `recent.contest_versions`, like `2/5 ACCEPTED, 1 REJECTED`: a problem counts once, by
+    the best verdict among its versions (`best_verdict`), so what the contest says cannot
+    depend on which version was opened last, as a pick of one file per problem would, and a
+    rejected attempt says nothing about a problem another version was accepted on. Local
+    verdicts don't count there, because they exist only for problems that were run — unless
+    no verdict can reach the contest at all, where it counts what passes locally and says
+    `PASSED`, any version passing a problem. That is
     `submit.reports_verdict`, which is about whether anything reports the outcome *back* (the
     `browser` provider watches nothing, `watch = false` is not read, `expects_verdict = false`
     is not parsed), not about how the submission is made, which is a browser tab for most

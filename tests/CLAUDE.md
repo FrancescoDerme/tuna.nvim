@@ -37,6 +37,7 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     only while it is read), and the editor rebuilt by a resize in the pane, cursor and insert
     mode it was in, and saving with `:w`/`:wq` and asking before an unsaved edit is closed away;
   - `menu.lua`: the contest summary over both layouts, counting current judge verdicts only, a
+    problem counted once by the best of its versions whichever was opened last, a
     problem's judge verdict beating its local one and either lapsing with an edit, which rows a
     local verdict counts, statuses in the runner UI's words and colours with counts uncoloured
     and stacked in a column of their own while every verdict ends on one edge, counted or not,

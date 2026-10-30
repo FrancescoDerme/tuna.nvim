@@ -1,7 +1,8 @@
 -- tests/menu.lua
 --
 -- The menu's Contests and Problems lists: a contest summarised over every problem in
--- it, in either layout and counting only verdicts that still describe the file on disk; a
+-- it, in either layout, each problem once by the best of its versions and counting only
+-- verdicts that still describe the file on disk; a
 -- problem's judge verdict, else its saved local verdict; statuses in the runner UI's
 -- words and colours, counts left plain and flush right; `widgets.panels` stacking the
 -- two lists in one column, scrolling a list that does not fit; and the Pinned list under
@@ -60,6 +61,51 @@ solution(flat, "b.cpp", nil)
 t.write(flat, "gen.cpp", "int main() {}\n")
 t.eq("plain files are problems too, helpers aside", menu.contest_status({ dir = flat, name = "f" }), { { "1/2 " }, { "ACCEPTED", "TunaCorrect" } })
 
+-- Several versions of a problem, each with a verdict of its own.
+local versions = t.tempdir()
+for problem, files in pairs({
+    A = { { "main.cpp", "rejected" }, { "main2.cpp", "accepted" } },
+    B = { { "main.cpp", "rejected" }, { "main2.cpp", "partial" } },
+    C = { { "main.cpp", "rejected" } },
+    D = { { "main.cpp" }, { "main2.cpp", "accepted" } },
+    E = { { "main.cpp", "accepted" }, { "main2.cpp", "rejected" } },
+}) do
+    vim.fn.mkdir(versions .. "/" .. problem, "p")
+    for _, file in ipairs(files) do
+        solution(versions .. "/" .. problem, file[1], file[2])
+    end
+end
+local summary = {
+    { "3/5 " },
+    { "ACCEPTED", "TunaCorrect" },
+    { ", " },
+    { "1 " },
+    { "REJECTED", "TunaWrong" },
+    { ", " },
+    { "1 " },
+    { "PARTIAL", "TunaWarning" },
+}
+t.eq("a problem counts once, by the best verdict of its versions", menu.contest_status({ dir = versions, name = "v" }), summary)
+for _, last in ipairs({ "/A/main.cpp", "/A/main2.cpp", "/D/main.cpp" }) do
+    t.eq("whichever version was opened last: " .. last, menu.contest_status({ dir = versions, name = "v", problem = versions .. last }), summary)
+end
+
+-- A version in a contest of plain files is known by the problem its sidecar names.
+local flat_versions = t.tempdir()
+solution(flat_versions, "a.cpp", "rejected")
+solution(flat_versions, "a2.cpp", "accepted")
+solution(flat_versions, "b.cpp", "rejected")
+local flat_store = vim.json.decode(table.concat(vim.fn.readfile(flat_versions .. "/.tuna.json"), "\n"))
+flat_store.task = { ["a.cpp"] = { url = "https://x/a" }, ["a2.cpp"] = { url = "https://x/a" }, ["b.cpp"] = { url = "https://x/b" } }
+t.write(flat_versions, ".tuna.json", vim.json.encode(flat_store))
+t.eq("and plain files naming one problem are its versions", menu.contest_status({ dir = flat_versions, name = "fv" }), {
+    { "1/2 " },
+    { "ACCEPTED", "TunaCorrect" },
+    { ", " },
+    { "1 " },
+    { "REJECTED", "TunaWrong" },
+})
+
 --------------------------------------------------------------------------------
 -- A judge that cannot answer
 --------------------------------------------------------------------------------
@@ -101,6 +147,19 @@ t.eq("so the contest counts what passed locally, in that word", menu.contest_sta
     { "PASSED", "TunaCorrect" },
 })
 t.eq("a problem says what it always said", menu.entry_status(blind_a), { { "1/1 " }, { "PASSED", "TunaCorrect" } })
+
+-- Second versions: A's passes as its first does, B's passes where its first did not, and C's
+-- does not.
+solution(blind .. "/A", "main2.cpp")
+solution(blind .. "/B", "main2.cpp")
+solution(blind .. "/C", "main2.cpp")
+core.save_local_verdict(blind .. "/A/main2.cpp", { { tcnum = 0, status = "CORRECT" } })
+core.save_local_verdict(blind .. "/B/main2.cpp", { { tcnum = 0, status = "CORRECT" } })
+core.save_local_verdict(blind .. "/C/main2.cpp", { { tcnum = 0, status = "WRONG" } })
+t.eq("a problem passes when any of its versions does, counted once", menu.contest_status({ dir = blind, name = "abc1", problem = blind .. "/B/main.cpp" }), {
+    { "2/3 " },
+    { "PASSED", "TunaCorrect" },
+})
 
 require("tuna").setup({})
 t.eq(

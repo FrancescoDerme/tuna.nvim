@@ -632,6 +632,38 @@ function M.contest_problems(dir, like, cfg)
     return files
 end
 
+---Every problem of a contest as all the solutions written for it, in the order of
+---`contest_problems`: the solutions of each problem directory, and in the contest directory
+---the files whose sidecar task names one problem, each other file being a problem alone.
+---@param dir string contest directory
+---@param cfg table
+---@return string[][]
+function M.contest_versions(dir, cfg)
+    local tools = require("tuna.run.tools")
+    local sidecar = require("tuna.problem.sidecar")
+    local problems, by_url = {}, {}
+    for _, file in ipairs(tools.solutions_in(dir, cfg)) do
+        local url = (sidecar.task(file, cfg) or {}).url
+        local versions = url and by_url[url]
+        if versions then
+            versions[#versions + 1] = file
+        else
+            versions = { file }
+            problems[#problems + 1] = versions
+            if url then
+                by_url[url] = versions
+            end
+        end
+    end
+    for _, name in ipairs(utils.subdirectories(dir)) do
+        local files = tools.solutions_in(dir .. "/" .. name, cfg)
+        if #files > 0 then
+            problems[#problems + 1] = files
+        end
+    end
+    return problems
+end
+
 ---`:Tuna go contest` — cd to the contest last worked on and open a problem in it.
 ---@param index integer? which recent contest, 1 (the default) being the most recent
 function M.open_contest(index)
