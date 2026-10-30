@@ -22,8 +22,10 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     nothing copied while it is loaded, the testcase editor's two panes together `editor_ui.width` of the
     editor, a menu of varying previews as wide as the widest, between half and seven tenths
     of the editor, the key legend's two columns closing together when one is closed
-    with `:q`, a menu's starting row and preview, a menu's search (opened typing, narrowing the
-    list before `<CR>` reads it, `j` typed and `<Down>` moving, the pane walk,
+    with `:q`, a menu's starting row and preview, a pane worth pasting from copied from in
+    Normal and Visual mode with nothing a selection does raising `E21` while a list and any
+    other pane start no selection, a menu's search (opened typing, narrowing the list before
+    `<CR>` reads it, `j` typed and `<Down>` moving, the pane walk,
     typing again only where it was left typing, completion turned off in it and in `input`,
     nvim-cmp told whether loaded already or loading on the prompt's `InsertEnter`, a resize
     keeping the search, nothing found choosing nothing), a menu's panes beside its list (the

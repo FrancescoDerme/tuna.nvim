@@ -33,7 +33,7 @@ local M = {}
 ---@param bufnr integer buffer to display
 ---@param enter boolean whether to move the cursor into the new window
 ---@param opts table { width, height, row, col, border, border_highlight, title, kind?,
----  keep_scrolloff?, wrap?, cursorline? }
+---  keep_scrolloff?, wrap?, cursorline?, selectable? }
 ---@return integer winid
 local function open_float(bufnr, enter, opts)
     -- Everything Vim has to be told about a scratch surface — the name, the `tuna`
@@ -85,7 +85,7 @@ local function open_float(bufnr, enter, opts)
     -- made inert here rather than left to raise `E21` a keystroke later. Run before the
     -- widget binds its own keys, which simply take precedence.
     if not vim.bo[bufnr].modifiable then
-        surface.read_only(bufnr)
+        surface.read_only(bufnr, { selectable = opts.selectable })
     end
     return winid
 end
@@ -600,6 +600,7 @@ end
 ---@field wrap boolean? wraps its lines at word boundaries
 ---@field readout boolean? a line read at a glance (the library's complexity): the pane keys pass
 ---  over it, as the runner UI's over its Run pane, and still lead out of it
+---@field selectable boolean? worth pasting from, so Visual mode copies from it
 ---@field panes tuna.MenuPreview[]? the panes, with `content`
 ---@field beside { width: integer, height: integer }? the panes to the right of the search and
 ---  list rather than under them, the whole float this size, borders included, centred as the
@@ -1057,6 +1058,7 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
                 -- cursorline while it is the pane being read.
                 keep_scrolloff = true,
                 wrap = spec.wrap,
+                selectable = spec.selectable,
             })
             vim.wo[win].linebreak = spec.wrap == true
             surface.follow_cursorline(win)

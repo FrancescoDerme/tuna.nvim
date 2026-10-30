@@ -231,6 +231,7 @@ local function start_over(path, ext, cfg)
     end, vim.api.nvim_get_current_win(), function() end, {
         width = widgets.sequence_width(vim.list_extend({ title }, items), previews),
         filetype = vim.filetype.match({ filename = "scratch." .. ext }),
+        selectable = true,
         content = function(idx)
             return previews[idx] or { title = "empty", lines = { "" } }
         end,
@@ -259,6 +260,7 @@ function M.start(bufnr)
         title = vim.fn.fnamemodify(path, ":t"),
         lines = scratch_lines(path),
         filetype = vim.filetype.match({ filename = "scratch." .. ext }),
+        selectable = true,
     }
     held.width = widgets.sequence_width({ "A scratch already exists", "Resume", "Restart" }, { held })
     widgets.menu({ "Resume", "Restart" }, "A scratch already exists", function(idx)

@@ -508,6 +508,19 @@ for _, interface in ipairs({ "split", "popup" }) do
         vim.wo[ui.windows.so.winid].cursorline,
     }, { true, false })
     ui:unzoom()
+    local function selects(name)
+        for _, m in ipairs(vim.api.nvim_buf_get_keymap(ui.windows[name].bufnr, "n")) do
+            if m.lhs == "v" then
+                return false
+            end
+        end
+        return true
+    end
+    t.eq(interface .. ": a read-only pane is selected from, the selector and the Run pane are not",
+        { selects("so"), selects("se"), selects("tc"), selects("st") }, { true, true, false, false })
+    ui:show_message("A message", "text")
+    t.eq(interface .. ": nor is a message", vim.fn.maparg("v", "n", false, true).buffer, 1)
+    vim.api.nvim_win_close(0, true)
     -- The diff keeps the cursorline: a disagreeing line is marked only where it disagrees.
     ui:toggle_diff_view()
     vim.api.nvim_set_current_win(ui.windows.so.winid)

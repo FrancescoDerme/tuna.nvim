@@ -174,6 +174,9 @@ do
             return { p.title, p.fit, p.wrap }
         end, pv.panes),
     }, { { { "Notes", true, true }, { "Complexity", true, true }, {} } })
+    t.eq("and only the code is selected from", vim.tbl_map(function(p)
+        return p.selectable == true
+    end, pv.panes), { false, false, true })
     local sieve = pv.content(2)
     t.eq("an entry's notes, its complexity without the label, and its code", {
         sieve[1].lines,

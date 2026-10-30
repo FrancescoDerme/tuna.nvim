@@ -167,14 +167,16 @@ do
         { "empty.cpp", "empty file" },
     })
 
-    local previews, stats = {}, { deleted = 0, builds = 0, dirs = 0, emptied = {} }
+    local previews, selectable, stats = {}, nil, { deleted = 0, builds = 0, dirs = 0, emptied = {} }
     widgets.menu = function(_, _, on_choice, _, _, preview)
         previews[#previews + 1] = preview.lines[1]
+        selectable = preview.selectable
         on_choice(1) -- Delete
     end
     clean.confirm_each({ found[1] }, 1, nil, stats, { width = 40 }, function() end)
     widgets.menu = real_menu
     t.has("its preview says what it is, having no text to show", previews[1], "A compiled program")
+    t.eq("and offers nothing to select", selectable, false)
     t.eq("deleted, it counts as a build, its directory emptied", {
         vim.fn.filereadable(pdir .. "/.main2"),
         stats.builds,

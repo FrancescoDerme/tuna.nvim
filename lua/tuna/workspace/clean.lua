@@ -895,6 +895,7 @@ local function file_preview(f)
         title = f.rel,
         lines = about and { about } or vim.split(utils.read_file(f.path) or "", "\n", { plain = true }),
         filetype = not f.build and vim.filetype.match({ filename = f.path }) or nil,
+        selectable = not f.build,
     }
 end
 

@@ -2048,7 +2048,7 @@ function RunnerUI:show_ui()
     -- the next keystroke raises `E21: Cannot make changes, 'modifiable' is off` — an
     -- error about an editing session the user never meant to start.
     for _, buf in ipairs(action_bufs) do
-        surface.read_only(buf)
+        surface.read_only(buf, { selectable = buf ~= tc_buf and buf ~= self.windows.st.bufnr })
     end
 
     -- Coming back to the UI after something else took the screen. Opening a file

@@ -38,9 +38,16 @@ M.LAYER = {
 --- same, and so do the increment/decrement and case/rot13 operators.)
 M.CHANGE_KEYS = {
     "i", "I", "a", "A", "o", "O", "c", "C", "s", "S", "r", "R", "x", "X", "d", "D",
-    "p", "P", "J", "~", "v", "V", "<C-v>", "<Insert>", "gi", "gI", "gp", "gP", "gJ", "g~",
-    "u", "U", "<C-r>", "<C-a>", "<C-x>", "&", "gu", "gU", "g?",
+    "p", "P", "J", "~", "<Insert>", "gi", "gI", "gp", "gP", "gJ", "g~",
+    "u", "U", "<C-r>", "<C-a>", "<C-x>", "&", "gu", "gU", "g?", ">", "<", "=", "!", "gq", "gw",
 }
+
+--- The keys that start a selection, for a buffer with nothing worth copying from it.
+local VISUAL_KEYS = { "v", "V", "<C-v>" }
+
+--- Of `CHANGE_KEYS`, those that only select in Visual mode: `i`/`a` begin a text object and
+--- `o`/`O` go to the selection's other end.
+local SELECTING = { i = true, a = true, o = true, O = true }
 
 ---Tell Vim what this buffer is: a named, tagged scratch buffer whose writes are ours to
 ---handle. Call it once, as soon as the buffer exists.
@@ -102,7 +109,9 @@ end
 ---try. Bound only where nothing is mapped yet, so a surface's real actions keep their
 ---meanings — which is why this is called **after** those are bound.
 ---@param bufnr integer
-function M.read_only(bufnr)
+---@param opts { selectable: boolean? }? `selectable`: a buffer worth pasting from, which Visual
+---  mode copies from, unlike a list or a line read at a glance
+function M.read_only(bufnr, opts)
     if not (bufnr and api.nvim_buf_is_valid(bufnr)) then
         return
     end
@@ -113,15 +122,21 @@ function M.read_only(bufnr)
     -- form against it finds nothing and a surface's own action (the runner UI's
     -- `<C-r>`, run all) would be `<Nop>`ed over.
     local function code(key)
-        return api.nvim_replace_termcodes(key, true, false, true)
+        return api.nvim_replace_termcodes(key, true, true, true)
     end
-    local taken = {}
-    for _, m in ipairs(api.nvim_buf_get_keymap(bufnr, "n")) do
-        taken[code(m.lhs)] = true
+    local inert = { n = vim.list_slice(M.CHANGE_KEYS), x = M.CHANGE_KEYS }
+    if not (opts and opts.selectable) then
+        vim.list_extend(inert.n, VISUAL_KEYS)
     end
-    for _, key in ipairs(M.CHANGE_KEYS) do
-        if not taken[code(key)] then
-            vim.keymap.set("n", key, "<Nop>", { buffer = bufnr, nowait = true })
+    for mode, keys in pairs(inert) do
+        local taken = {}
+        for _, m in ipairs(api.nvim_buf_get_keymap(bufnr, mode)) do
+            taken[code(m.lhs)] = true
+        end
+        for _, key in ipairs(keys) do
+            if not (taken[code(key)] or (mode == "x" and SELECTING[key])) then
+                vim.keymap.set(mode, key, "<Nop>", { buffer = bufnr, nowait = true })
+            end
         end
     end
 end

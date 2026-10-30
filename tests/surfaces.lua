@@ -40,7 +40,7 @@ end
 --- Keys that begin a change. On an unmodifiable buffer each one ends in `E21`.
 local CHANGE_KEYS = {
     "i", "I", "a", "A", "o", "O", "c", "C", "s", "S", "r", "R", "x", "X", "d", "D",
-    "p", "P", "J", "~", "v", "V", "<C-v>", "gi", "gI", "gp", "gP", "gJ", "g~", "u", "<C-r>",
+    "p", "P", "J", "~", "gi", "gI", "gp", "gP", "gJ", "g~", "u", "<C-r>", ">", "<", "=", "!", "gq", "gw",
 }
 local LAYERS = { [50] = "grid", [60] = "zoom", [70] = "overlay", [80] = "dialog" }
 
@@ -61,7 +61,7 @@ end
 ---is (a raw `\18`), so matching the written form against it finds nothing.
 local function live_change_keys(buf)
     local function code(key)
-        return api.nvim_replace_termcodes(key, true, false, true)
+        return api.nvim_replace_termcodes(key, true, true, true)
     end
     local mapped = {}
     for _, m in ipairs(api.nvim_buf_get_keymap(buf, "n")) do
@@ -483,6 +483,64 @@ for _, f in ipairs(floats()) do
 end
 ok("a following preview starts on that row too", previewed == "row 2", previewed)
 close_layer(80)
+
+-- A pane worth pasting from is selected and copied from like any buffer, what a selection could
+-- change stays inert instead of raising `E21`, and a key the surface claims keeps its meaning.
+-- A list, and a pane that does not ask for it, starts no selection.
+widgets.menu({ "one" }, "a menu", function() end, nil, nil, { title = "preview", lines = { "one two", "three" }, selectable = true })
+settle()
+for _, f in ipairs(floats()) do
+    if api.nvim_buf_get_lines(f.buf, 0, 1, false)[1] == "one two" then
+        api.nvim_set_current_win(f.win)
+    end
+end
+local function typed(keys, cursor)
+    api.nvim_win_set_cursor(0, cursor or { 1, 0 })
+    api.nvim_feedkeys(api.nvim_replace_termcodes(keys, true, false, true), "xt", false)
+    return vim.fn.getreg('"')
+end
+ok("a read-only pane copies a line", typed("yy") == "one two\n", vim.fn.getreg('"'))
+ok("and a selection", typed("vey") == "one", vim.fn.getreg('"'))
+ok("of lines", typed("Vjy") == "one two\nthree\n", vim.fn.getreg('"'))
+ok("of a block", typed("<C-v>jy") == "o\nt", vim.fn.getreg('"'))
+ok("by a text object", typed("viwy", { 1, 4 }) == "two", vim.fn.getreg('"'))
+ok("from its other end", typed("vlohy", { 1, 4 }) == " tw", vim.fn.getreg('"'))
+for _, key in ipairs({ "d", "c", "s", "x", "p", "u", "U", "~", "J", "I", "A", ">", "<", "=", "!", "gq", "gw" }) do
+    vim.v.errmsg = ""
+    local fine, err = pcall(typed, "Vj" .. key)
+    ok("a selection's '" .. key .. "' stays inert", fine and vim.v.errmsg == "" and vim.fn.mode() == "n", err or vim.v.errmsg)
+end
+ok("and the pane's '>' too", pcall(typed, ">>") and vim.v.errmsg == "", vim.v.errmsg)
+close_layer(80)
+local function inert_selections(buf)
+    local inert = 0
+    for _, m in ipairs(api.nvim_buf_get_keymap(buf, "n")) do
+        if vim.tbl_contains({ "v", "V", "<C-V>" }, m.lhs) then
+            inert = inert + 1
+        end
+    end
+    return inert
+end
+widgets.menu({ "one" }, "a menu", function() end, nil, nil, { title = "preview", lines = { "two" } })
+settle()
+for _, f in ipairs(floats()) do
+    ok("a list or a pane not worth pasting from starts no selection", inert_selections(f.buf) == 3, inert_selections(f.buf))
+end
+close_layer(80)
+local claimed = api.nvim_create_buf(false, true)
+vim.keymap.set("x", "d", "y", { buffer = claimed })
+vim.keymap.set("n", "<", "y", { buffer = claimed })
+require("tuna.ui.surface").read_only(claimed)
+local function claim(mode, lhs)
+    for _, m in ipairs(api.nvim_buf_get_keymap(claimed, mode)) do
+        if m.lhs == lhs then
+            return m.rhs
+        end
+    end
+end
+ok("a key a surface claims in Visual mode stays claimed", claim("x", "d") == "y", claim("x", "d"))
+ok("and a `<`, which Vim names `<lt>`", claim("n", "<lt>") == "y", claim("n", "<lt>"))
+api.nvim_buf_delete(claimed, { force = true })
 
 -- A menu with a search: focused on the search pane and typing, the list narrowed by what is
 -- typed, even when the keys come faster than the change events (`et<CR>` in one go), and

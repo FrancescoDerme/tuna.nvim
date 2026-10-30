@@ -16,8 +16,12 @@ specific Vim error about a buffer the user never opened.
   skip tuna's windows by filetype read it right then (lualine's `ignore_focus` would otherwise
   describe the float instead of the file underneath).
 - `read_only(buf)`: unmodifiable, and `CHANGE_KEYS` mapped to `<Nop>` wherever nothing else
-  claims them. Call it **after** binding real keys; claims are compared on terminal codes
-  (`<C-R>` equals `<C-r>`).
+  claims them, in Normal and Visual mode alike. Call it **after** binding real keys; claims are
+  compared on terminal codes (`<C-R>` equals `<C-r>`). `selectable` leaves Visual mode open on
+  what is worth pasting somewhere (the library's code, a source previewed, a runner UI pane
+  showing a testcase or a tool's output), where only `SELECTING` keeps its meaning. Everything
+  else starts no selection: a list, a line read at a glance (the library's notes and
+  complexity, the Run pane, a message, the key legend).
 - `render(buf, content, opts)`: no write when unchanged, `undolevels = -1` around the write,
   `modified` cleared.
 - `float(buf, opts)` with `LAYER`: grid 50, zoom 60, overlay 70, dialog 80. Neovim's default is
@@ -34,7 +38,13 @@ specific Vim error about a buffer the user never opened.
   `WinEnter` and `ModeChanged` made with the first float), so the bar is right the moment it
   shows. lualine's own refresh on those events means to redraw the current window but names
   the option `kind`, not `scope`, so it redraws the tab's windows, which leave out floats: a
-  float's bar would otherwise wait for lualine's timer. With any other `laststatus` a float
+  float's bar would otherwise wait for lualine's timer. Operator-pending and Visual mode still
+  read `NORMAL` in a float. Operator-pending sets the `statusline` of the float, and of the
+  window under it when refreshed by tab, but the bar does not repaint: `:redrawstatus`, with
+  `!`, `:redraw!`, `nvim__redraw`, each scheduled or run through `nvim_win_call` from the
+  window under it, were tried, none shows it reliably, and some leave a stale mode on the bar.
+  Visual mode is lost earlier: lualine reads the mode inside `nvim_win_call` of the file
+  window, where Neovim reports Normal for another buffer. With any other `laststatus` a float
   keeps the empty one `style = "minimal"` gives it, because from Neovim 0.12 a float with a
   `statusline` of its own draws it inside its border, showing the pane's `tuna://` name.
 - `group(wins, on_close)`: windows that close together, keyed on `WinClosed`.
@@ -94,7 +104,8 @@ specific Vim error about a buffer the user never opened.
   mode) while they are replaced.
 - `menu`: optional `on_close`; `preview` (fixed lines or cursor-following `content(idx)`, colour
   via `'syntax'` not `'filetype'`, list capped at `MENU_LIST_SHARE` of the height, read-only and
-  never left modified), or several `panes` stacked, `content` then answering one table each: a
+  never left modified, `selectable` for one worth pasting from), or several `panes` stacked,
+  `content` then answering one table each: a
   `fit` pane is as tall as the tallest content any item gives it, at most a third of the room,
   and not drawn when none gives it any. `beside` puts them right of the search and the list, the
   whole at a given size centred as the runner UI's grid, and there the pane keys move by

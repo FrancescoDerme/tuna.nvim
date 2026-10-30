@@ -340,7 +340,7 @@ local function preview_opts(ext, all, cfg)
         panes = {
             { title = "Notes", fit = true, wrap = true },
             { title = "Complexity", fit = true, wrap = true, readout = true },
-            { filetype = vim.filetype.match({ filename = "x." .. ext }) or ext },
+            { filetype = vim.filetype.match({ filename = "x." .. ext }) or ext, selectable = true },
         },
         content = function(idx)
             return panes_of(all[idx])
