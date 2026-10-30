@@ -6,7 +6,7 @@
 
 </div>
 
-https://github.com/user-attachments/assets/83424d80-9559-45a1-8716-862163a48086
+[https://github.com/user-attachments/assets/83424d80-9559-45a1-8716-862163a48086](https://github.com/user-attachments/assets/c5be9f01-9618-4e09-af19-5b122f69e2f2)
 
 tuna.nvim is a competitive programming plugin that integrates with [Competitive Companion](https://github.com/jmerle/competitive-companion) to download contests, runs your solution against testcases, supports stress testing, and much more.
 
@@ -199,6 +199,8 @@ Every deletion is confirmed one at a time, with the file in front of you.
 <img width="1920" height="1080" alt="clean" src="https://github.com/user-attachments/assets/de4f558c-9fe4-41e5-a002-70031b36f2d2" />
 
 ### Your algorithms library
+
+https://github.com/user-attachments/assets/649c04a7-5682-4286-a96e-5e47abd794d3
 
 [`:Tuna lib`](REFERENCE.md#lib) copies a piece of your own library into the file you are writing.
 The library is plain source files in the folder `library.path` points at, with the parts worth copying marked in place, and notes about them right under the opening mark:
