@@ -392,11 +392,13 @@ local followed, follow_group = {}, nil
 ---marks nothing the user is doing. A list keeps its line always instead, since it marks the
 ---selection. The user's value is the option's global one, which tuna never writes.
 ---@param winid integer
-function M.follow_cursorline(winid)
+---@param ignore_user boolean? one list of several on a board, where only the current one acts:
+---  it has the line while current whatever the user's value, as that marks the selection
+function M.follow_cursorline(winid, ignore_user)
     local function show(win, on)
         api.nvim_set_option_value("cursorline", on, { scope = "local", win = win })
     end
-    if not api.nvim_get_option_value("cursorline", { scope = "global" }) then
+    if not ignore_user and not api.nvim_get_option_value("cursorline", { scope = "global" }) then
         followed[winid] = nil
         show(winid, false)
         return

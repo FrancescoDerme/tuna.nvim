@@ -67,6 +67,9 @@ specific Vim error about a buffer the user never opened.
 - `follow_cursorline(win)`: a reading pane (a preview, a runner UI detail pane or zoom, the
   testcase editor's panes) has the user's `cursorline` only while it is the current window,
   where it marks where they read; a list keeps its line always, since it marks the selection.
+  A `panels` list follows too, passing `ignore_user`, as only the current one acts: it has the
+  line while current whatever the user's value, and none otherwise. A `form` keeps one in every
+  list, since `<CR>` submits each one's selection.
   One `WinEnter`/`WinLeave` pair serves every followed window. The user's value is read from the
   option's global scope, so tuna sets `cursorline` with local scope only, never through
   `vim.wo`, which would also write the global value of the window it is set in and carry it into

@@ -43,9 +43,10 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     names giving way to a narrow width (a contest's judge first), and `panels` stacking,
     scrolling, moving focus and squeezing a `format` column before the others, the real menu's
     titles and free-standing banner, its Pinned list (every pin, scrolling within the
-    editor, under the other two) with the pin/unpin command, the hint over the commands (where
-    it sits, passed over by the pane keys, `/` searching), and the commands kept short (rows
-    that apply only where they do, Scaffold and Download opening their choices);
+    editor, under the other two) with the pin/unpin command, the current list alone having a
+    cursorline, the hint over the commands (where it sits, passed over by the pane keys, `/`
+    searching), and the commands kept short (rows that apply only where they do, Scaffold and
+    Download opening their choices);
   - `recent.lua`: both histories (default and configured sizes, move to top, a problem
     bringing its contest back, contests named by the judge and contest recorded with them,
     a folder whose sidecar names two of a contest's problems inferred as it, one problem's

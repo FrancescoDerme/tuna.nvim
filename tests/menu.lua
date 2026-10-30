@@ -510,6 +510,19 @@ do
         t.ok("and centred", hint.line:match("^%s+") ~= nil, hint.line)
         t.eq("with no cursorline to walk", vim.wo[hint.win].cursorline, false)
     end
+    -- Only the list `<CR>` acts on has a line: whatever the user's cursorline, here off.
+    local function lines_on()
+        local out = {}
+        for name, list in pairs(board()) do
+            if vim.wo[list.win].cursorline then
+                out[#out + 1] = name
+            end
+        end
+        return out
+    end
+    t.eq("the current list alone has a cursorline", lines_on(), { "Contests" })
+    api.nvim_set_current_win(b.Problems.win)
+    t.eq("and it follows focus", lines_on(), { "Problems" })
     local cfg = require("tuna.config").get_buffer_config(0)
     api.nvim_set_current_win(b["Catch of the day"].win)
     press(cfg.switch_window_keys[3])

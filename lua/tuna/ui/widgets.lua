@@ -2081,8 +2081,11 @@ function M.panels(sections, on_choice, restore_winid, on_close, header, keys)
                 -- scrolloff applies; one that fits keeps the pin so its edge rows stay
                 -- reachable (the same rule the menu follows).
                 keep_scrolloff = heights[i] < #sec.items,
-                cursorline = not sec.hint,
             })
+            -- Only the current list acts on `<CR>`, so a line on the others would mark nothing.
+            if not sec.hint then
+                surface.follow_cursorline(w, true)
+            end
             pcall(api.nvim_win_set_cursor, w, { math.min(sec.sel, #sec.items), 0 })
             panels.wins[i], panels.bufs[i] = w, b
             panels.place[i] = { column = c, top = top }
@@ -2127,8 +2130,8 @@ function M.panels(sections, on_choice, restore_winid, on_close, header, keys)
         end
     end
 
-    ---Focus list `j` (nothing happens for nil). Focus is the active window (cursor +
-    ---cursorline), as everywhere else in the plugin, so this only moves the cursor.
+    ---Focus list `j` (nothing happens for nil). Focus is the active window, whose cursor and
+    ---cursorline show it, so this only moves the cursor.
     local function focus(j)
         if j and api.nvim_win_is_valid(panels.wins[j]) then
             panels.focused = j
