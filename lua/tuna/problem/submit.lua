@@ -1013,12 +1013,17 @@ end
 ---here instead, and only what is left falls through to the tail. Both are decided on
 ---the transport's own words rather than on the exit code, which is `101` for a Rust
 ---panic whatever caused it and says nothing about the network.
+---
+---A tool that named its submission had submitted, so a failure after that loses only the
+---verdict. Before that nothing tells the two apart: the tool may have failed to submit,
+---or be waiting for a submission made in the browser.
 ---@param err string raw stderr
 ---@param out string raw stdout
 ---@param code integer? the tool's exit code
+---@param submitted boolean? the tool had named its submission
 ---@return string message the notification line
 ---@return string short a few words for the lualine indicator
-local function failure_reason(err, out, code)
+local function failure_reason(err, out, code, submitted)
     local blob = strip_ansi(err .. "\n" .. out):lower()
     local function mentions(hints)
         for _, hint in ipairs(hints) do
@@ -1033,17 +1038,21 @@ local function failure_reason(err, out, code)
     -- A crash *caused* by being offline is an offline failure, not a crash — which is
     -- exactly what a submitter that `unwrap()`s its HTTP call does with the wifi off.
     if mentions(OFFLINE_HINTS) then
+        if submitted then
+            return "lost the connection while waiting for the verdict, the submission went through.", "verdict unknown"
+        end
         return "could not reach the judge, is the network up?", "no connection"
     end
     if mentions(CRASH_HINTS) then
         return "the submit tool crashed (see 'submit.log_file' for its output)", "tool crashed"
     end
 
+    local failed = submitted and "verdict unknown" or "submit failed"
     local tail = meaningful_tail(err, out)
     if tail == "" then
-        return "exited with code " .. tostring(code), "submit failed"
+        return "exited with code " .. tostring(code), failed
     end
-    return clamp(redact(tail)), "submit failed"
+    return clamp(redact(tail)), failed
 end
 
 ---Start index of the last (rightmost) match of Lua pattern `pat` in `hay`, or nil.
@@ -1225,10 +1234,10 @@ local function run_watch(ctx, cmd)
             -- its crash dump either — see `failure_reason`. Falls back to stdout for
             -- tools that report the reason there (e.g. the Rust submitter's
             -- "Unsupported domain: atcoder.jp").
-            local reason, short = failure_reason(err_acc, out_acc, res.code)
+            local reason, short = failure_reason(err_acc, out_acc, res.code, url ~= nil)
             set_state(path, "error", short, url)
             arm_invalidation(ctx.bufnr) -- a failed verdict is stale once the source changes
-            utils.notify("submit failed, " .. reason, "ERROR")
+            utils.notify((url and "submit: " or "submit failed, ") .. reason, "ERROR")
         end)
     end)
     jobs[path] = handle

@@ -444,7 +444,7 @@ M.defaults = {
         -- within this long (a hung/abandoned poll), stop watching and clear the
         -- indicator so it doesn't stick forever. The submission itself already
         -- happened — this only stops polling. 0 disables.
-        watch_timeout = 120000,
+        watch_timeout = 180000,
         -- Debug: if set to a file path, watch mode dumps each submission's raw
         -- stdout/stderr (control codes intact) and the parsed verdict there, so a
         -- misbehaving judge's exact output can be inspected. nil disables.

@@ -175,7 +175,10 @@ submissions. The rules that hold everywhere are in the root `CLAUDE.md`.
   - Exit with no verdict: `watch_outcome` decides on the exit code alone. Exit 0 clears the
     indicator; it never reports a failure. `expects_verdict = false` only disables parsing.
   - Failures: `failure_reason` checks `OFFLINE_HINTS` first, then `CRASH_HINTS`, then the
-    redacted, clamped `meaningful_tail`.
+    redacted, clamped `meaningful_tail`. A tool that printed its submission URL had submitted,
+    so a failure after that is a verdict lost, not a submission. Before that the two can't be
+    told apart: a tool like `submitter` on Codeforces waits on a browser submission tuna can't
+    see.
   - Jobs: one per file in `jobs[path]`. A new submit supersedes the old job, and callbacks check
     they still own the slot. `watch_timeout` stops a hung poll; `M.clear` cancels.
 - Verdict state is per file (`M.state[path]`) and drives `status`/`status_hl`/`is_submitting`.

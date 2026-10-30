@@ -48,6 +48,15 @@ t.ok("nothing leaks the apiKey", not reason:find("abcdef123456"), reason)
 t.ok("nor the apiSig", not reason:find("deadbeef"), reason)
 t.ok("the message is one line", not reason:find("\n"), reason)
 
+-- A tool that named its submission had submitted, so only the verdict was lost.
+local lost, lost_short = s.failure_reason(PANIC, "", 101, true)
+t.has("offline after the submission is named loses the verdict, not the submission", lost, "submission went through")
+t.eq("and lualine says so", lost_short, "verdict unknown")
+t.ok("still leaking nothing", not lost:find("abcdef123456"), lost)
+t.eq("a tool's own words after the submission are still its own, and no failed submit",
+    { s.failure_reason("error: quota reached", "", 1, true) }, { "error: quota reached", "verdict unknown" })
+t.eq("nor is a silent exit after it", { s.failure_reason("", "", 1, true) }, { "exited with code 1", "verdict unknown" })
+
 for _, hint in ipairs({ "connection refused", "no route to host", "name resolution failed" }) do
     local r, sh = s.failure_reason("error: " .. hint, "", 1)
     t.has("'" .. hint .. "' is an offline failure", r, "could not reach the judge")
