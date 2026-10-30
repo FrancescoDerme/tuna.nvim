@@ -24,7 +24,7 @@ local subcommand_args = {
     scaffold = tools.SCAFFOLDS,
     checker = { "auto", "off" },
     submit = { "clear" },
-    go = { "problem", "contest" },
+    go = { "problem", "contest", "judge" },
     next = { "problem", "scaffold" },
     prev = { "problem", "scaffold" },
 }
@@ -885,10 +885,13 @@ M.subcommands = {
     -- Back to what you were working on, across restarts: the solution itself, or the
     -- contest it belongs to. Both also move Neovim's directory there (`cd_command`),
     -- since coming back to a problem means working *in* it. Bare `:Tuna go` is the
-    -- problem — the one reached for most often.
+    -- problem — the one reached for most often. `judge` leaves Neovim where it is and
+    -- opens the problem you are on in the browser.
     go = function(args)
         local recent = require("tuna.workspace.recent")
-        if args[1] == "contest" then
+        if args[1] == "judge" then
+            require("tuna.problem.submit").open_problem(M.target_buffer())
+        elseif args[1] == "contest" then
             recent.open_contest()
         else
             recent.open_problem()

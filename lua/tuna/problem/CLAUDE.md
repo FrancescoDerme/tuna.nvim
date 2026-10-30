@@ -151,6 +151,8 @@ submissions. The rules that hold everywhere are in the root `CLAUDE.md`.
   ever written to the sidecar.
 - URL candidates are validated (`is_valid_url`: http(s), no leftover `$(…)`). Invalid ones are
   skipped, and with none valid the submit aborts before any provider runs.
+- `open_problem` (`:Tuna go judge`) opens that identity URL. It goes straight to
+  `resolve_url` rather than `M.context`, which saves the buffer and demands a language.
 - **Mirror routing** for Codeforces sends through the sidecar's `mirror` only within
   `submit.mirror_ttl_seconds` of `mirror_at`. It is a clock because nothing can be probed:
   Codeforces returns an identical challenge page either way, and a network lookup would block the

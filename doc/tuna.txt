@@ -300,6 +300,7 @@ GETTING AROUND                                               *tuna-navigation*
 - `:Tuna go problem` / `:Tuna go contest` move you back to what you were
   working on. The menu also provides access to your recent contests and
   problems.
+- `:Tuna go judge` opens the problem you are on in your browser.
 - `:Tuna pin` puts the problem you are on aside to solve later, and pinning it
   again lets it go. The menu provides access to your pinned problems.
 
@@ -572,10 +573,13 @@ Every command is a subcommand of `:Tuna` with tab-completion, and a lowercase
 
         Bare `:Tuna next` and `:Tuna prev` mean the problem.
 
-:Tuna go [problem/contest]
-        Go back to the problem, or the contest, you were last working on,
-        across restarts, and move Neovim's directory there with you. Bare
-        `:Tuna go` means the problem.
+:Tuna go [problem/contest/judge]
+        `:Tuna go problem` and `:Tuna go contest` go back to the problem, or
+        the contest, you were last working on, across restarts, and move
+        Neovim's directory there with you. Bare `:Tuna go` means the problem.
+
+        `:Tuna go judge` opens the problem you are on in your browser, at the
+        URL `:Tuna submit` finds for it.
 
                                                                  *tuna-pinned*
 :Tuna pin
@@ -735,6 +739,7 @@ one prefix: >lua
     `<leader>tf`                   pin
     `<leader>tl`                   library
     `<leader>tdt`                  download testcases
+    `<leader>tgj`                  open the problem on its judge
 
     Everywhere
     `<leader>tm`                   menu
@@ -772,7 +777,8 @@ with its arguments fixed. Actions are defined in `M.actions` in
 `delete_testcase`, `generate_testcase`, `submit`, `submit_clear`,
 `download_testcases`, `download_problem`, `download_contest`, `download_sync`,
 `clean`, `pin`, `next_problem`, `prev_problem`, `next_scaffold`,
-`prev_scaffold`, `go_problem`, `go_contest`, `scratch` and `library`.
+`prev_scaffold`, `go_problem`, `go_contest`, `go_judge`, `scratch` and
+`library`.
 
 ------------------------------------------------------------------------------
 HIGHLIGHTS                                                   *tuna-highlights*

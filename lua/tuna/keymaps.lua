@@ -44,6 +44,7 @@ M.actions = {
     prev_scaffold = "Tuna prev scaffold",
     go_problem = "Tuna go problem", -- back to the problem/contest last worked on
     go_contest = "Tuna go contest",
+    go_judge = "Tuna go judge", -- open the problem you are on in the browser
     scratch = "Tuna scratch", -- scratch solution to write in before the problem exists
     -- A download like the others, except it folds the `:Tuna scratch` file into the
     -- problem it opens — hence its name and its place in the download group.
@@ -61,6 +62,7 @@ M.actions = {
 --   <leader>tn  Next problem    <leader>tf  Pin         <leader>tds  Sync
 --   <leader>tp  Prev problem                            <leader>tgp  Problem
 --                                                       <leader>tgc  Contest
+--                                                       <leader>tgj  Judge
 --
 -- The labels above are the which-key entries. A key inside a group does not repeat
 -- what the group already says (`td` "Download" → `Problem`, `tg` "Go to" →
@@ -91,6 +93,7 @@ M.preset = {
         -- rest of the editing actions.
         library = "l",
         download_testcases = "dt",
+        go_judge = "gj", -- needs a problem to open, unlike the global `gp` and `gc`
     },
     global = {
         menu = "m",
@@ -120,6 +123,7 @@ M.preset_labels = {
     download_sync = "Sync",
     go_problem = "Problem", -- under "Go to"
     go_contest = "Contest",
+    go_judge = "Judge",
 }
 
 ---Expand `M.preset` against a prefix, with the user's own tables layered on top so a

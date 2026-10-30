@@ -121,7 +121,8 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     giving no verdict and no notification; `submit.lua` also: an edit hiding a shown verdict and
     keeping it stored, a write of the source submitted bringing it back, and the problem a
     file is a solution of: its own URL and mirror, a second attempt's the folder's, none in a
-    folder of several, outliving its file, and recorded as the file's own by a submit;
+    folder of several, outliving its file, and recorded as the file's own by a submit, and
+    `:Tuna go judge` opening what a submit would, from a runner pane too, saving nothing;
     `clean.lua` also:
     the templates a file is compared with, a judge's matched without a sidecar and the best
     match deciding, tuna's starter recognised, a template never offered, an empty one included,

@@ -186,6 +186,7 @@ A step-by-step guide on setting this up, from pointing tuna at your tool to read
   `:Tuna next scaffold` goes round the files of the problem you are on.
 - `:Tuna go problem` / `:Tuna go contest` move you back to what you were working on.
   The menu also provides access to your recent contests and problems.
+- `:Tuna go judge` opens the problem you are on in your browser.
 - `:Tuna pin` puts the problem you are on aside to solve later, and pinning it again lets it go.
   The menu provides access to your pinned problems.
 

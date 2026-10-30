@@ -242,6 +242,18 @@ local function resolve_url(bufnr, filepath, cfg)
     return nil, invalid
 end
 
+---Why `resolve_url` found nothing, and how to fix it.
+---@param invalid string? its second result
+---@return string
+local function url_failure(invalid)
+    if invalid then
+        return ("resolved problem URL is not valid (%s), "):format(vim.inspect(invalid))
+            .. "fix the `submit at:` URL in the header or sidecar."
+    end
+    return "no problem URL found, add a URL marker to the header (see `submit.url`), "
+        .. "or download the problem so its URL is stored in the sidecar."
+end
+
 local MIRROR_TTL = 24 * 60 * 60 -- a round is hours; its mirror lasts a day or two
 
 ---The Codeforces mirror a problem should still be submitted through, or nil.
@@ -395,14 +407,7 @@ function M.context(bufnr)
 
     local url, invalid = resolve_url(bufnr, filepath, cfg)
     if not url then
-        if invalid then
-            return nil,
-                ("resolved submission URL is not valid (%s), "):format(vim.inspect(invalid))
-                    .. "fix the `submit at:` URL in the header or sidecar."
-        end
-        return nil,
-            "no submission URL found, add a URL marker to the header (see `submit.url`), "
-                .. "or download the problem so its URL is stored in the sidecar."
+        return nil, url_failure(invalid)
     end
     -- Now that we know the URL (hence the judge), fold in any per-judge override.
     local scfg = judge_scfg(cfg.submit, url)
@@ -1408,6 +1413,23 @@ function M.submit(bufnr)
     -- problem), so the verdict can be persisted/restored even when it wasn't downloaded.
     persist_task(ctx)
     provider(ctx) -- the provider drives the per-buffer submit state
+end
+
+---Open the problem of the file in `bufnr` on its judge. The identity URL, not a submit
+---page: this is for reading the problem, and that address outlives any mirror.
+---@param bufnr integer
+function M.open_problem(bufnr)
+    local filepath = vim.api.nvim_buf_get_name(bufnr)
+    if filepath == "" then
+        utils.notify("go judge: this buffer has no file, so no problem to open.")
+        return
+    end
+    local url, invalid = resolve_url(bufnr, filepath, config.get_buffer_config(bufnr))
+    if not url then
+        utils.notify("go judge: " .. url_failure(invalid))
+    elseif not open_url(url) then
+        utils.notify("go judge: could not open a browser for " .. url .. ".", "ERROR")
+    end
 end
 
 -- The pure output-reading helpers, exposed for the test suite: reaching them

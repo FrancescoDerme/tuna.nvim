@@ -265,7 +265,7 @@ do
     t.eq("each file's problem is its own, and a second attempt takes the folder's one", {
         context(round .. "/A.cpp"),
         context(round .. "/B.cpp"),
-        context(round .. "/C.cpp"):match("^no submission URL") ~= nil,
+        context(round .. "/C.cpp"):match("^no problem URL") ~= nil,
         context(one .. "/main2.cpp"),
     }, { cf .. "A", cf .. "B", true, cf .. "D" })
     t.eq("and a mirror is the file's it was downloaded with", {
@@ -286,6 +286,54 @@ do
     t.eq("a submit records the problem as the file's own", (sidecar.get_entry(one .. "/main2.cpp", "task") or {}).url, cf .. "D")
     submit.providers.stub = nil
     require("tuna").setup({})
+
+    -- `:Tuna go judge` opens what a submit would identify the problem by, and asks nothing
+    -- of the file a submit does: no language, and no save.
+    local opened, said = {}, {}
+    local ui_open, notify = vim.ui.open, vim.notify
+    vim.ui.open = function(url)
+        opened[#opened + 1] = url
+        return {}
+    end
+    vim.notify = function(msg)
+        said[#said + 1] = msg
+    end
+    local function go_judge(buf)
+        opened, said = {}, {}
+        vim.api.nvim_set_current_buf(buf)
+        require("tuna.commands").execute({ "go", "judge" })
+        return opened[1] or said[1]
+    end
+    local function buffer_of(path)
+        vim.cmd.edit(vim.fn.fnameescape(path))
+        return vim.api.nvim_get_current_buf()
+    end
+
+    local downloaded = buffer_of(round .. "/B.cpp")
+    vim.api.nvim_buf_set_lines(downloaded, 0, -1, false, { "unsaved" })
+    t.eq("go judge opens a downloaded problem from its sidecar", go_judge(downloaded), cf .. "B")
+    t.ok("and leaves the buffer unsaved", vim.bo[downloaded].modified)
+    vim.bo[downloaded].modified = false
+    local marked = buffer_of(round .. "/C.cpp")
+    t.has("with no problem, it says how to get one", go_judge(marked), "go judge: no problem URL")
+    vim.api.nvim_buf_set_lines(marked, 0, -1, false, { "// submit at: https://judge.test/p/1" })
+    t.eq("a header marker gives it one, as in a submit", go_judge(marked), "https://judge.test/p/1")
+    vim.api.nvim_buf_set_lines(marked, 0, -1, false, { "// submit at: $(URL)" })
+    t.has("an unfilled marker is not opened", go_judge(marked), "go judge: resolved problem URL is not valid")
+    vim.bo[marked].modified = false
+    local nameless = vim.api.nvim_create_buf(false, true)
+    t.has("a buffer with no file has no problem", go_judge(nameless), "go judge: this buffer has no file")
+
+    -- From a runner pane, the problem is the solution the pane shows.
+    local runner_ui = require("tuna.runner_ui")
+    local owner_of = runner_ui.owner_of
+    runner_ui.owner_of = function(buf)
+        return buf == nameless and { bufnr = downloaded } or nil
+    end
+    t.eq("a runner pane opens its solution's problem", go_judge(nameless), cf .. "B")
+    runner_ui.owner_of = owner_of
+
+    vim.ui.open, vim.notify = ui_open, notify
 end
 
 t.report()

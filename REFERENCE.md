@@ -52,8 +52,8 @@ Every command is a subcommand of `:Tuna` with tab-completion, and a lowercase `:
   <td>go to the problem either side of this one in a contest, or to this problem's next source file</td>
 </tr>
 <tr>
-  <td><a href="#go"><code>:Tuna go [problem|contest]</code></a></td>
-  <td>go back to what you were working on</td>
+  <td><a href="#go"><code>:Tuna go [problem|contest|judge]</code></a></td>
+  <td>go back to what you were working on, or open this problem on its judge</td>
 </tr>
 <tr>
   <td><a href="#pin"><code>:Tuna pin</code></a></td>
@@ -252,11 +252,13 @@ Bare `:Tuna next` and `:Tuna prev` mean the problem.
 ## go
 
 ```
-:Tuna go [problem|contest]
+:Tuna go [problem|contest|judge]
 ```
 
-Goes back to the problem, or the contest, you were last working on, across restarts, and moves Neovim's directory there with you.
+`:Tuna go problem` and `:Tuna go contest` go back to the problem, or the contest, you were last working on, across restarts, and move Neovim's directory there with you.
 Bare `:Tuna go` means the problem.
+
+`:Tuna go judge` opens the problem you are on in your browser, at the URL `:Tuna submit` finds for it.
 
 ## pin
 
@@ -431,6 +433,7 @@ keymaps = {
 |               | `<leader>tf`                                | pin                                 |
 |               | `<leader>tl`                                | library                             |
 |               | `<leader>tdt`                               | download testcases                  |
+|               | `<leader>tgj`                               | open the problem on its judge       |
 | Everywhere    | `<leader>tm`                                | menu                                |
 |               | `<leader>tw`                                | scratch                             |
 |               | `<leader>tdp`, `<leader>tdc`, `<leader>tds` | download a problem, a contest, sync |
@@ -458,7 +461,7 @@ keymaps = {
 
 `mappings` are buffer-local, set for the solution filetypes in `keymaps.filetypes`, and `global` are set once and always there.
 
-Every action can be mapped this way. An action is a name for a `:Tuna` command with its arguments fixed. Actions are defined in `M.actions` in [`lua/tuna/keymaps.lua`](lua/tuna/keymaps.lua): `menu`, `run`, `run_all`, `run_stress`, `run_interactive`, `show_ui`, `add_testcase`, `edit_testcase`, `delete_testcase`, `generate_testcase`, `submit`, `submit_clear`, `download_testcases`, `download_problem`, `download_contest`, `download_sync`, `clean`, `pin`, `next_problem`, `prev_problem`, `next_scaffold`, `prev_scaffold`, `go_problem`, `go_contest`, `scratch` and `library`.
+Every action can be mapped this way. An action is a name for a `:Tuna` command with its arguments fixed. Actions are defined in `M.actions` in [`lua/tuna/keymaps.lua`](lua/tuna/keymaps.lua): `menu`, `run`, `run_all`, `run_stress`, `run_interactive`, `show_ui`, `add_testcase`, `edit_testcase`, `delete_testcase`, `generate_testcase`, `submit`, `submit_clear`, `download_testcases`, `download_problem`, `download_contest`, `download_sync`, `clean`, `pin`, `next_problem`, `prev_problem`, `next_scaffold`, `prev_scaffold`, `go_problem`, `go_contest`, `go_judge`, `scratch` and `library`.
 
 ## Highlights
 
