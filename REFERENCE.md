@@ -258,7 +258,7 @@ Bare `:Tuna next` and `:Tuna prev` mean the problem.
 `:Tuna go problem` and `:Tuna go contest` go back to the problem, or the contest, you were last working on, across restarts, and move Neovim's directory there with you.
 Bare `:Tuna go` means the problem.
 
-`:Tuna go judge` opens the problem you are on in your browser, at the URL `:Tuna submit` finds for it.
+`:Tuna go judge` opens the problem you are on in your browser.
 
 ## pin
 
