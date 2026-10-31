@@ -81,7 +81,7 @@ function M.edit_testcase(add, tcnum)
         while tctbl[tcnum] do
             tcnum = tcnum + 1
         end
-        tctbl[tcnum] = { input = "", output = "" }
+        tctbl[tcnum] = { input = "" }
     end
 
     local function start_editor(n)
@@ -89,11 +89,26 @@ function M.edit_testcase(add, tcnum)
             utils.notify("testcase edit: testcase " .. tostring(n) .. " doesn't exist.")
             return
         end
-        local function save(tc)
-            testcases.buf_save_testcase(bufnr, n, tc.input, tc.output)
-        end
         local widgets = require("tuna.ui.widgets")
-        widgets.editor(bufnr, n, tctbl[n].input, tctbl[n].output, save, api.nvim_get_current_win())
+        local function save(tc, expect_empty_output)
+            testcases.buf_save_testcase(bufnr, n, tc.input, tc.output, expect_empty_output)
+            tctbl[n].output = (tc.output ~= "" or expect_empty_output) and tc.output or nil
+        end
+        widgets.editor(bufnr, n, tctbl[n].input, tctbl[n].output, save, api.nvim_get_current_win(), {
+            answer_words = function()
+                return testcases.empty_answer_words(tctbl[n].output)
+            end,
+            -- As the runner UI does: an answer stored empty or absent goes on meaning what it
+            -- meant, and only a real one left empty is asked about.
+            settle = function(tc, proceed)
+                local stored = tctbl[n].output
+                if tc.output ~= "" or stored == nil or stored == "" then
+                    proceed(stored == "")
+                else
+                    widgets.ask_empty_answer(n, api.nvim_get_current_win(), proceed)
+                end
+            end,
+        })
     end
 
     if tcnum then

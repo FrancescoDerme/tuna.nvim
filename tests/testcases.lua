@@ -514,4 +514,179 @@ do
     widgets.menu = real_menu
 end
 
+-- `:Tuna testcase edit` and `add`: a blank Output pane says what it means, as the runner UI's
+-- does, and saving leaves an answer stored empty as it was.
+do
+    local api = vim.api
+    local d = t.tempdir()
+    t.write(d, "one.cpp", "int main(){}\n")
+    t.write(d, "one_input0.txt", "1\n")
+    t.write(d, "one_input1.txt", "1\n")
+    t.write(d, "one_output1.txt", "")
+    t.write(d, "one_input2.txt", "1\n")
+    t.write(d, "one_output2.txt", "5\n")
+    vim.cmd("edit " .. d .. "/one.cpp")
+    local widgets = require("tuna.ui.widgets")
+    local C = require("tuna.commands")
+    local notes = api.nvim_create_namespace("tuna_empty_note")
+    local source = api.nvim_get_current_win()
+
+    ---Open the editor from the solution, as the command is.
+    local function edit(add, tcnum)
+        api.nvim_set_current_win(source)
+        C.edit_testcase(add, tcnum)
+    end
+
+    local function output_win()
+        for _, w in ipairs(api.nvim_list_wins()) do
+            local title = api.nvim_win_get_config(w).title
+            if type(title) == "table" and title[1][1]:find("^ Output") then
+                return w
+            end
+        end
+    end
+    ---The words the Output pane shows, false for none.
+    local function words()
+        local mark = api.nvim_buf_get_extmarks(api.nvim_win_get_buf(output_win()), notes, 0, -1, { details = true })[1]
+        return mark and mark[4].virt_text[1][1] or false
+    end
+    local function type_answer(lines)
+        local b = api.nvim_win_get_buf(output_win())
+        api.nvim_buf_set_lines(b, 0, -1, false, lines)
+        api.nvim_exec_autocmds("TextChanged", { buffer = b })
+    end
+    local function save()
+        api.nvim_set_current_win(output_win())
+        vim.cmd("write")
+    end
+    local function stored_empty(n)
+        return vim.fn.filereadable(d .. "/one_output" .. n .. ".txt") == 1 and vim.fn.getfsize(d .. "/one_output" .. n .. ".txt") == 0
+    end
+
+    edit(false, 0)
+    t.eq("an editor on no answer says so", words(), "no answer, not judged")
+    edit(false, 1)
+    t.eq("on an answer stored empty says that", words(), "must print nothing")
+    edit(false, 2)
+    t.eq("and on a real one says nothing", words(), false)
+    edit(true)
+    t.eq("a testcase being added has no answer", words(), "no answer, not judged")
+
+    edit(false, 1)
+    save()
+    t.eq("saving leaves an answer stored empty as it was", { stored_empty(1), words() }, { true, "must print nothing" })
+    widgets.editor(nil)
+    t.eq("a resize keeps the words", words(), "must print nothing")
+    type_answer({ "x" })
+    t.eq("the first key takes them away", words(), false)
+    type_answer({ "" })
+    t.eq("and clearing the pane brings them back", words(), "must print nothing")
+    type_answer({ "", "x" })
+    t.eq("a blank first line with text under it is no empty pane", words(), false)
+    type_answer({ "" })
+
+    -- A real answer left empty is asked about, as on the runner UI, by every way of saving.
+    local real_menu = widgets.menu
+    local asked, answers = {}, {}
+    widgets.menu = function(_, title, on_choice)
+        asked[#asked + 1] = title
+        if answers[title] then
+            on_choice(answers[title])
+        end
+    end
+    local QUESTION = "The answer to testcase 2 is empty"
+    local function answer(n)
+        return table.concat(vim.fn.readfile(d .. "/one_output" .. n .. ".txt"), "\n")
+    end
+    local function press(keys)
+        api.nvim_set_current_win(output_win())
+        api.nvim_feedkeys(api.nvim_replace_termcodes(keys, true, false, true), "x", false)
+        t.drain()
+    end
+    ---Open testcase 2 with its answer cleared and not saved.
+    local function cleared(what)
+        asked, answers = {}, what
+        t.write(d, "one_output2.txt", "5\n")
+        edit(false, 2)
+        type_answer({ "" })
+    end
+
+    cleared({ [QUESTION] = 3 })
+    t.eq("a real answer cleared and not saved says nothing yet", words(), false)
+    save()
+    t.drain()
+    t.eq("kept editing, nothing is written and the text stays", {
+        asked,
+        answer(2),
+        api.nvim_buf_get_lines(api.nvim_win_get_buf(output_win()), 0, -1, false),
+    }, { { QUESTION }, "5", { "" } })
+
+    cleared({ [QUESTION] = 1 })
+    save()
+    t.drain()
+    t.eq("answered with no answer, the file goes and the pane says so", { vim.fn.filereadable(d .. "/one_output2.txt"), words() }, { 0, "no answer, not judged" })
+    type_answer({ "7" })
+    save()
+    type_answer({ "" })
+    t.eq("an answer saved since the editor opened counts as stored", words(), false)
+
+    cleared({ [QUESTION] = 2 })
+    save()
+    t.drain()
+    t.eq("answered with an empty one, it is stored empty and says so", { stored_empty(2), words() }, { true, "must print nothing" })
+
+    for keys, name in pairs({ [":wq<CR>"] = ":wq", [":x<CR>"] = ":x", ["ZZ"] = "ZZ" }) do
+        cleared({ [QUESTION] = 3 })
+        press(keys)
+        t.eq(name .. " waits for the answer, and keeping on editing keeps the editor", { asked, answer(2), output_win() ~= nil }, { { QUESTION }, "5", true })
+        answers[QUESTION] = 2
+        press(keys)
+        t.eq(name .. " closes once it is answered", { stored_empty(2), output_win() }, { true, nil })
+    end
+
+    cleared({ ["Unsaved testcase 2"] = 1, [QUESTION] = 3 })
+    press("q")
+    t.eq("Save and close asks too, and stays on keep editing", { asked, answer(2), output_win() ~= nil }, { { "Unsaved testcase 2", QUESTION }, "5", true })
+    answers[QUESTION] = 1
+    press("q")
+    t.eq("and closes once answered", { vim.fn.filereadable(d .. "/one_output2.txt"), output_win() }, { 0, nil })
+
+    -- A command line left with `<Esc>` is a command not given, whatever it held.
+    for _, line in ipairs({ ":wq", ":x", ":q", ":wqa" }) do
+        cleared({ [QUESTION] = 1 })
+        api.nvim_set_current_win(output_win())
+        api.nvim_feedkeys(api.nvim_replace_termcodes(line .. "<Esc>", true, false, true), "tx", false)
+        t.drain()
+        t.eq(line .. " left with <Esc> does nothing", { asked, answer(2), output_win() ~= nil }, { {}, "5", true })
+    end
+    cleared({ [QUESTION] = 1 })
+    api.nvim_set_current_win(output_win())
+    pcall(api.nvim_feedkeys, api.nvim_replace_termcodes("/wq<CR>", true, false, true), "tx", false)
+    t.drain()
+    t.eq("nor is a search that spells one", { asked, answer(2), output_win() ~= nil }, { {}, "5", true })
+
+    -- A `:wq` not typed cannot be held: Vim closes the panes, and the answer still lands.
+    cleared({ [QUESTION] = 2 })
+    api.nvim_set_current_win(output_win())
+    vim.v.errmsg = ""
+    vim.cmd("wq")
+    t.drain()
+    t.eq("a :wq from a script closes first and the answer still counts, with the panes gone", {
+        stored_empty(2),
+        output_win(),
+        vim.v.errmsg,
+    }, { true, nil, "" })
+
+    asked, answers = {}, {}
+    edit(false, 0)
+    save()
+    edit(false, 1)
+    save()
+    t.drain()
+    t.eq("no answer and an empty one go on meaning what they meant, unasked", { asked, stored_empty(1) }, { {}, true })
+    press(":wq<CR>")
+    t.eq("and a typed :wq closes at once", output_win(), nil)
+    widgets.menu = real_menu
+end
+
 t.report()

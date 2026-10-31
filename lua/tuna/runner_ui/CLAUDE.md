@@ -73,8 +73,9 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
   `follow_row` is how the UI chooses, a no-op once the user has. Three things choose: `show_ui` takes `opening_row()` on its scheduled tick, *after* the rows
   exist (interactive and run-all build theirs after opening, so deciding earlier lands on line
   1); every render calls `follow_after_compile`, leaving a Compile row that ended with exit 0
-  and printed nothing (a failed or talkative build is what answers the run, and one still
-  running must not move under the user); and interactive's `run_one_session` follows the row it
+  and printed nothing for the row last looked at, else the first testcase (a failed or talkative
+  build is what answers the run, and one still running must not move under the user); and
+  interactive's `run_one_session` follows the row it
   talks to (one session at a time, live's row the only typable one). While the choice is the
   UI's, cursor and selection must agree, or the editor's own cursor event reads as a move by
   hand: `show_ui` selects nothing, `selected_line` on 1, until the tick chooses. The choice
@@ -83,9 +84,9 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
   UI's `run_all_again`, not a single row's `built_first`), so every run starts as the first did,
   and in `show_ui`, which reopens on `last_row_id`, kept on the runner.
 - `opening_row()`: a run whose build has not finished opens on it (`building`), whatever was
-  last looked at; otherwise `last_row_id` (matched by `row_id`), else `initial_row()`, the first
-  testcase, or Compile when it printed something. `building` is about the *run*, not the process
-  (`not preloaded and exit_code == nil`): between the rows being built and the compiler being
+  last looked at; otherwise `last_row` (`last_row_id`, matched by `row_id`), else
+  `initial_row()`, the first testcase, or Compile when it printed something. `building` is about
+  the *run*, not the process (`not preloaded and exit_code == nil`): between the rows being built and the compiler being
   spawned, a UI opened would otherwise draw the panes of a run and redraw them a tick later. For
   the same reason the modes `mark_not_run` before `show_ui`.
 - `render_selector` lays rows out in three columns (header, verdict, time) through
@@ -129,8 +130,17 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
 
 **Gates** (all menus, all ending in `Keep editing`/`Stop`, which is also what dismissal gives)
 - `with_pending_settled(tcnum, what, proceed, after_save)`: re-running with unsaved edits asks
-  `Save and <what>` / `Discard and <what>` / `Keep editing`. Saving re-runs what it saved, so
-  `proceed` follows a save only with `after_save`; `request_close` shares `unsaved_items`.
+  `Save and <what>` / `Discard and <what>` / `Keep editing`, `what` being `run` for a row that has
+  not. A single row added and never saved (`fresh`) gets no Discard, having nothing behind it to
+  act on. Saving runs what it saved, so `proceed` follows a save only with `after_save`, for an
+  action wider than the rows saved (`<C-r>`, a run replacing the runner), whose save starts no
+  run (`hold_run`) or those rows would run twice, or when no run can start (`preloaded`, a busy
+  runner), where the save alone would do nothing it promised; `request_close` shares
+  `unsaved_items`.
+- `save_all_pending(done)` is every save but a plain `:w`: each row goes through
+  `with_answer_settled` in turn, so an answer stored empty stays so and a real one left empty is
+  asked about, and `done` (close, run, carry on quitting) follows the last. `Keep editing` ends
+  the chain there, which is why `:wq`, `:wqa` and `Save and close` wait on it.
 - `commands.settle_runners(bufnr, { run, keep }, proceed)`, which every run and `show_ui` go
   through, keeps one runner UI per buffer and loses nothing on a mode switch: before a run it
   asks about an unwritten edit in any of the buffer's runners (interactive, stress and run-all
@@ -139,10 +149,9 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
   but `keep` is then hidden by `RunnerUI:delete`, which keeps `pending` on its runner.
   `runners_of`/`all_runners` (every live runner, what a resize redraws) search only loaded mode
   modules; the modes also stop the runner they replace, for callers bypassing `commands`.
-- `with_answer_settled`: `:w` asks only when a **real answer would become empty**:
-  `Don't specify output` / `Expect empty output` / `Keep editing`. It asks nothing about empty
-  inputs, or about answers already absent or empty. The menu is opened with `vim.schedule`,
-  because a float entered inside `BufWriteCmd` loses focus when the write finishes.
+- `with_answer_settled`: a save asks only when a **real answer would become empty**, through
+  `widgets.ask_empty_answer`. It asks nothing about empty inputs, or about answers already absent
+  or empty.
 - `with_disk_settled` / `disk_drift` compare rows with disk in one read. It excludes `bare`
   rows, unsaved `n` rows and pending rows.
   - **Changed** on disk: reload silently via `sync_rows` and say so once.
@@ -156,6 +165,8 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
   - Every branch renders, and the re-run finds rows by identity (`row_index`).
 
 **Quitting and focus**
+- `surface.quit_command` is what is read here, so a search spelling a quit and a line left with
+  `<Esc>` are no commands. `!` discards an edit only on a command that does not write.
 - `:q`/`:close`/`:wq`/`:x` in any pane are cancelled in `CmdlineLeave`, by setting
   `v:event.abort` **from Vimscript** (`vim.v.event` is a copy in Lua), and turned into
   `request_close`. `:q!` passes; `:qa`-style commands pass unless an edit would be lost, then
@@ -226,12 +237,23 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
   Nothing is zoomed unasked: a failed build is read on the build step, whose grid always has an
   Errors pane, and a zoom would cover it and take the row from someone who moved off.
 - Diff view (`paint_diff`, namespace `tuna_runner_diff`) marks only what disagrees, and a cell
-  put in (inline virtual text, keeping the panes level) where the other side has something this
-  one lacks; a line the other side lacks is coloured whole. A disagreeing line has no colour of
+  put in (inline virtual text, keeping the panes level) where the output has less than the
+  answer, which nothing else there would show. Not where the answer has less: the output marks
+  that, and a cell on the line being typed sits at the cursor. A line the other side lacks is
+  coloured whole, red as every other disagreement (`TunaDiffAdd` and `TunaDiffDelete` link to
+  `TunaDiffText`): beside verdicts where green means correct, `DiffAdd` reads as right. A
+  disagreeing line has no colour of
   its own: behind the agreeing tokens it hides which disagree, and beside a cursorline it reads
   as a second one. The compared panes are bound with `scrollbind`/`cursorbind` instead of filler
   lines, given the same top line first (line i faces line i), not `:syncbind`, after which Vim
   skips syncing the next scroll in a bound window. It is cached by texts and row (`diff_cache`)
   and follows unsaved pane text as you type (debounced). A row is diffed once it has `stdout`,
   not by a timestamp: a stress counterexample is written by the search rather than spawned, and
-  gating on the spawn would leave exactly the rows worth comparing unmarked.
+  gating on the spawn would leave exactly the rows worth comparing unmarked. An empty pane is
+  compared only where the answer is stored empty (`tc.expected == ""`), so the marks follow the
+  verdict there; no answer is not judged, and an answer cleared and unsaved is `:w`'s question.
+- `mark_empty_answer` has a blank Expected Output pane say what it means
+  (`testcases.empty_answer_words` through `surface.note_when_empty`), a blank pane alone not
+  telling an answer stored empty from none. It runs on every render of the details and on every
+  edit, so the words go as the first character is typed rather than with the debounce, and come
+  back on an undo. A real answer cleared and unsaved says nothing, being `:w`'s question.

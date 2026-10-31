@@ -764,6 +764,17 @@ function M.buf_save_testcase(bufnr, tcnum, input, output, expect_empty_output)
     end
 end
 
+---What an empty answer pane means, by the answer stored: the two a blank pane cannot tell apart.
+---Nothing for a real answer, which a pane holding none of is only being edited.
+---@param stored string?
+---@return string?
+function M.empty_answer_words(stored)
+    if stored == nil then
+        return "no answer, not judged"
+    end
+    return stored == "" and "must print nothing" or nil
+end
+
 ---Delete a single testcase for a buffer.
 ---@param bufnr integer
 ---@param tcnum integer

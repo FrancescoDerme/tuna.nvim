@@ -106,6 +106,13 @@ t.eq("a line with a token missing at its end is marked there, empty, and the tok
 }, { { { 5, 5 } }, { { 6, 7 } } })
 local gap = diff.compute("ac\n", "abc\n", "exact")
 t.eq("and a character missing mid-line, by characters, where it is missing", gap.out[1] and gap.out[1].spans, { { 1, 1 } })
+-- The expected line is the one being typed, so what it lacks is left to the output beside it.
+for name, method in pairs({ squish = "squish", exact = "exact" }) do
+    local typing = diff.compute("8\n2 2 2\n", "8\n2\n", method)
+    t.eq(name .. ": an expected line that ends short puts nothing at the cursor", typing.exp[2] and typing.exp[2].spans, {})
+    t.ok(name .. ": and what it lacks is marked in the output", #typing.out[2].spans > 0, typing.out[2])
+end
+t.eq("nor does a character missing mid-line from the expected one", diff.compute("abc\n", "ac\n", "exact").exp[1].spans, {})
 
 -- A checker that did not build judges nothing and says so on the row it could not judge, and
 -- nowhere else: the build step shows why, beside the other sources.

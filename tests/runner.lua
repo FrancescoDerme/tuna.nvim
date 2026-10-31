@@ -3590,11 +3590,19 @@ chosen:update_ui(true)
 drain(chosen.ui)
 t.eq("a render before a move's cursor event leaves the cursor where it was put", vim.api.nvim_win_get_cursor(chosen.ui.windows.tc.winid)[1], 2)
 
-C3.execute({ "run" })
-vim.wait(3000, function()
-    return chosen.completed and chosen.ui:selected_index() == 2
-end, 20)
-t.eq("a run asked for hands the choice back", { chosen.ui:selected_index(), chosen.ui.user_moved }, { 2, false })
+---Run the whole set and say where the board ends up.
+local function rerun()
+    C3.execute({ "run" })
+    settled(chosen)
+    drain(chosen.ui)
+    return { chosen.ui:selected_index(), chosen.ui.user_moved }
+end
+move_to(3)
+t.eq("a run asked for hands the choice back, and its build the row last looked at", rerun(), { 3, false })
+move_to(1)
+t.eq("the build is only where a run starts, so it goes on to the first testcase", rerun(), { 2, false })
+chosen.last_row_id = "a row since deleted"
+t.eq("and so does a run whose row has gone", rerun(), { 2, false })
 
 move_to(3)
 chosen.ui:delete()
@@ -3609,6 +3617,334 @@ C3.runners[wbuf] = nil
 require("tuna.run.tools").set_mode(wdir .. "/sol.cpp", nil)
 vim.system = real_system
 vim.fn.delete(wdir, "rf")
+
+-- An empty Expected Output pane means two things: a testcase with no answer is not judged, and
+-- one whose answer is stored empty has to print nothing. The diff follows the verdict on each,
+-- and the pane says which it is.
+do
+    local edir = t.tempdir()
+    t.write(edir, "sol.cpp", "int main(){}\n")
+    vim.cmd("edit " .. edir .. "/sol.cpp")
+    vim.bo.filetype = "cpp"
+    local ebuf = vim.api.nvim_get_current_buf()
+    tcs.buf_save_testcase(ebuf, 0, "in\n", "", true)
+    tcs.buf_save_testcase(ebuf, 1, "in\n", nil)
+    tcs.buf_save_testcase(ebuf, 2, "in\n", "8\n")
+    vim.system = function(argv, _, on_exit)
+        local out = vim.tbl_contains(argv, "-o") and "" or "8\n2 2 2\n"
+        vim.schedule(function()
+            on_exit({ code = 0, signal = 0, stdout = out, stderr = "" })
+        end)
+        return { kill = function() end, wait = function() return { code = 0 } end, pid = 0 }
+    end
+    C3.execute({ "run" })
+    local board = C3.runners[ebuf]
+    settled(board)
+    local ui = board.ui
+    drain(ui)
+    ui:toggle_diff_view()
+    local diff_marks = vim.api.nvim_create_namespace("tuna_runner_diff")
+    local answer_marks = vim.api.nvim_create_namespace("tuna_empty_note")
+    local out, exp = ui.windows.so.bufnr, ui.windows.eo.bufnr
+
+    ---What the panes say about the row shown: the marks on the output, and the pane's words.
+    local function said()
+        local words = vim.api.nvim_buf_get_extmarks(exp, answer_marks, 0, -1, { details = true })[1]
+        return { #vim.api.nvim_buf_get_extmarks(out, diff_marks, 0, -1, {}) > 0, words and words[4].virt_text[1][1] or false }
+    end
+    local function show(row)
+        ui.user_moved = true -- or the board moves off a finished build by itself
+        ui:goto_row(row)
+        ui.update_windows, ui.update_details = true, true
+        ui:update_ui()
+        drain(ui)
+    end
+    ---Type into Expected Output, the edit event firing as it does for a key.
+    local function type_answer(lines)
+        vim.api.nvim_buf_set_lines(exp, 0, -1, false, lines)
+        vim.api.nvim_exec_autocmds("TextChanged", { buffer = exp })
+    end
+
+    show(2)
+    t.eq("an answer stored empty is judged, marked and named", { board.tcdata[2].status, said() }, { "WRONG", { true, "must print nothing" } })
+    show(3)
+    t.eq("no answer is not judged, and says so", { board.tcdata[3].status, said() }, { "DONE", { false, "no answer, not judged" } })
+    show(1)
+    t.eq("nor is the build step, whose panes hold something else", said()[2], false)
+
+    -- The marks describe the answer too: an empty one removed by hand leaves the same two texts.
+    show(2)
+    t.eq("an answer stored empty is marked", said()[1], true)
+    os.remove(edir .. "/sol_output0.txt")
+    C3.execute({ "run" })
+    settled(board)
+    drain(ui)
+    show(2)
+    t.eq("and once it is gone, marks and words follow the verdict", { board.tcdata[2].status, said() }, { "DONE", { false, "no answer, not judged" } })
+    tcs.buf_save_testcase(ebuf, 0, "in\n", "", true)
+    C3.execute({ "run" })
+    settled(board)
+    drain(ui)
+
+    show(2)
+    type_answer({ "x" })
+    t.eq("the first key takes the words away, before the debounce", said()[2], false)
+    type_answer({ "" })
+    t.eq("and clearing the pane brings them back", said()[2], "must print nothing")
+    ui:discard_pending()
+
+    show(4)
+    t.eq("a real answer is compared and names nothing", said(), { true, false })
+    type_answer({ "" })
+    ui:render_diff()
+    t.eq("cleared and not saved, it is no empty answer yet", said(), { false, false })
+
+    -- Saved as the question offers it, which is how an answer comes to be stored empty.
+    vim.api.nvim_set_current_win(ui.windows.eo.winid)
+    vim.cmd("write")
+    vim.wait(2000, function()
+        return vim.bo.filetype == "tuna" and vim.api.nvim_get_current_win() ~= ui.windows.eo.winid
+    end, 10)
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("j<CR>", true, false, true), "x", false)
+    settled(board)
+    drain(ui)
+    t.eq("answered with Expect empty output, it is one", { board.tcdata[4].expected, said() }, { "", { true, "must print nothing" } })
+
+    -- An empty file beside the solution, the other way to one, and a row added with no answer.
+    t.write(edir, "sol_input3.txt", "in\n")
+    t.write(edir, "sol_output3.txt", "")
+    C3.execute({ "run" })
+    settled(board)
+    drain(ui)
+    show(5)
+    t.eq("an empty answer file made by hand is that same answer", { board.tcdata[5].status, said() }, { "WRONG", { true, "must print nothing" } })
+    vim.api.nvim_set_current_win(ui.windows.tc.winid)
+    ui:add_testcase()
+    drain(ui)
+    t.eq("a row just added has no answer yet", said()[2], "no answer, not judged")
+    ui:discard_pending()
+    vim.cmd.stopinsert()
+
+    t.eq("every disagreement is one colour, and no group of the editor's", {
+        vim.api.nvim_get_hl(0, { name = "TunaDiffAdd" }).link,
+        vim.api.nvim_get_hl(0, { name = "TunaDiffDelete" }).link,
+    }, { "TunaDiffText", "TunaDiffText" })
+
+    board:kill_all_processes()
+    board:delete_ui()
+    C3.runners[ebuf] = nil
+    vim.system = real_system
+    vim.fn.delete(edir, "rf")
+end
+
+-- What stands between an unsaved row and a run: a row added and never saved has only one way
+-- forward, and the action asked for happens, with every save settling what an empty answer means.
+do
+    local rdir = t.tempdir()
+    t.write(rdir, "sol.cpp", "int main(){}\n")
+    t.write(rdir, "sol_input0.txt", "in\n")
+    t.write(rdir, "sol_output0.txt", "5\n")
+    t.write(rdir, "sol_input1.txt", "in\n")
+    t.write(rdir, "sol_output1.txt", "")
+    vim.cmd("edit " .. rdir .. "/sol.cpp")
+    vim.bo.filetype = "cpp"
+    local rbuf = vim.api.nvim_get_current_buf()
+    local runs = 0
+    vim.system = function(argv, _, on_exit)
+        local compile = vim.tbl_contains(argv, "-o")
+        runs = runs + (compile and 0 or 1)
+        vim.schedule(function()
+            on_exit({ code = 0, signal = 0, stdout = compile and "" or "out\n", stderr = "" })
+        end)
+        return { kill = function() end, wait = function() return { code = 0 } end, pid = 0 }
+    end
+    local widgets = require("tuna.ui.widgets")
+    local real_menu = widgets.menu
+    local asked, answers = {}, {}
+    widgets.menu = function(items, title, on_choice)
+        asked[#asked + 1] = items
+        if answers[title] then
+            on_choice(answers[title])
+        end
+    end
+    local QUESTION = "The answer to testcase 0 is empty"
+    local answer_of = function(n)
+        return table.concat(vim.fn.readfile(rdir .. "/sol_output" .. n .. ".txt"), "\n")
+    end
+
+    C3.execute({ "run" })
+    local board = C3.runners[rbuf]
+    settled(board)
+    local ui = board.ui
+    drain(ui)
+
+    local function press(keys)
+        vim.api.nvim_set_current_win(ui.windows.tc.winid)
+        vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(keys, true, false, true), "x", false)
+        settled(board)
+        drain(ui)
+    end
+    local function show(row)
+        ui.user_moved = true
+        ui:goto_row(row)
+        ui.update_windows, ui.update_details = true, true
+        ui:update_ui()
+        drain(ui)
+    end
+    local function type_into(name, lines)
+        local b = ui.windows[name].bufnr
+        vim.api.nvim_buf_set_lines(b, 0, -1, false, lines)
+        vim.api.nvim_exec_autocmds("TextChanged", { buffer = b })
+        drain(ui)
+    end
+
+    -- A row added and not saved.
+    ui.user_moved = true
+    ui:add_testcase()
+    drain(ui)
+    vim.cmd.stopinsert()
+    type_into("si", { "typed" })
+    asked, answers, runs = {}, { ["Unsaved testcase 2"] = 2 }, 0
+    press("r")
+    t.eq("a new row offers a first run, and no discard to run nothing with", asked, { { "Save and run", "Keep editing" } })
+    t.eq("keeping on editing keeps it, unwritten and not run", { runs, ui.pending[2] ~= nil, vim.fn.filereadable(rdir .. "/sol_input2.txt") }, { 0, true, 0 })
+    asked, answers = {}, { ["Unsaved testcase 2"] = 1 }
+    press("r")
+    t.eq("saved, it is written and run once", { runs, ui.pending[2], vim.fn.filereadable(rdir .. "/sol_input2.txt") }, { 1, nil, 1 })
+
+    -- Re-running everything means everything, however many rows a save was about.
+    show(2)
+    type_into("si", { "first" })
+    local stdins = {}
+    local counted = vim.system
+    vim.system = function(argv, opts, on_exit)
+        if not vim.tbl_contains(argv, "-o") then
+            stdins[#stdins + 1] = vim.trim(opts.stdin or "")
+        end
+        return counted(argv, opts, on_exit)
+    end
+    asked, answers = {}, { ["Unsaved testcase 0"] = 1 }
+    press("<C-r>")
+    table.sort(stdins)
+    t.eq("<C-r> after a save runs every testcase, once each", stdins, { "first", "in", "typed" })
+    vim.system = counted
+
+    -- A command line left with `<Esc>` is a command not given, whatever it held.
+    show(2)
+    type_into("si", { "second" })
+    for _, line in ipairs({ ":q", ":wq", ":x", ":qa", ":wqa", ":close" }) do
+        asked = {}
+        vim.api.nvim_set_current_win(ui.windows.tc.winid)
+        vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(line .. "<Esc>", true, false, true), "tx", false)
+        drain(ui)
+        t.eq(line .. " left with <Esc> does nothing", { #asked, ui.ui_visible, ui:has_pending() }, { 0, true, true })
+    end
+    -- Nor is a search one, whatever it looks for.
+    for _, search in ipairs({ "/q", "/wq", "?x" }) do
+        asked = {}
+        vim.api.nvim_set_current_win(ui.windows.so.winid)
+        pcall(vim.api.nvim_feedkeys, vim.api.nvim_replace_termcodes(search .. "<CR>", true, false, true), "tx", false)
+        drain(ui)
+        t.eq("searching " .. search .. " does nothing", { #asked, ui.ui_visible, ui:has_pending() }, { 0, true, true })
+    end
+    ui:discard_pending()
+    show(2)
+
+    -- Discard takes a row never saved with it: nothing is left of it to go looking for.
+    ui.user_moved = true
+    ui:add_testcase()
+    drain(ui)
+    vim.cmd.stopinsert()
+    local rows = #board.tcdata
+    asked, answers = {}, { ["Unsaved testcase " .. ui:current_row().tcnum] = 2 }
+    press("<C-r>")
+    t.eq("<C-r> Discard over a row never saved asks once and drops the row", { #asked, #board.tcdata }, { 1, rows - 1 })
+    answers = {}
+    show(2)
+
+    -- A row that has run is a re-run, with everything to fall back on.
+    show(2)
+    type_into("si", { "edited" })
+    asked, answers = {}, {}
+    press("r")
+    t.eq("a row that has run says so", asked, { { "Save and re-run", "Discard and re-run", "Keep editing" } })
+    ui:discard_pending()
+    show(2)
+
+    -- An answer stored empty outlives a save of something else.
+    show(3)
+    type_into("si", { "edited" })
+    asked, answers = {}, { ["Unsaved testcase 1"] = 1 }
+    press("r")
+    t.eq("an answer stored empty stays so through Save and re-run", { #asked, vim.fn.getfsize(rdir .. "/sol_output1.txt") }, { 1, 0 })
+    -- A save that is the run, here, starts it itself.
+    show(3)
+    type_into("si", { "edited again" })
+    asked, answers, runs = {}, { ["Unsaved testcase 1"] = 1 }, 0
+    press("r")
+    t.eq("a single row's save runs it, once", runs, 1)
+
+    -- A real answer left empty is asked about before anything happens.
+    show(2)
+    type_into("eo", { "" })
+    asked, answers, runs = {}, { ["Unsaved testcase 0"] = 1, [QUESTION] = 3 }, 0
+    press("r")
+    t.eq("Save and re-run asks about an answer left empty, and stops at keep editing", { #asked, answer_of(0), runs, ui.pending[0] ~= nil }, { 2, "5", 0, true })
+    -- `:wq!` still writes: `!` is about closing, and the edit is what the command is for.
+    asked, answers = {}, { [QUESTION] = 3 }
+    vim.api.nvim_set_current_win(ui.windows.tc.winid)
+    vim.api.nvim_feedkeys(":wq!\r", "tx", false)
+    drain(ui)
+    t.eq(":wq! keeps the edit too, asking what it would write", { #asked, ui.ui_visible, ui:has_pending() }, { 1, true, true })
+    asked, answers = {}, { ["Unsaved testcase 0"] = 1, [QUESTION] = 3 }
+    ui:request_close()
+    drain(ui)
+    t.eq("as does Save and close, which leaves the board up", { #asked, ui.ui_visible, answer_of(0) }, { 2, true, "5" })
+    vim.api.nvim_set_current_win(ui.windows.tc.winid)
+    answers = { [QUESTION] = 3 }
+    asked = {}
+    vim.api.nvim_feedkeys(":wq\r", "x", false)
+    drain(ui)
+    t.eq("as does :wq, which leaves the board up", { #asked, ui.ui_visible, answer_of(0) }, { 1, true, "5" })
+    answers = { [QUESTION] = 2 }
+    vim.api.nvim_set_current_win(ui.windows.tc.winid)
+    vim.api.nvim_feedkeys(":wq\r", "x", false)
+    settled(board)
+    drain(ui)
+    t.eq("and closes it once answered", { ui.ui_visible, vim.fn.getfsize(rdir .. "/sol_output0.txt") }, { false, 0 })
+
+    -- A board listed before any run: a save starts nothing, so the run is asked for by itself.
+    C3.runners[rbuf] = nil
+    vim.api.nvim_set_current_buf(rbuf)
+    C3.show_runner_ui(rbuf)
+    local listed = C3.runners[rbuf]
+    vim.wait(2000, function()
+        return listed and listed.ui and listed.ui.ui_visible
+    end, 10)
+    board, ui = listed, listed.ui
+    drain(ui)
+    t.eq("a board can be listed, with nothing run", board.preloaded, true)
+    ui.user_moved = true
+    ui:add_testcase()
+    drain(ui)
+    vim.cmd.stopinsert()
+    type_into("si", { "typed" })
+    local n = ui:current_row().tcnum
+    asked, answers, runs = {}, { ["Unsaved testcase " .. n] = 1 }, 0
+    press("r")
+    vim.wait(2000, function()
+        return runs > 0 and board:idle()
+    end, 10)
+    drain(ui)
+    t.eq("and Save and run runs it there too", { ui:current_row().status, ui:current_row().stdout }, { "DONE", "out\n" })
+
+    widgets.menu = real_menu
+    board:kill_all_processes()
+    board:delete_ui()
+    C3.runners[rbuf] = nil
+    vim.system = real_system
+    vim.fn.delete(rdir, "rf")
+end
 
 --------------------------------------------------------------------------------
 -- The build step's own grid

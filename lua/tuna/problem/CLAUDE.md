@@ -28,6 +28,8 @@ submissions. The rules that hold everywhere are in the root `CLAUDE.md`.
   - A `single_file` save or delete rewrites the whole store, so the testcases it is not
     touching go through `keep_stored` and are written back exactly as they were; the bulk
     rule would otherwise drop a stored empty testcase and an expected empty answer.
+  - A blank pane cannot show the difference, so `empty_answer_words` gives what it says, in the
+    runner UI and the testcase editor alike. An empty answer file made by hand is one too.
   - In memory, typed text goes through `core.answer`, which turns `""` into `nil`. `sync_rows`
     takes the disk's answer as it is, so a stored empty answer survives a reload.
 - `tc_directory(source_dir, filepath, cfg)` is the only place `testcases_directory` is

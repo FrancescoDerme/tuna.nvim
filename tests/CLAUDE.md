@@ -187,8 +187,15 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     stopping in a read-only one, the selector's cursorline always and a pane's or the zoom's
     only while focused, a row reading `EDITED` for what is typed and not for a pane's own
     filling, the cursorline kept in diff mode, what a diff paints (only the disagreeing tokens on
-    a line that disagrees, a cell where a line ends short, a line the other lacks coloured
-    whole), `:w` from a read-only pane,
+    a line that disagrees, a cell where the output ends short and none at the cursor where the
+    answer does, a line the other lacks coloured whole), an answer stored empty compared and
+    named in its pane while no answer and one cleared unsaved are not, marks following an answer
+    removed by hand, the two one-sided colours being the red of a disagreement, a row added and
+    not saved offering a first run and no Discard, a run asked for happening on a board listed
+    before any run, `<C-r>` after a save running every testcase once, a quit left with `<Esc>` or
+    spelled by a search doing nothing, `:wq!` keeping the edit it writes, Discard taking a row
+    never saved with it, every save settling an empty answer and `Keep editing` stopping what
+    followed it, `:w` from a read-only pane,
     a file opened from the board opening where the board was opened over and the board put away,
     a row added or restored going into number order and selected, the cursor with it, a
     restore after another action restoring the deletion under a free number when its own was
@@ -212,8 +219,10 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     keeping its accent, a board kept between
     runs closing back to the window it was last shown over, and a zoom
     key doing nothing in a zoom). `testcases.lua` also covers the `single_file` rewrite keeping
-    untouched testcases, a conversion through every backend keeping an answer
-    stored empty and leaving no layout behind (the store's root kept), which testcase a command
+    untouched testcases, the editor's blank Output pane saying what it means and a save leaving
+    an answer stored empty as it was, a real one left empty asked about by `:w`, `:wq`, `:x`,
+    `ZZ` and `Save and close`, each waiting on the answer, a quit left with `<Esc>` or spelled by
+    a search doing nothing, a conversion through every backend keeping an answer stored empty and leaving no layout behind (the store's root kept), which testcase a command
     without a number acts on, and sharing a folder's testcases (offered for a solution with none
     when exactly one other has some, never for several sets, a format or `testcases_directory`
     carrying the file's name, or a name without a number; renamed as they were, an empty answer

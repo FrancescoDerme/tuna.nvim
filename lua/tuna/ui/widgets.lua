@@ -388,11 +388,37 @@ end
 -- Testcase editor (input + output, side by side)
 --------------------------------------------------------------------------------
 
+---What a save that would leave a real answer empty asks, in the runner UI and the editor alike:
+---absent and empty mean different things, and the panes cannot say which was meant.
+---@param tcnum integer
+---@param back_to integer the window "Keep editing" returns to
+---@param proceed fun(expect_empty_output: boolean) not called on "Keep editing", or dismissed
+function M.ask_empty_answer(tcnum, back_to, proceed)
+    -- Opened *out* of the write command rather than inside it. A float entered from a
+    -- `BufWriteCmd` does not keep the focus: Vim restores the window the command ran in
+    -- as it finishes the `:w`, which would leave the menu on screen with the cursor
+    -- still in the pane behind it and no way to answer without reaching for the mouse.
+    vim.schedule(function()
+        M.menu(
+            { "Don't specify output", "Expect empty output", "Keep editing" },
+            "The answer to testcase " .. tcnum .. " is empty",
+            function(idx)
+                if idx == 1 or idx == 2 then
+                    proceed(idx == 2)
+                end
+            end,
+            back_to,
+            function() end
+        )
+    end)
+end
+
 ---@class tuna.EditorWidget
 ---@field ui_visible boolean
 ---@field bufnr integer source buffer the testcase belongs to
 ---@field tcnum string testcase number, formatted for titles
----@field callback fun(testcase: { input: string, output: string })?
+---@field callback fun(testcase: { input: string, output: string }, expect_empty_output: boolean?)?
+---@field opts table?
 ---@field restore_winid integer?
 ---@field input_buf integer?
 ---@field input_win integer?
@@ -406,9 +432,12 @@ local editor = { ui_visible = false }
 ---@param tcnum integer? testcase number (title only)
 ---@param input_content string? initial input pane content
 ---@param output_content string? initial output pane content
----@param callback fun(testcase: { input: string, output: string })? receives the edited content on save
+---@param callback fun(testcase: { input: string, output: string }, expect_empty_output: boolean?)? receives the edited content on save
 ---@param restore_winid integer? window to refocus once the editor closes
-function M.editor(bufnr, tcnum, input_content, output_content, callback, restore_winid)
+---@param opts { answer_words: (fun(): string?)?, settle: (fun(testcase: table, proceed: fun(expect_empty_output: boolean)))? }?
+---`answer_words` is what the output pane says while it is empty, `settle` what stands between
+---a save and `callback`, which it may never reach
+function M.editor(bufnr, tcnum, input_content, output_content, callback, restore_winid, opts)
     local input_lines, output_lines
     local in_output, cursor -- the pane and the spot a resize finds the user in
     if bufnr == nil then -- resize: keep the current, possibly-unsaved content
@@ -439,6 +468,7 @@ function M.editor(bufnr, tcnum, input_content, output_content, callback, restore
         editor.bufnr = bufnr
         editor.tcnum = tcnum and (tostring(tcnum) .. " ") or ""
         editor.callback = callback
+        editor.opts = opts or {}
         editor.restore_winid = restore_winid
         input_lines = vim.split(input_content or "", "\n", { plain = true })
         output_lines = vim.split(output_content or "", "\n", { plain = true })
@@ -495,15 +525,36 @@ function M.editor(bufnr, tcnum, input_content, output_content, callback, restore
     end
     editor.ui_visible = true
 
-    ---Send the edited content back through the callback and clear modified flags.
-    local function save()
+    local function say_empty()
+        surface.note_when_empty(editor.output_buf, editor.opts.answer_words and editor.opts.answer_words())
+    end
+    say_empty()
+
+    ---Send the edited content back through the callback and clear modified flags, then run
+    ---`after`. A question on the way may stop it there, and may outlive the panes: a `:wq` not
+    ---typed closes them whatever the answer.
+    ---@param after fun()?
+    local function save(after)
         local content = { input = get_buf_text(editor.input_buf), output = get_buf_text(editor.output_buf) }
-        if editor.callback then
-            editor.callback(content)
+        local function write(expect_empty_output)
+            if editor.callback then
+                editor.callback(content, expect_empty_output)
+            end
+            if editor.ui_visible then
+                editor.saved = content
+                vim.bo[editor.input_buf].modified = false
+                vim.bo[editor.output_buf].modified = false
+                say_empty()
+            end
+            if after then
+                after()
+            end
         end
-        editor.saved = content
-        vim.bo[editor.input_buf].modified = false
-        vim.bo[editor.output_buf].modified = false
+        if editor.opts.settle then
+            editor.opts.settle(content, write)
+        else
+            write()
+        end
     end
 
     ---Close both panes and restore focus. Guarded so the WinClosed autocmd that
@@ -513,6 +564,7 @@ function M.editor(bufnr, tcnum, input_content, output_content, callback, restore
             return
         end
         editor.ui_visible = false
+        pcall(api.nvim_del_augroup_by_name, "tuna_editor_quit")
         if api.nvim_get_mode().mode:sub(1, 1) == "i" then
             vim.cmd("stopinsert")
         end
@@ -556,8 +608,7 @@ function M.editor(bufnr, tcnum, input_content, output_content, callback, restore
             "Unsaved testcase" .. (label ~= "" and (" " .. label) or ""),
             function(idx)
                 if idx == 1 then
-                    save()
-                    close()
+                    save(close)
                 elseif idx == 2 then
                     close()
                 elseif api.nvim_win_is_valid(back_to) then
@@ -581,9 +632,41 @@ function M.editor(bufnr, tcnum, input_content, output_content, callback, restore
 
     for _, b in ipairs({ editor.input_buf, editor.output_buf }) do
         -- `:w` / `:wq` save the testcase; closing either window tears down both.
-        api.nvim_create_autocmd("BufWriteCmd", { buffer = b, callback = save })
+        api.nvim_create_autocmd("BufWriteCmd", {
+            buffer = b,
+            callback = function()
+                save()
+            end,
+        })
         api.nvim_create_autocmd("WinClosed", { buffer = b, callback = close })
+        map_keys("ZZ", "n", b, function()
+            save(close)
+        end)
     end
+
+    -- A save can ask a question, so one that also closes is held until it is answered: left
+    -- alone, Vim would close the panes first, and "Keep editing" would have nothing to keep.
+    api.nvim_create_autocmd("CmdlineLeave", {
+        group = api.nvim_create_augroup("tuna_editor_quit", { clear = true }),
+        callback = function()
+            local cur = api.nvim_get_current_buf()
+            local cmd = surface.quit_command()
+            if not (cmd and cmd.write) or (cur ~= editor.input_buf and cur ~= editor.output_buf) then
+                return
+            end
+            local line = vim.fn.getcmdline()
+            vim.cmd("let v:event.abort = v:true")
+            vim.schedule(function()
+                save(function()
+                    close()
+                    if cmd.scope == "all" then
+                        pcall(api.nvim_command, line)
+                    end
+                end)
+            end)
+        end,
+    })
+    api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, { buffer = editor.output_buf, callback = say_empty })
 end
 
 --------------------------------------------------------------------------------

@@ -20,6 +20,7 @@
 -- saves — stays with the surface: this module is about what Vim is told, not policy.
 
 local api = vim.api
+local note_ns = api.nvim_create_namespace("tuna_empty_note")
 
 local M = {}
 
@@ -513,6 +514,48 @@ function M.render(bufnr, content, opts)
     vim.bo[bufnr].modifiable = opts.modifiable == true
     vim.bo[bufnr].modified = false
     return lines
+end
+
+-- Every abbreviation of the commands that close a window or the editor, by what they close and
+-- whether they write first.
+local QUIT_COMMANDS = {}
+local function quit_cmds(names, scope, write)
+    for _, name in ipairs(names) do
+        QUIT_COMMANDS[name] = { scope = scope, write = write }
+    end
+end
+quit_cmds({ "q", "qu", "qui", "quit", "clo", "clos", "close" }, "window", false)
+quit_cmds({ "wq", "x", "xi", "xit", "exi", "exit" }, "window", true)
+quit_cmds({ "qa", "qal", "qall", "quita", "quitall" }, "all", false)
+quit_cmds({ "wqa", "wqal", "wqall", "xa", "xal", "xall" }, "all", true)
+
+---The quit command being given, read in `CmdlineLeave`: what it closes, whether it writes first,
+---and whether it carried a `!`. How a surface with several windows, or one that asks before it
+---closes, turns a quit into a request of its own. A search that spells one is no command, nor
+---is a line left with `<Esc>`.
+---@return { scope: "window"|"all", write: boolean }? cmd nil when no quit is being given
+---@return boolean forced
+function M.quit_command()
+    if vim.v.event.abort or vim.v.event.cmdtype ~= ":" then
+        return nil, false
+    end
+    local cmd, bang = vim.fn.getcmdline():match("^%s*(%a+)(!?)%s*$")
+    if cmd and QUIT_COMMANDS[cmd] then
+        return QUIT_COMMANDS[cmd], bang == "!"
+    end
+    return nil, false
+end
+
+---Show `words` dimmed in a buffer while it is empty, nothing with no `words`. Virtual text, so
+---no part of its text. Asked on every edit, so it stays O(1) in the buffer's size: a buffer of
+---one line, of no length, is told without reading it.
+---@param bufnr integer
+---@param words string?
+function M.note_when_empty(bufnr, words)
+    api.nvim_buf_clear_namespace(bufnr, note_ns, 0, -1)
+    if words and api.nvim_buf_line_count(bufnr) == 1 and api.nvim_buf_get_offset(bufnr, 1) <= 1 then
+        api.nvim_buf_set_extmark(bufnr, note_ns, 0, 0, { virt_text = { { words, "Comment" } }, virt_text_pos = "overlay" })
+    end
 end
 
 return M

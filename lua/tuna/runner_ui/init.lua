@@ -155,36 +155,6 @@ local function as_list(maps)
     return type(maps) == "table" and maps or {}
 end
 
--- Every abbreviation of the commands that close a pane or the editor, by what they close and
--- whether they write first. Closing *this window* is a request to put the runner UI away, so
--- the UI closes itself rather than letting one pane be torn out of the grid; the
--- quit-everything commands mean what they say and are only intercepted when an unsaved edit
--- would be lost.
-local QUIT_COMMANDS = {}
-local function quit_cmds(names, scope, write)
-    for _, name in ipairs(names) do
-        QUIT_COMMANDS[name] = { scope = scope, write = write }
-    end
-end
-quit_cmds({ "q", "qu", "qui", "quit", "clo", "clos", "close" }, "window", false)
-quit_cmds({ "wq", "x", "xi", "xit", "exi", "exit" }, "window", true)
-quit_cmds({ "qa", "qal", "qall", "quita", "quitall" }, "all", false)
-quit_cmds({ "wqa", "wqal", "wqall", "xa", "xal", "xall" }, "all", true)
-
----@private
----Whether a typed command line is one of those — what it closes, whether it writes
----first, and whether it carried a `!`.
----@param line string
----@return { scope: "window"|"all", write: boolean }? nil when it isn't a quit command
----@return boolean forced
-local function quit_command(line)
-    local cmd, bang = line:match("^%s*(%a+)(!?)%s*$")
-    if cmd and QUIT_COMMANDS[cmd] then
-        return QUIT_COMMANDS[cmd], bang == "!"
-    end
-    return nil, false
-end
-
 ---@private
 ---Whether `winid` is one of this UI's panes.
 ---@param winid integer
@@ -465,26 +435,7 @@ function RunnerUI:with_answer_settled(tcnum, proceed)
         return
     end
 
-    -- Captured before the schedule below, and used as the window "Keep editing" returns
-    -- to: the pane the `:w` was typed in.
-    local back_to = api.nvim_get_current_win()
-    -- Opened *out* of the write command rather than inside it. A float entered from a
-    -- `BufWriteCmd` does not keep the focus: Vim restores the window the command ran in
-    -- as it finishes the `:w`, which would leave the menu on screen with the cursor
-    -- still in the pane behind it and no way to answer without reaching for the mouse.
-    vim.schedule(function()
-        require("tuna.ui.widgets").menu(
-            { "Don't specify output", "Expect empty output", "Keep editing" },
-            "The answer to testcase " .. tcnum .. " is empty",
-            function(idx)
-                if idx == 1 or idx == 2 then
-                    proceed(idx == 2)
-                end
-            end,
-            back_to,
-            function() end
-        )
-    end)
+    require("tuna.ui.widgets").ask_empty_answer(tcnum, api.nvim_get_current_win(), proceed)
 end
 
 ---@private
@@ -556,15 +507,17 @@ function RunnerUI:request_close(torn, on_closed)
         unsaved_items("close"),
         "Unsaved " .. testcase_label(nums),
         function(idx)
-            if idx == 1 then
-                self:save_all_pending()
+            local function closed()
                 self:delete()
+                if on_closed then
+                    on_closed()
+                end
+            end
+            if idx == 1 then
+                self:save_all_pending(closed)
             elseif idx == 2 then
                 self:discard_pending()
-                self:delete()
-            end
-            if on_closed and idx ~= 3 then
-                on_closed()
+                closed()
             end
         end,
         back_to,
@@ -759,7 +712,8 @@ end
 ---@param what string the action each answer names, e.g. "re-run all"
 ---@param proceed fun()
 ---@param after_save boolean? run `proceed` after saving too, for an action that replaces
----the run a save starts rather than being that run
+---the run a save starts, so the save starts none. One that could not start a run anyway (a
+---board listed before any run, a runner still busy) leaves the action to `proceed` either way.
 function RunnerUI:with_pending_settled(tcnum, what, proceed, after_save)
     self:capture_pending()
     local nums = self:unsaved_testcases()
@@ -773,17 +727,26 @@ function RunnerUI:with_pending_settled(tcnum, what, proceed, after_save)
         return
     end
 
+    -- A row added and never saved has nothing behind it to fall back on, so a single row's
+    -- action has nothing to do once it is discarded.
+    local nothing_kept = tcnum ~= nil and (self.pending[tcnum] or {}).fresh
+    local items = unsaved_items(what)
+    if nothing_kept then
+        table.remove(items, 2)
+    end
     require("tuna.ui.widgets").menu(
-        unsaved_items(what),
+        items,
         "Unsaved " .. testcase_label(nums),
         function(idx)
             if idx == 1 then
-                -- Saving re-runs what it saved, so the run is already under way.
-                self:save_all_pending()
-                if after_save then
-                    proceed()
-                end
-            elseif idx == 2 then
+                -- Saving runs what it saved, so the run is under way, unless no run can start.
+                local runs = not self.runner.preloaded and self.runner:idle()
+                self:save_all_pending(function()
+                    if after_save or not runs then
+                        proceed()
+                    end
+                end, after_save)
+            elseif idx == 2 and not nothing_kept then
                 self:discard_pending()
                 proceed()
             end
@@ -932,6 +895,7 @@ end
 ---cost.
 ---@param bufnr integer the pane changed
 function RunnerUI:on_pane_edit(bufnr)
+    self:mark_empty_answer()
     -- A change that left the buffer unmodified was not typed: `TextChanged` also reports the
     -- UI's own filling of a pane the first time the pane is entered after it, and an undo
     -- back to the stored text clears `modified`. Only the settle pass may lower the edit.
@@ -1033,6 +997,12 @@ end
 ---well as `pending` cleared: `delete()` rescues a modified pane into `pending` on its
 ---way out, so clearing the table alone would see the edits captured straight back.
 function RunnerUI:discard_pending()
+    -- A row added and never saved is nothing but its edit, so it goes too.
+    for tcnum, edit in pairs(self.pending) do
+        if edit.fresh then
+            self.runner:remove_testcase_rows(tcnum)
+        end
+    end
     self.pending = {}
     self.pane_edited = false
     self:clear_pane_modified()
@@ -1070,10 +1040,11 @@ end
 ---Write the edits shown in the panes (or held for `tcnum`) to disk and re-run.
 ---@param tcnum integer
 ---@param expect_empty_output boolean? an empty answer means "print nothing"
+---@param hold_run boolean? write it without running it, for a run about to replace that one
 ---@return boolean
-function RunnerUI:save_testcase(tcnum, expect_empty_output)
+function RunnerUI:save_testcase(tcnum, expect_empty_output, hold_run)
     local input, expected = self:edited_text(tcnum)
-    if not self.runner:save_testcase(tcnum, input, expected, expect_empty_output) then
+    if not self.runner:save_testcase(tcnum, input, expected, expect_empty_output, hold_run) then
         return false
     end
     self.pending[tcnum] = nil
@@ -1087,12 +1058,27 @@ function RunnerUI:save_testcase(tcnum, expect_empty_output)
 end
 
 ---@private
----Write every unsaved testcase.
-function RunnerUI:save_all_pending()
+---Write every unsaved testcase, in order, each settling what an empty answer means: one
+---stored empty stays so, and a real one left empty is asked about.
+---@param done fun()? run once all are written, and not on "Keep editing", which stops here
+---@param hold_run boolean? write them without running them, as `done` will
+function RunnerUI:save_all_pending(done, hold_run)
     self:capture_pending()
-    for tcnum in pairs(vim.deepcopy(self.pending)) do
-        self:save_testcase(tcnum)
+    local nums = vim.tbl_keys(self.pending)
+    table.sort(nums)
+    local function save_from(i)
+        if nums[i] == nil then
+            if done then
+                done()
+            end
+            return
+        end
+        self:with_answer_settled(nums[i], function(expect_empty_output)
+            self:save_testcase(nums[i], expect_empty_output, hold_run)
+            save_from(i + 1)
+        end)
     end
+    save_from(1)
 end
 
 ---@private
@@ -1334,9 +1320,10 @@ function RunnerUI:follow_row(idx)
 end
 
 ---@private
----Once the build is over and had nothing to say, the row worth looking at is the first
----testcase: the Compile row is only where a run *starts*. A build that failed or printed
----something is the row that answers the run, so it keeps the cursor, as does one still going.
+---Once the build is over and had nothing to say, the row worth looking at is the one last
+---looked at, else the first testcase: the Compile row is only where a run *starts*. A build
+---that failed or printed something is the row that answers the run, so it keeps the cursor, as
+---does one still going.
 function RunnerUI:follow_after_compile()
     local first = self.runner.tcdata[1]
     if not (first and first.compile and self.runner.tcdata[2]) then
@@ -1352,7 +1339,8 @@ function RunnerUI:follow_after_compile()
     if self.runner:build_pending(first) or self.runner:build_spoke(first) then
         return
     end
-    self:follow_row(2)
+    local last = self:last_row()
+    self:follow_row(last and last ~= 1 and last or 2)
 end
 
 ---@private
@@ -1395,18 +1383,10 @@ function RunnerUI:building()
 end
 
 ---@private
----Which row to open on: the one last looked at, if it is still there. Matched by
----identity rather than line number, so it survives the rows being rebuilt — and
----falls back to `initial_row` on the first open of a runner, when the row it names
----was deleted, or after a fresh set of testcases was loaded.
----@return integer
-function RunnerUI:opening_row()
-    -- A run opens on its build, whatever was last looked at: that is where the run is, and
-    -- `follow_after_compile` hands the row over the moment it ends with nothing to say. Every
-    -- run then starts the same way, rather than the first one differing from the rest.
-    if self:building() then
-        return 1
-    end
+---The row last looked at, if it is still there. Matched by identity rather than line number,
+---so it survives the rows being rebuilt.
+---@return integer?
+function RunnerUI:last_row()
     local id = self.runner.last_row_id
     if id then
         for i, tc in ipairs(self.runner.tcdata) do
@@ -1415,7 +1395,22 @@ function RunnerUI:opening_row()
             end
         end
     end
-    return self:initial_row()
+    return nil
+end
+
+---@private
+---Which row to open on: the one last looked at, falling back to `initial_row` on the first
+---open of a runner, when the row it names was deleted, or after a fresh set of testcases was
+---loaded.
+---@return integer
+function RunnerUI:opening_row()
+    -- A run opens on its build, whatever was last looked at: that is where the run is, and
+    -- `follow_after_compile` hands the row over the moment it ends with nothing to say. Every
+    -- run then starts the same way, rather than the first one differing from the rest.
+    if self:building() then
+        return 1
+    end
+    return self:last_row() or self:initial_row()
 end
 
 ---What each pane of the build step shows: its source's compiler output, or each of its
@@ -1872,7 +1867,7 @@ function RunnerUI:show_ui()
             if not self.ui_visible then
                 return
             end
-            local cmd, forced = quit_command(vim.fn.getcmdline())
+            local cmd, forced = surface.quit_command()
             if cmd == nil then
                 return
             end
@@ -1890,28 +1885,31 @@ function RunnerUI:show_ui()
                     return
                 end
             end
-            if forced then
+            -- `!` means do it anyway, and a command that writes has an edit to keep.
+            if forced and not cmd.write then
                 self:discard_pending()
                 return
             end
             if cmd.scope == "all" then
-                -- `:qa`/`:xa` mean leave Neovim, so they are let through: written first
-                -- if that is what was asked (each pane is `acwrite`, and a save that has
-                -- nothing to write does nothing), and stopped to ask only when quitting
-                -- would throw an edit away.
-                if cmd.write then
-                    self:save_all_pending()
-                elseif self:has_pending() then
+                -- `:qa`/`:xa` mean leave Neovim, so they are let through, and stopped only
+                -- when an edit is at stake: to write it, which may ask, if that is what
+                -- was asked, and to ask about it if quitting would throw it away.
+                if self:has_pending() then
                     local line = vim.fn.getcmdline()
                     vim.cmd("let v:event.abort = v:true")
-                    vim.schedule(function()
-                        -- Answered, the quit carries on by itself: cancelling it was
-                        -- only ever a way to ask, not a refusal.
-                        self:request_close(false, function()
-                            vim.schedule(function()
-                                pcall(api.nvim_command, line)
-                            end)
+                    -- Answered, the quit carries on by itself: cancelling it was only ever
+                    -- a way to ask, not a refusal.
+                    local function carry_on()
+                        vim.schedule(function()
+                            pcall(api.nvim_command, line)
                         end)
+                    end
+                    vim.schedule(function()
+                        if cmd.write then
+                            self:save_all_pending(carry_on)
+                        else
+                            self:request_close(false, carry_on)
+                        end
                     end)
                 end
                 return
@@ -1920,8 +1918,9 @@ function RunnerUI:show_ui()
             vim.schedule(function()
                 if cmd.write then
                     -- `:wq` here is "Save and close", which is what it means anywhere.
-                    self:save_all_pending()
-                    self:delete()
+                    self:save_all_pending(function()
+                        self:delete()
+                    end)
                 else
                     self:request_close()
                 end
@@ -1981,7 +1980,7 @@ function RunnerUI:show_ui()
         -- report a verdict for text that is no longer what you are looking at. Ask.
         -- Then ask again if the row's testcase has gone missing from disk, for the same
         -- reason from the other side: the verdict would be about something not there.
-        self:with_pending_settled(tc and tc.tcnum, "re-run", function()
+        self:with_pending_settled(tc and tc.tcnum, tc and tc.stdout == nil and "run" or "re-run", function()
             self:with_disk_settled(tc and tc.tcnum, "re-run", function()
                 -- Found again by identity, not by the index we started from: settling
                 -- the two questions can renumber this row, and can remove others above
@@ -2012,7 +2011,7 @@ function RunnerUI:show_ui()
                     self.runner:run_testcases()
                 end)
             end)
-        end)
+        end, true)
     end)
     map_tc("toggle_diff", function()
         self:toggle_diff_view()
@@ -2217,8 +2216,8 @@ function RunnerUI:set_diff_bind(enable)
 end
 
 ---@private
----Paint one pane's diff marks: what disagrees, and a cell where the other side has something
----this one lacks, put in rather than over the text, so the two panes stay level. A line the
+---Paint one pane's diff marks: what disagrees, and a cell where the output has less than the
+---answer, put in rather than over the text, so the two panes stay level. A line the
 ---other side lacks is coloured whole. A line that disagrees is not: its colour behind the
 ---agreeing tokens hides which ones disagree, and beside a cursorline it reads as a second one.
 ---@param bufnr integer?
@@ -2256,6 +2255,19 @@ local function paint_diff(bufnr, marks)
 end
 
 ---@private
+---Say what an empty Expected Output pane means, as a blank pane cannot tell an answer stored
+---empty from no answer. `on_pane_edit` calls this, so it must stay O(1) in testcase size.
+function RunnerUI:mark_empty_answer()
+    local eo = self.windows.eo
+    if not (eo and eo.bufnr and api.nvim_buf_is_valid(eo.bufnr)) then
+        return
+    end
+    local tc = self:current_row()
+    local shown = tc and self.pane_tcnum ~= nil and self.pane_tcnum == tc.tcnum and self:writable_pane("eo")
+    surface.note_when_empty(eo.bufnr, shown and require("tuna.problem.testcases").empty_answer_words(tc.expected) or nil)
+end
+
+---@private
 ---The two texts the marks describe. **What is on screen**, literally: while the panes
 ---are showing this row they *are* the text — an expected output typed but not written
 ---is what you are looking at, so it is what gets compared, and the marks follow it as
@@ -2279,7 +2291,8 @@ end
 ---Cheap enough to redo on every render, which is what keeps the marks correct as
 ---the selection moves or a re-run replaces the output.
 ---Paints nothing, quietly, on a row there is nothing to compare on: one that has no
----answer (the Compile row, an input-only testcase), one a mode owns outright, one that
+---answer (the Compile row, an input-only testcase, unlike one whose answer is stored empty,
+---which is compared like any other), one a mode owns outright, one that
 ---has never run, and one whose two texts agree. The panes themselves show which of
 ---those it is, so none of it is narrated anywhere.
 ---@return integer? first the first differing line, if any
@@ -2323,7 +2336,10 @@ function RunnerUI:render_diff()
         return nil
     end
     local output, expected = self:diff_texts(tc)
-    if output == SKIP or expected == SKIP or expected == nil or expected == "" then
+    -- An empty pane is an answer only where one is stored empty: the solution has to print
+    -- nothing there. Anywhere else there is no answer, or one cleared and not yet saved, which
+    -- `:w` is what asks about.
+    if output == SKIP or expected == SKIP or expected == nil or (expected == "" and tc.expected ~= "") then
         return nil -- nothing to compare against, or a mode's own pane
     end
 
@@ -3125,6 +3141,7 @@ function RunnerUI:update_ui()
                 -- them belongs to. `nil` on a row with nothing to edit (`Compile`,
                 -- run-all's solution headers), so nothing can be captured for it.
                 self.pane_tcnum = editable and tc.tcnum or nil
+                self:mark_empty_answer()
                 -- The panes now hold exactly what they were given, so the only unwritten
                 -- edit on screen is one restored from `pending`.
                 self.pane_edited = pending ~= nil

@@ -108,7 +108,17 @@ specific Vim error about a buffer the user never opened.
   when something would be lost. A `<C-s>` there would mean the opposite of the runner
   UI's `stop_all`. A resize rebuilds both panes in the pane, cursor and mode the user was in;
   `skip_close` keeps the panes' `WinClosed` from running the real close (which leaves insert
-  mode) while they are replaced.
+  mode) while they are replaced. A blank Output pane says what it means, as the runner UI's
+  does (`opts.answer_words`, through `surface.note_when_empty`). `opts.settle` stands between a
+  save and its callback: `commands.edit_testcase` leaves an answer stored empty or absent as it
+  was, and asks about a real one left empty.
+- `ask_empty_answer` is that question, here since the runner UI and the editor both ask it:
+  `Don't specify output` / `Expect empty output` / `Keep editing`. It opens with `vim.schedule`,
+  as a float entered inside `BufWriteCmd` loses focus when the write finishes.
+- A save can ask, so a typed `:wq`, `:x` or `:wqa` in the editor is held in `CmdlineLeave`
+  (`surface.quit_command`, as in the runner UI), and `ZZ` is mapped, or Vim would close the panes
+  before the answer and leave `Keep editing` nothing to keep. A `:wq` from a script cannot be
+  held: the panes close, and the answer still lands, which `save` guards for.
 - `menu`: optional `on_close`; `preview` (fixed lines or cursor-following `content(idx)`, colour
   via `'syntax'` not `'filetype'`, list capped at `MENU_LIST_SHARE` of the height, read-only and
   never left modified, `selectable` for one worth pasting from), or several `panes` stacked,

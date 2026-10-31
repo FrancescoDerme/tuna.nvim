@@ -1035,8 +1035,9 @@ end
 ---@param expect_empty_output boolean? an empty answer means the solution must print
 ---nothing, rather than that the testcase has no answer — the one thing a save cannot
 ---read off the panes, so it is the one thing asked
+---@param hold_run boolean? leave the row to a run about to replace this one
 ---@return boolean # whether the write succeeded
-function RunnerCore:save_testcase(tcnum, input, expected, expect_empty_output)
+function RunnerCore:save_testcase(tcnum, input, expected, expect_empty_output, hold_run)
     local ok, err = pcall(function()
         testcases.buf_save_testcase(self:edit_bufnr(), tcnum, input, expected, expect_empty_output)
     end)
@@ -1055,7 +1056,7 @@ function RunnerCore:save_testcase(tcnum, input, expected, expect_empty_output)
         -- it — which is what `bare` says it has not.
         self.tcdata[i].bare = nil
     end
-    if self.preloaded or not self:idle() then
+    if hold_run or self.preloaded or not self:idle() then
         self:update_ui(true)
     else
         for _, i in ipairs(rows) do

@@ -38,7 +38,7 @@ local M = {}
 
 -- What a marked line is, and the highlight groups (created in `init.lua`) it is painted with.
 -- A line whose counterpart disagrees is marked only where it disagrees, so `CHANGE` names
--- no group; a line the other side lacks is the difference whole, in the editor's diff colours.
+-- no group; a line the other side lacks is the difference whole.
 M.CHANGE = "change" -- a line whose counterpart disagrees
 M.TEXT = "TunaDiffText" -- the token/characters that actually disagree
 M.ADD = "TunaDiffAdd" -- a line yours has and the expected output does not
@@ -46,8 +46,8 @@ M.DELETE = "TunaDiffDelete" -- a line the expected output has and yours does not
 
 ---@class tuna.DiffMark
 ---@field hl string what the line is (`CHANGE`/`ADD`/`DELETE`)
----@field spans { [1]: integer, [2]: integer }[] byte ranges `[start, end)`, 0-based; an empty one
----  is where the other side has something this one lacks
+---@field spans { [1]: integer, [2]: integer }[] byte ranges `[start, end)`, 0-based; an empty one,
+---  in the output alone, is where the expected output has something it lacks
 
 ---@class tuna.DiffResult
 ---@field out table<integer, tuna.DiffMark> marks for the output pane, by 1-based line
@@ -106,7 +106,7 @@ local function char_spans(a, b)
     -- both strings share), but the prefix may have been walked back, so keep the
     -- span non-empty and ordered.
     local ea, eb = math.max(#a - s, pa), math.max(#b - s, pb)
-    return { { pa, ea } }, { { pb, eb } }
+    return { { pa, ea } }, eb > pb and { { pb, eb } } or {}
 end
 
 ---@private
@@ -170,12 +170,11 @@ local function line_spans(a, b, mode, tol)
             sb[#sb + 1] = { y.s, y.e }
         end
     end
-    -- The shorter line ends where the other goes on: an empty span there, or nothing on it
-    -- would say it disagrees.
+    -- An output that ends short gets an empty span there, or nothing on it would say it
+    -- disagrees. An expected line that does needs none: what it lacks is marked in the output
+    -- beside it, and it is the line being typed, where a mark would sit at the cursor.
     if #ta < #tb then
         sa[#sa + 1] = { #a, #a }
-    elseif #tb < #ta then
-        sb[#sb + 1] = { #b, #b }
     end
     if #sa == 0 and #sb == 0 then
         -- Same tokens in the same places: the lines differ only in spacing, which

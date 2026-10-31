@@ -42,14 +42,14 @@ function M.setup_highlight_groups()
         TunaCorrect = { ctermfg = "green", fg = "#00ff00" },
         TunaWarning = { ctermfg = "yellow", fg = "orange" },
         TunaWrong = { ctermfg = "red", fg = "#ff0000" },
-        -- The runner UI's diff. The lines one side lacks follow the editor's own diff
-        -- colours, so they wear whatever the colorscheme uses for the same idea. The
-        -- values that actually disagree do not: `DiffText` is a neutral background in
-        -- most themes, so it reads as "selected" rather than "wrong". They keep the
-        -- text's own colour and take a red-tinted background instead (see `wrong_bg`).
+        -- The runner UI's diff. Everything that disagrees is one colour: on a board where
+        -- green means correct, a line one side lacks is as wrong as a value that differs, so
+        -- the editor's own `DiffAdd` is the wrong word for it. Nor is `DiffText`, a neutral
+        -- background in most themes, reading as "selected". They keep the text's own colour
+        -- and take a red-tinted background instead (see `wrong_bg`).
         TunaDiffText = { bg = wrong_bg, ctermbg = 52 }, -- the tokens/characters that disagree
-        TunaDiffAdd = { link = "DiffAdd" }, -- a line the expected output doesn't have
-        TunaDiffDelete = { link = "DiffDelete" }, -- a line missing from the output
+        TunaDiffAdd = { link = "TunaDiffText" }, -- a line the expected output doesn't have
+        TunaDiffDelete = { link = "TunaDiffText" }, -- a line missing from the output
         -- The accent on the runner UI's *editable* panes (Input, Expected Output):
         -- their border and title, so the two panes you can type into are told apart
         -- from the four you can only read, at a glance and without a legend.
