@@ -173,6 +173,30 @@ t.eq("and the contest, in either case and word order", s.rank(rows, "CHERR 8"), 
 t.eq("a contest's own row ranks first for its name", s.rank(rows, "round 7")[1], 4)
 t.eq("what matches nothing shows nothing", s.rank(rows, "zzz"), {})
 
+-- A group naming its judge twice reads as the contest, and is still found by the judge.
+local round = "Codeforces - Codeforces Round 9"
+local named = s.catalogue({
+    {
+        dir = "/r9",
+        names = { ["A.cpp"] = true, ["B.cpp"] = true },
+        content = vim.json.encode({
+            task = {
+                ["A.cpp"] = { name = "A. Ink", group = round, url = "https://x.test/9/A" },
+                ["B.cpp"] = { name = "B. Jam", group = round, url = "https://x.test/9/B" },
+            },
+        }),
+    },
+})
+t.eq(
+    "a row says the judge once, on a contest and on its problems",
+    vim.tbl_map(function(r)
+        return r.name
+    end, named),
+    { "Codeforces Round 9", "A. Ink  Codeforces Round 9", "B. Jam  Codeforces Round 9" }
+)
+t.eq("the contest is entered under that name", named[1].contest, "Codeforces Round 9")
+t.eq("a search still matches the whole group", #s.rank(named, "codeforces - codeforces"), 3)
+
 -- Picking goes there, the directory moving with it.
 local function pick(query, expect)
     open_picker()

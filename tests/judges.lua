@@ -109,4 +109,13 @@ local broke = parse("CodeChef - Starters 100", "https://codechef.com/x", {
 })
 t.eq("a broken parser falls back to the raw contest", broke, { judge = "codechef", contest = "starters 100" })
 
+local label = require("tuna.problem.judges").label
+t.eq("a contest naming its judge drops the prefix", label("Codeforces - Codeforces Round 1124 (Div. 2)"), "Codeforces Round 1124 (Div. 2)")
+t.eq("wherever in its name, in either case", {
+    label("Codeforces - Educational Codeforces Round 195 (Rated for Div. 2)"),
+    label("AtCoder - JIJ Contest 2026 (ATCODER Beginner Contest 476)"),
+}, { "Educational Codeforces Round 195 (Rated for Div. 2)", "JIJ Contest 2026 (ATCODER Beginner Contest 476)" })
+t.eq("one that does not keep it, or the judge would go unsaid", label("Codeforces - acm.sgu.ru archive"), "Codeforces - acm.sgu.ru archive")
+t.eq("a group with no contest half stays as it is", { label("Codeforces"), label("codeforces round 1109"), label("") }, { "Codeforces", "codeforces round 1109", "" })
+
 t.report()

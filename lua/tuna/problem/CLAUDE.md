@@ -141,6 +141,9 @@ submissions. The rules that hold everywhere are in the root `CLAUDE.md`.
   Don't add round-name normalizers: a round number is not a contest id.
 - Path-hostile characters are replaced later, in `task_modifiers`, for download paths only
   (`eval_path`): a template's text and paths keep them.
+- `label(group)` is the group to show: the contest half when it names the judge anywhere (a
+  plain substring, in any case), so nothing says the judge twice, else the whole group.
+  It is for display alone: `group` stays what is stored and compared.
 
 ## Submit (`submit.lua`)
 

@@ -10,6 +10,7 @@ local uv = vim.uv
 local config = require("tuna.config")
 local utils = require("tuna.utils")
 local sidecar = require("tuna.problem.sidecar")
+local judges = require("tuna.problem.judges")
 
 local M = {}
 
@@ -146,7 +147,7 @@ local function catalogue(found)
                 local name = type(task.name) == "string" and task.name or base
                 local group = type(task.group) == "string" and task.group or nil
                 rows[#rows + 1] = {
-                    name = group and (name .. "  " .. group) or name,
+                    name = group and (name .. "  " .. judges.label(group)) or name,
                     text = name .. " " .. (group or ""),
                     path = file,
                 }
@@ -169,10 +170,10 @@ local function catalogue(found)
         local dir = vim.tbl_count(urls) > 1 and contest_dir(problems) or nil
         if dir then
             rows[#rows + 1] = {
-                name = group,
+                name = judges.label(group),
                 text = group,
                 path = dir,
-                contest = group,
+                contest = judges.label(group),
                 problems = vim.tbl_map(function(p)
                     return p.name
                 end, problems),

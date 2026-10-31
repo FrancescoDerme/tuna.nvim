@@ -195,7 +195,8 @@ problems and remembering them. The rules that hold everywhere are in the root `C
     its file. A contest is a `group` naming two problems by `url`, in the folder holding them
     (`contest_dir`) and not listed when they are scattered. Rows are recent first (`recent`'s
     lists), then by path, so a contest leads its problems. `rank` is `matchfuzzy` over `name
-    group`.
+    group`, the whole group, so typing a judge still finds a row whose `judges.label` left it
+    out.
   - It shows no verdicts: it is for reaching a known problem, nothing typed can match one, and
     checking one hashes every solution. Not a search of the recent lists either: they hold a
     handful of rows already on screen.

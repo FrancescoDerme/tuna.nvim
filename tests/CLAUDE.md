@@ -116,7 +116,8 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     before it, the roots a download path gives, what a sidecar lists (a task with its file
     still there, a contest of two problems in one folder, no scattered group, no second attempt
     taken for one), what the walk passes over (dot-directories, `skip_directories`, symlinks,
-    `ignored_directories`, a broken sidecar), the order, `rank`, picking going there and what
+    `ignored_directories`, a broken sidecar), the order, `rank`, a row saying its judge once and
+    found by it all the same, picking going there and what
     it says when it finds nothing or is cut short;
   - `download.lua`: the listener's boundary, a request handled while its sender is still
     connected, and what is stored (an empty answer kept, no file refused, a typed `~` path,

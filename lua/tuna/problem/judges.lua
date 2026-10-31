@@ -2,7 +2,7 @@
 --
 -- Turns Competitive Companion's `task.group` ("Judge - Contest") into a tidy
 -- `judge` + `contest` pair used by the download-path modifiers ($(JUDGE)/$(CONTEST))
--- and thus the on-disk folder names.
+-- and thus the on-disk folder names, and into a label to show (`M.label`).
 --
 -- A *parser* normalizes one judge's contest names. Built-in parsers ship for
 -- Codeforces and AtCoder; users add parsers for new judges — or override/disable the
@@ -82,6 +82,19 @@ M.builtin = {
         end
     end,
 }
+
+---A task's `group` as a person reads it: the contest alone when its name already says the
+---judge, as most do ("Codeforces - Educational Codeforces Round 195" is the second half), and
+---the whole group when the judge would otherwise go unsaid.
+---@param group string
+---@return string
+function M.label(group)
+    local hyphen = group:find(" - ", 1, true)
+    if hyphen and group:sub(hyphen + 3):lower():find(group:sub(1, hyphen - 1):lower(), 1, true) then
+        return group:sub(hyphen + 3)
+    end
+    return group
+end
 
 ---Parse a task's `group` into a `judge` + `contest`, applying the effective parser.
 ---@param task tuna.CCTask
