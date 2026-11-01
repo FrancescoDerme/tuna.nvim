@@ -45,6 +45,7 @@ local M = {}
 ---@field file string? its file, relative to the library root
 ---@field path string? its file's absolute path
 ---@field whole boolean? a whole file rather than a guarded snippet
+---@field version integer? its place among the snippets of its exact name, when there are several
 ---@field body string? its code, lowercased with whitespace removed, for searching
 ---@field said string? its notes and complexity, the same way
 
@@ -338,8 +339,8 @@ local function preview_opts(ext, all, cfg)
             height = math.floor(rows * (cfg.library.height or cfg.popup_ui.height) + 0.5),
         },
         panes = {
-            { title = "Notes", fit = true, wrap = true },
-            { title = "Complexity", fit = true, wrap = true, readout = true },
+            { title = "notes", fit = true, wrap = true },
+            { title = "complexity", fit = true, wrap = true, readout = true },
             { filetype = vim.filetype.match({ filename = "x." .. ext }) or ext, selectable = true },
         },
         content = function(idx)
@@ -379,7 +380,8 @@ end
 ---Everything insertable in the library for `ext`, sorted by name: every guarded snippet,
 ---and every file with no guards as a single whole-file entry, so a library that hasn't
 ---been marked up yet can still be picked from. Each entry carries its `body` for the
----search.
+---search, and entries of one exact name their `version`, in file and line order, so a
+---snippet keeps its number from one opening to the next.
 ---@param cfg table
 ---@param ext string
 ---@return tuna.Snippet[]
@@ -416,8 +418,19 @@ local function catalogue(cfg, ext)
         if a.name ~= b.name then
             return a.name < b.name
         end
-        return a.file < b.file
+        if a.file ~= b.file then
+            return a.file < b.file
+        end
+        return a.first < b.first
     end)
+    for i, e in ipairs(all) do
+        local before, after = all[i - 1], all[i + 1]
+        if before and before.name == e.name then
+            e.version = before.version + 1
+        elseif after and after.name == e.name then
+            e.version = 1
+        end
+    end
     return all
 end
 
@@ -481,21 +494,26 @@ function M.open(bufnr)
     local items = vim.tbl_map(function(e)
         return e.name
     end, all)
+    local tags = {}
+    for i, e in ipairs(all) do
+        tags[i] = e.version and ("(%d)"):format(e.version) or nil
+    end
 
     require("tuna.ui.widgets").menu(
         items,
-        "Library",
+        "library",
         function(idx)
             M.insert(all[idx], bufnr)
         end,
         restore,
         nil,
         preview_opts(ext, all, cfg),
-        nil,
-        nil,
-        function(query)
-            return rank(all, query)
-        end
+        {
+            search = function(query)
+                return rank(all, query)
+            end,
+            tags = tags,
+        }
     )
 end
 

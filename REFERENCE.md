@@ -125,7 +125,7 @@ Opens the runner UI in the mode the problem is set to.
   Bare `:Tuna testcase` and `:Tuna testcase n` do the same.
 - `delete` removes testcase `n`, after asking.
 - `generate` writes a testcase from your generator, the same one that stress uses.
-  It has an input and no answer, so it reads `DONE` unless your solution crashes, runs out of time or a checker judges it.
+  It has an input and no answer, so it reads `done` unless your solution crashes, runs out of time or a checker judges it.
   On the runner UI, `t` does the same.
 
 Without a number, `edit` and `delete` act on the only testcase when there is one, and ask which when there are several.
@@ -294,6 +294,7 @@ long long bexp(long long b, long long e, long long m) { ... }
 
 It lists every snippet in files with the current file's extension.
 If a file has no marked snippet, it is offered whole.
+Snippets of the same name are told apart by a dimmed number.
 A snippet's notes are the comment lines right under its opening mark, up to the first blank or code line.
 From a line starting with `Complexity:` to their end, they are treated as the snippet's complexity.
 Typing narrows the list: name and file name matches show up first, then the snippets whose notes are matched, and then those whose code is.
@@ -444,13 +445,13 @@ keymaps = {
 |               | `<leader>tgs`                               | search every problem and contest    |
 
 The preset groups keys by subject: `d` for downloads and `g` for "go to".
-A key inside a group has a short label that leaves out the group's word (`<leader>tdp` is `Problem`), so if you use which-key, name the groups in your config:
+A key inside a group has a short label that leaves out the group's word (`<leader>tdp` is `problem`), so if you use which-key, name the groups in your config:
 
 ```lua
 require("which-key").add({
-    { "<leader>t", group = "Tuna" },
-    { "<leader>td", group = "Download" },
-    { "<leader>tg", group = "Go to" },
+    { "<leader>t", group = "tuna" },
+    { "<leader>td", group = "download" },
+    { "<leader>tg", group = "go to" },
 })
 ```
 
@@ -475,6 +476,7 @@ tuna colours its windows with these highlight groups:
 - `TunaEditable`: the border of the panes you can type into.
 - `TunaMenuTitle`: the letters of the menu's banner.
 - `TunaDiffText`, `TunaDiffAdd` and `TunaDiffDelete`: the diff view.
+- `TunaFade1` to `TunaFade6`: a name fading out under its number in the library, where it is too long for the list.
 
 tuna's colours are only defaults: define any of these groups yourself, or in your colorscheme, and yours win.
 tuna sets its defaults again after every colorscheme change, so the groups you leave alone follow your theme.

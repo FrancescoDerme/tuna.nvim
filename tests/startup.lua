@@ -53,6 +53,11 @@ t.eq("and writing it loads nothing more", loaded(), TRACKING)
 require("tuna").setup({ keymaps = { preset = "<leader>t" } })
 t.eq("setup() loads only the keymaps on top of that", loaded(), { "tuna", "tuna.config", "tuna.keymaps", "tuna.utils", "tuna.workspace.recent" })
 
+t.eq("a key's label is lowercase, in a group or on its own", {
+    vim.fn.maparg("<leader>tgp", "n", false, true).desc,
+    vim.fn.maparg("<leader>tm", "n", false, true).desc,
+}, { "problem", "menu" })
+
 t.has(":Tuna completes its subcommands", table.concat(vim.fn.getcompletion("Tuna ", "cmdline"), " "), "run")
 
 t.report()

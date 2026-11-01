@@ -27,7 +27,7 @@ The rules that hold everywhere are in the root `CLAUDE.md`.
   dropped by `finish`, holding the input being tried and both outputs. It is there from the
   moment the board opens, not from the moment generation starts: the hunt is what a stress
   run spends its time on, and it would otherwise appear only as it ended. `mark_not_run`
-  leaves it saying what it is for (`NOT RUN` is a testcase's word for having no verdict yet),
+  leaves it saying what it is for (`not run` is a testcase's word for having no verdict yet),
   and `run_single` on it does nothing, there being no stored testcase behind it. Its `tcnum`
   is a string (`SEARCH`), so it is not editable, not compared against disk, and skipped by the
   counterexample dedup scan, which would otherwise find the input in it every time. It is
@@ -49,7 +49,7 @@ The rules that hold everywhere are in the root `CLAUDE.md`.
   what the process said in its Errors pane, and the row then stays (`drop_search_row` keeps
   one carrying a verdict) holding the seed's input, which is what there is to debug. Nothing
   in a runner answers a process with a float: a compile failure of a *helper* is the same,
-  said on the Compile row (`refresh_build_row`, FAILED) beside the pane holding what its
+  said on the compile row (`refresh_build_row`, failed) beside the pane holding what its
   compiler wrote. The floats that remain are about the mode, not a process: a configured
   helper that is broken, found on a rerun.
 - **Every run searches from a seed of its own** (`seed_base`, the clock's microseconds, kept
@@ -104,7 +104,7 @@ The rules that hold everywhere are in the root `CLAUDE.md`.
     a scroll made from code, or later manual scrolls drift.
   - `run_one_session` hands the cursor to the row it is about to talk to (`ui:goto_row`):
     that row's columns are the conversation, and in live it is the only row whose column is
-    typable, so the UI would otherwise sit on Compile with nothing to show and nothing to
+    typable, so the UI would otherwise sit on compile with nothing to show and nothing to
     type into.
   - In live, the keys that start typing (`i`/`I`/`a`/`A`/`o`/`O` and `<CR>`) are bound on the
     Live column: while it is typable they are Vim's own (replayed through `feedkeys`), and
@@ -124,7 +124,7 @@ The rules that hold everywhere are in the root `CLAUDE.md`.
   and reporting a broken configured one, instead of running; `whole` (a run of every session)
   builds the solution too.
 - Sessions run one at a time (`run_sessions`). `kill_process` ends the one running, marking
-  its row `killed` so every source's exit path reads `KILLED`; `kill_all_processes` also sets
+  its row `killed` so every source's exit path reads `killed`; `kill_all_processes` also sets
   `stopped`, and no session starts after it.
 
 **Run-all (`multi.lua`)**
@@ -138,12 +138,12 @@ The rules that hold everywhere are in the root `CLAUDE.md`.
   renumbered by a restore leave nothing behind to disagree with the grid. Keep no copy of the
   list beside the rows: renumbering a row leaves it stale, and the next add brings the old
   number back. With no testcases it lists a `bare` testcase 0 under every solution, labelled
-  `No input`, as the normal board does, and a testcase added or saved on the board is every
+  `no input`, as the normal board does, and a testcase added or saved on the board is every
   solution's, written as the buffer's own.
 - `opts.list` (`:Tuna run all 2 3`) runs every solution on those testcases alone, a missing
   one reported as normal mode reports it.
 - All solutions compile first, then everything runs in one shared pool of `multiple_testing`.
-  A compile failure is a `CE` row.
+  A compile failure is a `ce` row.
 - The pool, `run_single` and `rerun_solution` all settle through `settle`, once nothing runs
   and nothing is queued; a stop empties the queue (`qpos`), so a stopped matrix settles as soon
   as its killed cases are in. A header's `correct/total` counts judged rows only

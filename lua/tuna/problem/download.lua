@@ -535,8 +535,8 @@ local function store_testcases_into_buffer(bufnr, tclist, replace, finished)
     -- Keep-or-replace is decided in the floating UI like every other tuna question;
     -- dismissing (Esc) stores nothing. Every answer releases the batch processor.
     require("tuna.ui.widgets").menu(
-        { "Keep them alongside the new ones", "Replace them", "Stop" },
-        "Testcases already exist",
+        { "keep them alongside the new ones", "replace them", "stop" },
+        "testcases already exist",
         function(idx)
             if idx == 1 then
                 write(tctbl)
@@ -584,7 +584,7 @@ local function store_single_problem(task, cfg, finished)
     local widgets = require("tuna.ui.widgets")
     ask(
         cfg.downloaded_problems_prompt_path,
-        "Problem path",
+        "problem path",
         default_path,
         function(typed)
             -- A path typed or edited in the prompt is read like a configured one: a leading
@@ -619,7 +619,7 @@ local function store_single_problem(task, cfg, finished)
             -- command-line prompt. Dismissing (Esc) counts as "stop".
             if utils.file_exists(filepath) then
                 widgets.menu(
-                    { "Override", "Stop" },
+                    { "override", "stop" },
                     -- `:~:.` keeps the title readable: relative to the cwd when the
                     -- problem lives under it, otherwise with `$HOME` as `~`.
                     vim.fn.fnamemodify(filepath, ":~:.") .. " already exists",
@@ -659,7 +659,7 @@ local function store_contest(tasks, cfg, finished)
     local widgets = require("tuna.ui.widgets")
     ask(
         cfg.downloaded_contests_prompt_directory,
-        "Contest directory",
+        "contest directory",
         default_dir,
         function(typed)
             -- Read like a configured path, as the problem path is.
@@ -667,7 +667,7 @@ local function store_contest(tasks, cfg, finished)
             local local_cfg = config.load_local_config_and_extend(directory)
             ask(
                 local_cfg.downloaded_contests_prompt_extension,
-                "Files extension",
+                "files extension",
                 local_cfg.downloaded_files_extension,
                 function(file_extension)
                     -- Resolve every problem's path up front so we can decide once,
@@ -736,18 +736,18 @@ local function store_contest(tasks, cfg, finished)
                     -- something missing to write — with the contest complete on disk it
                     -- would do nothing.
                     if existing > 0 then
-                        local items, actions = { "Override all" }, {
+                        local items, actions = { "override all" }, {
                             function()
                                 write_all()
                             end,
                         }
                         if existing < #targets then
-                            items[#items + 1] = "Write missing only"
+                            items[#items + 1] = "write missing only"
                             actions[#actions + 1] = function()
                                 write_all(true)
                             end
                         end
-                        items[#items + 1] = "Stop"
+                        items[#items + 1] = "stop"
                         actions[#actions + 1] = function()
                             if finished then
                                 finished()
@@ -878,8 +878,8 @@ local function make_handler(mode, notify_on_download, bufnr, cfg)
                 -- flow whose other prompts are floating. Dismissing stores nothing;
                 -- every answer releases the batch processor.
                 require("tuna.ui.widgets").menu(
-                    { "Store the testcases only", "Store the full problem", "Stop" },
-                    "Downloaded '" .. tasks[1].name .. "'",
+                    { "store the testcases only", "store the full problem", "stop" },
+                    "downloaded '" .. tasks[1].name .. "'",
                     function(choice)
                         if choice == 1 then
                             store_testcases_into_buffer(

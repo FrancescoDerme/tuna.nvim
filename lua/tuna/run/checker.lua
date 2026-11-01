@@ -26,10 +26,10 @@ local M = {}
 ---@param tc table testcase data; reads `.stdin`, `.stdout`, `.expected`
 ---@param checker "builtin"|tuna.HelperSpec resolved checker spec
 ---@param compare_method tuna.CompareSpec builtin compare method
----@param callback fun(correct: boolean?, message: string?) verdict (`nil` => uncheckable/DONE)
+---@param callback fun(correct: boolean?, message: string?) verdict (`nil` => uncheckable/done)
 function M.judge(tc, checker, compare_method, callback)
     -- Builtin: plain comparison. Preserves exact/squish/custom behaviour, and
-    -- returns nil (DONE) when there is no expected output (e.g. the compile step).
+    -- returns nil (done) when there is no expected output (e.g. the compile step).
     if checker == nil or checker == "builtin" then
         callback(compare.compare_output(tc.stdout or "", tc.expected, compare_method))
         return

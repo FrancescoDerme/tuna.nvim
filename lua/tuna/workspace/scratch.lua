@@ -217,7 +217,7 @@ local function start_over(path, ext, cfg)
     end
 
     local widgets = require("tuna.ui.widgets")
-    local title = "Start the scratch from"
+    local title = "start the scratch from"
     local items, previews = {}, {}
     for i, tmpl in ipairs(choices) do
         items[i] = vim.fn.fnamemodify(tmpl, ":~")
@@ -225,7 +225,7 @@ local function start_over(path, ext, cfg)
         local header, blanks = split_template(lines)
         previews[i] = { title = vim.fn.fnamemodify(tmpl, ":t"), lines = vim.list_slice(lines, header + blanks + 1) }
     end
-    items[#items + 1] = "Empty file"
+    items[#items + 1] = "empty file"
     widgets.menu(items, title, function(idx)
         create(path, cfg, choices[idx])
     end, vim.api.nvim_get_current_win(), function() end, {
@@ -262,8 +262,8 @@ function M.start(bufnr)
         filetype = vim.filetype.match({ filename = "scratch." .. ext }),
         selectable = true,
     }
-    held.width = widgets.sequence_width({ "A scratch already exists", "Resume", "Restart" }, { held })
-    widgets.menu({ "Resume", "Restart" }, "A scratch already exists", function(idx)
+    held.width = widgets.sequence_width({ "a scratch already exists", "resume", "restart" }, { held })
+    widgets.menu({ "resume", "restart" }, "a scratch already exists", function(idx)
         if idx == 1 then
             resume(path, ext, cfg)
         else

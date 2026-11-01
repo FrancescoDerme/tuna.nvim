@@ -589,7 +589,7 @@ local function still_good(entry, stamp, exec, cwd)
     return stamp ~= nil and entry ~= nil and entry.compiled == true and entry.stamp == stamp and program_exists(exec, cwd)
 end
 
----For a build made by its caller rather than `prepare` (the solution's, on the Compile row or
+---For a build made by its caller rather than `prepare` (the solution's, on the compile row or
 ---a run-all header): the build of `source` this session can reuse, with what its compiler
 ---said, or nil and how to remember the one about to be made once it has succeeded. The
 ---stamp is taken now, before the compiler starts, so an edit made while it runs is a change

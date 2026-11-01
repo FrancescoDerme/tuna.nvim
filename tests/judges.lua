@@ -21,8 +21,8 @@ t.eq(
     parse("Codeforces - Codeforces Round 1112 (Div. 2)", "https://codeforces.com/contest/2250/problem/A"),
     { judge = "codeforces", contest = "2250" }
 )
--- A mirror sends a bare "Codeforces" with no contest name at all, so every problem
--- downloaded during a live round used to land under `unknown_contest`.
+-- A mirror sends a bare "Codeforces" with no contest name at all, and a problem downloaded
+-- during a live round belongs under its contest all the same, not `unknown_contest`.
 t.eq(
     "a mirror with no contest name still resolves, via the id",
     parse("Codeforces", "https://m1.codeforces.com/contest/2250/problem/A"),

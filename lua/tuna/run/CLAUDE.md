@@ -108,8 +108,8 @@ hold everywhere are in the root `CLAUDE.md`.
 
 **`RunnerCore` (`run/core.lua`)** is the base of every mode (subclassed with `M.extend()`).
 - `tcdata` rows. `execute_process(tcindex, cmd, dir, opts, on_done)` spawns via `vim.system`
-  with its own timeout timer (TIMEOUT, KILLED, SIG, RET), then judges with `checker.judge`
-  unless `opts.judge == false` (the Compile row), setting `judging` while it waits. Every
+  with its own timeout timer (timeout, killed, sig, ret), then judges with `checker.judge`
+  unless `opts.judge == false` (the compile row), setting `judging` while it waits. Every
   program tuna runs (testcases, the checker, the stress search's steps, a session's solution and
   interactor) gets `tools.RUN_ENV` on top of the editor's environment:
   `GLIBCXX_DEBUG_MESSAGE_LENGTH=0`, since libstdc++'s debug mode wraps its reports at 78 columns
@@ -129,12 +129,13 @@ hold everywhere are in the root `CLAUDE.md`.
   - `pane_titles()`;
   - `on_details_rendered(ui, tc)` runs after the detail panes are drawn, for panes the mode
     draws itself;
-  - `legend_rows()` returns `{ title, rows }`, a section of the `?` legend of the mode's own
+  - `legend_rows()` returns `{ title, rows }`, a box of the `?` legend of the mode's own,
+    closing its left column
     (stress: the search row and what the run keys do to the search; interactive: the source
     playing the other side and what decides the verdict).
 - **Editing contract**:
   - `editable_testcases` is a class flag. `row_editable(tc)` is true only for numeric `tcnum`,
-    which excludes Compile and run-all headers.
+    which excludes compile and run-all headers.
   - Other members: `row_id`, `edit_bufnr`, `rows_for`, `row_for`, `next_tcnum`, `free_number`,
     `add_testcase_row`, `remove_testcase_rows`, `split_testcase`, `run_rows`,
     `sync_rows(nums, tctbl)`.
@@ -144,11 +145,11 @@ hold everywhere are in the root `CLAUDE.md`.
   - `idle()` reads `completed`, and structural edits wait for it.
   - `save_testcase(tcnum, input, expected, expect_empty_output)` writes, updates every row
     showing that testcase, clears `bare`, and re-runs, unless the runner is `preloaded`.
-- **One build, for every mode.** `build_solution` spawns the compiler for the Compile row
+- **One build, for every mode.** `build_solution` spawns the compiler for the compile row
   through `execute_process`, with the runner's own commands in normal mode and those of the
   normal runner a mode holds (`r`) otherwise, so a build reads the same everywhere: the same
   verdicts, the same timing, the same answer when a helper beside it failed. A build reused
-  (see `tools.lua`) reads `CACHED` on the row, with the words its compiler said then.
+  (see `tools.lua`) reads `cached` on the row, with the words its compiler said then.
   `build_all` starts it and the mode's helpers (`build_helpers`) **at once**, each being its
   own program with its own compiler: queued one behind another they are most of what a run
   waits for, and the cursor is held on the build step until the last of them lands. Its
@@ -157,7 +158,7 @@ hold everywhere are in the root `CLAUDE.md`.
   what "nothing will run" means is its own (normal ends its lanes, stress `finish()`es its
   search, interactive sets `completed`). `defer_build` keeps that build on the runner for a UI
   opened with its rows only listed, and `M.compile_row()` is the row itself.
-- **The build step is every source the run compiles.** The solution is the Compile row itself;
+- **The build step is every source the run compiles.** The solution is the compile row itself;
   each helper the mode needs is a step in `self.builds`, declared up front with `plan_builds`
   (a pane appearing halfway through would re-tile the row under someone reading it) and
   compiled through `build_helper`, which puts the compiler's words on it. A spec with nothing
@@ -172,17 +173,19 @@ hold everywhere are in the root `CLAUDE.md`.
 - `M.time_limit(cfg)` and `M.parallelism(cfg, jobs)` are how every mode reads `maximum_time`
   and `multiple_testing`.
 - **One vocabulary for a verdict**: `M.verdict(correct)` is what a judged row wears
-  (`CORRECT`, `WRONG`, `DONE` with no answer), in every mode.
+  (`correct`, `wrong`, `done` with no answer), in every mode. What `tc.status` holds is what the
+  row shows, so the runs compare the words on screen (`M.judged`, `^sig `), and nothing lowers
+  or reformats them on the way to a pane.
 - `M.register(registry, bufnr, runner)` is how every mode keeps its runner by buffer: one
   `BufUnload` watcher per registry and buffer, however often the buffer is run.
 - **One vocabulary for an ending**: `M.ending(how, timeout)` gives the status, colour and
-  words for a process that did not exit cleanly (`TIMEOUT`, `KILLED`, `SIG n`, `RET n`,
+  words for a process that did not exit cleanly (`timeout`, `killed`, `sig n`, `ret n`,
   `vim.system`'s own timeout kill, code 124 and SIGTERM, reading as a timeout), for a testcase
   (`finish_process`), an interactive session and a stress helper alike.
 - **Stopping**: `kill_process(idx)` ends one row and the run goes on; `kill_all_processes`
   stops the run, in every mode: it sets `stopped`, which every mode's lanes read before
   starting anything, kills what runs, marks the rows still waiting (`status == ""`)
-  `NOT RUN`, and the run then settles as idle. Every start of a run clears `stopped`: the
+  `not run`, and the run then settles as idle. Every start of a run clears `stopped`: the
   UI's `<C-r>` and `:Tuna run` stop first and then run.
 - **A run of the whole set builds what changed**, in every mode, the solution included:
   `run_testcases` is the first run and `<C-r>` alike (the stress and interactive `M.run` end in
@@ -193,7 +196,7 @@ hold everywhere are in the root `CLAUDE.md`.
   a run finishes: normal `check_complete`, run-all's `settle` (`save_local_verdicts`, each
   solution over its own case rows), and interactive session ends (`save_buffer_verdict` skips a
   wiped buffer). Stress saves none. Only judged rows count (`M.judged`, which run-all's header
-  counts use too) (CORRECT passes; WRONG, TIMEOUT, RET, SIG fail), so a run that judged nothing
+  counts use too) (correct passes; wrong, timeout, ret, sig fail), so a run that judged nothing
   leaves the entry alone. The source hash is recorded, and `local_verdict` answers only while
   it matches.
 
@@ -205,9 +208,9 @@ hold everywhere are in the root `CLAUDE.md`.
   `:Tuna compare` also set them on the buffer's runners at once (`runners_of`), so an open
   board's judge row says what the next run will use, and never drop a runner, whose board
   no later run could then find to hide.
-- `build_rows`: row 1 is `Compile` when compiling, and the build gates the testcases. With **no
-  testcases** it builds one `bare` testcase 0, labelled `No input`, run on empty stdin with no
-  answer (so `DONE`) and editable; saving it creates the testcase. `n` in the UI reuses an
+- `build_rows`: row 1 is `compile` when compiling, and the build gates the testcases. With **no
+  testcases** it builds one `bare` testcase 0, labelled `no input`, run on empty stdin with no
+  answer (so `done`) and editable; saving it creates the testcase. `n` in the UI reuses an
   untouched bare row. An explicit `:Tuna run 5` for a missing testcase reports it and stops
   instead of falling through to a bare run.
 - **Trailing numbers always name testcases** (normal, interactive, run-all). Stress runs
@@ -215,10 +218,10 @@ hold everywhere are in the root `CLAUDE.md`.
   numbers on a stress run it resolved itself, or `:Tuna run 5` would mean testcase 5 or five
   inputs depending on the files beside the solution, and after a typed `stress` it refuses
   anything but one number rather than dropping it unseen.
-- `load_testcases` builds the same rows as `NOT RUN` with `preloaded = true` (`:Tuna show_ui`
+- `load_testcases` builds the same rows as `not run` with `preloaded = true` (`:Tuna show_ui`
   before any run) and keeps the build (`defer_build`), so `run_single` builds first through
   `built_first` as in every mode, and `run_testcases(nil)` claims it (`claim_listed`). The
-  Compile row's own run key is the build.
+  compile row's own run key is the build.
 - `:Tuna show_ui` (`commands.show_runner_ui`) opens the mode last run in this session, else
   the one saved for the problem (`tools.resolve_mode`), since after a restart nothing has
   run. Interactive, stress and run-all open the same way when they have no runner yet:

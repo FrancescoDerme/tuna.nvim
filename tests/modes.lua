@@ -209,8 +209,8 @@ do
     end
     t.eq("off forces, auto hands back, and neither bare nor a word it does not know changes it", seen, { "off", "off", "auto", "auto", "auto" })
     t.eq("bare, it says how it is set", { said[2], said[4] }, {
-        "Tuna: checker: off for this problem, comparing outputs.",
-        "Tuna: checker: automatic for this problem, using checker.py.",
+        "tuna: checker: off for this problem, comparing outputs.",
+        "tuna: checker: automatic for this problem, using checker.py.",
     })
     t.has("and the unknown word is answered", said[5], "use auto or off")
     t.eq("completion offers the two words", commands.complete("", "Tuna checker ", 13), { "auto", "off" })
@@ -218,7 +218,7 @@ do
     commands.execute({ "compare", "exact" })
     commands.execute({ "compare" })
     t.eq("bare compare leaves the method alone", tools.get_compare(ksol), "exact")
-    t.eq("and says what it is", said[#said], "Tuna: compare: exact for this problem.")
+    t.eq("and says what it is", said[#said], "tuna: compare: exact for this problem.")
     -- There is no word for "the configured one": naming the configured method is how a
     -- problem goes back to it, so a later change to the config reaches it.
     commands.execute({ "compare", "default" })
@@ -226,7 +226,7 @@ do
     t.eq("and changes nothing", tools.get_compare(ksol), "exact")
     commands.execute({ "compare", "squish" })
     t.eq("naming the configured method keeps no override", tools.get_compare(ksol), nil)
-    t.eq("and says so", said[#said], "Tuna: compare: squish, the configured method.")
+    t.eq("and says so", said[#said], "tuna: compare: squish, the configured method.")
     t.eq("completion offers the methods", commands.complete("", "Tuna compare ", 13), { "exact", "float", "squish" })
 
     -- Configured as float, a float with the configured tolerance is it, another is not.
@@ -411,15 +411,15 @@ local function rerun_after_deleting(open_mode, file, answer)
 end
 local asked, ir, idir = rerun_after_deleting("interactive", "interactor.py")
 t.eq("an interactor rerun with the interactor gone offers to write it", asked, {
-    title = "The interactor source needs an interactor",
-    items = { "Create interactor.py", "Stop" },
+    title = "the interactor source needs an interactor",
+    items = { "create interactor.py", "stop" },
 })
 t.eq("and runs no session", ir.sol_handle, nil)
 t.eq("stopping writes nothing", vim.fn.glob(idir .. "/interactor.*"), "")
 local sasked, sr = rerun_after_deleting("stress", "brute.py", 3)
 t.eq("a stress restart with its bruteforce gone offers that one, or a search for crashes without it", sasked, {
-    title = "Stress needs a bruteforce",
-    items = { "Create brute.py", "Search for crashes without one", "Stop" },
+    title = "stress needs a bruteforce",
+    items = { "create brute.py", "search for crashes without one", "stop" },
 })
 t.eq("stopping searches nothing", sr.iter, 0)
 local _, hunted = rerun_after_deleting("stress", "brute.py", 2)

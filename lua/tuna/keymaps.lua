@@ -55,20 +55,20 @@ M.actions = {
 
 -- The ready-made preset, enabled with `keymaps.preset = "<leader>t"` (any prefix).
 -- Suffixes are grouped by subject, so which-key, with the groups named in the user's own
--- config (REFERENCE.md shows how), shows one "Tuna" group with subgroups under it:
+-- config (REFERENCE.md shows how), shows one "tuna" group with subgroups under it:
 --
---   <leader>tr  Run             <leader>tm  Menu        <leader>tdt  Testcases
---   <leader>tu  Show ui         <leader>tw  Scratch     <leader>tdp  Problem
---   <leader>ts  Submit          <leader>tl  Library     <leader>tdc  Contest
---   <leader>tn  Next problem    <leader>tf  Pin         <leader>tds  Sync
---   <leader>tp  Prev problem                            <leader>tgp  Problem
---                                                       <leader>tgc  Contest
---                                                       <leader>tgj  Judge
---                                                       <leader>tgs  Search
+--   <leader>tr  run             <leader>tm  menu        <leader>tdt  testcases
+--   <leader>tu  show ui         <leader>tw  scratch     <leader>tdp  problem
+--   <leader>ts  submit          <leader>tl  library     <leader>tdc  contest
+--   <leader>tn  next problem    <leader>tf  pin         <leader>tds  sync
+--   <leader>tp  prev problem                            <leader>tgp  problem
+--                                                       <leader>tgc  contest
+--                                                       <leader>tgj  judge
+--                                                       <leader>tgs  search
 --
 -- The labels above are the which-key entries. A key inside a group does not repeat
--- what the group already says (`td` "Download" → `Problem`, `tg` "Go to" →
--- `Contest`); an ungrouped one keeps its full name, since nothing else supplies the
+-- what the group already says (`td` "download" → `problem`, `tg` "go to" →
+-- `contest`); an ungrouped one keeps its full name, since nothing else supplies the
 -- noun. See `M.preset_labels`.
 --
 -- Testcases have no keys: they are added, edited and deleted on the runner UI, where
@@ -114,20 +114,20 @@ M.preset = {
 
 -- Labels for the preset's **grouped** keys, where the group has already said the noun.
 -- A which-key group is a word the user reads before the entry — `<leader>td` is
--- "Download", `<leader>tg` is "Go to" — so the derived `Download problem` /
--- `Last problem` say it twice. These are used
+-- "download", `<leader>tg` is "go to" — so the derived `download problem` /
+-- `go problem` say it twice. These are used
 -- **only** while an action is still on its preset key: move it out of the group with
 -- your own `mappings` and it goes back to the full label, which is the one that makes
 -- sense standing alone.
 M.preset_labels = {
-    download_testcases = "Testcases", -- under "Download"
-    download_problem = "Problem",
-    download_contest = "Contest",
-    download_sync = "Sync",
-    go_problem = "Problem", -- under "Go to"
-    go_contest = "Contest",
-    go_judge = "Judge",
-    go_search = "Search",
+    download_testcases = "testcases", -- under "download"
+    download_problem = "problem",
+    download_contest = "contest",
+    download_sync = "sync",
+    go_problem = "problem", -- under "go to"
+    go_contest = "contest",
+    go_judge = "judge",
+    go_search = "search",
 }
 
 ---Expand `M.preset` against a prefix, with the user's own tables layered on top so a
@@ -193,12 +193,11 @@ local function set_maps(mapping_tbl, base_opts, labels)
     for action, lhs in pairs(mapping_tbl) do
         local rhs = M.actions[action]
         if rhs and lhs then
-            -- Bare, capitalized label (no "Tuna:" prefix) — these live under a
-            -- dedicated which-key group, so the "Tuna" context is already implied.
+            -- Bare label (no "tuna:" prefix) — these live under a
+            -- dedicated which-key group, so the "tuna" context is already implied.
             local label = (labels or {})[action]
             if not label then
                 label = action:gsub("_", " ")
-                label = label:sub(1, 1):upper() .. label:sub(2)
             end
             for _, key in ipairs(keys_of(lhs)) do
                 local opts = vim.tbl_extend("force", base_opts, {

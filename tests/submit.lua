@@ -114,12 +114,18 @@ local scfg = {
 -- one line: a plain last-line scan matched "Testing" and never reached "Accepted".
 local state, text = s.scan_verdict("Testing\tRunning on test 3\tAccepted", scfg)
 t.eq("a final verdict beats the pending frames before it", state, "accepted")
-t.has("and the text is a snippet, not the whole blob", text, "Accepted")
+t.has("and the text is a snippet, not the whole blob, in lowercase", text, "accepted")
 t.ok("which does not carry the earlier frames", not text:lower():find("testing"), text)
 
 t.eq("with no final verdict the latest pending one shows", (s.scan_verdict("Testing\tRunning on test 3", scfg)), "pending")
 t.eq("a rejection is final too", (s.scan_verdict("Running\twrong answer on test 6", scfg)), "rejected")
 t.eq("nothing recognisable is no verdict", s.scan_verdict("hello", scfg), nil)
+t.eq("a verdict in another alphabet is matched and lowered too", { s.scan_verdict("ПРИНЯТО", { verdicts = { { "принято", "accepted" } } }) }, { "accepted", "принято" })
+t.eq("a stray NUL byte is no failure", (s.scan_verdict("Accepted\0", scfg)), "accepted")
+t.eq("a rule's capitals in another alphabet still match", (s.scan_verdict("Принято", { verdicts = { { "Принято", "accepted" } } })), "accepted")
+t.eq("while a rule stays a pattern", (s.scan_verdict("x1", { verdicts = { { "x%S", "accepted" } } })), "accepted")
+t.eq("its classes keeping their meaning", (s.scan_verdict("x ", { verdicts = { { "x%S", "accepted" } } })), nil)
+t.eq("the snippet is capped in characters, none cut in half", select(2, s.scan_verdict("ок " .. ("я"):rep(80), { verdicts = { { "ок", "accepted" } } })), "ок " .. ("я"):rep(57))
 
 -- Terminal control has to go, or a redrawing submitter leaks ^H and escape junk into
 -- lualine.
@@ -169,7 +175,7 @@ local function write_entry(entry)
     }))
 end
 local verdict_for = require("tuna.problem.submit").verdict_for
-local accepted = { state = "accepted", text = "Accepted" }
+local accepted = { state = "accepted", text = "accepted" }
 
 t.eq("no sidecar, no verdict", verdict_for(vpath), nil)
 write_entry({ hash = vim.fn.sha256(source) })
@@ -334,6 +340,45 @@ do
     runner_ui.owner_of = owner_of
 
     vim.ui.open, vim.notify = ui_open, notify
+end
+
+-- A verdict shows in lowercase whatever the judge wrote, as it arrives and when it comes back
+-- from a sidecar written with the judge's own capitals, while what names a file stays as it is.
+do
+    local submit = require("tuna.problem.submit")
+    local dir = t.tempdir()
+    t.write(dir, "Main.cpp", "int main() {}\n")
+    local path = vim.fs.normalize(vim.uv.fs_realpath(dir)) .. "/Main.cpp"
+    local cfg = require("tuna.config").current_setup
+    local buf = vim.fn.bufadd(path)
+    vim.fn.bufload(buf)
+    vim.api.nvim_set_current_buf(buf)
+    s.run_watch({ filepath = path, bufnr = buf, cfg = cfg, scfg = cfg.submit, name = "Main.cpp" }, "sleep 0.05; printf 'Running\\tAccepted'")
+    t.has("a file's name keeps its case while it is submitted", submit.status(buf), "submitting Main.cpp")
+    vim.wait(3000, function()
+        return (submit.state[path] or {}).state == "accepted"
+    end, 10)
+    t.has("the judge's word arrives in lowercase", submit.status(buf), "accepted")
+    submit.clear(buf)
+    local hash = vim.fn.sha256("int main() {}\n")
+    t.write(dir, ".tuna.json", vim.json.encode({ submit = { ["Main.cpp"] = { state = "rejected", text = "Wrong Answer", hash = hash } } }))
+    submit.restore(buf)
+    t.has("and one stored in the judge's capitals comes back in lowercase", submit.status(buf), "wrong answer")
+    submit.clear(buf)
+    t.write(dir, ".tuna.json", vim.json.encode({ submit = { ["Main.cpp"] = { state = "accepted", text = "ПРИНЯТО", hash = hash } } }))
+    submit.restore(buf)
+    t.has("in any alphabet", submit.status(buf), "принято")
+    submit.clear(buf)
+    t.write(dir, ".tuna.json", ('{"submit":{"Main.cpp":{"state":"accepted","text":"Accepted\\u0000 x","hash":"%s"}}}'):format(hash))
+    t.eq("a NUL stored in one is no failure", submit.verdict_for(path).text, "accepted x")
+    t.write(dir, ".tuna.json", vim.json.encode({ submit = { ["Main.cpp"] = { state = "rejected", text = "Wrong Answer", hash = hash } } }))
+    t.eq("as it does read from the path alone", submit.verdict_for(path).text, "wrong answer")
+    -- The sidecar travels with the folder and may be edited by hand.
+    for _, text in ipairs({ "null", "3" }) do
+        t.write(dir, ".tuna.json", ('{"submit":{"Main.cpp":{"state":"accepted","text":%s,"hash":"%s"}}}'):format(text, hash))
+        t.eq("an entry with no words is no verdict, " .. text, { pcall(submit.restore, buf) }, { true })
+        t.eq("and shows nothing", submit.status(buf), "")
+    end
 end
 
 t.report()

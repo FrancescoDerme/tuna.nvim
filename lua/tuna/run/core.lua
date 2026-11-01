@@ -74,7 +74,7 @@ M.RunnerCore = RunnerCore
 ---answer, not that its answer is empty. That is what reaches the disk — `write_or_delete`
 ---removes an empty output file rather than writing one — so a row holding `""` would
 ---disagree with what was just saved, and the judge would compare the run against an
----empty answer and call it WRONG on a testcase that has nothing to be wrong about.
+---empty answer and call it wrong on a testcase that has nothing to be wrong about.
 ---@param text string?
 ---@return string?
 function M.answer(text)
@@ -108,16 +108,16 @@ function M.parallelism(cfg, jobs)
 end
 
 ---Whether a row's status is a verdict on the solution, what a local verdict counts. A
----testcase with no answer (`DONE`), one stopped (`KILLED`) or one that could not start
----(`FAILED`) says nothing about whether the solution is right.
+---testcase with no answer (`done`), one stopped (`killed`) or one that could not start
+---(`failed`) says nothing about whether the solution is right.
 ---@param status string
 ---@return boolean
 function M.judged(status)
-    return status == "CORRECT"
-        or status == "WRONG"
-        or status == "TIMEOUT"
-        or status:match("^RET ") ~= nil
-        or status:match("^SIG ") ~= nil
+    return status == "correct"
+        or status == "wrong"
+        or status == "timeout"
+        or status:match("^ret ") ~= nil
+        or status:match("^sig ") ~= nil
 end
 
 -- The buffers each runner registry already watches for unloading, so a buffer run a
@@ -151,11 +151,11 @@ end
 ---@return string status, string hlgroup
 function M.verdict(correct)
     if correct == true then
-        return "CORRECT", "TunaCorrect"
+        return "correct", "TunaCorrect"
     elseif correct == false then
-        return "WRONG", "TunaWrong"
+        return "wrong", "TunaWrong"
     end
-    return "DONE", "TunaDone"
+    return "done", "TunaDone"
 end
 
 ---How a process that did not exit cleanly ended: the verdict a row wears for it, its colour,
@@ -167,13 +167,13 @@ end
 ---@return string? status, string? hlgroup, string? words
 function M.ending(how, timeout)
     if how.timed_out or (how.code == 124 and how.signal == 15) then
-        return "TIMEOUT", "TunaWrong", ("timed out after %.1f s"):format((timeout or 0) / 1000)
+        return "timeout", "TunaWrong", ("timed out after %.1f s"):format((timeout or 0) / 1000)
     elseif how.killed then
-        return "KILLED", "TunaWarning", "was stopped"
+        return "killed", "TunaWarning", "was stopped"
     elseif how.signal and how.signal ~= 0 then
-        return "SIG " .. how.signal, "TunaWarning", ("was killed by signal %d"):format(how.signal)
+        return "sig " .. how.signal, "TunaWarning", ("was killed by signal %d"):format(how.signal)
     elseif how.code and how.code ~= 0 then
-        return "RET " .. how.code, "TunaWarning", ("exited with code %d"):format(how.code)
+        return "ret " .. how.code, "TunaWarning", ("exited with code %d"):format(how.code)
     end
 end
 
@@ -191,7 +191,7 @@ function M.save_local_verdict(solution, rows)
     for _, tc in ipairs(rows) do
         if type(tc.tcnum) == "number" and type(tc.status) == "string" and M.judged(tc.status) then
             total = total + 1
-            if tc.status == "CORRECT" then
+            if tc.status == "correct" then
                 passed = passed + 1
             end
         end
@@ -272,11 +272,11 @@ function RunnerCore:delete_ui()
     self.ui = nil
 end
 
----List the rows without running them: every row reads `NOT RUN` (the absence of a
+---List the rows without running them: every row reads `not run` (the absence of a
 ---verdict, so unstyled) and the runner is `preloaded` until its first run.
 function RunnerCore:mark_not_run()
     for _, tc in ipairs(self.tcdata) do
-        tc.status, tc.hlgroup = "NOT RUN", "TunaDone"
+        tc.status, tc.hlgroup = "not run", "TunaDone"
     end
     self.preloaded = true
 end
@@ -310,7 +310,7 @@ end
 ---being asked to judge it.
 ---@return table
 function M.compile_row()
-    return { tcnum = "Compile", stdin = "", expected = nil, compile = true, status = "", hlgroup = "TunaRunning" }
+    return { tcnum = "compile", stdin = "", expected = nil, compile = true, status = "", hlgroup = "TunaRunning" }
 end
 
 ---What a mode does when the build failed and nothing will run. The base class has nothing to
@@ -318,14 +318,14 @@ end
 ---every later edit is refused for a run that never started.
 function RunnerCore:on_build_failed() end
 
----Build the solution, driving the Compile row, and then `cont`. A run that has nothing to
----compile (no Compile row) goes straight on. Every mode builds through here, so a build
+---Build the solution, driving the compile row, and then `cont`. A run that has nothing to
+---compile (no compile row) goes straight on. Every mode builds through here, so a build
 ---reads the same everywhere: the same verdicts, the same timing, and the same answer when a
 ---helper beside it failed (`refresh_build_row`). The commands are the runner's own for the
 ---normal mode and those of the normal runner it holds (`r`) for the others.
 ---
 ---A build this session already made from the same source, headers and command is reused
----(`tools.reuse_build`): the row reads `CACHED` and shows what that build's compiler
+---(`tools.reuse_build`): the row reads `cached` and shows what that build's compiler
 ---said, so its warnings stay where they were.
 ---@param cont fun() run only when the build succeeded
 function RunnerCore:build_solution(cont)
@@ -339,7 +339,7 @@ function RunnerCore:build_solution(cont)
     local reused, remember = tools.reuse_build(source, r.cc, r.compile_directory, r.rc.exec, r.running_directory)
     if reused then
         tc.exit_code, tc.stdout, tc.stderr = 0, reused.stdout, reused.stderr
-        tc.status, tc.hlgroup = "CACHED", "TunaDone"
+        tc.status, tc.hlgroup = "cached", "TunaDone"
         self:refresh_build_row()
         self:update_ui(true)
         cont()
@@ -387,7 +387,7 @@ function RunnerCore:build_helpers(specs, cont)
     end
 end
 
----Build everything this run compiles, at once: the solution, which is the Compile row, and
+---Build everything this run compiles, at once: the solution, which is the compile row, and
 ---the helpers its mode needs. `on_solution` runs as soon as the solution alone is built, for
 ---what does not need the rest (stress puts the testcases already on disk through it there),
 ---and `cont` once the last of them lands. A failure anywhere settles at `on_build_failed`,
@@ -470,7 +470,7 @@ function RunnerCore:pane_content(tc, name)
     elseif name == "se" then
         -- The checker's own words belong with the errors: for an external checker its
         -- stderr *is* the explanation of the verdict ("wrong answer: expected 5, got
-        -- 3"), and a WRONG with the reason collected but never shown is a checker the
+        -- 3"), and a `wrong` with the reason collected but never shown is a checker the
         -- user cannot hear.
         local msg = tc.checker_message
         if msg and msg ~= "" then
@@ -578,27 +578,27 @@ function RunnerCore:build_judge()
     end
 end
 
----The Compile row answers for the whole build step, not only the solution: a helper that
+---The compile row answers for the whole build step, not only the solution: a helper that
 ---failed to compile is a failed build, said where every build is said, beside the pane
 ---holding what its compiler wrote. Only a build that came back clean is downgraded — the
 ---solution's own failure is the more specific answer, and keeps its exit code.
 function RunnerCore:refresh_build_row()
     local tc = self.tcdata[1]
-    if not (tc and tc.compile and (tc.status == "DONE" or tc.status == "CACHED")) then
+    if not (tc and tc.compile and (tc.status == "done" or tc.status == "cached")) then
         return
     end
     for _, step in ipairs(self.builds or {}) do
         if step.failed then
-            tc.status, tc.hlgroup = "FAILED", "TunaWarning"
+            tc.status, tc.hlgroup = "failed", "TunaWarning"
             return
         end
     end
 end
 
 ---What the build step shows, source by source, in the order their panes are handed out:
----the solution first, whose compile *is* the Compile row, then every helper this run
+---the solution first, whose compile *is* the compile row, then every helper this run
 ---builds.
----@param tc table the Compile row
+---@param tc table the compile row
 ---@return { label: string, role: string, output: string, failed: boolean, done: boolean }[]
 function RunnerCore:build_sources(tc)
     local name = api.nvim_buf_is_valid(self.bufnr) and api.nvim_buf_get_name(self.bufnr) or ""
@@ -626,7 +626,7 @@ end
 ---Whether any source of the build step said something: a failure, or a warning. The row
 ---worth reading is the one that has something on it, so this is what keeps the UI on the
 ---build step instead of handing the cursor to the first testcase.
----@param tc table the Compile row
+---@param tc table the compile row
 ---@return boolean
 function RunnerCore:build_spoke(tc)
     for _, source in ipairs(self:build_sources(tc)) do
@@ -640,7 +640,7 @@ end
 ---Whether the build step is still going. A helper compiling beside the solution is part of
 ---the same step, so the cursor waits for it too, or a warning landing a moment later would
 ---arrive on a row nobody is looking at any more.
----@param tc table the Compile row
+---@param tc table the compile row
 ---@return boolean
 function RunnerCore:build_pending(tc)
     for _, source in ipairs(self:build_sources(tc)) do
@@ -678,14 +678,14 @@ function RunnerCore:reset_row(tc)
 end
 
 ---Spawn one `tcdata` process and, on a clean exit, judge it. Used by every
----`vim.system`-based mode. A per-process timeout timer labels a kill as TIMEOUT
+---`vim.system`-based mode. A per-process timeout timer labels a kill as `timeout`
 ---precisely rather than as an anonymous signal.
 ---@param tcindex integer index into `self.tcdata`
 ---@param cmd { exec: string, args: string[]? }
 ---@param dir string working directory
 ---@param opts { stdin: string?, timelimit: integer?, checker: any?, judge: boolean? }?
 ---   `stdin`/`timelimit` default to the row's; `checker` defaults to `self.checker`;
----   `judge == false` skips judging (the Compile row) and marks a clean exit DONE.
+---   `judge == false` skips judging (the compile row) and marks a clean exit `done`.
 ---@param on_done fun()? called once the row reaches a terminal state
 function RunnerCore:execute_process(tcindex, cmd, dir, opts, on_done)
     opts = opts or {}
@@ -698,7 +698,7 @@ function RunnerCore:execute_process(tcindex, cmd, dir, opts, on_done)
     -- the time the dead child reports in. Without the token that stale report would
     -- write into whatever row now sits at this index: clearing `running` (declaring a
     -- run complete early), nilling the fresh handle (making the new process
-    -- unkillable), stamping `SIG 9` over a row mid-run, and pulling another lane out of
+    -- unkillable), stamping `sig 9` over a row mid-run, and pulling another lane out of
     -- the *new* run's queue through its `on_done`, double-running rows.
     tc.run_id = (tc.run_id or 0) + 1
     local run_id = tc.run_id
@@ -736,7 +736,7 @@ function RunnerCore:execute_process(tcindex, cmd, dir, opts, on_done)
             timer:stop()
             timer:close()
         end
-        tc.status, tc.hlgroup = "FAILED", "TunaWarning"
+        tc.status, tc.hlgroup = "failed", "TunaWarning"
         tc.stderr = tostring(handle) -- the pcall error message
         tc.time = -1
         self:update_ui(true)
@@ -748,7 +748,7 @@ function RunnerCore:execute_process(tcindex, cmd, dir, opts, on_done)
 
     tc.handle = handle
     tc.running = true
-    tc.status = "RUNNING"
+    tc.status = "running"
     tc.hlgroup = "TunaRunning"
     self:update_ui(true)
 end
@@ -816,13 +816,13 @@ function RunnerCore:finish_process(tc, run_id, timer, res, opts, on_done)
         tc.status, tc.hlgroup = ended, hl
         finalize()
     elseif opts.judge == false then
-        -- The Compile row (or any non-judged step): a clean exit is just DONE, but
+        -- The compile row (or any non-judged step): a clean exit is just `done`, but
         -- its stdout/stderr (compiler warnings) stay viewable in the detail panes.
-        tc.status, tc.hlgroup = "DONE", "TunaDone"
+        tc.status, tc.hlgroup = "done", "TunaDone"
         self:refresh_build_row() -- a helper may have failed while this one was building
         finalize()
     else
-        -- Derive the verdict via the checker (nil expected → DONE). External
+        -- Derive the verdict via the checker (nil expected → `done`). External
         -- checkers are async, so flag the row as judging until the verdict lands.
         tc.judging = true
         local chk = opts.checker or self.checker
@@ -862,7 +862,7 @@ function RunnerCore:kill_all_processes()
     for tcindex, tc in ipairs(self.tcdata) do
         self:kill_process(tcindex)
         if tc.status == "" then
-            tc.status, tc.hlgroup = "NOT RUN", "TunaDone"
+            tc.status, tc.hlgroup = "not run", "TunaDone"
         end
     end
     self:update_ui(true)
@@ -878,7 +878,7 @@ end
 RunnerCore.editable_testcases = true
 
 ---Whether a given row stands for a stored testcase, and so can be edited, re-saved
----or deleted. Excludes the `Compile` pseudo-row and run-all's solution headers
+---or deleted. Excludes the `compile` pseudo-row and run-all's solution headers
 ---without either having to be special-cased anywhere else.
 ---@param tc table?
 ---@return boolean
@@ -1007,7 +1007,7 @@ function RunnerCore:add_testcase_row(tcnum)
         stdin = "",
         expected = nil,
         timelimit = M.time_limit(self.config),
-        status = "NOT RUN",
+        status = "not run",
         hlgroup = "TunaDone",
     })
     self:sort_testcase_rows()
@@ -1028,7 +1028,7 @@ end
 
 ---Save an edited testcase to disk, refresh the rows that show it, and re-run them.
 ---Nothing is re-run for a UI that was only *listing* testcases (`:Tuna show_ui`
----before any run): there is no build to run yet, so the rows stay `NOT RUN`.
+---before any run): there is no build to run yet, so the rows stay `not run`.
 ---@param tcnum integer
 ---@param input string
 ---@param expected string

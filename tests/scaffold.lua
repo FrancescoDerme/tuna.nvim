@@ -126,11 +126,11 @@ dir, buf = problem()
 answer = 2
 scaffold.create("bruteforce", buf, "java")
 t.eq("a language with no template offers the ones there are", asked and asked.items, {
-    "Write it in .cpp",
-    "Write it in .py",
-    "Stop",
+    "write it in .cpp",
+    "write it in .py",
+    "stop",
 })
-t.eq("saying which was asked for", asked and asked.title, "No bruteforce template for .java")
+t.eq("saying which was asked for", asked and asked.title, "no bruteforce template for .java")
 t.eq("and writes the one picked", read(dir .. "/brute.py"), read(shipped .. "/bruteforce.py"))
 answer, asked = 3, nil
 scaffold.create("checker", buf, "java")
@@ -144,7 +144,7 @@ dir, buf = problem()
 t.write(dir, "gen.cpp", "// written by hand\n")
 answer, asked = 3, nil
 scaffold.create("generator", buf)
-t.eq("an existing file is asked about", asked and asked.items, { "Open it", "Overwrite", "Stop" })
+t.eq("an existing file is asked about", asked and asked.items, { "open it", "overwrite", "stop" })
 t.eq("and stopping leaves it as it was", read(dir .. "/gen.cpp"), "// written by hand\n")
 answer = 2
 scaffold.create("generator", buf)
@@ -162,8 +162,8 @@ do
     answer, asked = 1, nil
     require("tuna.run.modes.stress").run(buf, 1)
     t.eq("stress with no helpers offers to write them", asked, {
-        items = { "Create gen.cpp and brute.cpp", "Stop" },
-        title = "Stress needs a generator and a bruteforce",
+        items = { "create gen.cpp and brute.cpp", "stop" },
+        title = "stress needs a generator and a bruteforce",
     })
     t.ok("creating writes both", read(dir .. "/gen.cpp") ~= nil and read(dir .. "/brute.cpp") ~= nil)
     t.eq("opens the first to be written", vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t"), "gen.cpp")
@@ -179,7 +179,7 @@ do
     dir, buf = problem()
     answer, asked = 1, nil
     require("tuna.run.modes.interactive").run(buf, { "interactor" })
-    t.eq("the interactor source offers its interactor", asked and asked.items, { "Create interactor.cpp", "Stop" })
+    t.eq("the interactor source offers its interactor", asked and asked.items, { "create interactor.cpp", "stop" })
     t.eq("and opens it", vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t"), "interactor.cpp")
 
     -- A configured helper that is broken is not something a starter beside the solution fixes: the
@@ -270,7 +270,7 @@ do
     end
     local dir, buf = problem()
     scaffold.create("solution", buf)
-    t.eq("a new solution is offered the next free name", prompted, { title = "New solution", default = "main2.cpp" })
+    t.eq("a new solution is offered the next free name", prompted, { title = "new solution", default = "main2.cpp" })
     t.eq("written from the solution's template, with no problem to fill in its header", read(dir .. "/main2.cpp"), table.concat(vim.list_slice(vim.fn.readfile(shipped .. "/solution.cpp"), 3), "\n") .. "\n")
     t.eq("and opened", vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t"), "main2.cpp")
     scaffold.create("solution", vim.api.nvim_get_current_buf())
@@ -313,7 +313,7 @@ do
 
     prompted = nil
     scaffold.create("sol", buf)
-    t.eq("a solution's tool_names name it too", prompted and prompted.title, "New solution")
+    t.eq("a solution's tool_names name it too", prompted and prompted.title, "new solution")
 
     widgets.input = function(_, _, on_submit)
         on_submit("  ")

@@ -93,7 +93,7 @@ M.defaults = {
     -- { exec, args } command, expanded with the usual $(FNOEXT)/$(ABSDIR)/… modifiers.
     -- A helper set here counts as present, as a file beside the solution does.
     -- The generator gets a seed appended (unless pass_seed = false): a number new for
-    -- every run plus the iteration, so each run tries new inputs, and the Run pane shows
+    -- every run plus the iteration, so each run tries new inputs, and the run pane shows
     -- the seed of the one being tried, to reproduce it.
     stress = {
         -- override discovery, e.g. { exec = "python3", args = { "$(ABSDIR)/gen.py" } }; also
@@ -120,7 +120,7 @@ M.defaults = {
 
     -- interactive problems (:Tuna run interactive [live|feed|interactor]) — the
     -- solution talks to the other side over stdio, turn by turn. Three sources:
-    --   * live       — YOU are the other side: type into the (editable) Input pane,
+    --   * live       — YOU are the other side: type into the (editable) input pane,
     --                  each <CR> line is sent to the solution; no auto-verdict.
     --   * feed       — the testcase input plays the other side, one line per turn;
     --                  judged against the expected output if present.
@@ -592,7 +592,7 @@ M.defaults = {
         },
     },
     runner_ui = {
-        -- The grid drawn while the Compile row is the one on screen. The build step is not a
+        -- The grid drawn while the compile row is the one on screen. The build step is not a
         -- testcase — no input, no answer, nothing to compare — so its grid places only the
         -- selector (`tc`) and one `build` cell, split into a pane per source the run compiles
         -- (your solution, and a generator and a bruteforce, an interactor or a checker), each
@@ -602,7 +602,7 @@ M.defaults = {
             { 8, "build" },
         },
         -- Write the key that zooms each pane at the end of its title, e.g.
-        -- ` Errors (e) `. On the build row each source's pane shows its own key.
+        -- ` errors (e) `. On the build row each source's pane shows its own key.
         show_title_keys = true,
         interface = "popup", -- "popup" | "split"
         -- The border and title colour of the panes you can *type* into (Input and
@@ -649,7 +649,7 @@ M.defaults = {
             -- prompt that catches `q`.
             close = { "<esc>", "<C-c>", "q", "Q" },
             -- Inline testcase management, from the selector. Editing itself needs no
-            -- key: the Input and Expected Output panes are ordinary editable buffers
+            -- key: the input and expected output panes are ordinary editable buffers
             -- and `:w` saves the testcase and re-runs it.
             add_testcase = { "n", "N" },
             -- One the generator writes, a fresh seed each time. `t` because `g` begins `gg`

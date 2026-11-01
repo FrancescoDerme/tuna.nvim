@@ -361,7 +361,7 @@ local function write(role, ext, path, cfg, task, opts)
         create()
         return
     end
-    widgets.menu({ "Open it", "Overwrite", "Stop" }, '"' .. fname .. '" already exists', function(idx)
+    widgets.menu({ "open it", "overwrite", "stop" }, '"' .. fname .. '" already exists', function(idx)
         if idx == 1 then
             done(path)
         elseif idx == 2 then
@@ -443,7 +443,7 @@ function M.create(role, bufnr, ext, opts)
     end
 
     if role == "solution" then
-        widgets.input("New solution", solution_name(dir, solution, ext, cfg), function(name)
+        widgets.input("new solution", solution_name(dir, solution, ext, cfg), function(name)
             if vim.trim(name) == "" then
                 return nothing()
             end
@@ -468,10 +468,10 @@ function M.create(role, bufnr, ext, opts)
     end
     local items = {}
     for i, other in ipairs(others) do
-        items[i] = "Write it in ." .. other
+        items[i] = "write it in ." .. other
     end
-    items[#items + 1] = "Stop"
-    widgets.menu(items, ("No %s template for .%s"):format(role, ext), function(idx)
+    items[#items + 1] = "stop"
+    widgets.menu(items, ("no %s template for .%s"):format(role, ext), function(idx)
         if idx and others[idx] then
             write(role, others[idx], dir .. "/" .. file_name(role, others[idx], cfg), cfg, task, opts)
         else
@@ -497,11 +497,11 @@ function M.create_missing(roles, bufnr, title, opts)
     local names = vim.tbl_map(function(role)
         return file_name(role, ext, cfg)
     end, roles)
-    local items = { "Create " .. table.concat(names, " and ") }
+    local items = { "create " .. table.concat(names, " and ") }
     if opts.instead then
         items[#items + 1] = opts.instead.label
     end
-    items[#items + 1] = "Stop"
+    items[#items + 1] = "stop"
     widgets.menu(items, title, function(idx)
         if opts.instead and idx == 2 then
             return opts.instead.choose()

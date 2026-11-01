@@ -74,7 +74,7 @@ vim.cmd.edit(vim.fn.fnameescape(root .. "/flat/A.cpp"))
 local function list_buffer()
     for _, w in ipairs(api.nvim_list_wins()) do
         local title = api.nvim_win_get_config(w).title
-        if type(title) == "table" and vim.trim(title[1][1]) == "Go to" then
+        if type(title) == "table" and vim.trim(title[1][1]) == "go to" then
             return api.nvim_win_get_buf(w)
         end
     end
@@ -116,9 +116,11 @@ close_picker()
 
 -- Rows arrive for the opening that asked for them, not whatever is open by then.
 local widgets = require("tuna.ui.widgets")
-local first = widgets.menu({}, "A first menu", function() end, api.nvim_get_current_win(), nil, nil, nil, nil, function()
-    return {}
-end)
+local first = widgets.menu({}, "A first menu", function() end, api.nvim_get_current_win(), nil, nil, {
+    search = function()
+        return {}
+    end,
+})
 widgets.menu({ "other" }, "Another menu", function() end, api.nvim_get_current_win())
 widgets.menu_items(first, { "late" })
 t.eq("rows for a menu since replaced leave the next one alone", api.nvim_buf_get_lines(0, 0, -1, false), { "other" })

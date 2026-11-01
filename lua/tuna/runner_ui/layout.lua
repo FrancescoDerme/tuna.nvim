@@ -19,12 +19,12 @@ local M = {}
 
 ---Every pane the UI knows, and the title on its border.
 M.titles = {
-    st = " Run ",
-    tc = " Testcases ",
-    so = " Output ",
-    eo = " Expected Output ",
-    si = " Input ",
-    se = " Errors ",
+    st = " run ",
+    tc = " testcases ",
+    so = " output ",
+    eo = " expected output ",
+    si = " input ",
+    se = " errors ",
 }
 
 ---What a grid may place, by what it is for. A testcase row's grid is written in the panes'

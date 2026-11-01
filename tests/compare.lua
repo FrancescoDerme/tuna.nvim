@@ -13,13 +13,12 @@ local core = require("tuna.run.core")
 --------------------------------------------------------------------------------
 
 -- `nil` is not a verdict of any kind: there is nothing to be right or wrong against,
--- which the runner draws as DONE.
+-- which the runner draws as done.
 t.eq("no expected output is not a verdict", compare.compare_output("anything\n", nil, "exact"), nil)
 
 -- And that is what an empty answer must become before it is stored, since an empty
--- output file is deleted rather than written. Storing "" made the judge compare the
--- run against an empty answer, so editing an answerless testcase turned DONE into
--- WRONG until the next full re-run reloaded `nil` from disk.
+-- output file is deleted rather than written. Stored as "", the judge would compare the
+-- run against an empty answer, and an answerless testcase edited would read `wrong`.
 t.eq("an empty answer is stored as none", core.answer(""), nil)
 t.eq("a nil answer stays none", core.answer(nil), nil)
 t.eq("a real answer is kept", core.answer("5\n"), "5\n")

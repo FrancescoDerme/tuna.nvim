@@ -8,7 +8,7 @@
 --     or table of strings, got nil", so this checks the value at the point it is handed
 --     to the process, not just at the point it is loaded;
 --   * an empty answer is `nil`, so a testcase with nothing to be wrong about is not
---     judged against `""` and reported WRONG.
+--     judged against `""` and reported wrong.
 --
 -- `vim.system` is stubbed, so no compiler is needed and nothing is really spawned: the
 -- stub records what each child would have been given and reports a clean exit, which
@@ -28,12 +28,18 @@ local tcs = require("tuna.problem.testcases")
 ---The line of a board's `?` legend (its read-only column) that contains `text`, if any.
 ---@return string?
 local function legend_line(ui, text)
-    local _, readonly = ui:legend_sections()
-    for _, line in ipairs(readonly) do
+    local _, readonly, mode = ui:legend_sections()
+    for _, line in ipairs(vim.list_extend(vim.list_extend({}, readonly), mode and mode.lines or {})) do
         if line:find(text, 1, true) then
             return line
         end
     end
+end
+
+---Whether the legend has a box of the mode's own titled `title`.
+local function legend_section(ui, title)
+    local _, _, mode = ui:legend_sections()
+    return mode ~= nil and mode.title == title
 end
 
 --------------------------------------------------------------------------------
@@ -113,7 +119,7 @@ end
 -- Until the run is over: every run claims its runner as it starts, so an idle runner with no
 -- row still running or being judged has nothing left to land. Read off the runner rather than
 -- off the rows' words, which a run legitimately leaves blank (a failed build's testcases) or
--- `NOT RUN`.
+-- `not run`.
 local function settled(runner)
     vim.wait(5000, function()
         if not (runner and runner.tcdata and runner.tcdata[1] and runner:idle()) then
@@ -145,7 +151,7 @@ t.eq("its stdin is the empty string, not nil", r.tcdata[2].stdin, "")
 t.eq("and it keeps its answer", r.tcdata[2].expected, "42\n")
 
 -- An input with no answer: there is nothing to judge against, which is a `nil`
--- expected output (the verdict is then DONE, not WRONG — see tests/compare.lua).
+-- expected output (the verdict is then done, not wrong — see tests/compare.lua).
 r = rows_of({ [0] = { input = "hi\n" } })
 t.eq("an input-only testcase keeps its input", r.tcdata[2].stdin, "hi\n")
 t.eq("and has no answer to be judged against", r.tcdata[2].expected, nil)
@@ -163,8 +169,8 @@ t.eq("the compile row's stdin is a string", r.tcdata[1].stdin, "")
 local ui_test = require("tuna.runner_ui")._test
 local columns, build_text, build_titles = ui_test.selector_columns, ui_test.build_text, ui_test.build_titles
 local sel_rows = {
-    { header = "Compile", status = "DONE", time = "0.266 s" },
-    { header = "TC 0", status = "RUNNING", time = "" },
+    { header = "compile", status = "done", time = "0.266 s" },
+    { header = "tc 0", status = "running", time = "" },
 }
 t.eq("a pane with room keeps the ten-wide columns", { columns(sel_rows, 40) }, { 10, 10, true })
 t.eq("and so does a selector with no window of its own", { columns(sel_rows, nil) }, { 10, 10, true })
@@ -188,7 +194,7 @@ vim.wait(1000, function()
 end, 20)
 local core = require("tuna.run.core")
 local sidecar = require("tuna.problem.sidecar")
--- The stub prints nothing: testcase 0 is WRONG, and testcase 1 has no answer to judge.
+-- The stub prints nothing: testcase 0 is wrong, and testcase 1 has no answer to judge.
 t.eq("a finished run saves its local verdict, over the testcases it judged", { core.local_verdict(dir .. "/sol.cpp") }, { 0, 1 })
 sidecar.set_entry(dir .. "/sol.cpp", "results", nil)
 
@@ -295,7 +301,7 @@ do
     run_once(0)
     built, row = run_once(0)
     t.eq("an unchanged solution is not built again", built, false)
-    t.eq("its row says the build was reused", { row.status, row.exit_code }, { "CACHED", 0 })
+    t.eq("its row says the build was reused", { row.status, row.exit_code }, { "cached", 0 })
     t.eq("and keeps what its compiler said", row.stderr, "sol.cpp:1: warning\n")
     touch(bdir .. "/sol.cpp")
     t.eq("a solution saved with nothing changed is not built again either", (run_once(0)), false)
@@ -303,7 +309,7 @@ do
     t.ok("a header it includes edited, it is built again", (run_once(0)))
     edit(bdir .. "/sol.cpp")
     built, row = run_once(1)
-    t.ok("a build that fails", built and row.status == "RET 1", row)
+    t.ok("a build that fails", built and row.status == "ret 1", row)
     t.ok("is never reused", (run_once(0)))
     os.remove(bdir .. "/sol")
     t.ok("nor is one whose program is gone", (run_once(0)))
@@ -389,7 +395,7 @@ do
         for _, sp in ipairs(spawns) do
             builds = builds + (sp.argv[1] == "rustc" and 1 or 0)
         end
-        t.eq("a Rust solution's row never reads CACHED", rr.tcdata[1].status, "DONE")
+        t.eq("a Rust solution's row never reads cached", rr.tcdata[1].status, "done")
     end
     t.eq("and it is built on every run", builds, 2)
     vim.cmd("silent! bwipeout!")
@@ -611,10 +617,10 @@ for _, interface in ipairs({ "split", "popup" }) do
         vim.o.lines = lines
         ui:redraw_grid()
     end
-    -- A row reads EDITED for what is typed, not for the pane's own filling, which Vim reports
+    -- A row reads `edited` for what is typed, not for the pane's own filling, which Vim reports
     -- as a change the first time the pane is entered after it.
     local function edited()
-        return table.concat(vim.api.nvim_buf_get_lines(ui.windows.tc.bufnr, 0, -1, false), "\n"):find("EDITED") ~= nil
+        return table.concat(vim.api.nvim_buf_get_lines(ui.windows.tc.bufnr, 0, -1, false), "\n"):find("edited") ~= nil
     end
     local si = ui.windows.si.bufnr
     vim.api.nvim_exec_autocmds("TextChanged", { buffer = si })
@@ -653,7 +659,7 @@ for _, interface in ipairs({ "split", "popup" }) do
     ui:unzoom()
     move(2)
     t.eq(interface .. ": and back to a testcase row", state(), { focus = "tc", row = 2 })
-    t.eq(interface .. ": where the pane is Output again", ui.windows.so.title, " Output (o) ")
+    t.eq(interface .. ": where the pane is Output again", ui.windows.so.title, " output (o) ")
     t.eq(interface .. ": keeping its lines whole again", wrapping(ui.windows.so.winid), WHOLE)
     ui:zoom("so")
     t.eq(interface .. ": as its zoom does", wrapping(ui.zoom_winid), WHOLE)
@@ -663,11 +669,11 @@ for _, interface in ipairs({ "split", "popup" }) do
     ui:zoom("se")
     vim.api.nvim_feedkeys("o", "xt", false)
     local still = vim.api.nvim_win_get_config(ui.zoom_winid).title
-    t.has(interface .. ": a zoom key in a zoom leaves it as it is", still and still[1][1] or "", "Errors")
+    t.has(interface .. ": a zoom key in a zoom leaves it as it is", still and still[1][1] or "", "errors")
     ui:unzoom()
     if interface == "popup" then
         local drawn = vim.api.nvim_win_get_config(ui.windows.so.winid).title
-        t.eq("popup: and drawn as Output again", drawn and drawn[1][1], " Output (o) ")
+        t.eq("popup: and drawn as Output again", drawn and drawn[1][1], " output (o) ")
     end
     -- A file opened from inside the board (`:Tuna next`, `:Tuna go`, a starter) opens in the
     -- window the board was opened over, the board put away: its panes are pinned to their own
@@ -750,7 +756,7 @@ end
 --------------------------------------------------------------------------------
 
 -- Hitting run on a file with no testcases means "execute this". Without it the two
--- kinds of language disagreed: a compiled file built and showed a lone `Compile` row
+-- kinds of language disagreed: a compiled file built and showed a lone `compile` row
 -- with nothing to say why, an interpreted one only warned, and neither ran anything.
 stub_system()
 r = require("tuna.run").new(buf)
@@ -760,15 +766,26 @@ vim.system = real_system
 t.eq("a run with nothing to test still builds a row for it", #r.tcdata, 2)
 local bare = r.tcdata[2]
 t.eq("its stdin is the empty string, not nil", bare.stdin, "")
-t.eq("it has no answer, so it can never read CORRECT", bare.expected, nil)
+t.eq("it has no answer, so it can never read correct", bare.expected, nil)
 -- It is testcase 0 and editable, which is what lets typing into the panes and `:w`
 -- turn "just run it" into a stored testcase. `bare` is what says it has no file behind
--- it yet: the selector labels it `No input` until it does.
+-- it yet: the selector labels it `no input` until it does.
 t.eq("the row is testcase 0", bare.tcnum, 0)
 t.eq("and is editable, so it can be saved into one", r:row_editable(bare), true)
 t.eq("it is flagged as having nothing behind it yet", bare.bare, true)
 t.eq("and 0 is taken, so a further testcase is 1", r:next_tcnum(), 1)
 check_spawns("bare run", r.rc.exec)
+do
+    r:show_ui()
+    drain(r.ui)
+    local rows = vim.api.nvim_buf_get_lines(r.ui.windows.tc.bufnr, 0, -1, false)
+    t.eq("the selector names the build and the bare row in its own words", {
+        rows[1]:match("^%s*(%a+)"),
+        rows[2]:match("^%s*(%a+ %a+)"),
+    }, { "compile", "no input" })
+    t.ok("and a verdict in lowercase", rows[2]:find("done", 1, true) ~= nil, rows[2])
+    r.ui:delete()
+end
 
 -- Saving it writes a real testcase and the row stops explaining itself.
 r:save_testcase(0, "2 3\n", "5\n")
@@ -786,6 +803,10 @@ do
     vim.wait(2000, function()
         return nr.completed
     end, 20)
+    nr:show_ui()
+    drain(nr.ui)
+    t.has("the selector numbers a testcase in lowercase", vim.api.nvim_buf_get_lines(nr.ui.windows.tc.bufnr, 1, 2, false)[1], "tc 0")
+    nr.ui:delete()
     local n = nr:next_tcnum()
     nr:add_testcase_row(n)
     nr:save_testcase(n, "2\n", "")
@@ -795,10 +816,10 @@ do
     t.eq("a row added after a run settles once it has run", nr:idle(), true)
     nr:save_testcase(n, "2\n", "x\n")
     vim.wait(2000, function()
-        return nr.completed and nr.tcdata[#nr.tcdata].status ~= "DONE"
+        return nr.completed and nr.tcdata[#nr.tcdata].status ~= "done"
     end, 20)
     vim.system = real_system
-    t.eq("so saving an answer for it judges it", nr.tcdata[#nr.tcdata].status, "WRONG")
+    t.eq("so saving an answer for it judges it", nr.tcdata[#nr.tcdata].status, "wrong")
     tcs.buf_delete_testcase(buf, n)
     tcs.buf_delete_testcase(buf, 0)
 end
@@ -889,12 +910,35 @@ if iui then
     t.ok("the conversation's selector rows fit its pane", widest <= tcw and widest > 0, { selector_lines(), tcw })
     local si, so, se = iui.windows.si, iui.windows.so, iui.windows.se
     t.ok("the live pane is drawn", si.winid ~= nil and vim.api.nvim_win_is_valid(si.winid))
-    t.eq("and is titled Live, with the key that opens it", si.title, " Live (i) ")
+    t.eq("and is titled Live, with the key that opens it", si.title, " live (i) ")
     local sc = vim.api.nvim_win_get_config(si.winid)
-    t.eq("with that title on its border", sc.title and sc.title[1][1], " Live (i) ")
+    t.eq("with that title on its border", sc.title and sc.title[1][1], " live (i) ")
     t.eq("in the accent, since live mode is typed into", sc.title and sc.title[1][2], "TunaEditableBorder")
     -- The legend says how this source is played: the mode adds a section of its own.
-    t.ok("the legend has a section for the source being played", legend_line(iui, "INTERACTIVE, LIVE") ~= nil)
+    t.ok("the legend has a section for the source being played", legend_section(iui, "interactive, live"))
+    -- With no pane to type into the legend has no editable half, and the box stays.
+    do
+        local titles = {}
+        local writable = iui.writable_pane
+        iui.writable_pane = function()
+            return false
+        end
+        iui:show_help()
+        iui.writable_pane = writable
+        for _, win in ipairs(vim.api.nvim_list_wins()) do
+            local c = vim.api.nvim_win_get_config(win)
+            if c.zindex == 70 and type(c.title) == "table" then
+                titles[#titles + 1] = vim.trim(c.title[1][1])
+            end
+        end
+        table.sort(titles)
+        t.eq("and a box of its own under the keys, with nothing editable", titles, { "interactive, live", "keys" })
+        for _, win in ipairs(vim.api.nvim_list_wins()) do
+            if vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_config(win).zindex == 70 then
+                vim.api.nvim_win_close(win, true)
+            end
+        end
+    end
     t.has("saying how a line is sent", legend_line(iui, "send a line"), "<CR>")
     t.has("and how to reach the other sources", legend_line(iui, "other sources"), ":Tuna run interactive feed or interactor")
     -- A mode that can't edit testcases still binds the keys that would, silently: left
@@ -925,8 +969,7 @@ if iui then
 
     -- The conversation's selector is the width it is in every other mode, and its two
     -- conversing columns are exactly as wide as each other. Checked on the layout arithmetic
-    -- at several editor widths, because what the grid's division leaves over depends on it,
-    -- and that rounding is what used to make them differ.
+    -- at several editor widths, because what the grid's division leaves over depends on it.
     local geometry = require("tuna.runner_ui.popup")._test.compute_layout
     local ui_cfg = require("tuna.config").get_buffer_config(buf)
     local conv_layout = ir:layout()
@@ -955,7 +998,7 @@ if iui then
     t.eq("the row being talked to is the row the UI shows", iui:selected_index(), 2)
     local row
     for _, r in ipairs(ir.tcdata) do
-        if r.tcnum ~= "Compile" then
+        if r.tcnum ~= "compile" then
             row = r
             iui.selected_row = r
         end
@@ -1058,7 +1101,7 @@ if fui then
             accents[#accents + 1] = c.title and c.title[1][2]
         end
     end
-    t.eq("with their canonical titles", titles, { " Input (i) ", " Expected Output (a) " })
+    t.eq("with their canonical titles", titles, { " input (i) ", " expected output (a) " })
     t.eq("both in the accent", accents, { "TunaEditableBorder", "TunaEditableBorder" })
     -- Editable means `idle()` gates the structural edits, so a single re-run has to claim
     -- the runner for as long as its session runs, and give it back when it settles.
@@ -1082,7 +1125,7 @@ if fui then
         vim.wait(2000, function()
             return fr.completed
         end, 20)
-        -- Whether the row came back CORRECT is a race with a real process being torn down,
+        -- Whether the row came back correct is a race with a real process being torn down,
         -- so what is checked is that the session saved a verdict over the case it judged.
         local _, feed_total = core.local_verdict(dir .. "/sol.cpp")
         t.eq("a finished feed session saves its local verdict", feed_total, 1)
@@ -1145,6 +1188,15 @@ vim.wait(2000, function()
     return lr.completed
 end, 20)
 drain(lr.ui)
+do
+    local was = lr.tcdata[2].status
+    lr.spawn_solution = function() end
+    lr:run_live(2, function() end)
+    t.eq("a session being played reads live on its row", lr.tcdata[2].status, "live")
+    lr.spawn_solution = nil
+    lr.tcdata[2].status = was
+    drain(lr.ui)
+end
 
 -- The column going live is what hands it over: the cursor ends up in it, in insert, at the
 -- end of the line being composed. A stand-in pipe makes the session "live". The row is chosen
@@ -1242,7 +1294,7 @@ if xui then
     t.eq("interactor does not edit testcases", xr.editable_testcases, false)
     t.eq("interactor draws no expected output", xui.windows.eo.winid, nil)
     local xc = vim.api.nvim_win_get_config(xui.windows.si.winid)
-    t.eq("its conversation pane is titled Live", xc.title and xc.title[1][1], " Live (i) ")
+    t.eq("its conversation pane is titled Live", xc.title and xc.title[1][1], " live (i) ")
     t.ok("and wears no accent, since nothing is typed into it", not (xc.title and xc.title[1][2] == "TunaEditableBorder"), xc.title)
     -- The conversation's columns stay level: unwrapped and scroll-bound, Errors included. The
     -- build step is no conversation, so there its panes wrap and scroll on their own.
@@ -1267,12 +1319,12 @@ do
     local popup = require("tuna.runner_ui.popup")
     local wins = {}
     for name, title in pairs(require("tuna.runner_ui.layout").titles) do
-        wins[name] = { bufnr = vim.api.nvim_create_buf(false, true), title = name == "si" and " Live " or title }
+        wins[name] = { bufnr = vim.api.nvim_create_buf(false, true), title = name == "si" and " live " or title }
     end
     local setup = require("tuna.config").current_setup
     popup.relayout(wins, setup, nil, 2, setup.popup_ui.layout)
     local cfg = vim.api.nvim_win_get_config(wins.si.winid)
-    t.eq("the interface draws a renamed pane's title", cfg.title and cfg.title[1][1], " Live ")
+    t.eq("the interface draws a renamed pane's title", cfg.title and cfg.title[1][1], " live ")
     for _, w in pairs(wins) do
         if w.winid and vim.api.nvim_win_is_valid(w.winid) then
             vim.api.nvim_win_close(w.winid, true)
@@ -1449,8 +1501,8 @@ do
     -- A bruteforce killed by a signal.
     local crashed = search({ genx = seeded, solx = { stdout = "5\n" }, refx = { code = 0, signal = 6 } })
     t.eq("the search is listed with the other rows the moment the board opens", opening, {
-        { "Compile", "RUNNING" },
-        { "TC 0", "STRESS" },
+        { "compile", "running" },
+        { "tc 0", "stress" },
     })
     t.eq("a bruteforce killed by a signal is a failure, not an empty answer", saved_rows(crashed), {})
     t.eq("each program of the search is told not to wrap a debug-mode report", {
@@ -1466,7 +1518,7 @@ do
         crashed:row_label(hunt),
         hunt.status,
         hunt.hlgroup,
-    }, { "TC 0", "SIG 6", "TunaWarning" })
+    }, { "tc 0", "sig 6", "TunaWarning" })
     t.has("and its Errors pane says which program failed, and on which seed", crashed:pane_content(hunt, "se"), ("bruteforce was killed by signal 6 (seed %d)"):format(crashed:seed(1)))
     -- Without a seed handed to the generator, the input is named by its number instead.
     crashed.pass_seed = false
@@ -1480,12 +1532,12 @@ do
     t.eq("the bruteforce is held to its own budget", budgets.refx, 9876)
     t.eq("while the generator and the solution keep maximum_time", { budgets.genx, budgets.solx }, { 1234, 1234 })
     local waited = slow.tcdata[#slow.tcdata]
-    t.eq("a timeout reads as one, in the word a testcase would use", { waited.status, waited.hlgroup }, { "TIMEOUT", "TunaWrong" })
+    t.eq("a timeout reads as one, in the word a testcase would use", { waited.status, waited.hlgroup }, { "timeout", "TunaWrong" })
     t.has("with the budget that ran out named", slow:pane_content(waited, "se"), "stress.bruteforce_time")
 
     -- A bruteforce that finished and printed nothing: that is its answer.
     local empty = search({ genx = seeded, solx = { stdout = "5\n" }, refx = { stdout = "" } })
-    t.eq("a bruteforce that printed nothing still answers for the input", saved_rows(empty), { { 0, "WRONG" } })
+    t.eq("a bruteforce that printed nothing still answers for the input", saved_rows(empty), { { 0, "wrong" } })
     t.eq("saved as an answer that is empty, not an answer that is missing", testcase_files(), {
         "main_input0.txt",
         "main_output0.txt",
@@ -1496,7 +1548,7 @@ do
     local looking = search({ genx = seeded, solx = "hold", refx = { stdout = "5\n" } })
     local row = looking.search_entry
     t.ok("the search has a row of its own before it finds anything", row ~= nil, looking.tcdata)
-    t.eq("numbered as the counterexample it is hunting for", { looking:row_label(row), row.status }, { "TC 0", "STRESS" })
+    t.eq("numbered as the counterexample it is hunting for", { looking:row_label(row), row.status }, { "tc 0", "stress" })
     t.eq("holding the input being tried", row.stdin, ("in %d\n"):format(looking:seed(1)))
     -- The generator is handed the run's own base plus the iteration, so a run after one that
     -- found nothing tries new inputs, and the Run pane says which seed is being tried.
@@ -1511,7 +1563,7 @@ do
     vim.wait(5000, function()
         return looking.finished
     end, 10)
-    t.eq("once the search stops, the row goes with it", looking.search_entry, nil)
+    t.eq("once the search stops, the row goes with it", { looking.search_entry, vim.tbl_contains(looking.tcdata, row) }, { nil, false })
     t.eq("leaving nothing behind, the two agreed on every input", saved_rows(looking), {})
 
     -- The search and the testcases already on disk are two lanes. The search starts as soon
@@ -1549,7 +1601,7 @@ do
         both.tcdata[3].status,
     }, { true, true, "" })
     t.ok("which is not idle, whatever the search is doing", not both:idle())
-    t.eq("with the counterexample it found already saved", saved_rows(both)[3], { 2, "WRONG" })
+    t.eq("with the counterexample it found already saved", saved_rows(both)[3], { 2, "wrong" })
     held({ stdout = "5\n" })
     vim.wait(5000, function()
         return both.tcdata[3].status ~= ""
@@ -1557,7 +1609,7 @@ do
     t.eq("the testcases still get their verdicts, the one running and the one after it", {
         both.tcdata[2].status,
         both.tcdata[3].status,
-    }, { "CORRECT", "CORRECT" })
+    }, { "correct", "correct" })
     t.ok("and only then is the run idle", both:idle())
     both.ui:delete()
 
@@ -1577,7 +1629,7 @@ do
         halted.tcdata[2].status,
         halted.tcdata[3].status,
         halted.tcdata[4].status,
-    }, { "KILLED", "", "" })
+    }, { "killed", "", "" })
     t.ok("and leaves nothing running", halted:idle(), halted.rerunning)
     halted.ui:delete()
 
@@ -1586,7 +1638,7 @@ do
     -- a process of its own: the search fills its rows in itself.
     local ns = vim.api.nvim_create_namespace("tuna_runner_diff")
     local found = search({ genx = seeded, solx = { stdout = "5\n" }, refx = { stdout = "9\n" } })
-    t.eq("the search saved what it disagreed on", saved_rows(found), { { 0, "WRONG" } })
+    t.eq("the search saved what it disagreed on", saved_rows(found), { { 0, "wrong" } })
     found.ui:toggle_diff_view()
     found.ui:select_row(2)
     found.ui.update_windows, found.ui.update_details = true, true
@@ -1626,7 +1678,7 @@ do
     }, { nil, true })
     found.ui:delete()
 
-    -- Listed and not run, the search row says what it is for: `NOT RUN` is a testcase's word
+    -- Listed and not run, the search row says what it is for: `not run` is a testcase's word
     -- for having no verdict yet, and the search has no verdict to have.
     for _, f in ipairs(vim.fn.globpath(sdir2, "main_*.txt", false, true)) do
         vim.fn.delete(f)
@@ -1635,8 +1687,8 @@ do
     stress.show(sbuf)
     local listed = stress.active[sbuf]
     t.eq("and is listed when the rows are only listed", listing(listed), {
-        { "Compile", "NOT RUN" },
-        { "TC 0", "STRESS" },
+        { "compile", "not run" },
+        { "tc 0", "stress" },
     })
     t.ok("with nothing running, so the rows can be edited", listed:idle(), listed.finished)
 
@@ -1651,11 +1703,11 @@ do
     local quiet = vim.notify
     vim.notify = function() end
     listed.ui:add_testcase()
-    t.eq("a testcase added goes above the search row, which moves on", labels(), { "Compile", "TC 0", "TC 1" })
+    t.eq("a testcase added goes above the search row, which moves on", labels(), { "compile", "tc 0", "tc 1" })
     listed.ui:delete_testcase(0)
     listed.ui:restore_testcase()
     vim.notify = quiet
-    t.eq("and so does one restored", labels(), { "Compile", "TC 0", "TC 1" })
+    t.eq("and so does one restored", labels(), { "compile", "tc 0", "tc 1" })
     t.eq("the search row last throughout", listed.tcdata[#listed.tcdata], listed.search_entry)
     listed.ui:delete()
 
@@ -1675,7 +1727,7 @@ do
     })
     vim.notify = quiet
     t.eq("a checker that did not build stops the search before any input", unjudged.iter, 0)
-    t.eq("its build says so on the Compile row", unjudged.tcdata[1].status, "FAILED")
+    t.eq("its build says so on the compile row", unjudged.tcdata[1].status, "failed")
     t.eq("and nothing is notified, input by input or otherwise", said, {})
 
     -- One that built but gives no verdict (it cannot start) stops the search on the input it
@@ -1694,7 +1746,7 @@ do
         end,
     })
     local row = silent.tcdata[#silent.tcdata]
-    t.eq("a checker that gives no verdict stops the search on that input", { silent.iter, row.status }, { 1, "FAILED" })
+    t.eq("a checker that gives no verdict stops the search on that input", { silent.iter, row.status }, { 1, "failed" })
     t.has("saying so on the search row", row.stderr or "", ("checker gave no verdict (seed %d)"):format(silent:seed(1)))
 
     -- A restart judges with the checker as it is now, like every run.
@@ -1714,7 +1766,7 @@ do
 
     -- A solution that never compiled searches for nothing.
     local broken = search({ ccx = { code = 1 }, genx = seeded, solx = { stdout = "5\n" }, refx = { stdout = "5\n" } })
-    t.eq("a failed build leaves the compile row saying so", broken.tcdata[1].status, "RET 1")
+    t.eq("a failed build leaves the compile row saying so", broken.tcdata[1].status, "ret 1")
     t.ok("and finishes the search, which is what lets the rows be edited", broken:idle(), broken.finished)
 
     -- With no bruteforce a run of stress asked for offers to search for crashes alone, which
@@ -1754,14 +1806,14 @@ do
         return hunt ~= nil and hunt.finished
     end, 10)
     t.eq("asked for, it offers the bruteforce's starter or a search for crashes without one", offered, {
-        "Stress needs a bruteforce",
-        { "Create brute.cpp", "Search for crashes without one", "Stop" },
+        "stress needs a bruteforce",
+        { "create brute.cpp", "search for crashes without one", "stop" },
     })
     t.eq("which runs no bruteforce, and keeps the input the solution crashed on", {
         vim.tbl_contains(calls, "refx"),
         saved_rows(hunt),
         testcase_files(),
-    }, { false, { { 0, "SIG 11" } }, { "main_input0.txt" } })
+    }, { false, { { 0, "sig 11" } }, { "main_input0.txt" } })
     local function brute_row(r2)
         for _, line in ipairs(r2.ui:status_lines()) do
             if line:match("^brute") then
@@ -1793,7 +1845,7 @@ end
 -- A run compiles more than the solution — a generator and a bruteforce, an interactor, a
 -- checker — and each of them has a compiler with something to say. The build step shows
 -- them one above the other, each pane named after its source, so a warning is read where
--- it belongs instead of in the one Errors pane the solution used to have to itself.
+-- it belongs rather than in one Errors pane shared by them all.
 do
     local bdir = t.tempdir()
     for _, name in ipairs({ "main.cpp", "gen.cpp", "brute.cpp", "checker.cpp" }) do
@@ -1846,10 +1898,10 @@ do
     })
     local assigned = bui:build_assignment(first)
     t.eq("the solution first, then the helpers the mode needs", build_titles(assigned), {
-        se = " Errors: main.cpp ",
-        so = " Errors: gen.cpp ",
-        eo = " Errors: brute.cpp ",
-        si = " Errors: checker.cpp ",
+        se = " errors: main.cpp ",
+        so = " errors: gen.cpp ",
+        eo = " errors: brute.cpp ",
+        si = " errors: checker.cpp ",
     })
     t.eq("each holding what its own compiler said, and nothing when it said nothing", build_text(assigned), {
         se = "",
@@ -1878,10 +1930,50 @@ do
         drawn_title("se"),
         drawn_title("so"),
         vim.api.nvim_buf_get_lines(bui.windows.so.bufnr, 0, 1, false)[1],
-    }, { " Errors: main.cpp (e) ", " Errors: gen.cpp (i) ", "gen.cpp warns" })
+    }, { " errors: main.cpp (e) ", " errors: gen.cpp (i) ", "gen.cpp warns" })
     t.ok("and wear no accent, nothing on the build step is typed into", not accented(bui, "eo"), "eo")
     t.eq("four sources, and still the six panes every board has, not one buffer more", vim.tbl_count(bui.windows), 6)
-    t.ok("the legend has a section for the search", legend_line(bui, "STRESS") ~= nil)
+    t.ok("the legend has a section for the search", legend_section(bui, "stress"))
+    -- Its own box, closing the left column, under the keys and with nothing left over beside it.
+    do
+        local columns, lines = vim.o.columns, vim.o.lines
+        local function legend_boxes()
+            bui:show_help()
+            local boxes = {}
+            for _, win in ipairs(vim.api.nvim_list_wins()) do
+                local c = vim.api.nvim_win_get_config(win)
+                if c.zindex == 70 and type(c.title) == "table" then
+                    boxes[vim.trim(c.title[1][1])] = { win = win, row = c.row, col = c.col, height = c.height, lines = vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(win), 0, -1, false) }
+                end
+            end
+            return boxes
+        end
+        -- Short of rows, a stack shares what there is and stays on screen.
+        vim.o.columns, vim.o.lines = 60, 24
+        local stacked = legend_boxes()
+        local bottom, shortest = 0, math.huge
+        for _, b in pairs(stacked) do
+            bottom = math.max(bottom, b.row + b.height + 2)
+            shortest = math.min(shortest, b.height)
+        end
+        t.ok("a legend too tall is kept on screen", bottom <= vim.o.lines, { bottom, vim.o.lines })
+        t.ok("with no box of it left unreadable", shortest >= 3, shortest)
+        for _, b in pairs(stacked) do
+            vim.api.nvim_win_close(b.win, true)
+        end
+        vim.o.lines = lines
+        vim.o.columns = 200
+        local boxes = legend_boxes()
+        local keys, mode = boxes["read-only panes"] or boxes.keys, boxes.stress
+        t.ok("the legend's mode has a box of its own", keys ~= nil and mode ~= nil, vim.tbl_keys(boxes))
+        if keys and mode then
+            t.eq("under the keys, in their column, touching", { mode.col, mode.row }, { keys.col, keys.row + keys.height + 2 })
+            t.eq("as tall as what it says", mode.height, #mode.lines)
+            t.ok("which no longer stands among the keys", not vim.tbl_contains(keys.lines, "stress"), keys.lines)
+            vim.api.nvim_win_close(mode.win, true)
+        end
+        vim.o.columns = columns
+    end
     t.has("saying what the search row is", legend_line(bui, "the search row"), "the input being tried")
     t.has(
         "and spells out the build row's keys, which follow its sources",
@@ -1901,16 +1993,16 @@ do
         bui:unzoom()
     end
     t.eq("every source on the build step opens with its own key", opened, {
-        e = " Errors: main.cpp (e) ",
-        i = " Errors: gen.cpp (i) ",
-        a = " Errors: brute.cpp (a) ",
-        o = " Errors: checker.cpp (o) ",
+        e = " errors: main.cpp (e) ",
+        i = " errors: gen.cpp (i) ",
+        a = " errors: brute.cpp (a) ",
+        o = " errors: checker.cpp (o) ",
     })
     bui:select_row(2)
     bui.update_windows, bui.update_details = true, true
     bui:update_ui()
     drain(bui)
-    t.eq("and named back for a testcase row", { drawn_title("so"), drawn_title("se") }, { " Output (o) ", " Errors (e) " })
+    t.eq("and named back for a testcase row", { drawn_title("so"), drawn_title("se") }, { " output (o) ", " errors (e) " })
     t.ok("which is where the accent comes back", accented(bui, "eo"), "eo")
     -- And goes again: a pane the re-tiling leaves open keeps the colour it had, so the
     -- accent has to be taken off as well as put on.
@@ -1931,25 +2023,25 @@ do
         return vim.tbl_map(drawn_title, { ... })
     end
     t.eq("each source's pane is named with the key that opens it", titles_of("se", "so", "eo", "si"), {
-        " Errors: main.cpp (e) ",
-        " Errors: gen.cpp (i) ",
-        " Errors: brute.cpp (a) ",
-        " Errors: checker.cpp (o) ",
+        " errors: main.cpp (e) ",
+        " errors: gen.cpp (i) ",
+        " errors: brute.cpp (a) ",
+        " errors: checker.cpp (o) ",
     })
     bui:select_row(2)
     render()
     t.eq("while a testcase row names every pane's key", titles_of("so", "eo", "si", "se"), {
-        " Output (o) ",
-        " Expected Output (a) ",
-        " Input (i) ",
-        " Errors (e) ",
+        " output (o) ",
+        " expected output (a) ",
+        " input (i) ",
+        " errors (e) ",
     })
     bui.config = vim.tbl_deep_extend("force", bui.config, { runner_ui = { show_title_keys = false } })
     bui:select_row(1)
     render()
     bui:select_row(2)
     render()
-    t.eq("and turned off, the titles are the panes' names alone", titles_of("so", "se"), { " Output ", " Errors " })
+    t.eq("and turned off, the titles are the panes' names alone", titles_of("so", "se"), { " output ", " errors " })
 
     br:kill_all_processes()
     bui:delete()
@@ -1967,14 +2059,14 @@ do
         return cr and cr.tcdata[1] and not cr:build_pending(cr.tcdata[1])
     end, 10)
     t.eq("a helper with nothing to compile takes no pane", build_titles(cr.ui:build_assignment(cr.tcdata[1])), {
-        se = " Errors: main.cpp ",
-        so = " Errors: brute.cpp ",
-        eo = " Errors: checker.cpp ",
+        se = " errors: main.cpp ",
+        so = " errors: brute.cpp ",
+        eo = " errors: checker.cpp ",
     })
     cr:kill_all_processes()
     cr.ui:delete()
 
-    -- A helper that failed to compile is a failed build: the Compile row says so, beside the
+    -- A helper that failed to compile is a failed build: the compile row says so, beside the
     -- pane holding what its compiler wrote, rather than over the board in a float.
     require("tuna.config").setup({
         -- A different compile command, so the build cache answers this run afresh.
@@ -2004,7 +2096,7 @@ do
         broke.tcdata[1].status,
         broke.tcdata[1].hlgroup,
         broke.tcdata[1].exit_code,
-    }, { "FAILED", "TunaWarning", 0 })
+    }, { "failed", "TunaWarning", 0 })
     t.has(
         "with what its compiler said in that source's pane",
         build_text(broke.ui:build_assignment(broke.tcdata[1])).so,
@@ -2074,7 +2166,7 @@ do
     t.ok("the checker failed while the solution was still building", late.builds[1].failed, late.builds)
     release()
     settled(late)
-    t.eq("and the solution's own clean build does not write that off the row", late.tcdata[1].status, "FAILED")
+    t.eq("and the solution's own clean build does not write that off the row", late.tcdata[1].status, "failed")
     late.ui:delete()
 
     -- With only the solution to build there is nothing to tell apart: the Errors pane keeps
@@ -2106,12 +2198,12 @@ do
         lone[key] = onl.ui.zoom_winid and vim.api.nvim_win_get_config(onl.ui.zoom_winid).title[1][1] or false
         onl.ui:unzoom()
     end
-    t.eq("with the solution alone, only its key opens anything", lone, { i = false, a = false, o = false, e = " Errors (e) " })
+    t.eq("with the solution alone, only its key opens anything", lone, { i = false, a = false, o = false, e = " errors (e) " })
     t.eq("and a plain run's legend adds no section and no build row line", {
         legend_line(onl.ui, "zoom on the build row"),
-        legend_line(onl.ui, "STRESS"),
-        legend_line(onl.ui, "INTERACTIVE"),
-    }, {})
+        legend_section(onl.ui, "stress"),
+        legend_section(onl.ui, "interactive, stress"),
+    }, { nil, false, false })
     onl.ui:delete()
 
     vim.system = real_system
@@ -2558,7 +2650,7 @@ do
 end
 
 -- With no testcases, run-all does what a normal run does: every solution runs once on empty
--- stdin, on a bare testcase 0 named `No input`, and saving it writes the first testcase,
+-- stdin, on a bare testcase 0 named `no input`, and saving it writes the first testcase,
 -- which every solution then shows. A testcase added on the board is every solution's too.
 do
     local edir = t.tempdir()
@@ -2583,16 +2675,31 @@ do
         return out
     end
     t.eq("run-all with no testcases runs every solution on a bare testcase 0", cases(), {
-        { "a.cpp", "  No input", "DONE" },
-        { "b.cpp", "  No input", "DONE" },
+        { "a.cpp", "  no input", "done" },
+        { "b.cpp", "  no input", "done" },
     })
+    t.has("a solution's summary lists them in lowercase", mr:solution_summary(mr.tcdata[1]), "tc 0: done")
+    -- A header counts what its rows say, and goes on saying it is running while one is.
+    do
+        local sol = mr.tcdata[1].sol
+        local case = mr.tcdata[sol.case_idxs[1]]
+        local was = case.status
+        local function header_for(status)
+            case.status = status
+            mr:recompute_header(sol)
+            return { mr.tcdata[1].status, mr.tcdata[1].hlgroup }
+        end
+        t.eq("a correct row counts for its solution", header_for("correct"), { "1/1", "TunaCorrect" })
+        t.eq("a running one leaves the header running", header_for("running"), { "0/0", "TunaRunning" })
+        header_for(was)
+    end
     -- Named for what is typed into it from the first keystroke, as on the normal board.
     mr.ui:goto_row(2)
     drain(mr.ui)
     local si = mr.ui.windows.si.bufnr
     vim.api.nvim_buf_set_lines(si, 0, -1, false, { "typed" })
     vim.api.nvim_exec_autocmds("TextChanged", { buffer = si })
-    t.has("typing into it names it a testcase at once", vim.api.nvim_buf_get_lines(mr.ui.windows.tc.bufnr, 1, 2, false)[1], "TC 0")
+    t.has("typing into it names it a testcase at once", vim.api.nvim_buf_get_lines(mr.ui.windows.tc.bufnr, 1, 2, false)[1], "tc 0")
     mr.ui:discard_pending()
     mr:save_testcase(0, "5\n", "6\n")
     settled(mr)
@@ -2601,12 +2708,12 @@ do
         vim.tbl_map(function(c)
             return c[2]
         end, cases()),
-    }, { { input = "5\n", output = "6\n" }, { "  TC 0", "  TC 0" } })
+    }, { { input = "5\n", output = "6\n" }, { "  tc 0", "  tc 0" } })
     mr.ui:add_testcase()
     drain(mr.ui)
     t.eq("and a testcase added on the board is added under every solution", vim.tbl_map(function(c)
         return c[1] .. " " .. c[2]
-    end, cases()), { "a.cpp   TC 0", "a.cpp   TC 1", "b.cpp   TC 0", "b.cpp   TC 1" })
+    end, cases()), { "a.cpp   tc 0", "a.cpp   tc 1", "b.cpp   tc 0", "b.cpp   tc 1" })
     vim.system = real_system
     vim.notify = quiet
     mr:kill_all_processes()
@@ -2777,7 +2884,7 @@ local function question(tcnum, input, expected)
     return asked
 end
 
-local ANSWER_PROMPT = { "Don't specify output", "Expect empty output", "Keep editing" }
+local ANSWER_PROMPT = { "don't specify output", "expect empty output", "keep editing" }
 
 gtcs.buf_save_testcase(gbuf, 0, "5\n", "5\n")
 gr:sync_rows({ 0 })
@@ -2812,9 +2919,7 @@ t.eq("and it goes on meaning what it meant", kept, true)
 gtcs.buf_delete_testcase(gbuf, 0)
 
 -- Every prompt that stands between the user and a lost edit offers the same three
--- answers, named after the outcome each produces. Closing used to say `Discard changes`
--- and `Cancel` where re-running said `Discard and re-run` and `Cancel`: the same
--- question in two vocabularies, one of which named the action and one of which did not.
+-- answers, named after the outcome each produces, so one question has one vocabulary.
 gtcs.buf_save_testcase(gbuf, 0, "5\n", "5\n")
 gr:sync_rows({ 0 })
 local function unsaved_prompt(fn)
@@ -2832,16 +2937,16 @@ local function unsaved_prompt(fn)
 end
 t.eq("re-running one asks in the shared vocabulary", unsaved_prompt(function()
     gui:with_pending_settled(0, "re-run", function() end)
-end), { "Save and re-run", "Discard and re-run", "Keep editing" })
+end), { "save and re-run", "discard and re-run", "keep editing" })
 t.eq("re-running all asks the same way", unsaved_prompt(function()
     gui:with_pending_settled(nil, "re-run all", function() end)
-end), { "Save and re-run all", "Discard and re-run all", "Keep editing" })
+end), { "save and re-run all", "discard and re-run all", "keep editing" })
 t.eq("and so does closing", unsaved_prompt(function()
     gui:request_close()
-end), { "Save and close", "Discard and close", "Keep editing" })
+end), { "save and close", "discard and close", "keep editing" })
 
--- `Discard` says exactly what it does. It used to read "Discard and re-run", which for
--- a single row is a promise it cannot keep: the row being re-run is the one going away.
+-- `discard` says exactly what it does. "discard and re-run" would be, for a single row, a
+-- promise it cannot keep: the row being re-run is the one going away.
 gtcs.buf_save_testcase(gbuf, 0, "5\n", "5\n")
 gr:sync_rows({ 0 })
 gtcs.buf_delete_testcase(gbuf, 0)
@@ -2851,9 +2956,9 @@ vim.wait(50, function()
     return asked ~= nil
 end)
 t.eq("the missing-testcase prompt offers a plain Discard", asked, {
-    "Restore and re-run all",
-    "Discard",
-    "Stop",
+    "restore and re-run all",
+    "discard",
+    "stop",
 })
 
 widgets.menu = real_menu
@@ -2972,7 +3077,7 @@ do
     t.eq("and not the normal runner's", C.runners[rbuf], nil)
     t.eq("nothing is run to show it", #spawns, 0)
     local last = shown and shown.tcdata[#shown.tcdata]
-    t.eq("its rows read NOT RUN", last and last.status, "NOT RUN")
+    t.eq("its rows read not run", last and last.status, "not run")
     t.eq("and the runner is idle, so feed's testcases can be edited", shown and shown:idle(), true)
     if shown then
         shown:run_testcases()
@@ -2993,7 +3098,7 @@ do
 
     -- The normal board listed has built nothing either: a testcase's run key builds first
     -- through the same build every mode has, and a build that fails leaves the row saying it
-    -- was never run, which is the truth. The Compile row's run key is the build, once.
+    -- was never run, which is the truth. The compile row's run key is the build, once.
     local function listed_normal(compile_code)
         clear_runners()
         spawns = {}
@@ -3025,19 +3130,19 @@ do
     nr:run_single(2)
     settled(nr)
     t.eq("a listed normal board's run key builds, then runs the row", commands_run(), { compiler, "./sol" })
-    t.ok("which then has a verdict", nr.tcdata[2].status ~= "NOT RUN", nr.tcdata[2].status)
+    t.ok("which then has a verdict", nr.tcdata[2].status ~= "not run", nr.tcdata[2].status)
 
     nr = listed_normal(1)
     nr:run_single(2)
     settled(nr)
     t.eq("a build that fails runs nothing behind it", commands_run(), { compiler })
-    t.eq("and leaves the row saying it was never run", nr.tcdata[2].status, "NOT RUN")
+    t.eq("and leaves the row saying it was never run", nr.tcdata[2].status, "not run")
     t.eq("with the runner idle again", nr:idle(), true)
 
     nr = listed_normal(0)
     nr:run_single(1)
     settled(nr)
-    t.eq("the Compile row's run key builds once", commands_run(), { compiler })
+    t.eq("the compile row's run key builds once", commands_run(), { compiler })
     t.eq("and settles", nr:idle(), true)
 
     -- An interpreted solution builds nothing, but its first run still saves it: the row runs
@@ -3067,7 +3172,7 @@ end
 --------------------------------------------------------------------------------
 
 -- One rule, whatever built the rows: listing a problem opens on its first real row, since the
--- Compile step is where a run starts rather than something to read; a run moves to the row it
+-- compile step is where a run starts rather than something to read; a run moves to the row it
 -- is about once the build turns out to have had nothing to say; and neither happens once the
 -- selector has been moved by hand, because a row someone chose is not a default. The row a run
 -- is about is its first real row everywhere except interactive, which holds one session at a
@@ -3088,7 +3193,7 @@ local wtcs = require("tuna.problem.testcases").buf_get_testcases(wbuf)
 ---The first row that is not the build step: what every mode is expected to land on.
 local function first_real_row(r)
     for i, tc in ipairs(r.tcdata) do
-        if tc.tcnum ~= "Compile" then
+        if tc.tcnum ~= "compile" then
             return i
         end
     end
@@ -3180,7 +3285,7 @@ for _, board in ipairs(boards) do
     vim.system = real_system
 end
 
--- A build that failed reads the same in every mode that has a Compile row: it is one piece of
+-- A build that failed reads the same in every mode that has a compile row: it is one piece of
 -- code (`build_solution`), so the row wears the verdict the compiler gave it, and the runner
 -- settles instead of holding the board open for a run that never started.
 local built = 0
@@ -3198,12 +3303,12 @@ for _, board in ipairs(boards) do
     end
     local r = board.run()
     settled(r)
-    if r.tcdata[1] and r.tcdata[1].tcnum == "Compile" then
+    if r.tcdata[1] and r.tcdata[1].tcnum == "compile" then
         built = built + 1
         t.eq(board.name .. ": a build that failed says so on its row", {
             r.tcdata[1].status,
             r.tcdata[1].hlgroup,
-        }, { "RET 1", "TunaWarning" })
+        }, { "ret 1", "TunaWarning" })
         t.ok(board.name .. ": and the run settles, nothing having started", r:idle(), r.tcdata[1])
         -- The build step's own grid has an Errors pane whatever the configured one lacks,
         -- so the failure is read where the run left the cursor, with nothing opened over it.
@@ -3230,11 +3335,11 @@ t.ok("which is every mode that builds a solution of its own", built >= 3, built)
 -- helper alike.
 do
     local ending = core.ending
-    t.eq("a timeout", { ending({ timed_out = true }, 1500) }, { "TIMEOUT", "TunaWrong", "timed out after 1.5 s" })
-    t.eq("vim.system's own timeout kill is one too", (ending({ code = 124, signal = 15 })), "TIMEOUT")
-    t.eq("a stop", { ending({ killed = true, signal = 9 }) }, { "KILLED", "TunaWarning", "was stopped" })
-    t.eq("a signal", { ending({ code = 0, signal = 6 }) }, { "SIG 6", "TunaWarning", "was killed by signal 6" })
-    t.eq("an exit code", { ending({ code = 3, signal = 0 }) }, { "RET 3", "TunaWarning", "exited with code 3" })
+    t.eq("a timeout", { ending({ timed_out = true }, 1500) }, { "timeout", "TunaWrong", "timed out after 1.5 s" })
+    t.eq("vim.system's own timeout kill is one too", (ending({ code = 124, signal = 15 })), "timeout")
+    t.eq("a stop", { ending({ killed = true, signal = 9 }) }, { "killed", "TunaWarning", "was stopped" })
+    t.eq("a signal", { ending({ code = 0, signal = 6 }) }, { "sig 6", "TunaWarning", "was killed by signal 6" })
+    t.eq("an exit code", { ending({ code = 3, signal = 0 }) }, { "ret 3", "TunaWarning", "exited with code 3" })
     t.eq("and a clean exit is no ending at all", ending({ code = 0, signal = 0 }), nil)
 end
 
@@ -3268,7 +3373,7 @@ for _, board in ipairs(boards) do
     t.ok(board.name .. ": run all again builds the solution again", compiled_solution(), spawns)
     local ran = 0
     for _, tc in ipairs(r.tcdata) do
-        if type(tc.tcnum) == "number" and tc.status ~= "NOT RUN" and tc.status ~= "" then
+        if type(tc.tcnum) == "number" and tc.status ~= "not run" and tc.status ~= "" then
             ran = ran + 1
         end
     end
@@ -3309,7 +3414,7 @@ for _, board in ipairs(boards) do
         local r = board.run()
         vim.wait(3000, function()
             for _, tc in ipairs(r.tcdata) do
-                if tc.status == "RUNNING" and tc.tcnum ~= "Compile" then
+                if tc.status == "running" and tc.tcnum ~= "compile" then
                     return true
                 end
             end
@@ -3324,7 +3429,7 @@ for _, board in ipairs(boards) do
                 cases[#cases + 1] = tc.status
             end
         end
-        t.eq(board.name .. ": a stopped run kills what runs, and nothing it queued starts", cases, { "KILLED", "NOT RUN" })
+        t.eq(board.name .. ": a stopped run kills what runs, and nothing it queued starts", cases, { "killed", "not run" })
         t.eq(board.name .. ": nothing is spawned after the stop", #spawns, spawned)
         t.eq(board.name .. ": and the board is idle again", r:idle(), true)
         if board.name == "run-all" then
@@ -3338,7 +3443,7 @@ end
 require("tuna.config").setup({})
 
 -- Interactive holds one session at a time: a stop ends the one running and starts no other,
--- and the row it was on reads KILLED, as a stopped testcase does everywhere.
+-- and the row it was on reads killed, as a stopped testcase does everywhere.
 do
     stub_system()
     local ir = boards[4].run()
@@ -3366,7 +3471,7 @@ do
     held()
     local last = ir.tcdata[#ir.tcdata]
     t.eq("interactive: no session starts after a stop", sessions, 1)
-    t.eq("interactive: the one that never started says so", { last.status, ir:idle() }, { "NOT RUN", true })
+    t.eq("interactive: the one that never started says so", { last.status, ir:idle() }, { "not run", true })
     ir:delete_ui()
     vim.system = real_system
 end
@@ -3666,9 +3771,9 @@ do
     end
 
     show(2)
-    t.eq("an answer stored empty is judged, marked and named", { board.tcdata[2].status, said() }, { "WRONG", { true, "must print nothing" } })
+    t.eq("an answer stored empty is judged, marked and named", { board.tcdata[2].status, said() }, { "wrong", { true, "must print nothing" } })
     show(3)
-    t.eq("no answer is not judged, and says so", { board.tcdata[3].status, said() }, { "DONE", { false, "no answer, not judged" } })
+    t.eq("no answer is not judged, and says so", { board.tcdata[3].status, said() }, { "done", { false, "no answer, not judged" } })
     show(1)
     t.eq("nor is the build step, whose panes hold something else", said()[2], false)
 
@@ -3680,7 +3785,7 @@ do
     settled(board)
     drain(ui)
     show(2)
-    t.eq("and once it is gone, marks and words follow the verdict", { board.tcdata[2].status, said() }, { "DONE", { false, "no answer, not judged" } })
+    t.eq("and once it is gone, marks and words follow the verdict", { board.tcdata[2].status, said() }, { "done", { false, "no answer, not judged" } })
     tcs.buf_save_testcase(ebuf, 0, "in\n", "", true)
     C3.execute({ "run" })
     settled(board)
@@ -3717,7 +3822,7 @@ do
     settled(board)
     drain(ui)
     show(5)
-    t.eq("an empty answer file made by hand is that same answer", { board.tcdata[5].status, said() }, { "WRONG", { true, "must print nothing" } })
+    t.eq("an empty answer file made by hand is that same answer", { board.tcdata[5].status, said() }, { "wrong", { true, "must print nothing" } })
     vim.api.nvim_set_current_win(ui.windows.tc.winid)
     ui:add_testcase()
     drain(ui)
@@ -3767,7 +3872,7 @@ do
             on_choice(answers[title])
         end
     end
-    local QUESTION = "The answer to testcase 0 is empty"
+    local QUESTION = "the answer to testcase 0 is empty"
     local answer_of = function(n)
         return table.concat(vim.fn.readfile(rdir .. "/sol_output" .. n .. ".txt"), "\n")
     end
@@ -3804,11 +3909,11 @@ do
     drain(ui)
     vim.cmd.stopinsert()
     type_into("si", { "typed" })
-    asked, answers, runs = {}, { ["Unsaved testcase 2"] = 2 }, 0
+    asked, answers, runs = {}, { ["unsaved testcase 2"] = 2 }, 0
     press("r")
-    t.eq("a new row offers a first run, and no discard to run nothing with", asked, { { "Save and run", "Keep editing" } })
+    t.eq("a new row offers a first run, and no discard to run nothing with", asked, { { "save and run", "keep editing" } })
     t.eq("keeping on editing keeps it, unwritten and not run", { runs, ui.pending[2] ~= nil, vim.fn.filereadable(rdir .. "/sol_input2.txt") }, { 0, true, 0 })
-    asked, answers = {}, { ["Unsaved testcase 2"] = 1 }
+    asked, answers = {}, { ["unsaved testcase 2"] = 1 }
     press("r")
     t.eq("saved, it is written and run once", { runs, ui.pending[2], vim.fn.filereadable(rdir .. "/sol_input2.txt") }, { 1, nil, 1 })
 
@@ -3823,7 +3928,7 @@ do
         end
         return counted(argv, opts, on_exit)
     end
-    asked, answers = {}, { ["Unsaved testcase 0"] = 1 }
+    asked, answers = {}, { ["unsaved testcase 0"] = 1 }
     press("<C-r>")
     table.sort(stdins)
     t.eq("<C-r> after a save runs every testcase, once each", stdins, { "first", "in", "typed" })
@@ -3856,7 +3961,7 @@ do
     drain(ui)
     vim.cmd.stopinsert()
     local rows = #board.tcdata
-    asked, answers = {}, { ["Unsaved testcase " .. ui:current_row().tcnum] = 2 }
+    asked, answers = {}, { ["unsaved testcase " .. ui:current_row().tcnum] = 2 }
     press("<C-r>")
     t.eq("<C-r> Discard over a row never saved asks once and drops the row", { #asked, #board.tcdata }, { 1, rows - 1 })
     answers = {}
@@ -3867,27 +3972,27 @@ do
     type_into("si", { "edited" })
     asked, answers = {}, {}
     press("r")
-    t.eq("a row that has run says so", asked, { { "Save and re-run", "Discard and re-run", "Keep editing" } })
+    t.eq("a row that has run says so", asked, { { "save and re-run", "discard and re-run", "keep editing" } })
     ui:discard_pending()
     show(2)
 
     -- An answer stored empty outlives a save of something else.
     show(3)
     type_into("si", { "edited" })
-    asked, answers = {}, { ["Unsaved testcase 1"] = 1 }
+    asked, answers = {}, { ["unsaved testcase 1"] = 1 }
     press("r")
     t.eq("an answer stored empty stays so through Save and re-run", { #asked, vim.fn.getfsize(rdir .. "/sol_output1.txt") }, { 1, 0 })
     -- A save that is the run, here, starts it itself.
     show(3)
     type_into("si", { "edited again" })
-    asked, answers, runs = {}, { ["Unsaved testcase 1"] = 1 }, 0
+    asked, answers, runs = {}, { ["unsaved testcase 1"] = 1 }, 0
     press("r")
     t.eq("a single row's save runs it, once", runs, 1)
 
     -- A real answer left empty is asked about before anything happens.
     show(2)
     type_into("eo", { "" })
-    asked, answers, runs = {}, { ["Unsaved testcase 0"] = 1, [QUESTION] = 3 }, 0
+    asked, answers, runs = {}, { ["unsaved testcase 0"] = 1, [QUESTION] = 3 }, 0
     press("r")
     t.eq("Save and re-run asks about an answer left empty, and stops at keep editing", { #asked, answer_of(0), runs, ui.pending[0] ~= nil }, { 2, "5", 0, true })
     -- `:wq!` still writes: `!` is about closing, and the edit is what the command is for.
@@ -3896,7 +4001,7 @@ do
     vim.api.nvim_feedkeys(":wq!\r", "tx", false)
     drain(ui)
     t.eq(":wq! keeps the edit too, asking what it would write", { #asked, ui.ui_visible, ui:has_pending() }, { 1, true, true })
-    asked, answers = {}, { ["Unsaved testcase 0"] = 1, [QUESTION] = 3 }
+    asked, answers = {}, { ["unsaved testcase 0"] = 1, [QUESTION] = 3 }
     ui:request_close()
     drain(ui)
     t.eq("as does Save and close, which leaves the board up", { #asked, ui.ui_visible, answer_of(0) }, { 2, true, "5" })
@@ -3930,13 +4035,13 @@ do
     vim.cmd.stopinsert()
     type_into("si", { "typed" })
     local n = ui:current_row().tcnum
-    asked, answers, runs = {}, { ["Unsaved testcase " .. n] = 1 }, 0
+    asked, answers, runs = {}, { ["unsaved testcase " .. n] = 1 }, 0
     press("r")
     vim.wait(2000, function()
         return runs > 0 and board:idle()
     end, 10)
     drain(ui)
-    t.eq("and Save and run runs it there too", { ui:current_row().status, ui:current_row().stdout }, { "DONE", "out\n" })
+    t.eq("and Save and run runs it there too", { ui:current_row().status, ui:current_row().stdout }, { "done", "out\n" })
 
     widgets.menu = real_menu
     board:kill_all_processes()
@@ -4163,7 +4268,7 @@ end
 
 -- The generator writes a testcase's input, with no answer, under the lowest free number, from a
 -- seed of its own that the message names. From the command it is a file; on a board, and from
--- the command while a board is open, a row, selected and run, reading DONE. A generator that
+-- the command while a board is open, a row, selected and run, reading done. A generator that
 -- fails writes nothing, and one that is missing offers its starter.
 do
     local gdir = t.tempdir()
@@ -4212,7 +4317,7 @@ do
     t.eq("the command writes the generator's input as a testcase with no answer", stored(0), { input = "3\n1 2 3\n" })
     local seed = gen_argv and gen_argv[#gen_argv]
     t.ok("handed a seed of its own", tonumber(seed) ~= nil, gen_argv)
-    t.eq("which the message names", said[#said], "Tuna: testcase 0 generated, seed " .. tostring(seed) .. ".")
+    t.eq("which the message names", said[#said], "tuna: testcase 0 generated, seed " .. tostring(seed) .. ".")
 
     C3.execute({ "run" })
     local r = C3.runners[buf]
@@ -4229,7 +4334,7 @@ do
         row(1) and row(1).stdin,
         row(1) and row(1).status,
         stored(1),
-    }, { "4\n", "DONE", { input = "4\n" } })
+    }, { "4\n", "done", { input = "4\n" } })
     t.eq("selected", r.tcdata[r.ui:selected_index()] == row(1), true)
 
     C3.generate_testcase()
@@ -4248,7 +4353,7 @@ do
     gen_result = { stdout = "5\n" }
     C3.generate_testcase()
     t.drain()
-    t.eq("with pass_seed off it is handed none, and none is named", { #gen_argv, said[#said] }, { 1, "Tuna: testcase 3 generated." })
+    t.eq("with pass_seed off it is handed none, and none is named", { #gen_argv, said[#said] }, { 1, "tuna: testcase 3 generated." })
 
     configure(true, nil)
     local scaffold = require("tuna.workspace.scaffold")

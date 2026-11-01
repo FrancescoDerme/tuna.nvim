@@ -63,7 +63,7 @@ t.eq("a contest of files steps between them, and says where it is at its end", {
     from("B", -1),
     from("C", 1),
     real(vim.fn.getcwd()),
-}, { "C.cpp Tuna: problem 3/3: C", "A.cpp Tuna: problem 1/3: A", "C.cpp Tuna: problem 3/3 is the last one.", round })
+}, { "C.cpp tuna: problem 3/3: C", "A.cpp tuna: problem 1/3: A", "C.cpp tuna: problem 3/3 is the last one.", round })
 require("tuna").setup({ cd_command = "lcd" })
 from("A", 1)
 t.eq("and stepping within its folder leaves the window without a directory of its own", vim.fn.haslocaldir(), 0)

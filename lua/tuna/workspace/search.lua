@@ -249,7 +249,7 @@ function M.open(bufnr)
     local widgets = require("tuna.ui.widgets")
     local id = widgets.menu(
         {},
-        "Go to",
+        "go to",
         function(idx)
             local row = rows[idx]
             if row.contest then
@@ -271,11 +271,11 @@ function M.open(bufnr)
                 return pane_of(rows[idx])
             end,
         },
-        nil,
-        nil,
-        function(query)
-            return rank(rows, query)
-        end
+        {
+            search = function(query)
+                return rank(rows, query)
+            end,
+        }
     )
     walk(roots, cfg, function(found, truncated)
         if truncated then

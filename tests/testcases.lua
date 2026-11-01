@@ -51,7 +51,7 @@ t.eq("the answer is split alongside", r.cases[1].output, "1\n")
 t.eq("and its rest is kept too", r.rest.output, "eh\net\n")
 
 -- An expected output that is empty to begin with splits fine, each case simply
--- having none. This is the case that used to come back WRONG once saved.
+-- having none.
 r, err = tc.split_testcase("h\n-\nA\n-\nt\n", "", "-")
 t.ok("an answerless testcase splits", r ~= nil, err)
 t.eq("and its cases have no answer", r.cases[1].output, "")
@@ -135,7 +135,7 @@ t.ok("a fresh directory takes the canonical first format", vim.fn.filereadable(d
 t.eq("what was written loads back", tc.files.load(dir .. "/", file, IN, OUT), { [0] = { input = "2 3\n", output = "5\n" } })
 
 -- An empty answer is the *absence* of one: the file is removed rather than written,
--- which is why a row holding "" disagreed with the disk and came back WRONG.
+-- so a row holding "" would disagree with the disk and read `wrong`.
 tc.files.write(dir .. "/", { [0] = { input = "2 3\n", output = "" } }, file, IN, OUT)
 t.ok("an empty answer deletes its file", vim.fn.filereadable(dir .. "/main_output0.txt") == 0)
 t.eq("and loads back as no answer at all", tc.files.load(dir .. "/", file, IN, OUT)[0].output, nil)
@@ -357,7 +357,7 @@ do
     C.edit_testcase(false)
     t.eq("with one testcase, edit opens it without asking which", { asked, edited }, { nil, 0 })
     C.delete_testcase()
-    t.eq("and delete goes straight to confirming it", asked, "Delete testcase 0?")
+    t.eq("and delete goes straight to confirming it", asked, "delete testcase 0?")
 
     for _, n in ipairs({ 1, 10, 2, 9 }) do
         t.write(dir, "one_input" .. n .. ".txt", "2\n")
@@ -365,8 +365,8 @@ do
     asked, edited = nil, nil
     C.edit_testcase(false)
     t.eq("with several, edit asks which, in order", { asked, choices }, {
-        "Edit a testcase",
-        { "Testcase 0", "Testcase 1", "Testcase 2", "Testcase 9", "Testcase 10" },
+        "edit a testcase",
+        { "testcase 0", "testcase 1", "testcase 2", "testcase 9", "testcase 10" },
     })
     t.eq("and opens the one chosen", edited, 1)
     asked = nil
@@ -377,7 +377,7 @@ do
     end
     real_split()
     C.split_testcase = real_split
-    t.eq("and split asks the same way", { asked, split }, { "Split a testcase", 1 })
+    t.eq("and split asks the same way", { asked, split }, { "split a testcase", 1 })
 
     for _, n in ipairs({ 0, 1, 10, 2, 9 }) do
         os.remove(dir .. "/one_input" .. n .. ".txt")
@@ -490,7 +490,7 @@ do
     run()
     t.eq("a run of a solution with none asks, naming every rename", asked, {
         title = "main2.cpp cannot read main.cpp's testcases, renaming them shares them permanently",
-        items = { "Rename and share", "Run without sharing" },
+        items = { "rename and share", "run without sharing" },
         renames = { "main_input0.txt  →  input0.txt" },
     })
     t.eq("and runs without sharing", { ran, vim.fn.filereadable(d .. "/main_input0.txt") }, { 1, 1 })
@@ -540,7 +540,7 @@ do
     local function output_win()
         for _, w in ipairs(api.nvim_list_wins()) do
             local title = api.nvim_win_get_config(w).title
-            if type(title) == "table" and title[1][1]:find("^ Output") then
+            if type(title) == "table" and title[1][1]:find("^ output") then
                 return w
             end
         end
@@ -594,7 +594,7 @@ do
             on_choice(answers[title])
         end
     end
-    local QUESTION = "The answer to testcase 2 is empty"
+    local QUESTION = "the answer to testcase 2 is empty"
     local function answer(n)
         return table.concat(vim.fn.readfile(d .. "/one_output" .. n .. ".txt"), "\n")
     end
@@ -644,9 +644,9 @@ do
         t.eq(name .. " closes once it is answered", { stored_empty(2), output_win() }, { true, nil })
     end
 
-    cleared({ ["Unsaved testcase 2"] = 1, [QUESTION] = 3 })
+    cleared({ ["unsaved testcase 2"] = 1, [QUESTION] = 3 })
     press("q")
-    t.eq("Save and close asks too, and stays on keep editing", { asked, answer(2), output_win() ~= nil }, { { "Unsaved testcase 2", QUESTION }, "5", true })
+    t.eq("Save and close asks too, and stays on keep editing", { asked, answer(2), output_win() ~= nil }, { { "unsaved testcase 2", QUESTION }, "5", true })
     answers[QUESTION] = 1
     press("q")
     t.eq("and closes once answered", { vim.fn.filereadable(d .. "/one_output2.txt"), output_win() }, { 0, nil })

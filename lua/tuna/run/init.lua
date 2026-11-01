@@ -12,7 +12,7 @@
 -- `RunnerCore` (`run/core.lua`); `TCRunner` is a thin subclass that only adds the
 -- parallel lanes and the completion check.
 --
--- The build is row 1 (`tcnum = "Compile"`): it runs first, and the real testcases only
+-- The build is row 1 (`tcnum = "compile"`): it runs first, and the real testcases only
 -- start if it succeeds.
 
 local config = require("tuna.config")
@@ -112,16 +112,16 @@ function TCRunner:build_rows(tctbl)
     -- Nothing to test, but the program is still worth running: hitting run on a file
     -- with no testcases means "execute this", which is how a scratch solution gets
     -- built and run without first inventing a dummy empty testcase. So it runs once on
-    -- empty stdin, with no expected output — it reads DONE and can never claim a pass
+    -- empty stdin, with no expected output — it reads done and can never claim a pass
     -- on a problem whose testcases simply failed to arrive. It is also what makes the
-    -- two languages agree: without it a compiled file built and showed a lone `Compile`
+    -- two languages agree: without it a compiled file built and showed a lone `compile`
     -- row while an interpreted one only warned, and neither ran anything.
     --
     -- It is testcase 0 (nothing is on disk, so that number is free) and editable like
     -- any other row, which is what turns "just run it" into the start of a testcase:
     -- read the output, type the input and the answer you wanted into the panes, `:w`,
     -- and the row is a stored testcase from then on. `bare` only says it has no file
-    -- behind it *yet* — the selector labels it `No input` rather than `TC 0` until it
+    -- behind it *yet* — the selector labels it `no input` rather than `tc 0` until it
     -- does, and `save_testcase` clears the flag.
     if next(tctbl) == nil then
         table.insert(self.tcdata, { tcnum = 0, bare = true, stdin = "", expected = nil, timelimit = timelimit })
@@ -139,7 +139,7 @@ function TCRunner:load_testcases(tctbl)
     self:build_rows(tctbl)
     for _, tc in ipairs(self.tcdata) do
         self:reset_row(tc)
-        tc.status = "NOT RUN"
+        tc.status = "not run"
         -- `TunaDone` is the unstyled group: "not run" is the absence of a verdict, not
         -- a bad one, so it must not read like a warning.
         tc.hlgroup = "TunaDone"
@@ -239,10 +239,10 @@ function TCRunner:check_complete()
     self:update_ui(true)
 end
 
----Re-run a single row (the UI's "run again"). The Compile row is the build, so running it
+---Re-run a single row (the UI's "run again"). The compile row is the build, so running it
 ---builds. A testcase row of a runner that was only listed builds first (`built_first`),
 ---since nothing it would spawn exists yet, and is reset only once the build succeeded: a
----build that fails leaves it saying `NOT RUN`, which is the truth.
+---build that fails leaves it saying `not run`, which is the truth.
 ---@param tcindex integer
 function TCRunner:run_single(tcindex)
     local tc = self.tcdata[tcindex]

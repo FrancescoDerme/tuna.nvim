@@ -2,7 +2,7 @@
 --
 -- One testcase from the generator, with no stress run around it: an input to read the
 -- solution's output on, to time it on, or to edit into a case of one's own. Nothing gives it
--- an answer, so a run of it reads DONE, unless the solution crashes or runs out of time, or a
+-- an answer, so a run of it reads done, unless the solution crashes or runs out of time, or a
 -- checker judges its output. The generator is the one stress uses, found, built and handed a
 -- seed the same way.
 
@@ -32,7 +32,7 @@ function M.input(bufnr, cfg, on_input)
         if note then
             utils.notify("generate: " .. note .. ".", "WARN")
         else
-            require("tuna.workspace.scaffold").create_missing({ "generator" }, bufnr, "Generating a testcase needs a generator")
+            require("tuna.workspace.scaffold").create_missing({ "generator" }, bufnr, "generating a testcase needs a generator")
         end
         return
     end

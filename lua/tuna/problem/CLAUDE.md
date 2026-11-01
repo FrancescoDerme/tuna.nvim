@@ -19,7 +19,7 @@ submissions. The rules that hold everywhere are in the root `CLAUDE.md`.
 - **Empty versus absent** is a load-bearing rule:
   - *Input*: empty and absent mean the same thing. `as_stored` normalizes inputs on load in all
     three backends.
-  - *Answer*: **absent means not judged** (`compare_output` returns `nil`, verdict `DONE`);
+  - *Answer*: **absent means not judged** (`compare_output` returns `nil`, verdict `done`);
     **present but empty means the solution must print nothing**. Only file presence can carry
     the difference, so `write_or_delete` deletes an empty answer unless `keep_empty` is set.
   - `buf_save_testcase` always keeps the input, even an empty one, and keeps an empty answer
@@ -122,8 +122,8 @@ submissions. The rules that hold everywhere are in the root `CLAUDE.md`.
   (mirrors have no per-problem pages and drop the contest later), with the mirror kept as
   `mirror`/`mirror_at`. A missing problem index is taken from the URL and prefixed to the name,
   because `$(PROBLEM)` orders the folders.
-- Existing targets ask in a float: `Override` / `Stop` for a problem;
-  `Override all` / `Write missing only` (only when some are missing) / `Stop` for a contest.
+- Existing targets ask in a float: `override` / `stop` for a problem;
+  `override all` / `write missing only` (only when some are missing) / `stop` for a contest.
   Every branch, and dismissal, calls `finished`.
 - The source is written from the solution's template (`scaffold.template`/`render`, with the
   task), and `store_downloaded_task` returns which one, for `scratch.absorb`. No warning when
@@ -178,7 +178,9 @@ submissions. The rules that hold everywhere are in the root `CLAUDE.md`.
 - **Watching**
   - Output: strip terminal control sequences, then `scan_verdict` over `submit.verdicts`,
     **preferring the rightmost final verdict over pending** (in-place redraws collapse onto one
-    line) and showing a short snippet.
+    line) and showing a short snippet, in lowercase: `scan_verdict` answers so and
+    `stored_verdict` lowers what a sidecar holds, whoever wrote it, `status` being no place for
+    it, as its `submitting …` names a file. `stored_verdict` is also where an entry with no text is no verdict.
   - Exit with no verdict: `watch_outcome` decides on the exit code alone. Exit 0 clears the
     indicator; it never reports a failure. `expects_verdict = false` only disables parsing.
   - Failures: `failure_reason` checks `OFFLINE_HINTS` first, then `CRASH_HINTS`, then the

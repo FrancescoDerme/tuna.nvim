@@ -52,9 +52,9 @@ function MultiRunner:row_label(tc, unsaved)
     end
     -- Named as the normal board names it, until it has an edit or a file behind it.
     if tc.bare and not unsaved then
-        return "  No input"
+        return "  no input"
     end
-    return "  TC " .. tostring(tc.tcnum)
+    return "  tc " .. tostring(tc.tcnum)
 end
 
 ---A per-testcase summary shown when a solution header row is selected.
@@ -69,7 +69,7 @@ function MultiRunner:solution_summary(hrow)
     for _, ci in ipairs(sol.case_idxs) do
         local c = self.tcdata[ci]
         local t = (c.time and c.time >= 0) and string.format(" (%.3f s)", c.time / 1000) or ""
-        lines[#lines + 1] = string.format("TC %s: %s%s", tostring(c.tcnum), c.status ~= "" and c.status or "pending", t)
+        lines[#lines + 1] = string.format("tc %s: %s%s", tostring(c.tcnum), c.status ~= "" and c.status or "pending", t)
     end
     return table.concat(lines, "\n")
 end
@@ -185,7 +185,7 @@ function MultiRunner:add_testcase_row(tcnum)
     local nums = self:testcase_numbers()
     nums[#nums + 1] = tcnum
     table.sort(nums)
-    self:lay_out(nums, nil, "NOT RUN", "TunaDone")
+    self:lay_out(nums, nil, "not run", "TunaDone")
 end
 
 ---…and deleting one removes it from every solution.
@@ -193,7 +193,7 @@ end
 function MultiRunner:remove_testcase_rows(tcnum)
     self:lay_out(vim.tbl_filter(function(n)
         return n ~= tcnum
-    end, self:testcase_numbers()), nil, "NOT RUN", "TunaDone")
+    end, self:testcase_numbers()), nil, "not run", "TunaDone")
 end
 
 ---The row of `tcnum` under the solution of `beside`, so adding or restoring a testcase
@@ -222,10 +222,10 @@ function MultiRunner:recompute_header(sol)
         local c = self.tcdata[ci]
         if core.judged(c.status) then
             total = total + 1
-            if c.status == "CORRECT" then
+            if c.status == "correct" then
                 correct = correct + 1
             end
-        elseif c.status == "" or c.status == "RUNNING" or c.judging then
+        elseif c.status == "" or c.status == "running" or c.judging then
             pending = true
         end
     end
@@ -251,7 +251,7 @@ function MultiRunner:set_cases(sol, status, hl)
 end
 
 ---Compile one solution (no-op for interpreted languages), reporting via `cb(ok)`.
----A failure becomes a `CE` header row (cases marked `—`) shown in the UI. A build this
+---A failure becomes a `ce` header row (cases marked `—`) shown in the UI. A build this
 ---session already made from the same source, headers and command is reused, as in every
 ---mode (`tools.reuse_build`).
 ---@param sol table
@@ -270,7 +270,7 @@ function MultiRunner:compile_solution(sol, cb)
     self:update_ui(true)
     utils.ensure_directory(self.compdir)
     -- pcall'd: a compiler that is not installed makes `vim.system` itself throw, and
-    -- that is this solution's CE, not an editor error.
+    -- that is this solution's `ce`, not an editor error.
     local ok, err = pcall(
         vim.system,
         vim.list_extend({ sol.cc.exec }, vim.deepcopy(sol.cc.args)),
@@ -279,7 +279,7 @@ function MultiRunner:compile_solution(sol, cb)
             vim.schedule(function()
                 hrow.compile_output = (res.stdout or "") .. (res.stderr or "")
                 if res.code ~= 0 then
-                    hrow.status, hrow.hlgroup = "CE", "TunaWarning"
+                    hrow.status, hrow.hlgroup = "ce", "TunaWarning"
                     self:set_cases(sol, "—", "TunaDone")
                     self:update_ui(true)
                     return cb(false)
@@ -291,7 +291,7 @@ function MultiRunner:compile_solution(sol, cb)
     )
     if not ok then
         hrow.compile_output = tostring(err)
-        hrow.status, hrow.hlgroup = "CE", "TunaWarning"
+        hrow.status, hrow.hlgroup = "ce", "TunaWarning"
         self:set_cases(sol, "—", "TunaDone")
         self:update_ui(true)
         cb(false)

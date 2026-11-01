@@ -64,9 +64,9 @@ end
 
 -- The runner UI's verdict words and colours, so a status reads the same here as there.
 local VERDICT = {
-    accepted = { "ACCEPTED", "TunaCorrect" },
-    rejected = { "REJECTED", "TunaWrong" },
-    partial = { "PARTIAL", "TunaWarning" },
+    accepted = { "accepted", "TunaCorrect" },
+    rejected = { "rejected", "TunaWrong" },
+    partial = { "partial", "TunaWarning" },
 }
 
 ---How a problem went, as `{ text, highlight? }` segments, in the order the user asks for it:
@@ -86,7 +86,7 @@ local function entry_status(path)
     end
     local passed, total = require("tuna.run.core").local_verdict(path)
     if passed then
-        return { { passed .. "/" .. total .. " " }, { "PASSED", passed == total and "TunaCorrect" or "TunaWrong" } }
+        return { { passed .. "/" .. total .. " " }, { "passed", passed == total and "TunaCorrect" or "TunaWrong" } }
     end
     return {}
 end
@@ -107,7 +107,7 @@ local function local_status(problems)
             end
         end
     end
-    return { { passed .. "/" .. #problems .. " " }, { "PASSED", passed > 0 and "TunaCorrect" or "TunaDone" } }
+    return { { passed .. "/" .. #problems .. " " }, { "passed", passed > 0 and "TunaCorrect" or "TunaDone" } }
 end
 
 -- Which verdict settles a problem with several versions, the higher rank winning: a rejected
@@ -131,12 +131,12 @@ end
 
 ---How a contest is going, over every problem in it, as `{ text, highlight? }` segments: how
 ---many the judge accepted out of all of them, then how many it rejected or accepted in part,
----e.g. `2/5 ACCEPTED, 1 REJECTED`. A problem counts once, by the best verdict of its versions
+---e.g. `2/5 accepted, 1 rejected`. A problem counts once, by the best verdict of its versions
 ---(`contest_versions`), so the count does not depend on which version was last opened. Only
 ---judge verdicts count, a local verdict existing only for problems that were run. A count is
 ---never coloured, and a word is dimmed at zero.
 ---Where no verdict can reach tuna at all — nothing reports one back for this judge
----(`submit.reports_verdict`) — it counts what passed locally instead: `0/7 ACCEPTED` would be
+---(`submit.reports_verdict`) — it counts what passed locally instead: `0/7 accepted` would be
 ---a claim about an answer nobody can hear, and would stay at zero forever.
 ---@param contest tuna.RecentContest?
 ---@return { [1]: string, [2]: string? }[]
@@ -329,47 +329,47 @@ local function command_entries(sol, cur)
                 commands.dispatch_mode(m, {}, sol)
             end
         end
-        add(("Run (%s, %s)"):format(mode, forced == mode and "forced" or "automatic"), function()
+        add(("run (%s, %s)"):format(mode, forced == mode and "forced" or "automatic"), function()
             commands.dispatch_mode(mode, {}, sol)
         end)
         if forced then
-            add("Make the run mode automatic", function()
+            add("make the run mode automatic", function()
                 tools.set_mode(path, nil)
                 commands.dispatch_mode((tools.resolve_mode(path, cfg)), {}, sol)
             end)
         end
         if mode ~= "all" and #tools.solutions_in(vim.fs.dirname(path), cfg) > 1 then
-            add("Run all versions", switch("all"))
+            add("run all versions", switch("all"))
         end
         if mode ~= "stress" and tools.helper("generator", path, cfg) then
-            add("Stress test", switch("stress"))
+            add("stress test", switch("stress"))
         end
         -- With no interactor beside it, as an interactive problem can run live without one.
         if mode ~= "interactive" then
-            add("Interactive", switch("interactive"))
+            add("interactive", switch("interactive"))
         end
-        add("Show runner UI", function()
+        add("show runner ui", function()
             commands.show_runner_ui(sol)
         end)
-        add("Submit", function()
+        add("submit", function()
             require("tuna.problem.submit").submit(sol)
         end)
         local checker = tools.resolve_checker(path, cfg)
         local checker_label = tools.checker_setting(path) == "off" and "off"
             or ("automatic, " .. (type(checker) == "table" and vim.fn.fnamemodify(checker.source or checker.exec, ":t") or "none found"))
-        add("Checker: " .. checker_label, function()
+        add("checker: " .. checker_label, function()
             commands.set_checker(sol, tools.checker_setting(path) == "off" and "auto" or "off")
         end)
-        add("Compare: " .. cmp_label, function()
+        add("compare: " .. cmp_label, function()
             commands.cycle_compare(sol)
         end)
         add(
-            "Scaffold",
+            "scaffold",
             choices_of(
-                "Scaffold",
+                "scaffold",
                 vim.tbl_map(function(role)
                     return {
-                        label = role:sub(1, 1):upper() .. role:sub(2),
+                        label = role,
                         run = function()
                             require("tuna.workspace.scaffold").create(role, cur)
                         end,
@@ -377,19 +377,19 @@ local function command_entries(sol, cur)
                 end, tools.SCAFFOLDS)
             )
         )
-        add(require("tuna.workspace.recent").is_pinned(path) and "Unpin this problem" or "Pin this problem", function()
+        add(require("tuna.workspace.recent").is_pinned(path) and "unpin this problem" or "pin this problem", function()
             commands.toggle_pin(sol)
         end)
     end
 
     -- Always available: nothing here needs a solution to act on.
     add(
-        "Download",
+        "download",
         choices_of(
-            "Download",
+            "download",
             vim.tbl_map(function(what)
                 return {
-                    label = what:sub(1, 1):upper() .. what:sub(2),
+                    label = what,
                     run = function()
                         commands.execute({ "download", what })
                     end,
@@ -397,13 +397,13 @@ local function command_entries(sol, cur)
             end, { "testcases", "problem", "contest" })
         )
     )
-    add("Scratch", function()
+    add("scratch", function()
         require("tuna.workspace.scratch").start()
     end)
-    add("Library", function()
+    add("library", function()
         require("tuna.workspace.library").open(cur)
     end)
-    add("Clean unused files", function()
+    add("clean unused files", function()
         require("tuna.workspace.clean").clean(sol)
     end)
     return out
@@ -424,7 +424,7 @@ end
 
 ---A status in its three parts: the count that leads it (`2/7 `, `3/4 `, or nothing), the
 ---verdict word (the first coloured segment), and whatever a contest counts besides
----(`, 1 REJECTED`). The count and the word each get a column of their own, filled from the
+---(`, 1 rejected`). The count and the word each get a column of their own, filled from the
 ---right, so the counts stack however long the words beside them are and the words end on one
 ---edge however long the counts are.
 ---@param status table[]
@@ -571,11 +571,11 @@ function M.open(bufnr)
     end
 
     require("tuna.ui.widgets").panels({
-        { title = "Contests", format = format(1), column = 1 },
-        { title = "Problems", format = format(2), column = 1 },
-        { title = "Pinned", format = format(3), column = 1 },
-        { items = { "Press / to search" }, hint = true, column = 2 },
-        { title = "Catch of the day", items = labels, column = 2 },
+        { title = "contests", format = format(1), column = 1 },
+        { title = "problems", format = format(2), column = 1 },
+        { title = "pinned", format = format(3), column = 1 },
+        { items = { "press / to search" }, hint = true, column = 2 },
+        { title = "catch of the day", items = labels, column = 2 },
     }, function(section, idx)
         if lists[section] then
             local e = lists[section][idx]

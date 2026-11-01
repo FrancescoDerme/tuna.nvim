@@ -9,6 +9,14 @@ local M = {}
 
 local download_started = false
 
+---How strongly each cell of a fading label still shows, in order, from the first towards the
+---tag that covers the rest: `TunaFade1` and on (see `widgets.menu`).
+M.FADE = { 0.85, 0.75, 0.65, 0.55, 0.45, 0.35 }
+
+-- The definition `setup_fades` last gave each `TunaFade` group, to tell a group of its own from
+-- one a user has taken over.
+local fades_given = {}
+
 ---@private
 ---Lay `fg` over `bg` at `alpha` opacity, both 24-bit RGB. Used to tint a highlight
 ---towards a colour without painting it at full strength.
@@ -56,9 +64,9 @@ function M.setup_highlight_groups()
         --
         -- A concrete colour, since it has to stand apart from the grey `FloatBorder`
         -- beside it, which a colorscheme's semantic groups often don't. Magenta is the
-        -- one hue this plugin doesn't already spend — green is CORRECT, red WRONG, amber
-        -- WARNING/EDITED — and it reads as "special" rather than as a verdict. Bold,
-        -- since a border is one cell thin. `default = true`, so a colorscheme defining
+        -- one hue this plugin doesn't already spend, green being `correct`, red `wrong` and
+        -- amber a warning, and it reads as "special" rather than as a verdict. Bold, since a
+        -- border is one cell thin. `default = true`, so a colorscheme defining
         -- `TunaEditable` still wins, and `runner_ui.editable_border_highlight` points
         -- at any group you like.
         TunaEditable = { ctermfg = "magenta", fg = "#c678dd", bold = true },
@@ -73,6 +81,30 @@ function M.setup_highlight_groups()
     for name, val in pairs(groups) do
         val.default = true
         vim.api.nvim_set_hl(0, name, val)
+    end
+    M.setup_fades()
+end
+
+---The `TunaFade` groups, mixing the float's text into the float's background as they stand, so
+---they follow the theme. Run as a label fades as well as on `ColorScheme`, as a float's colours
+---are often set straight after a colorscheme, with no event to say so. A transparent background
+---leaves nothing to mix with, so the label is plainly cut off there, as it is where colours
+---cannot be given in RGB. A group given another colour is left to whoever gave it.
+function M.setup_fades()
+    local normal = vim.api.nvim_get_hl(0, { name = "Normal", link = false })
+    local float = vim.api.nvim_get_hl(0, { name = "NormalFloat", link = false })
+    local text, behind = float.fg or normal.fg, float.bg or normal.bg
+    for i, alpha in ipairs(M.FADE) do
+        local name = "TunaFade" .. i
+        local have = vim.api.nvim_get_hl(0, { name = name })
+        if next(have) == nil or vim.deep_equal(have, fades_given[i]) then
+            local want = text and behind and { fg = blend(text, behind, alpha) } or {}
+            -- Only a change: setting a group redraws every window, even to what it was.
+            if not vim.deep_equal(have, want) then
+                vim.api.nvim_set_hl(0, name, want)
+            end
+            fades_given[i] = want
+        end
     end
 end
 

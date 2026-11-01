@@ -887,7 +887,7 @@ end
 local function file_preview(f)
     local stat = f.build and vim.uv.fs_stat(f.path)
     local about = stat
-        and ("A compiled program, %d KiB, built %s."):format(
+        and ("a compiled program, %d KiB, built %s."):format(
             math.ceil(stat.size / 1024),
             os.date("%Y-%m-%d %H:%M", stat.mtime.sec)
         )
@@ -919,7 +919,7 @@ local function confirm_each(files, i, restore, stats, ui, done)
     -- A pinned file starts on Keep, whatever was answered last: a run of Deletes must not carry
     -- a problem put aside on purpose along with it.
     local start = f.pinned and 2 or ui.row
-    widgets.menu({ "Delete", "Keep", "Stop" }, confirm_title(files, i), function(idx)
+    widgets.menu({ "delete", "keep", "stop" }, confirm_title(files, i), function(idx)
         -- The next prompt starts on this answer, so a run of the same one is a key each.
         ui.row = idx
         if idx == 3 then -- Stop
@@ -952,7 +952,7 @@ local function confirm_each(files, i, restore, stats, ui, done)
             end
         end
         confirm_each(files, i + 1, restore, stats, ui, done) -- idx 2 (Keep) lands here too
-    end, restore, nil, preview, ui.notice, start)
+    end, restore, nil, preview, { notice = ui.notice, row = start })
 end
 
 ---Wipe the buffers backing anything inside a directory that is about to be removed,
@@ -1022,7 +1022,7 @@ local function confirm_dirs(dirs, i, restore, stats, ui, done)
     -- Listed now: a child the pass has deleted since its start is gone from it.
     local preview = { title = d.rel .. "/", lines = dir_listing(d.path), width = ui.width }
     local title = ("[%d/%d] %s"):format(i, #dirs, prune_reason(d))
-    widgets.menu({ "Delete", "Keep", "Stop" }, title, function(idx)
+    widgets.menu({ "delete", "keep", "stop" }, title, function(idx)
         ui.row = idx -- the next prompt starts on this answer, as in `confirm_each`
         if idx == 3 then -- Stop
             stats.stopped = true
@@ -1045,7 +1045,7 @@ local function confirm_dirs(dirs, i, restore, stats, ui, done)
             end
         end
         confirm_dirs(dirs, i + 1, restore, stats, ui, done)
-    end, restore, nil, preview, ui.notice, ui.row)
+    end, restore, nil, preview, { notice = ui.notice, row = ui.row })
 end
 
 ---The pane shown above every confirmation when a scan could not cover its whole tree,
@@ -1060,13 +1060,13 @@ local function truncation_notice(stats, dir, cfg)
         return nil
     end
     return {
-        title = "Partial scan",
+        title = "partial scan",
         lines = {
             ("'%s' holds more than %d entries, so only part of it was searched."):format(
                 dir,
                 (cfg.clean or {}).max_entries or 20000
             ),
-            "Scan a narrower directory, or lower the recursion depth, to cover the rest.",
+            "scan a narrower directory, or lower the recursion depth, to cover the rest.",
         },
     }
 end
@@ -1130,15 +1130,15 @@ end
 -- Recursion-depth choices (default first); the form appends an editable row for any
 -- other depth.
 local DEPTH_CHOICES = {
-    { "Infinite (all subdirectories)", math.huge },
-    { "Only this directory", 1 },
+    { "infinite (all subdirectories)", math.huge },
+    { "only this directory", 1 },
 }
 
 -- Similarity-threshold choices (default first); the form appends an editable row for
 -- any other percentage. A file is unused when its similarity to the template is at
 -- least this.
 local THRESHOLD_CHOICES = {
-    { "Full match (100%)", 1.0 },
+    { "full match (100%)", 1.0 },
     { "95% match", 0.95 },
 }
 
@@ -1338,19 +1338,19 @@ function M.clean(bufnr)
     widgets.form(
         {
             {
-                title = "Directory",
+                title = "directory",
                 items = dir_labels,
-                custom = { label = "Custom: ", default = "", validate = validate_dir },
+                custom = { label = "custom: ", default = "", validate = validate_dir },
             },
             {
-                title = "Recursion depth",
+                title = "recursion depth",
                 items = labels_of(DEPTH_CHOICES),
-                custom = { label = "Custom: ", default = "", validate = validate_depth },
+                custom = { label = "custom: ", default = "", validate = validate_depth },
             },
             {
-                title = "Match threshold",
+                title = "match threshold",
                 items = labels_of(THRESHOLD_CHOICES),
-                custom = { label = "Custom: ", default = "", validate = validate_threshold },
+                custom = { label = "custom: ", default = "", validate = validate_threshold },
             },
         },
         function(results)

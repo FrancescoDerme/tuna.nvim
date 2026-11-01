@@ -41,25 +41,25 @@ t.write(contest .. "/E", "checker.cpp", "int main() {}\n") -- a helper alone is 
 vim.fn.mkdir(contest .. "/.git", "p")
 t.eq("every problem directory counts, verdicts summed, only the words coloured", menu.contest_status({ dir = contest, name = "c" }), {
     { "1/4 " },
-    { "ACCEPTED", "TunaCorrect" },
+    { "accepted", "TunaCorrect" },
     { ", " },
     { "1 " },
-    { "REJECTED", "TunaWrong" },
+    { "rejected", "TunaWrong" },
     { ", " },
     { "1 " },
-    { "PARTIAL", "TunaWarning" },
+    { "partial", "TunaWarning" },
 })
 
 -- A verdict for a source edited since describes a different program.
 t.write(contest .. "/A", "main.cpp", "int main() { return 1; }\n")
-t.eq("a verdict the file has moved past is not counted, and none accepted is dimmed", vim.list_slice(menu.contest_status({ dir = contest, name = "c" }), 1, 2), { { "0/4 " }, { "ACCEPTED", "TunaDone" } })
+t.eq("a verdict the file has moved past is not counted, and none accepted is dimmed", vim.list_slice(menu.contest_status({ dir = contest, name = "c" }), 1, 2), { { "0/4 " }, { "accepted", "TunaDone" } })
 
 -- Problems as plain files in the contest directory.
 local flat = t.tempdir()
 solution(flat, "a.cpp", "accepted")
 solution(flat, "b.cpp", nil)
 t.write(flat, "gen.cpp", "int main() {}\n")
-t.eq("plain files are problems too, helpers aside", menu.contest_status({ dir = flat, name = "f" }), { { "1/2 " }, { "ACCEPTED", "TunaCorrect" } })
+t.eq("plain files are problems too, helpers aside", menu.contest_status({ dir = flat, name = "f" }), { { "1/2 " }, { "accepted", "TunaCorrect" } })
 
 -- Several versions of a problem, each with a verdict of its own.
 local versions = t.tempdir()
@@ -77,13 +77,13 @@ for problem, files in pairs({
 end
 local summary = {
     { "3/5 " },
-    { "ACCEPTED", "TunaCorrect" },
+    { "accepted", "TunaCorrect" },
     { ", " },
     { "1 " },
-    { "REJECTED", "TunaWrong" },
+    { "rejected", "TunaWrong" },
     { ", " },
     { "1 " },
-    { "PARTIAL", "TunaWarning" },
+    { "partial", "TunaWarning" },
 }
 t.eq("a problem counts once, by the best verdict of its versions", menu.contest_status({ dir = versions, name = "v" }), summary)
 for _, last in ipairs({ "/A/main.cpp", "/A/main2.cpp", "/D/main.cpp" }) do
@@ -100,10 +100,10 @@ flat_store.task = { ["a.cpp"] = { url = "https://x/a" }, ["a2.cpp"] = { url = "h
 t.write(flat_versions, ".tuna.json", vim.json.encode(flat_store))
 t.eq("and plain files naming one problem are its versions", menu.contest_status({ dir = flat_versions, name = "fv" }), {
     { "1/2 " },
-    { "ACCEPTED", "TunaCorrect" },
+    { "accepted", "TunaCorrect" },
     { ", " },
     { "1 " },
-    { "REJECTED", "TunaWrong" },
+    { "rejected", "TunaWrong" },
 })
 
 --------------------------------------------------------------------------------
@@ -126,8 +126,8 @@ for _, name in ipairs({ "A", "B", "C" }) do
         vim.json.encode({ task = { ["main.cpp"] = { url = "https://atcoder.jp/contests/abc1/tasks/abc1_" .. name:lower() } } })
     )
 end
-core.save_local_verdict(blind .. "/A/main.cpp", { { tcnum = 0, status = "CORRECT" } })
-core.save_local_verdict(blind .. "/B/main.cpp", { { tcnum = 0, status = "WRONG" } })
+core.save_local_verdict(blind .. "/A/main.cpp", { { tcnum = 0, status = "correct" } })
+core.save_local_verdict(blind .. "/B/main.cpp", { { tcnum = 0, status = "wrong" } })
 
 local submit = require("tuna.problem.submit")
 local blind_a = blind .. "/A/main.cpp"
@@ -144,28 +144,28 @@ end
 require("tuna").setup({ submit = { judges = { atcoder = { provider = "browser" } } } })
 t.eq("so the contest counts what passed locally, in that word", menu.contest_status({ dir = blind, name = "abc1" }), {
     { "1/3 " },
-    { "PASSED", "TunaCorrect" },
+    { "passed", "TunaCorrect" },
 })
-t.eq("a problem says what it always said", menu.entry_status(blind_a), { { "1/1 " }, { "PASSED", "TunaCorrect" } })
+t.eq("a problem says what it always said", menu.entry_status(blind_a), { { "1/1 " }, { "passed", "TunaCorrect" } })
 
 -- Second versions: A's passes as its first does, B's passes where its first did not, and C's
 -- does not.
 solution(blind .. "/A", "main2.cpp")
 solution(blind .. "/B", "main2.cpp")
 solution(blind .. "/C", "main2.cpp")
-core.save_local_verdict(blind .. "/A/main2.cpp", { { tcnum = 0, status = "CORRECT" } })
-core.save_local_verdict(blind .. "/B/main2.cpp", { { tcnum = 0, status = "CORRECT" } })
-core.save_local_verdict(blind .. "/C/main2.cpp", { { tcnum = 0, status = "WRONG" } })
+core.save_local_verdict(blind .. "/A/main2.cpp", { { tcnum = 0, status = "correct" } })
+core.save_local_verdict(blind .. "/B/main2.cpp", { { tcnum = 0, status = "correct" } })
+core.save_local_verdict(blind .. "/C/main2.cpp", { { tcnum = 0, status = "wrong" } })
 t.eq("a problem passes when any of its versions does, counted once", menu.contest_status({ dir = blind, name = "abc1", problem = blind .. "/B/main.cpp" }), {
     { "2/3 " },
-    { "PASSED", "TunaCorrect" },
+    { "passed", "TunaCorrect" },
 })
 
 require("tuna").setup({})
 t.eq(
     "and a judge that can answer is still counted as the judge",
     vim.list_slice(menu.contest_status({ dir = blind, name = "abc1" }), 1, 2),
-    { { "0/3 " }, { "ACCEPTED", "TunaDone" } }
+    { { "0/3 " }, { "accepted", "TunaDone" } }
 )
 
 t.eq("a contest with no problems says nothing", menu.contest_status({ dir = t.tempdir(), name = "e" }), {})
@@ -175,37 +175,37 @@ t.eq("and neither does one whose directory is gone", menu.contest_status({ dir =
 -- A problem: the judge's verdict, else the local one
 --------------------------------------------------------------------------------
 
-t.eq("an accepted problem reads ACCEPTED, in green", menu.entry_status(flat .. "/a.cpp"), { { "ACCEPTED", "TunaCorrect" } })
-t.eq("a rejected one REJECTED, in red", menu.entry_status(contest .. "/B/main.cpp"), { { "REJECTED", "TunaWrong" } })
+t.eq("an accepted problem reads accepted, in green", menu.entry_status(flat .. "/a.cpp"), { { "accepted", "TunaCorrect" } })
+t.eq("a rejected one rejected, in red", menu.entry_status(contest .. "/B/main.cpp"), { { "rejected", "TunaWrong" } })
 t.eq("one with nothing to say says nothing", menu.entry_status(flat .. "/b.cpp"), {})
 
 core.save_local_verdict(flat .. "/b.cpp", {
-    { tcnum = "Compile", status = "CORRECT" }, -- not a testcase
-    { tcnum = 0, status = "CORRECT" },
-    { tcnum = 1, status = "WRONG" },
-    { tcnum = 2, status = "TIMEOUT" },
-    { tcnum = 3, status = "RET 1" },
-    { tcnum = 4, status = "SIG 11" },
-    { tcnum = 5, status = "DONE" },
-    { tcnum = 6, status = "KILLED" },
-    { tcnum = 7, status = "FAILED" },
-    { tcnum = 8, status = "NOT RUN" },
+    { tcnum = "compile", status = "correct" }, -- not a testcase
+    { tcnum = 0, status = "correct" },
+    { tcnum = 1, status = "wrong" },
+    { tcnum = 2, status = "timeout" },
+    { tcnum = 3, status = "ret 1" },
+    { tcnum = 4, status = "sig 11" },
+    { tcnum = 5, status = "done" },
+    { tcnum = 6, status = "killed" },
+    { tcnum = 7, status = "failed" },
+    { tcnum = 8, status = "not run" },
 })
 t.eq("a run's local verdict counts the testcases it judged", { core.local_verdict(flat .. "/b.cpp") }, { 1, 5 })
-t.eq("a problem the judge has not spoken on shows it, only the word coloured", menu.entry_status(flat .. "/b.cpp"), { { "1/5 " }, { "PASSED", "TunaWrong" } })
-core.save_local_verdict(flat .. "/b.cpp", { { tcnum = 0, status = "DONE" } })
+t.eq("a problem the judge has not spoken on shows it, only the word coloured", menu.entry_status(flat .. "/b.cpp"), { { "1/5 " }, { "passed", "TunaWrong" } })
+core.save_local_verdict(flat .. "/b.cpp", { { tcnum = 0, status = "done" } })
 t.eq("a run that judged nothing leaves the saved verdict alone", { core.local_verdict(flat .. "/b.cpp") }, { 1, 5 })
-core.save_local_verdict(flat .. "/b.cpp", { { tcnum = 0, status = "CORRECT" }, { tcnum = 1, status = "CORRECT" } })
-t.eq("all passing is green", menu.entry_status(flat .. "/b.cpp"), { { "2/2 " }, { "PASSED", "TunaCorrect" } })
+core.save_local_verdict(flat .. "/b.cpp", { { tcnum = 0, status = "correct" }, { tcnum = 1, status = "correct" } })
+t.eq("all passing is green", menu.entry_status(flat .. "/b.cpp"), { { "2/2 " }, { "passed", "TunaCorrect" } })
 t.write(flat, "b.cpp", "int main() { return 2; }\n")
 t.eq("a local verdict the source has moved past is not shown", menu.entry_status(flat .. "/b.cpp"), {})
 
-core.save_local_verdict(flat .. "/a.cpp", { { tcnum = 0, status = "WRONG" } })
-t.eq("a judge verdict still describing the source wins over a local one", menu.entry_status(flat .. "/a.cpp"), { { "ACCEPTED", "TunaCorrect" } })
+core.save_local_verdict(flat .. "/a.cpp", { { tcnum = 0, status = "wrong" } })
+t.eq("a judge verdict still describing the source wins over a local one", menu.entry_status(flat .. "/a.cpp"), { { "accepted", "TunaCorrect" } })
 t.write(flat, "a.cpp", "int main() { return 3; }\n")
-core.save_local_verdict(flat .. "/a.cpp", { { tcnum = 0, status = "WRONG" } })
-t.eq("once the source changes, the new run's local verdict shows", menu.entry_status(flat .. "/a.cpp"), { { "0/1 " }, { "PASSED", "TunaWrong" } })
-t.eq("a contest counts judge verdicts only", vim.list_slice(menu.contest_status({ dir = flat, name = "f" }), 1, 2), { { "0/2 " }, { "ACCEPTED", "TunaDone" } })
+core.save_local_verdict(flat .. "/a.cpp", { { tcnum = 0, status = "wrong" } })
+t.eq("once the source changes, the new run's local verdict shows", menu.entry_status(flat .. "/a.cpp"), { { "0/1 " }, { "passed", "TunaWrong" } })
+t.eq("a contest counts judge verdicts only", vim.list_slice(menu.contest_status({ dir = flat, name = "f" }), 1, 2), { { "0/2 " }, { "accepted", "TunaDone" } })
 local keys = vim.tbl_keys(vim.json.decode(table.concat(vim.fn.readfile(flat .. "/.tuna.json"), "\n")))
 table.sort(keys)
 t.eq("the local verdict sits beside the judge's in the sidecar", keys, { "results", "submit" })
@@ -214,11 +214,11 @@ t.eq("the local verdict sits beside the judge's in the sidecar", keys, { "result
 -- The rows, and where their colours go
 --------------------------------------------------------------------------------
 
-local contests = { { judge = "codeforces", name = "2263", status = { { "1/2 " }, { "ACCEPTED", "TunaCorrect" }, { ", " }, { "1 " }, { "REJECTED", "TunaWrong" } } } }
+local contests = { { judge = "codeforces", name = "2263", status = { { "1/2 " }, { "accepted", "TunaCorrect" }, { ", " }, { "1 " }, { "rejected", "TunaWrong" } } } }
 local problems = {
-    { name = "A", status = { { "ACCEPTED", "TunaCorrect" } } },
+    { name = "A", status = { { "accepted", "TunaCorrect" } } },
     { name = "C2. Floor of MEX (Hard Version)", status = {} },
-    { name = "C", status = { { "3/4 " }, { "PASSED", "TunaWrong" } } },
+    { name = "C", status = { { "3/4 " }, { "passed", "TunaWrong" } } },
 }
 local lists = { contests, problems }
 
@@ -233,12 +233,12 @@ local function covered(laid)
     return out
 end
 local WORDS = {
-    { { 1, "ACCEPTED", "TunaCorrect" }, { 1, "REJECTED", "TunaWrong" } },
-    { { 1, "ACCEPTED", "TunaCorrect" }, { 3, "PASSED", "TunaWrong" } },
+    { { 1, "accepted", "TunaCorrect" }, { 1, "rejected", "TunaWrong" } },
+    { { 1, "accepted", "TunaCorrect" }, { 3, "passed", "TunaWrong" } },
 }
 
 ---Where each row's verdict ends: the edge that has to be the same everywhere, whether the
----verdict is a judge's (`ACCEPTED`) or a run's (`3/4 PASSED`), counted or not.
+---verdict is a judge's (`accepted`) or a run's (`3/4 passed`), counted or not.
 local function verdict_columns(laid)
     local cols = {}
     for _, list in ipairs(laid) do
@@ -267,14 +267,14 @@ local function count_columns(laid)
     return cols
 end
 
--- Names are 31 cells at most ("C2. …"), counts 4 ("1/2 ") and verdicts 8 ("ACCEPTED"), with
--- ", 1 REJECTED" trailing past the edge the verdicts end on.
+-- Names are 31 cells at most ("C2. …"), counts 4 ("1/2 ") and verdicts 8 ("accepted"), with
+-- ", 1 rejected" trailing past the edge the verdicts end on.
 local laid = menu.recent_layout(lists)
-t.eq("a contest row is its judge and name, then its status", laid[1].rows, { "codeforces 2263" .. (" "):rep(18) .. "1/2 ACCEPTED, 1 REJECTED" })
+t.eq("a contest row is its judge and name, then its status", laid[1].rows, { "codeforces 2263" .. (" "):rep(18) .. "1/2 accepted, 1 rejected" })
 t.eq("a status sits right of the longest name, its count before its verdict", laid[2].rows, {
-    "A" .. (" "):rep(36) .. "ACCEPTED",
+    "A" .. (" "):rep(36) .. "accepted",
     "C2. Floor of MEX (Hard Version)",
-    "C" .. (" "):rep(32) .. "3/4   PASSED",
+    "C" .. (" "):rep(32) .. "3/4   passed",
 })
 t.eq("and every verdict ends on the same edge, counted or not", verdict_columns(laid), { 45, 45, 45 })
 t.eq("while the counts stack, whatever stands beside them", count_columns(laid), { 36, 36 })
@@ -291,15 +291,15 @@ local function widest(l)
 end
 laid = menu.recent_layout(lists, 40)
 t.eq("too narrow, the names give way, a contest's judge first", { laid[1].rows, laid[2].rows }, {
-    { "codeforc… 2263  1/2 ACCEPTED, 1 REJECTED" },
-    { "A" .. (" "):rep(19) .. "ACCEPTED", "C2. Floor of…", "C" .. (" "):rep(15) .. "3/4   PASSED" },
+    { "codeforc… 2263  1/2 accepted, 1 rejected" },
+    { "A" .. (" "):rep(19) .. "accepted", "C2. Floor of…", "C" .. (" "):rep(15) .. "3/4   passed" },
 })
 t.eq("and the rows fit", widest(laid), 40)
 t.eq("the verdicts still ending together", verdict_columns(laid), { 28, 28, 28 })
 t.eq("and the counts still stacked", count_columns(laid), { 19, 19 })
 t.eq("with the colours still on their words", covered(laid), WORDS)
 laid = menu.recent_layout(lists, 30)
-t.eq("narrower still, the judge goes and the names shorten", { laid[1].rows[1], laid[2].rows[2] }, { "2263  1/2 ACCEPTED, 1 REJECTED", "C2.…" })
+t.eq("narrower still, the judge goes and the names shorten", { laid[1].rows[1], laid[2].rows[2] }, { "2263  1/2 accepted, 1 rejected", "C2.…" })
 t.eq("statuses whole all the same", widest(laid), 30)
 
 t.eq("problems are named by their directory, told apart by what differs", menu.problem_names({
@@ -393,7 +393,7 @@ for _, name in ipairs({ "Contests", "Problems" }) do
     end
 end
 t.ok("the recent lists are laid out again for the width they get", fitted, { lines(b.Contests.win), lines(b.Problems.win), b.Problems.width })
-t.ok("keeping their statuses whole", lines(b.Problems.win)[3]:match("3/4%s+PASSED$") ~= nil, lines(b.Problems.win))
+t.ok("keeping their statuses whole", lines(b.Problems.win)[3]:match("3/4%s+passed$") ~= nil, lines(b.Problems.win))
 t.eq("and their colours", marks(b.Problems.win), 2)
 vim.o.columns = 140
 press("<Esc>")
@@ -459,7 +459,7 @@ for _, w in ipairs(api.nvim_list_wins()) do
     end
 end
 table.sort(titles)
-t.eq("the menu's lists, the commands being the catch of the day", titles, { "Catch of the day", "Contests", "Pinned", "Problems" })
+t.eq("the menu's lists, the commands being the catch of the day", titles, { "catch of the day", "contests", "pinned", "problems" })
 t.ok("the banner is drawn", banner ~= nil)
 if banner then
     t.ok("with no border around it", borderless(banner.config), banner.config.border)
@@ -491,24 +491,24 @@ do
     vim.cmd("edit " .. pinned[30])
     require("tuna.menu").open()
     local b = board()
-    local pin = b.Pinned
+    local pin = b.pinned
     t.ok("the Pinned list is drawn", pin ~= nil)
     if pin then
         local c = api.nvim_win_get_config(pin.win)
         local lines = api.nvim_buf_get_lines(api.nvim_win_get_buf(pin.win), 0, -1, false)
-        t.eq("every pin is listed, the most recent first", { #lines, lines[1]:match("ACCEPTED") }, { 30, "ACCEPTED" })
+        t.eq("every pin is listed, the most recent first", { #lines, lines[1]:match("accepted") }, { 30, "accepted" })
         t.ok("in fewer rows than it has, so it scrolls", c.height < 30, c.height)
         t.ok("and the board stays inside the editor", c.row + c.height + 2 <= vim.o.lines, c.row + c.height)
-        t.ok("under Contests and Problems", c.row > api.nvim_win_get_config(b.Problems.win).row)
+        t.ok("under Contests and Problems", c.row > api.nvim_win_get_config(b.problems.win).row)
     end
-    local cmds = b["Catch of the day"] and api.nvim_buf_get_lines(api.nvim_win_get_buf(b["Catch of the day"].win), 0, -1, false) or {}
-    t.ok("a pinned problem offers to unpin itself", vim.tbl_contains(cmds, "Unpin this problem"), cmds)
+    local cmds = b["catch of the day"] and api.nvim_buf_get_lines(api.nvim_win_get_buf(b["catch of the day"].win), 0, -1, false) or {}
+    t.ok("a pinned problem offers to unpin itself", vim.tbl_contains(cmds, "unpin this problem"), cmds)
     press("<Esc>")
     recent.unpin(pinned[30])
     require("tuna.menu").open()
     b = board()
-    cmds = b["Catch of the day"] and api.nvim_buf_get_lines(api.nvim_win_get_buf(b["Catch of the day"].win), 0, -1, false) or {}
-    t.ok("and an unpinned one to pin itself", vim.tbl_contains(cmds, "Pin this problem"), cmds)
+    cmds = b["catch of the day"] and api.nvim_buf_get_lines(api.nvim_win_get_buf(b["catch of the day"].win), 0, -1, false) or {}
+    t.ok("and an unpinned one to pin itself", vim.tbl_contains(cmds, "pin this problem"), cmds)
     press("<Esc>")
 
     -- A header with no solution beside it has the solution's filetype but nothing to run.
@@ -517,9 +517,9 @@ do
     vim.cmd("edit " .. lone .. "/debug.h")
     require("tuna.menu").open()
     b = board()
-    cmds = b["Catch of the day"] and api.nvim_buf_get_lines(api.nvim_win_get_buf(b["Catch of the day"].win), 0, -1, false) or {}
+    cmds = b["catch of the day"] and api.nvim_buf_get_lines(api.nvim_win_get_buf(b["catch of the day"].win), 0, -1, false) or {}
     t.ok("a header alone is offered nothing to run or pin", #cmds > 0 and not vim.iter(cmds):any(function(c)
-        return c:find("^Run") or c:find("Pin this problem")
+        return c:find("^run") or c:find("pin this problem")
     end), cmds)
     press("<Esc>")
     vim.cmd("edit " .. pinned[30])
@@ -530,9 +530,9 @@ do
     local tools = require("tuna.run.tools")
     local function choose_checker()
         require("tuna.menu").open()
-        local win = board()["Catch of the day"].win
+        local win = board()["catch of the day"].win
         for i, line in ipairs(api.nvim_buf_get_lines(api.nvim_win_get_buf(win), 0, -1, false)) do
-            if line:find("^Checker:") then
+            if line:find("^checker:") then
                 api.nvim_set_current_win(win)
                 api.nvim_win_set_cursor(win, { i, 0 })
             end
@@ -549,23 +549,23 @@ do
     local function commands_list()
         require("tuna.menu").open()
         local b = board()
-        return api.nvim_buf_get_lines(api.nvim_win_get_buf(b["Catch of the day"].win), 0, -1, false)
+        return api.nvim_buf_get_lines(api.nvim_win_get_buf(b["catch of the day"].win), 0, -1, false)
     end
     commands_list()
     local hint
     for _, w in ipairs(api.nvim_list_wins()) do
         local c = api.nvim_win_get_config(w)
         local line = c.relative ~= "" and api.nvim_buf_get_lines(api.nvim_win_get_buf(w), 0, 1, false)[1] or ""
-        if line:find("Press / to search", 1, true) then
+        if line:find("press / to search", 1, true) then
             hint = { win = w, config = c, line = line }
         end
     end
     local b = board()
     t.ok("a hint is drawn", hint ~= nil)
     if hint then
-        t.eq("over the commands", { hint.config.col, hint.config.width }, { b["Catch of the day"].col, b["Catch of the day"].width })
-        t.eq("level with the top of the board", hint.config.row, b.Contests.row)
-        t.eq("one row tall, its border touching the list under it", b["Catch of the day"].row, hint.config.row + hint.config.height + 2)
+        t.eq("over the commands", { hint.config.col, hint.config.width }, { b["catch of the day"].col, b["catch of the day"].width })
+        t.eq("level with the top of the board", hint.config.row, b.contests.row)
+        t.eq("one row tall, its border touching the list under it", b["catch of the day"].row, hint.config.row + hint.config.height + 2)
         t.ok("and centred", hint.line:match("^%s+") ~= nil, hint.line)
         t.eq("with no cursorline to walk", vim.wo[hint.win].cursorline, false)
     end
@@ -579,16 +579,16 @@ do
         end
         return out
     end
-    t.eq("the current list alone has a cursorline", lines_on(), { "Contests" })
-    api.nvim_set_current_win(b.Problems.win)
-    t.eq("and it follows focus", lines_on(), { "Problems" })
+    t.eq("the current list alone has a cursorline", lines_on(), { "contests" })
+    api.nvim_set_current_win(b.problems.win)
+    t.eq("and it follows focus", lines_on(), { "problems" })
     local cfg = require("tuna.config").get_buffer_config(0)
-    api.nvim_set_current_win(b["Catch of the day"].win)
+    api.nvim_set_current_win(b["catch of the day"].win)
     press(cfg.switch_window_keys[3])
-    t.eq("the pane keys do not stop on it", api.nvim_get_current_win(), b["Catch of the day"].win)
-    api.nvim_set_current_win(b.Contests.win)
+    t.eq("the pane keys do not stop on it", api.nvim_get_current_win(), b["catch of the day"].win)
+    api.nvim_set_current_win(b.contests.win)
     press(cfg.switch_window_keys[4])
-    t.eq("and go past it across the board", api.nvim_get_current_win(), b["Catch of the day"].win)
+    t.eq("and go past it across the board", api.nvim_get_current_win(), b["catch of the day"].win)
     local searched
     local search = require("tuna.workspace.search")
     local open_search = search.open
@@ -598,34 +598,34 @@ do
     press("/")
     search.open = open_search
     t.eq("`/` searches from the buffer the board was over", searched, api.nvim_get_current_buf())
-    t.eq("having closed the board", board().Contests, nil)
+    t.eq("having closed the board", board().contests, nil)
 
     -- The list stays short: what does not apply to this problem has no row.
     local dir = vim.fs.dirname(pinned[30])
     local cmds2 = commands_list()
     press("<Esc>")
-    t.ok("a problem with no helpers offers no stress test", not vim.tbl_contains(cmds2, "Stress test"), cmds2)
-    t.ok("one solution has no versions to run", not vim.tbl_contains(cmds2, "Run all versions"), cmds2)
-    t.ok("interactive stays, as it can run live", vim.tbl_contains(cmds2, "Interactive"), cmds2)
+    t.ok("a problem with no helpers offers no stress test", not vim.tbl_contains(cmds2, "stress test"), cmds2)
+    t.ok("one solution has no versions to run", not vim.tbl_contains(cmds2, "run all versions"), cmds2)
+    t.ok("interactive stays, as it can run live", vim.tbl_contains(cmds2, "interactive"), cmds2)
     t.ok("a dozen rows for a plain problem", #cmds2 <= 12, cmds2)
-    for _, gone in ipairs({ "Add testcase", "Generate testcase", "Next problem", "Previous problem", "Scaffold checker", "Download problem" }) do
+    for _, gone in ipairs({ "add testcase", "generate testcase", "next problem", "previous problem", "scaffold checker", "download problem" }) do
         t.ok(gone .. " has no row of its own", not vim.tbl_contains(cmds2, gone), cmds2)
     end
     t.write(dir, "main2.cpp", "int main() {}\n")
     t.write(dir, "gen.cpp", "int main() {}\n")
     cmds2 = commands_list()
     press("<Esc>")
-    t.ok("a second solution offers run all", vim.tbl_contains(cmds2, "Run all versions"), cmds2)
+    t.ok("a second solution offers run all", vim.tbl_contains(cmds2, "run all versions"), cmds2)
     tools.set_mode(pinned[30], "all")
     local running_all = commands_list()
     press("<Esc>")
     tools.set_mode(pinned[30], nil)
-    t.ok("unless it already runs that way", not vim.tbl_contains(running_all, "Run all versions"), running_all)
-    t.ok("a generator offers a stress test", vim.tbl_contains(cmds2, "Stress test"), cmds2)
+    t.ok("unless it already runs that way", not vim.tbl_contains(running_all, "run all versions"), running_all)
+    t.ok("a generator offers a stress test", vim.tbl_contains(cmds2, "stress test"), cmds2)
     t.write(dir, "brute.cpp", "int main() {}\n")
     cmds2 = commands_list()
     press("<Esc>")
-    t.ok("and a mode a problem already runs in is not offered twice", cmds2[1]:find("stress", 1, true) and not vim.tbl_contains(cmds2, "Stress test"), cmds2)
+    t.ok("and a mode a problem already runs in is not offered twice", cmds2[1]:find("stress", 1, true) and not vim.tbl_contains(cmds2, "stress test"), cmds2)
     for _, f in ipairs({ "main2.cpp", "gen.cpp", "brute.cpp" }) do
         os.remove(dir .. "/" .. f)
     end
@@ -633,7 +633,7 @@ do
     -- Scaffold and Download open their own choices.
     local function open_row(label)
         commands_list()
-        local win = board()["Catch of the day"].win
+        local win = board()["catch of the day"].win
         api.nvim_set_current_win(win)
         for i, line in ipairs(api.nvim_buf_get_lines(api.nvim_win_get_buf(win), 0, -1, false)) do
             if line == label then
@@ -645,8 +645,8 @@ do
         press("<Esc>")
         return rows
     end
-    t.eq("Scaffold offers every role", open_row("Scaffold"), { "Solution", "Checker", "Generator", "Bruteforce", "Interactor" })
-    t.eq("Download what can be downloaded", open_row("Download"), { "Testcases", "Problem", "Contest" })
+    t.eq("Scaffold offers every role", open_row("scaffold"), { "solution", "checker", "generator", "bruteforce", "interactor" })
+    t.eq("Download what can be downloaded", open_row("download"), { "testcases", "problem", "contest" })
 end
 
 vim.fn.delete(contest, "rf")

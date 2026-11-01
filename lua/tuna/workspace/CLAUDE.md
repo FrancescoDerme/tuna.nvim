@@ -57,7 +57,7 @@ problems and remembering them. The rules that hold everywhere are in the root `C
     caller can chain it, and a role's `tool_names` as the role (`role_of`: `main`, `brute`),
     the names a user sees on the files; completion and the docs keep to the role words.
   - **A run that needs a helper it does not have offers its starter** (`create_missing`): a
-    menu naming the files (`Create gen.cpp and brute.cpp` / `Stop`), rather than a warning,
+    menu naming the files (`create gen.cpp and brute.cpp` / `stop`), rather than a warning,
     from stress and the interactor source, on the first run and on a rerun alike. It writes
     them through `create` (the language fallback included), opens the first in the editor
     window and lists the rest, and runs nothing, a starter being where a helper begins. A
@@ -78,11 +78,11 @@ problems and remembering them. The rules that hold everywhere are in the root `C
     its role's templates is never offered, an empty one included; any other empty file is
     always unused.
   - The flow is floats only: a `form` for directory, depth and threshold, then one
-    `Delete`/`Keep`/`Stop` menu per file with a preview, sorted by match, at one width for the
+    `delete`/`keep`/`stop` menu per file with a preview, sorted by match, at one width for the
     pass (`widgets.sequence_width`, over every title and preview, each preview read again at its
     prompt, since the pass deletes as it goes), each starting on the answer last given
     (`ui.row`), and the same for directories. A pinned file (`scan` marks it) comes after the other files, is
-    titled `pinned, …` and starts on `Keep` whatever was answered last, so a run of Deletes
+    titled `pinned, …` and starts on `keep` whatever was answered last, so a run of Deletes
     cannot carry it along.
   - **Scan cost is bounded**: pruning at traversal (`descend_into`, `clean.skip_directories`,
     dot-directories, judged by the directory's own name at every depth: `vim.fs.dir` hands
@@ -112,7 +112,7 @@ problems and remembering them. The rules that hold everywhere are in the root `C
     and buffers of deleted files are wiped.
 - **`scratch.lua`**: the scratch is a template minus its leading modifier header
   (`split_template`). A scratch with anything written in it (its loaded buffer, else its file)
-  asks `Resume` / `Restart`, previewing what it holds. Restarting, and a missing or blank
+  asks `resume` / `restart`, previewing what it holds. Restarting, and a missing or blank
   scratch, go to the template question, opened straight from the first menu's choice (which
   fires after that menu has closed) so no frame is drawn without a dialog, a menu with a body
   preview: `template_choices` offers the solution's `scaffold.templates` (a task-only modifier
@@ -219,7 +219,10 @@ problems and remembering them. The rules that hold everywhere are in the root `C
   then the entries whose whitespace-free, lowercased notes contain the whitespace-free query,
   then those whose body does. Fuzzy matching stops at names, because nearly anything typed is
   scattered somewhere in a body. The list holds names alone, so it stays narrow beside the
-  panes; the code pane's title names the file. Beside it, Notes, Complexity and the code: the
+  panes; the code pane's title names the file. Entries of one exact name carry a `version`,
+  in file then line order (`catalogue`), shown as a dimmed `(n)` through `menu`'s `tags`: numbered
+  over the whole library, not the rows shown, so `(2)` stays `(2)` while a search narrows the
+  list. Beside it, Notes, Complexity and the code: the
   complexity has a pane of its own, without its label, because at the end of the notes it would
   move from entry to entry and long notes would push it out of view. Notes and Complexity are
   `fit` panes, as tall as the longest of theirs in the library, so they do not jump between

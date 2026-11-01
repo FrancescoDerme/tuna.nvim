@@ -771,15 +771,16 @@ function M.status_hl(bufnr)
     return fg and { fg = fg, gui = "bold" } or spec
 end
 
----The final verdict the sidecar holds for `path`, while it still describes the source on disk
----(`still_current`). Read with the global config: the sidecar's name is not something a
+---The final verdict the sidecar holds for `path`, in lowercase as every verdict tuna shows, while
+---it still describes the source on disk (`still_current`). Read with the global config: the sidecar's name is not something a
 ---per-directory config realistically changes, and this runs on every `BufReadPost`.
 ---@param path string absolute solution path
 ---@return { state: string, text: string, url: string? }?
 local function stored_verdict(path)
     local entry = sidecar.get_entry(path, "submit", config.current_setup)
-    if entry and FINAL[entry.state] and still_current(entry, path) then
-        return entry
+    if entry and FINAL[entry.state] and type(entry.text) == "string" and still_current(entry, path) then
+        -- A NUL, which a sidecar may hold, is a Blob to `vim.fn`.
+        return { state = entry.state, text = vim.fn.tolower((entry.text:gsub("%z", ""))), url = entry.url }
     end
     return nil
 end
@@ -787,7 +788,7 @@ end
 ---The last submit verdict recorded for `path`, whoever recorded it and whether or not
 ---the file is open, so the menu can say how a problem went without opening it.
 ---@param path string absolute solution path
----@return { state: string, text: string }? verdict, nil when there is none or it is stale
+---@return { state: string, text: string, url: string? }? verdict, nil when there is none or it is stale
 function M.verdict_for(path)
     if type(path) ~= "string" or path == "" then
         return nil
@@ -796,8 +797,7 @@ function M.verdict_for(path)
     if live and FINAL[live.state] then
         return { state = live.state, text = live.text }
     end
-    local entry = stored_verdict(path)
-    return entry and { state = entry.state, text = entry.text } or nil
+    return stored_verdict(path)
 end
 
 ---Whether a verdict for `path` could ever reach tuna. Not how the submission is made — that
@@ -852,7 +852,7 @@ local function strip_ansi(s)
     s = s:gsub("\27%].-\7", "") -- OSC … BEL
     s = s:gsub("\27%].-\27\\", "") -- OSC … ST
     s = s:gsub("\27%[[0-9;:<=>?]*[ -/]*[@-~]", "") -- CSI (params, intermediates, final)
-    s = s:gsub("[\1-\8\11\12\14-\31\127]", "") -- other C0 controls + stray ESC (0x1b)
+    s = s:gsub("[%z\1-\8\11\12\14-\31\127]", "") -- other C0 controls + stray ESC (0x1b)
     return s
 end
 
@@ -1083,22 +1083,24 @@ end
 ---prefer a **final** verdict anywhere in the stream (the submission finished) over any
 ---pending keyword, taking the rightmost (most recent) match of each; only when no final
 ---verdict is present do we surface the latest pending frame. The display text is a tidy
----snippet from the matched keyword up to the next frame boundary (tab / newline),
----bounded — so lualine shows `Accepted` / `failed on test 6` / `Running (on test 6)`,
+---lowercase snippet from the matched keyword up to the next frame boundary (tab / newline),
+---bounded — so lualine shows `accepted` / `failed on test 6` / `running (on test 6)`,
 ---not the whole concatenated blob.
 ---@param blob string
 ---@param scfg table
 ---@return string? state, string? snippet
 local function scan_verdict(blob, scfg)
     local clean = strip_ansi(blob)
-    local lower = clean:lower()
+    local lower = vim.fn.tolower(clean) -- UTF-8 aware, so a localized verdict matches and shows lowered
 
     -- Rightmost match among the rules of a given finality (final first, then pending).
     local function pick(want_final)
         local pos, state
         for _, rule in ipairs(scfg.verdicts or {}) do
             if (FINAL[rule[2]] == true) == want_final then
-                local p = last_match(lower, rule[1])
+                -- A rule is a Lua pattern, so only what the text's folding reaches is folded:
+                -- `%S` lowered would mean its opposite.
+                local p = last_match(lower, (rule[1]:gsub("[\194-\244][\128-\191]*", vim.fn.tolower)))
                 if p and (not pos or p >= pos) then
                     pos, state = p, rule[2]
                 end
@@ -1116,8 +1118,8 @@ local function scan_verdict(blob, scfg)
     end
 
     -- Clean snippet: from the keyword to the next frame boundary, trimmed and capped.
-    local snippet = (clean:sub(pos):match("^[^\r\n\t]*") or ""):gsub("%s+$", ""):sub(1, 60)
-    return state, snippet
+    local snippet = (lower:sub(pos):match("^[^\r\n\t]*") or ""):gsub("%s+$", "")
+    return state, vim.fn.strcharpart(snippet, 0, 60)
 end
 
 ---Run the submit command as a tracked async job, parsing stdout for the judge
@@ -1445,6 +1447,7 @@ M._test = {
     is_valid_url = is_valid_url,
     judge_of = judge_of,
     watch_outcome = watch_outcome,
+    run_watch = run_watch,
 }
 
 return M

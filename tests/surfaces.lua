@@ -211,6 +211,48 @@ if ui then
         end, floats())
     end
     local columns = #legend()
+    local first = api.nvim_get_current_win()
+    api.nvim_feedkeys(api.nvim_replace_termcodes(ui.config.switch_window_keys[4], true, false, true), "x", false)
+    local moved = api.nvim_get_current_win()
+    api.nvim_feedkeys(api.nvim_replace_termcodes(ui.config.switch_window_keys[1], true, false, true), "x", false)
+    ok("the pane keys go from box to box of the legend and back", moved ~= first and api.nvim_get_current_win() == first, vim.inspect({ first, moved }))
+    close_layer(70)
+    -- With a box of the mode's own in the left column, by position rather than in the order
+    -- the boxes were opened.
+    ui.runner.legend_rows = function()
+        return { title = "a mode", rows = { { "a", "b" } } }
+    end
+    ui:show_help()
+    settle()
+    local function box(title)
+        for _, f in ipairs(legend()) do
+            local t = api.nvim_win_get_config(f.win).title
+            if t and vim.trim(t[1][1]) == title then
+                return f.win
+            end
+        end
+    end
+    local function press(from, i)
+        api.nvim_set_current_win(box(from))
+        api.nvim_feedkeys(api.nvim_replace_termcodes(ui.config.switch_window_keys[i], true, false, true), "x", false)
+        return api.nvim_get_current_win()
+    end
+    local editable, readonly, its = box("editable panes"), box("read-only panes"), box("a mode")
+    ok("right goes across, not down", press("read-only panes", 4) == editable)
+    ok("left comes back level with it", press("editable panes", 1) == readonly)
+    ok("down goes down the column", press("read-only panes", 2) == its)
+    ok("up comes back", press("a mode", 3) == readonly)
+    ok("and down from the bottom stays", press("a mode", 2) == its)
+    ok("across from a box lower down goes to the one level with it", press("a mode", 4) == editable)
+    local function bottom(win)
+        local c = api.nvim_win_get_config(win)
+        return c.row + c.height
+    end
+    ok("and the columns end level, the first box taking up the slack", bottom(its) == bottom(editable), vim.inspect({ bottom(its), bottom(editable) }))
+    ui.runner.legend_rows = nil
+    close_layer(70)
+    ui:show_help()
+    settle()
     api.nvim_set_current_win(legend()[1].win)
     vim.cmd("quit")
     settle()
@@ -347,7 +389,7 @@ do
     settle()
     for _, f in ipairs(floats()) do
         local title = api.nvim_win_get_config(f.win).title
-        if title and vim.inspect(title):find("Output") then
+        if title and vim.inspect(title):find("output") then
             api.nvim_set_current_win(f.win)
         end
     end
@@ -368,7 +410,7 @@ do
     local title = api.nvim_win_get_config(0).title
     ok("a resize keeps the editor open", #floats() == 2, #floats() .. " floats")
     ok("still typing", tuna_probe.mode == "i", tuna_probe.mode)
-    ok("in the pane the user was in", title and vim.inspect(title):find("Output") ~= nil, vim.inspect(title))
+    ok("in the pane the user was in", title and vim.inspect(title):find("output") ~= nil, vim.inspect(title))
     ok("with its cursor and its text", vim.deep_equal({ api.nvim_win_get_cursor(0), api.nvim_buf_get_lines(0, 0, -1, false) },
         { { 2, 3 }, { "typed", "here" } }), vim.inspect(api.nvim_win_get_cursor(0)))
     close_layer(80)
@@ -403,7 +445,7 @@ do
     keys("a<A-h><Esc>")
     seen[#seen + 1] = pane()
     ok("the pane keys move between the editor's panes, typing too, and Tab does not",
-        vim.deep_equal(seen, { "Input", "Output", "Input", "Output", "Output", "Output", "Output", "Input" }), vim.inspect(seen))
+        vim.deep_equal(seen, { "input", "output", "input", "output", "output", "output", "output", "input" }), vim.inspect(seen))
     close_layer(80)
     require("tuna").setup({})
 end
@@ -446,8 +488,8 @@ do
     answer = 3
     press("q")
     ok("an edit is asked about, in the runner UI's words", vim.deep_equal(asked, {
-        title = "Unsaved testcase 3",
-        items = { "Save and close", "Discard and close", "Keep editing" },
+        title = "unsaved testcase 3",
+        items = { "save and close", "discard and close", "keep editing" },
     }), vim.inspect(asked))
     ok("keeping it keeps the editor", #floats() == 2, #floats() .. " floats")
     answer = 2
@@ -488,7 +530,7 @@ end
 
 -- A menu can start on a given row (a following preview with it), and a resize keeps the
 -- row the cursor is on rather than going back to the top.
-widgets.menu({ "one", "two", "three" }, "a menu", function() end, nil, nil, nil, nil, 2)
+widgets.menu({ "one", "two", "three" }, "a menu", function() end, nil, nil, nil, { row = 2 })
 settle()
 ok("a menu starts on the row it is given", api.nvim_win_get_cursor(0)[1] == 2, api.nvim_win_get_cursor(0)[1])
 api.nvim_win_set_cursor(0, { 3, 0 })
@@ -501,7 +543,7 @@ widgets.menu({ "one", "two" }, "a menu", function() end, nil, nil, {
     content = function(i)
         return { lines = { "row " .. i } }
     end,
-}, nil, 2)
+}, { row = 2 })
 settle()
 local previewed
 for _, f in ipairs(floats()) do
@@ -589,15 +631,17 @@ do
             content = function(i)
                 return { title = items[i], lines = { "about " .. items[i] } }
             end,
-        }, nil, nil, function(q)
-            local out = {}
-            for i, item in ipairs(items) do
-                if item:find(q, 1, true) then
-                    out[#out + 1] = i
+        }, {
+            search = function(q)
+                local out = {}
+                for i, item in ipairs(items) do
+                    if item:find(q, 1, true) then
+                        out[#out + 1] = i
+                    end
                 end
-            end
-            return out
-        end)
+                return out
+            end,
+        })
     end
     -- One scenario is one key sequence, since `x` ends insert mode when its keys run
     -- out; `<Cmd>` probes along it record what was on screen at that point.
@@ -620,7 +664,7 @@ do
 
     _G.tuna_probe = {}
     keys(OPEN .. NOTE .. "<Esc>")
-    ok("a search menu opens on its search pane, typing", tuna_probe[1] == "Search i", tuna_probe[1])
+    ok("a search menu opens on its search pane, typing", tuna_probe[1] == "search i", tuna_probe[1])
     conforms("widgets.menu with a search")
     close_layer(80)
 
@@ -633,16 +677,16 @@ do
     _G.tuna_probe = {}
     keys(OPEN .. NOTE .. "<C-j>" .. NOTE .. "<C-j>" .. NOTE .. "<C-k><C-k>" .. NOTE .. "be<Esc>")
     ok("the pane keys walk search, list and preview, and arriving back in the search pane types",
-        vim.deep_equal(tuna_probe, { "Search i", "a search n", "jam n", "Search i" }), vim.inspect(tuna_probe))
+        vim.deep_equal(tuna_probe, { "search i", "a search n", "jam n", "search i" }), vim.inspect(tuna_probe))
 
     widgets.menu(nil)
     settle()
-    ok("a resize keeps the search and the list it found", vim.deep_equal({ lines_of("Search"), lines_of("a search") }, { { "be" }, { "beta" } }),
-        vim.inspect({ lines_of("Search"), lines_of("a search") }))
+    ok("a resize keeps the search and the list it found", vim.deep_equal({ lines_of("search"), lines_of("a search") }, { { "be" }, { "beta" } }),
+        vim.inspect({ lines_of("search"), lines_of("a search") }))
 
     chosen = nil
     keys("Szzz<CR><Esc>")
-    ok("nothing found, nothing to choose", chosen == nil and lines_of("No match") ~= nil, vim.inspect({ chosen, #floats() }))
+    ok("nothing found, nothing to choose", chosen == nil and lines_of("no match") ~= nil, vim.inspect({ chosen, #floats() }))
     close_layer(80)
 end
 
@@ -666,9 +710,11 @@ do
                     { title = "code of " .. items[i], lines = { "about " .. items[i] } },
                 }
             end,
-        }, nil, nil, function()
-            return { 1, 2 }
-        end)
+        }, {
+            search = function()
+                return { 1, 2 }
+            end,
+        })
     end
     local function keys(k)
         api.nvim_feedkeys(api.nvim_replace_termcodes(k, true, false, true), "x", false)
@@ -688,7 +734,7 @@ do
 
     keys("<Cmd>lua tuna_open_beside(true)<CR><Esc>")
     conforms("widgets.menu with panes beside")
-    local search, list, pane, code = win_of("Search"), win_of("a library"), win_of("Notes"), win_of("code of jam")
+    local search, list, pane, code = win_of("search"), win_of("a library"), win_of("Notes"), win_of("code of jam")
     local function at(w)
         return api.nvim_win_get_position(w)
     end
@@ -715,7 +761,7 @@ do
     keys("<Cmd>lua tuna_open_beside(true)<CR><Down><Cmd>lua tuna_note()<CR><C-l><Cmd>lua tuna_note()<CR><C-j><Cmd>lua tuna_note()<CR><C-h><Cmd>lua tuna_note()<CR><C-l><Cmd>lua tuna_note()<CR><C-h><C-k><Cmd>lua tuna_note()<CR><Esc>")
     ok(
         "the pane keys move by position: the search pane to the notes, down to the code, across to the list and back",
-        vim.deep_equal(tuna_probe, { "Search i", "Notes n", "code of beta n", "a library n", "code of beta n", "Search i" }),
+        vim.deep_equal(tuna_probe, { "search i", "Notes n", "code of beta n", "a library n", "code of beta n", "search i" }),
         vim.inspect(tuna_probe)
     )
 
@@ -767,7 +813,7 @@ do
     vim.api.nvim_win_close(win_of("Notes"), true)
     settle()
     ok("closing one of its panes closes the menu", #floats() == 0, #floats())
-    widgets.menu({ "one" }, "a menu", function() end, nil, nil, nil, { title = "Know this", lines = { "first" } })
+    widgets.menu({ "one" }, "a menu", function() end, nil, nil, nil, { notice = { title = "Know this", lines = { "first" } } })
     settle()
     vim.api.nvim_win_close(win_of("Know this"), true)
     settle()
@@ -778,7 +824,7 @@ do
     keys("<Cmd>lua tuna_open_beside(true)<CR><Esc><C-j><C-k><Cmd>lua tuna_note()<CR>i<C-j><C-k><Cmd>lua tuna_note()<CR><Esc>")
     ok(
         "the search pane is typed into again only if it was left typing",
-        vim.deep_equal(tuna_probe, { "Search n", "Search i" }),
+        vim.deep_equal(tuna_probe, { "search n", "search i" }),
         vim.inspect(tuna_probe)
     )
     close_layer(80)
@@ -790,7 +836,7 @@ do
     local fake_cmp = { setup = { buffer = function(c) told[#told + 1] = { vim.api.nvim_get_current_buf(), c.enabled } end } }
     package.loaded["cmp"] = fake_cmp
     keys("<Cmd>lua tuna_open_beside(true)<CR><Esc>")
-    local sb = vim.api.nvim_win_get_buf(win_of("Search"))
+    local sb = vim.api.nvim_win_get_buf(win_of("search"))
     ok("a search pane turns completion off", vim.b[sb].completion == false and vim.deep_equal(told, { { sb, false } }), vim.inspect(told))
     close_layer(80)
     package.loaded["cmp"] = nil

@@ -58,9 +58,9 @@ local function choose_testcase(tctbl, verb, cb)
         cb(nums[1])
     else
         local labels = vim.tbl_map(function(n)
-            return "Testcase " .. n
+            return "testcase " .. n
         end, nums)
-        local title = verb:sub(1, 1):upper() .. verb:sub(2) .. " a testcase"
+        local title = verb .. " a testcase"
         require("tuna.ui.widgets").menu(labels, title, function(idx)
             cb(nums[idx])
         end, api.nvim_get_current_win())
@@ -130,7 +130,7 @@ function M.delete_testcase(tcnum)
             utils.notify("testcase delete: testcase " .. tostring(n) .. " doesn't exist.")
             return
         end
-        require("tuna.ui.widgets").menu({ "Delete", "Keep" }, "Delete testcase " .. n .. "?", function(idx)
+        require("tuna.ui.widgets").menu({ "delete", "keep" }, "delete testcase " .. n .. "?", function(idx)
             if idx == 1 then
                 testcases.buf_delete_testcase(bufnr, n)
             end
@@ -278,7 +278,7 @@ function M.run_testcases(bufnr, list, only_show)
         -- window. Only when there is nothing to show yet — a runner that has already
         -- run keeps its results.
         if #r.tcdata == 0 or r.preloaded then
-            -- No testcases is not nothing to show: `build_rows` lists the same `No input`
+            -- No testcases is not nothing to show: `build_rows` lists the same `no input`
             -- row a run with nothing to test would build, so the UI opens on an editable
             -- testcase 0 waiting to be typed into rather than on a warning. That is the
             -- way in to writing a problem's first testcase from the runner UI.
@@ -331,7 +331,7 @@ function M.offer_sharing(bufnr, proceed)
         proceed()
     end
     require("tuna.ui.widgets").menu(
-        { "Rename and share", "Run without sharing" },
+        { "rename and share", "run without sharing" },
         ("%s cannot read %s's testcases, renaming them shares them permanently"):format(name, vim.fs.basename(plan.owner)),
         function(idx)
             if idx ~= 1 then
@@ -348,7 +348,7 @@ function M.offer_sharing(bufnr, proceed)
         end,
         api.nvim_get_current_win(),
         decline,
-        { title = "Renames", lines = renames }
+        { title = "renames", lines = renames }
     )
 end
 
@@ -453,7 +453,7 @@ end
 ---runner that holds them.
 ---
 ---Before a **run** (`opts.run`) two more things hold. An unwritten testcase edit is asked
----about first (`Save and run` / `Discard and run` / `Keep editing`), because a run replaces
+---about first (`save and run` / `discard and run` / `keep editing`), because a run replaces
 ---the rows the edit lives in, and interactive, stress and run-all replace the whole runner.
 ---And the buffer's other runs are stopped, since one mode runs at a time: a live session
 ---left behind would wait on its input forever, and a stress search keeps rebuilding the

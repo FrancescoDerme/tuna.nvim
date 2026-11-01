@@ -82,8 +82,10 @@ do
     local widgets = require("tuna.ui.widgets")
     local real_menu = widgets.menu
     local rows, answers = {}, {}
-    widgets.menu = function(_, _, on_choice, _, _, _, _, row)
-        rows[#rows + 1] = row or 1
+    local notices = {}
+    widgets.menu = function(_, _, on_choice, _, _, _, opts)
+        rows[#rows + 1] = opts.row or 1
+        notices[#notices + 1] = opts.notice
         on_choice(answers[#rows])
     end
 
@@ -97,6 +99,16 @@ do
     clean.confirm_each(files, 1, nil, { deleted = 0, builds = 0, dirs = 0, emptied = {} }, { width = 40 }, function() end)
     t.eq("each file prompt starts on the answer to the one before", rows, { 1, 2, 1 })
     t.eq("while doing what each answer says", vim.uv.fs_stat(fdir .. "/b.cpp"), nil)
+    local notice = { title = "partial scan", lines = { "only part" } }
+    notices = {}
+    answers = { 2, 2 }
+    rows = {}
+    clean.confirm_each({ files[1] }, 1, nil, { deleted = 0, builds = 0, dirs = 0, emptied = {} }, { width = 40, notice = notice }, function() end)
+    t.eq("a file's prompt carries the notice", notices[1], notice)
+    notices = {}
+    rows = {}
+    clean.confirm_dirs({ { path = fdir, rel = "dir", files = 0 } }, 1, nil, { deleted = 0, builds = 0, dirs = 0, emptied = {} }, { width = 40, notice = notice }, function() end)
+    t.eq("and so does a directory's", notices[1], notice)
 
     rows, answers = {}, { 2, 2 } -- Keep, Keep
     local d1, d2 = t.tempdir(), t.tempdir()
@@ -126,8 +138,8 @@ do
     end, found), { { "b.cpp", false }, { "a.cpp", true } })
 
     local titles, rows = {}, {}
-    widgets.menu = function(_, title, on_choice, _, _, _, _, row)
-        titles[#titles + 1], rows[#rows + 1] = title, row or 1
+    widgets.menu = function(_, title, on_choice, _, _, _, opts)
+        titles[#titles + 1], rows[#rows + 1] = title, opts.row or 1
         on_choice(1) -- Delete
     end
     clean.confirm_each(found, 1, nil, { deleted = 0, builds = 0, dirs = 0, emptied = {} }, { width = 40 }, function() end)
@@ -175,7 +187,7 @@ do
     end
     clean.confirm_each({ found[1] }, 1, nil, stats, { width = 40 }, function() end)
     widgets.menu = real_menu
-    t.has("its preview says what it is, having no text to show", previews[1], "A compiled program")
+    t.has("its preview says what it is, having no text to show", previews[1], "a compiled program")
     t.eq("and offers nothing to select", selectable, false)
     t.eq("deleted, it counts as a build, its directory emptied", {
         vim.fn.filereadable(pdir .. "/.main2"),

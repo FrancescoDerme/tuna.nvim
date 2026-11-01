@@ -315,8 +315,9 @@ end
 ---you type into do, and what the ones you only read do. Which pane you are standing in
 ---is the thing that decides what a key means here, so the legend is organised the same
 ---way — and each half is shown in the colour its panes wear, so no cross-referencing
----is needed to work out which is which.
----@return string[] editable, string[] readonly
+---is needed to work out which is which. What the mode adds comes apart from both, as the box
+---of its own the legend gives it.
+---@return string[] editable, string[] readonly, { title: string, lines: string[] }? mode
 function RunnerUI:legend_sections()
     local m = self.config.runner_ui.mappings
     local function keys(action)
@@ -369,16 +370,12 @@ function RunnerUI:legend_sections()
         { "close", keys("close") },
         { "this legend", keys("help") },
         { "", "" },
-        { "* in the Run pane", "a setting you forced, auto gives it back" },
+        { "* in the run pane", "a setting you forced, auto gives it back" },
     })
     local readonly = align(rows)
-    -- What the mode adds: how its own rows and keys behave, in a section of its own.
+    -- What the mode adds: how its own rows and keys behave.
     local mode = self.runner.legend_rows and self.runner:legend_rows()
-    if mode then
-        vim.list_extend(readonly, { "", mode.title })
-        vim.list_extend(readonly, align(mode.rows))
-    end
-    return align(editable), readonly
+    return align(editable), readonly, mode and { title = mode.title, lines = align(mode.rows) }
 end
 
 ---@private
@@ -412,8 +409,8 @@ end
 ---about an empty *input*: for an input, empty and absent are the same thing.
 ---
 ---An empty **answer** is the exception, and the only one. Absent means the testcase is
----not judged (the verdict is `DONE`); present and empty means the solution must print
----nothing, and one that prints something is `WRONG`. The panes look identical either
+---not judged (the verdict is `done`); present and empty means the solution must print
+---nothing, and one that prints something is `wrong`. The panes look identical either
 ---way, so a save that would turn a real answer into an empty one asks which was meant.
 ---
 ---It asks **only then**. An answer that is already absent, or already empty, is not
@@ -449,13 +446,13 @@ end
 ---@private
 ---The three answers to "this would throw away an unsaved edit", for whichever action
 ---would. One list, so closing and re-running cannot drift apart: each answer names the
----outcome it produces, and the third is `Keep editing` rather than `Cancel` — what you
+---outcome it produces, and the third is `keep editing` rather than `cancel` — what you
 ---get, rather than what did not happen, and the same words the empty-save prompt uses
 ---for the same answer. It is also what a dismissal gives.
 ---@param what string the action, e.g. "close" or "re-run all"
 ---@return string[]
 local function unsaved_items(what)
-    return { "Save and " .. what, "Discard and " .. what, "Keep editing" }
+    return { "save and " .. what, "discard and " .. what, "keep editing" }
 end
 
 ---@private
@@ -464,7 +461,7 @@ end
 ---editing never asks anything.
 ---@param torn boolean? the windows are already gone (a `:q` on one pane)
 ---@param on_closed fun()? run once the UI is actually closed — how a `:qa` that was
----cancelled to ask about an edit gets to finish afterwards. Not run on "Keep editing":
+---cancelled to ask about an edit gets to finish afterwards. Not run on "keep editing":
 ---the answer there is that the command should not happen.
 function RunnerUI:request_close(torn, on_closed)
     if not self:has_pending() then
@@ -486,7 +483,7 @@ function RunnerUI:request_close(torn, on_closed)
         self:show_ui()
         was_in = nil
     end
-    -- Where "Keep editing" puts you back. Not `restore_winid` — that is the *code*
+    -- Where "keep editing" puts you back. Not `restore_winid` — that is the *code*
     -- buffer the runner was launched from, i.e. behind the UI, which is the one place
     -- you were certainly not: keeping the edit means going back to the pane holding
     -- it, or failing that the selector.
@@ -502,10 +499,10 @@ function RunnerUI:request_close(torn, on_closed)
     end
 
     -- Dismissing the prompt keeps the UI (and the edit) as it is, exactly like
-    -- choosing "Keep editing" — the safe answer is the one a stray Esc gives.
+    -- choosing "keep editing" — the safe answer is the one a stray Esc gives.
     require("tuna.ui.widgets").menu(
         unsaved_items("close"),
-        "Unsaved " .. testcase_label(nums),
+        "unsaved " .. testcase_label(nums),
         function(idx)
             local function closed()
                 self:delete()
@@ -638,7 +635,7 @@ end
 ---and not a state: the rows it happened to are on screen from then on.
 ---
 ---A **missing** testcase is the one the user has to answer, because the row is the
----last place its text exists and dropping it is not undoable. `Discard` only discards:
+---last place its text exists and dropping it is not undoable. `discard` only discards:
 ---the row being re-run may be the one going away, so a label promising a re-run could
 ---not keep it.
 ---@param tcnum integer? only care about this testcase (nil: any drifted row)
@@ -675,14 +672,14 @@ function RunnerUI:with_disk_settled(tcnum, what, proceed)
         return
     end
     local label = testcase_label(nums)
-    -- `Discard` is not "discard and re-run": the row being re-run may be the one going
+    -- `discard` is not "discard and re-run": the row being re-run may be the one going
     -- away, and then there is nothing left to run — a promise the label cannot keep. So
     -- it does exactly what it says, drops the rows and stops, and the re-run is one
-    -- keypress away once the UI says the truth. Dismissing is `Stop`, which changes
+    -- keypress away once the UI says the truth. Dismissing is `stop`, which changes
     -- nothing at all.
     require("tuna.ui.widgets").menu(
-        { "Restore and " .. what, "Discard", "Stop" },
-        label:sub(1, 1):upper() .. label:sub(2) .. " no longer on disk",
+        { "restore and " .. what, "discard", "stop" },
+        label .. " no longer on disk",
         function(idx)
             if idx == 1 then
                 self:restore_missing(nums)
@@ -736,7 +733,7 @@ function RunnerUI:with_pending_settled(tcnum, what, proceed, after_save)
     end
     require("tuna.ui.widgets").menu(
         items,
-        "Unsaved " .. testcase_label(nums),
+        "unsaved " .. testcase_label(nums),
         function(idx)
             if idx == 1 then
                 -- Saving runs what it saved, so the run is under way, unless no run can start.
@@ -854,7 +851,7 @@ end
 ---This reads both panes out in full, so it is **not** something to do per keystroke, where
 ---a large testcase would make typing lag. It runs where a pane is actually
 ---about to be repointed (a row switch, a render, a save, a close, a teardown);
----while you type, `on_pane_edit` keeps the row's `EDITED` state honest for free.
+---while you type, `on_pane_edit` keeps the row's `edited` state honest for free.
 function RunnerUI:capture_pending()
     -- Attributed to the row the panes were last *rendered* for, not to the selected
     -- one: between choosing a row and the render that repoints the panes, the two
@@ -865,7 +862,7 @@ function RunnerUI:capture_pending()
     end
     if not self:panes_changed() then
         -- Back to the stored text — undone, or retyped by hand. Either way
-        -- there is no edit any more, and the row must stop reading `EDITED`. A row added
+        -- there is no edit any more, and the row must stop reading `edited`. A row added
         -- with `n` keeps its entry: it is unsaved by existing, not by differing.
         self.pane_edited = false
         if not (self.pending[n] and self.pending[n].fresh) then
@@ -889,7 +886,7 @@ end
 ---What a keystroke in an editable pane costs. Deliberately O(1) in the size of the
 ---testcase: the text itself is only read out when a pane is about to be repointed
 ---(`capture_pending`), never here. All that has to be true *while* typing is that the
----row reads `EDITED` from the first keystroke; whether it still deserves to is settled
+---row reads `edited` from the first keystroke; whether it still deserves to is settled
 ---a moment later, by comparison. Re-renders **only when the set of edited rows actually
 ---changed**, since rewriting the selector on every character is the other half of the same
 ---cost.
@@ -1060,7 +1057,7 @@ end
 ---@private
 ---Write every unsaved testcase, in order, each settling what an empty answer means: one
 ---stored empty stays so, and a real one left empty is asked about.
----@param done fun()? run once all are written, and not on "Keep editing", which stops here
+---@param done fun()? run once all are written, and not on "keep editing", which stops here
 ---@param hold_run boolean? write them without running them, as `done` will
 function RunnerUI:save_all_pending(done, hold_run)
     self:capture_pending()
@@ -1109,7 +1106,7 @@ function RunnerUI:add_testcase()
     end
     self:capture_pending()
     -- A run with no testcases already left an empty, unsaved testcase 0 on screen (the
-    -- `No input` row), which is exactly what this key would otherwise create. Adding a
+    -- `no input` row), which is exactly what this key would otherwise create. Adding a
     -- second one beside it would number it 1 and leave a gap on disk, so `n` there
     -- means "go and type in the empty one".
     local n = self:bare_row_tcnum()
@@ -1321,7 +1318,7 @@ end
 
 ---@private
 ---Once the build is over and had nothing to say, the row worth looking at is the one last
----looked at, else the first testcase: the Compile row is only where a run *starts*. A build
+---looked at, else the first testcase: the compile row is only where a run *starts*. A build
 ---that failed or printed something is the row that answers the run, so it keeps the cursor, as
 ---does one still going.
 function RunnerUI:follow_after_compile()
@@ -1344,10 +1341,10 @@ function RunnerUI:follow_after_compile()
 end
 
 ---@private
----Which selector row the UI should open on. The first testcase, whenever the Compile
+---Which selector row the UI should open on. The first testcase, whenever the compile
 ---step has nothing to say: an empty compile row leaves the panes of a run in front of
 ---someone who opened the UI to read a verdict — or, before any run, to read the
----testcase itself. Row 1 (Compile) is kept for the two cases where it is the row worth
+---testcase itself. Row 1 (compile) is kept for the two cases where it is the row worth
 ---reading: a compilation that printed warnings or errors, and a run whose build has not
 ---finished, where the cursor must not be moved out from under the user as results land.
 ---@return integer
@@ -1367,7 +1364,7 @@ function RunnerUI:initial_row()
 end
 
 ---@private
----Whether a run's build is under way: a Compile row that has not finished, on a runner that is
+---Whether a run's build is under way: a compile row that has not finished, on a runner that is
 ---running rather than listing its rows (`preloaded`). It is about the *run*, not the process:
 ---asking whether the compiler runs right now leaves a window between the rows being built and
 ---it being spawned, and a UI opened inside that window draws the panes of a run for a build
@@ -1444,14 +1441,14 @@ local function build_titles(build)
             for i, source in ipairs(sources) do
                 labels[i] = source.label
             end
-            titles[pane] = (" Errors: %s "):format(table.concat(labels, ", "))
+            titles[pane] = (" errors: %s "):format(table.concat(labels, ", "))
         end
     end
     return titles
 end
 
 ---@private
----Every pane's title on `row`: its own, a name the mode gives it (interactive's `Live`), the
+---Every pane's title on `row`: its own, a name the mode gives it (interactive's `live`), the
 ---source it holds on the build step, and with `runner_ui.show_title_keys` the key that zooms it.
 ---@param row table?
 ---@return table<string, string>
@@ -1469,7 +1466,7 @@ function RunnerUI:titles_for(row)
 end
 
 ---@private
----`titles` with the key that zooms each pane at the end (` Errors (e) `). On the
+---`titles` with the key that zooms each pane at the end (` errors (e) `). On the
 ---build step the keys follow the sources' roles rather than the panes' names, so each is
 ---written on the pane it actually opens.
 ---@param titles table<string, string>
@@ -1917,7 +1914,7 @@ function RunnerUI:show_ui()
             vim.cmd("let v:event.abort = v:true")
             vim.schedule(function()
                 if cmd.write then
-                    -- `:wq` here is "Save and close", which is what it means anywhere.
+                    -- `:wq` here is "save and close", which is what it means anywhere.
                     self:save_all_pending(function()
                         self:delete()
                     end)
@@ -1930,7 +1927,7 @@ function RunnerUI:show_ui()
 
     for name, w in pairs(self.windows) do
         if self:writable_pane(name) and self.runner.editable_testcases then
-            -- The row reads `EDITED` from the first keystroke, not from the next render.
+            -- The row reads `edited` from the first keystroke, not from the next render.
             api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
                 group = self.augroup,
                 buffer = w.bufnr,
@@ -1938,7 +1935,7 @@ function RunnerUI:show_ui()
                     -- Only the selector: re-rendering the *panes* would replace the text
                     -- under the cursor with an identical copy and throw the cursor back
                     -- to line 1 on every keystroke. `TextChanged` also fires on undo and
-                    -- redo, which is what keeps `EDITED` honest in both directions.
+                    -- redo, which is what keeps `edited` honest in both directions.
                     self:on_pane_edit(ev.buf)
                 end,
             })
@@ -2272,7 +2269,7 @@ end
 ---are showing this row they *are* the text — an expected output typed but not written
 ---is what you are looking at, so it is what gets compared, and the marks follow it as
 ---you type rather than describing the file until the next `:w`. For any other row (the
----Compile row, a mode's own pane) it goes through the `pane_content` seam, which may
+---compile row, a mode's own pane) it goes through the `pane_content` seam, which may
 ---return `SKIP`.
 ---@param tc table the row being shown
 ---@return string|table|nil output text, or `SKIP` for a pane the mode owns
@@ -2291,7 +2288,7 @@ end
 ---Cheap enough to redo on every render, which is what keeps the marks correct as
 ---the selection moves or a re-run replaces the output.
 ---Paints nothing, quietly, on a row there is nothing to compare on: one that has no
----answer (the Compile row, an input-only testcase, unlike one whose answer is stored empty,
+---answer (the compile row, an input-only testcase, unlike one whose answer is stored empty,
 ---which is compared like any other), one a mode owns outright, one that
 ---has never run, and one whose two texts agree. The panes themselves show which of
 ---those it is, so none of it is narrated anywhere.
@@ -2590,7 +2587,7 @@ end
 ---a small float over the grid leaves the panes showing around it, and a legend read
 ---against half a set of testcase rows is a legend competing with what it explains.
 function RunnerUI:show_help()
-    local editable, readonly = self:legend_sections()
+    local editable, readonly, mode = self:legend_sections()
     local accent = self.config.runner_ui.editable_border_highlight
     local accent_hl = accent or self.config.floating_border_highlight
     local accent_group = accent and "TunaEditableBorder" or "TunaFloatBorder"
@@ -2606,30 +2603,40 @@ function RunnerUI:show_help()
         return w
     end
 
+    ---A titled box of the legend: every part of it has a border to say what it is.
+    local function box(lines, title)
+        return { lines = lines, title = " " .. title .. " ", hl = plain_hl, group = "TunaFloatBorder" }
+    end
+
     -- One column per pane kind, or a single stacked one when the editor is too narrow
     -- to hold both: a legend that cuts off the key it is naming is worse than a taller
     -- legend. Same story when nothing in this mode is editable — there is only one
-    -- half to tell you about.
+    -- half to tell you about. What the mode adds closes the left column, under the read-only
+    -- half.
+    local mode_box = mode and box(mode.lines, mode.title)
     local columns
     if not (self:writable_pane("si") or self:writable_pane("eo")) then
-        columns = { { lines = readonly, title = " Keys ", hl = plain_hl, group = "TunaFloatBorder" } }
-    elseif widest(editable) + widest(readonly) + 4 > vim_width - 2 then
-        local lines = { "READ-ONLY PANES" }
-        vim.list_extend(lines, readonly)
-        vim.list_extend(lines, { "", "EDITABLE PANES" })
-        vim.list_extend(lines, editable)
-        columns = { { lines = lines, title = " Keys ", hl = plain_hl, group = "TunaFloatBorder" } }
+        columns = { { boxes = { box(readonly, "keys"), mode_box } } }
     else
-        columns = {
-            { lines = readonly, title = " Read-only panes ", hl = plain_hl, group = "TunaFloatBorder" },
-            { lines = editable, title = " Editable panes ", hl = accent_hl, group = accent_group },
-        }
+        local read_box = box(readonly, "read-only panes")
+        local edit_box = box(editable, "editable panes")
+        edit_box.hl, edit_box.group = accent_hl, accent_group
+        local left = math.max(widest(readonly), mode and widest(mode.lines) or 0)
+        if widest(editable) + left + 4 > vim_width - 2 then
+            columns = { { boxes = { read_box, edit_box, mode_box } } }
+        else
+            columns = { { boxes = { read_box, mode_box } }, { boxes = { edit_box } } }
+        end
     end
 
     local height, natural = 0, 0
     for _, c in ipairs(columns) do
-        c.width = widest(c.lines)
-        height = math.max(height, #c.lines)
+        c.width, c.height = 0, -2 -- stacked boxes touch, each border taking two rows
+        for _, b in ipairs(c.boxes) do
+            c.width = math.max(c.width, widest(b.lines))
+            c.height = c.height + #b.lines + 2
+        end
+        height = math.max(height, c.height)
         natural = natural + c.width + 2 -- footprints, since the columns touch
     end
 
@@ -2664,26 +2671,60 @@ function RunnerUI:show_help()
     row = math.max(band_row, math.min(row, band_row + band_h - height - 2))
     at = math.max(0, math.min(at, vim_width - total))
 
+    ---The rows each of a column's boxes gets. The first fills what the taller column beside it
+    ---leaves, the mode's box under it keeping to its own lines. Too little room comes off the
+    ---tallest, a row at a time, so no box is left unreadable by the others and the column
+    ---stays on screen: what is cut off there scrolls, and the box's footer says so.
+    ---@param boxes table[]
+    ---@return integer[]
+    local function box_rows(boxes)
+        local rows, room = {}, height - 2 * (#boxes - 1)
+        for i, b in ipairs(boxes) do
+            rows[i] = #b.lines
+            room = room - rows[i]
+        end
+        rows[1] = rows[1] + math.max(room, 0)
+        while room < 0 do
+            local tallest = 1
+            for i in ipairs(rows) do
+                tallest = rows[i] > rows[tallest] and i or tallest
+            end
+            if rows[tallest] == 1 then
+                break
+            end
+            rows[tallest], room = rows[tallest] - 1, room + 1
+        end
+        return rows
+    end
+
     local wins = {}
-    for _, c in ipairs(columns) do
-        local buf = api.nvim_create_buf(false, true)
-        api.nvim_buf_set_lines(buf, 0, -1, false, c.lines)
-        vim.bo[buf].modifiable = false
-        surface.adopt(buf, "help")
-        local win = surface.float(buf, {
-            layer = surface.LAYER.overlay,
-            width = c.width,
-            height = height,
-            col = at,
-            row = row,
-            border = self.config.floating_border,
-            border_highlight = c.hl,
-            -- The title takes the *derived* group, whose background is the border's —
-            -- see `accent_editable_panes` for why the configured one won't do.
-            border_group = c.group,
-            title = { { c.title, c.group } },
-        })
-        wins[#wins + 1] = { win = win, buf = buf }
+    for c_at, c in ipairs(columns) do
+        local box_row = row
+        local heights = box_rows(c.boxes)
+        c.wins = {}
+        for i, b in ipairs(c.boxes) do
+            local rows = heights[i]
+            local buf = api.nvim_create_buf(false, true)
+            api.nvim_buf_set_lines(buf, 0, -1, false, b.lines)
+            vim.bo[buf].modifiable = false
+            surface.adopt(buf, "help")
+            local win = surface.float(buf, {
+                layer = surface.LAYER.overlay,
+                width = c.width,
+                height = rows,
+                col = at,
+                row = box_row,
+                border = self.config.floating_border,
+                border_highlight = b.hl,
+                -- The title takes the *derived* group, whose background is the border's —
+                -- see `accent_editable_panes` for why the configured one won't do.
+                border_group = b.group,
+                title = { { b.title, b.group } },
+            })
+            wins[#wins + 1] = { win = win, buf = buf, column = c_at, at = i, row = box_row, rows = rows }
+            c.wins[i] = wins[#wins]
+            box_row = box_row + rows + 2
+        end
         at = at + c.width + 2 -- the columns touch, as the runner UI's own panes do
     end
 
@@ -2696,14 +2737,31 @@ function RunnerUI:show_help()
     local close_all = surface.group(wins_only)
 
     local switch = as_list(self.config.switch_window_keys or {})
+    ---The box a pane key leads to from `w`, by position as on the board: up and down its column,
+    ---or across to the box level with its top.
+    ---@param w table
+    ---@param key_at integer the key's place in `switch_window_keys`: left, down, up, right
+    ---@return table?
+    local function box_from(w, key_at)
+        if key_at == 2 or key_at == 3 then
+            return columns[w.column].wins[w.at + (key_at == 2 and 1 or -1)]
+        end
+        local beside = columns[w.column + (key_at == 1 and -1 or 1)]
+        for _, other in ipairs(beside and beside.wins or {}) do
+            if other.row <= w.row and w.row < other.row + other.rows + 2 then
+                return other
+            end
+        end
+    end
+
     for _, w in ipairs(wins) do
         for _, key in ipairs(as_list(self.config.runner_ui.mappings.close)) do
             vim.keymap.set("n", key, close_all, { buffer = w.buf, nowait = true })
         end
-        -- The halves are a pair, so move between them with the keys that move between
-        -- panes everywhere else (left/up → first, right/down → last).
+        -- The boxes are one legend, so move between them with the keys that move between
+        -- panes everywhere else.
         for i, key in ipairs(switch) do
-            local target = (i == 1 or i == 3) and wins[1] or wins[#wins]
+            local target = box_from(w, i)
             vim.keymap.set("n", key, function()
                 if target and api.nvim_win_is_valid(target.win) then
                     api.nvim_set_current_win(target.win)
@@ -2840,7 +2898,7 @@ function RunnerUI:status_lines()
         vim.list_extend(entries, self.runner:status_tail())
     end
     -- A fixed pointer at the full legend: a digest of the keys goes stale or runs long,
-    -- and an unsaved edit is shown where it belongs, on its own row as `EDITED`.
+    -- and an unsaved edit is shown where it belongs, on its own row as `edited`.
     entries[#entries + 1] = { "help", as_list(self.config.runner_ui.mappings.help or {})[1] or "?" }
 
     local width = 0
@@ -2950,7 +3008,7 @@ end
 
 ---@private
 ---Redraw the testcase selector from `tcdata`. Split out of `update_ui` because
----typing in a pane has to refresh the rows' `EDITED` state *without* re-rendering
+---typing in a pane has to refresh the rows' `edited` state *without* re-rendering
 ---the detail panes — rewriting the buffer under the cursor on every keystroke would
 ---throw the cursor back to line 1.
 function RunnerUI:render_selector()
@@ -2969,7 +3027,7 @@ function RunnerUI:render_selector()
     for i, tc in ipairs(self.runner.tcdata) do
         -- The left column: a mode may relabel rows (run-all groups solution
         -- header rows above indented per-testcase rows).
-        -- A row standing for no stored testcase names itself (`Compile`); a numbered
+        -- A row standing for no stored testcase names itself (`compile`); a numbered
         -- one is a testcase. The bare row of a run with nothing to test is the case
         -- between the two: it is testcase 0 and editable, but nothing is on disk yet,
         -- so it says why it is there — until it has something behind it, which is
@@ -2978,24 +3036,24 @@ function RunnerUI:render_selector()
         if self.runner.row_label then
             header = self.runner:row_label(tc, unsaved[tc.tcnum])
         elseif tc.bare and not unsaved[tc.tcnum] then
-            header = "No input"
+            header = "no input"
         else
-            header = type(tc.tcnum) == "number" and ("TC " .. tc.tcnum) or tostring(tc.tcnum)
+            header = type(tc.tcnum) == "number" and ("tc " .. tc.tcnum) or tostring(tc.tcnum)
         end
         -- No runtime for a just-saved counterexample: show its label
         -- (e.g. "saved") in the time column instead.
         local timestr = (tc.time and tc.time >= 0) and string.format("%.3f s", tc.time / 1000)
             or (tc.time_label or "")
-        -- A row with an edit that hasn't been written reads `EDITED` instead of
+        -- A row with an edit that hasn't been written reads `edited` instead of
         -- its verdict: the verdict describes the *saved* testcase, so while the
         -- two disagree it would be a claim about text that is no longer there.
         -- It says so on the row it is about, and lasts until the edit is saved
-        -- (which re-runs it) or undone away. Unstyled (`TunaDone`, as `NOT RUN` is):
+        -- (which re-runs it) or undone away. Unstyled (`TunaDone`, as `not run` is):
         -- it is the *absence* of a verdict, not a bad one, and amber is the plugin's
         -- warning colour, while nothing is wrong with an edit.
         local status, hlgroup = tc.status, tc.hlgroup
         if unsaved[tc.tcnum] then
-            status, hlgroup = "EDITED", "TunaDone"
+            status, hlgroup = "edited", "TunaDone"
         end
         entries[i] = { header = header, status = status, time = timestr, hlgroup = hlgroup }
     end
@@ -3138,7 +3196,7 @@ function RunnerUI:update_ui()
                     self.runner:on_details_rendered(self, tc)
                 end
                 -- Which testcase the panes are now showing, i.e. whom a later edit of
-                -- them belongs to. `nil` on a row with nothing to edit (`Compile`,
+                -- them belongs to. `nil` on a row with nothing to edit (`compile`,
                 -- run-all's solution headers), so nothing can be captured for it.
                 self.pane_tcnum = editable and tc.tcnum or nil
                 self:mark_empty_answer()

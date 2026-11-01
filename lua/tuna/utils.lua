@@ -14,7 +14,7 @@ function M.notify(msg, level)
     if type(level) == "string" then
         level = vim.log.levels[level]
     end
-    vim.notify("Tuna: " .. msg, level or vim.log.levels.ERROR, { title = "Tuna" })
+    vim.notify("tuna: " .. msg, level or vim.log.levels.ERROR, { title = "tuna" })
 end
 
 ---Remap a floating window's border highlight so the border keeps the configured

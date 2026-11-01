@@ -33,7 +33,7 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
   every pane's title there, stored on the pane records before the interface places them, taken
   again each re-tile, since the row can rename a pane. `build_assignment` gives each source of
   the build step one of the `BUILD_PANES` buffers in order, and `stack_into` splits the `build`
-  cell into them, one above the other, so the grid, the titles (`Errors: gen.cpp`,
+  cell into them, one above the other, so the grid, the titles (`errors: gen.cpp`,
   `build_titles`, a pane named after its source only when there is more than one), the text
   (`build_text`) and the zoom keys (`opens`) all come from one placement. The placement joins no
   text, as the render tick asks for the grid each render. The UI fills the build step's panes,
@@ -72,7 +72,7 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
 - **Which row is shown** is the UI's choice until the selector is moved by hand (`user_moved`).
   `follow_row` is how the UI chooses, a no-op once the user has. Three things choose: `show_ui` takes `opening_row()` on its scheduled tick, *after* the rows
   exist (interactive and run-all build theirs after opening, so deciding earlier lands on line
-  1); every render calls `follow_after_compile`, leaving a Compile row that ended with exit 0
+  1); every render calls `follow_after_compile`, leaving a compile row that ended with exit 0
   and printed nothing for the row last looked at, else the first testcase (a failed or talkative
   build is what answers the run, and one still running must not move under the user); and
   interactive's `run_one_session` follows the row it
@@ -85,7 +85,7 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
   and in `show_ui`, which reopens on `last_row_id`, kept on the runner.
 - `opening_row()`: a run whose build has not finished opens on it (`building`), whatever was
   last looked at; otherwise `last_row` (`last_row_id`, matched by `row_id`), else
-  `initial_row()`, the first testcase, or Compile when it printed something. `building` is about
+  `initial_row()`, the first testcase, or compile when it printed something. `building` is about
   the *run*, not the process (`not preloaded and exit_code == nil`): between the rows being built and the compiler being
   spawned, a UI opened would otherwise draw the panes of a run and redraw them a tick later. For
   the same reason the modes `mark_not_run` before `show_ui`.
@@ -105,7 +105,7 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
 - Editable panes are always-modifiable `acwrite` buffers. `:w` from **any** pane saves the row
   the panes show (`pane_tcnum`, the row last *rendered*, not the selected row); a write with no
   change does nothing. Unwritten edits live in `ui.pending[tcnum]`: they survive row switches
-  and resizes, override `pane_content`, feed the diff, and the row reads `EDITED` (unstyled).
+  and resizes, override `pane_content`, feed the diff, and the row reads `edited` (unstyled).
 - `on_pane_edit` must stay O(1) in testcase size. It reads only Vim's `modified` flag (a change
   leaving it unset raises nothing: `TextChanged` also reports the UI's own filling of a pane the
   first time it is entered after) and re-renders the selector only when the edited set changes
@@ -128,9 +128,9 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
   takes the lowest free number, the one just deleted included, and a restore over it would
   overwrite what was saved there since.
 
-**Gates** (all menus, all ending in `Keep editing`/`Stop`, which is also what dismissal gives)
+**Gates** (all menus, all ending in `keep editing`/`stop`, which is also what dismissal gives)
 - `with_pending_settled(tcnum, what, proceed, after_save)`: re-running with unsaved edits asks
-  `Save and <what>` / `Discard and <what>` / `Keep editing`, `what` being `run` for a row that has
+  `save and <what>` / `discard and <what>` / `keep editing`, `what` being `run` for a row that has
   not. A single row added and never saved (`fresh`) gets no Discard, having nothing behind it to
   act on. Saving runs what it saved, so `proceed` follows a save only with `after_save`, for an
   action wider than the rows saved (`<C-r>`, a run replacing the runner), whose save starts no
@@ -139,8 +139,8 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
   `unsaved_items`.
 - `save_all_pending(done)` is every save but a plain `:w`: each row goes through
   `with_answer_settled` in turn, so an answer stored empty stays so and a real one left empty is
-  asked about, and `done` (close, run, carry on quitting) follows the last. `Keep editing` ends
-  the chain there, which is why `:wq`, `:wqa` and `Save and close` wait on it.
+  asked about, and `done` (close, run, carry on quitting) follows the last. `keep editing` ends
+  the chain there, which is why `:wq`, `:wqa` and `save and close` wait on it.
 - `commands.settle_runners(bufnr, { run, keep }, proceed)`, which every run and `show_ui` go
   through, keeps one runner UI per buffer and loses nothing on a mode switch: before a run it
   asks about an unwritten edit in any of the buffer's runners (interactive, stress and run-all
@@ -159,7 +159,7 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
     silently and said once, the file being the only copy. Not on a board of the testcases a
     run named (`runner.subset`: `:Tuna run 2 3`, run-all's and interactive's numbers), which
     leaves the others out on purpose.
-  - **Missing**: ask `Restore and re-run` / `Discard` / `Stop`. `restore_missing` writes back to
+  - **Missing**: ask `restore and re-run` / `discard` / `stop`. `restore_missing` writes back to
     the original number if it is free, else the lowest free number, renumbering the row,
     which then moves into number order.
   - Every branch renders, and the re-run finds rows by identity (`row_index`).
@@ -234,6 +234,9 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
   right-hand column. A bordered float's `row`/`col` is its border cell and `width`/`height`
   exclude the border: centre on `size + 2` (`overlay_geometry`, `ui_bounds`).
 - The zoom and message floats are sized by `runner_ui.zoom`, the legend to the UI's footprint.
+  Every part of the legend is a titled box, stacked when they share a column, so no heading
+  sits among its rows, where a lowercase one would read as one more row. Short of rows they
+  are shared from the tallest down, and the pane keys go by position, as on the board.
   Nothing is zoomed unasked: a failed build is read on the build step, whose grid always has an
   Errors pane, and a zoom would cover it and take the row from someone who moved off.
 - Diff view (`paint_diff`, namespace `tuna_runner_diff`) marks only what disagrees, and a cell

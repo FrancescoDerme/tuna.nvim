@@ -446,7 +446,7 @@ Every command is a subcommand of `:Tuna` with tab-completion, and a lowercase
           `:Tuna testcase n` do the same.
         - `delete` removes testcase `n`, after asking.
         - `generate` writes a testcase from your generator, the same one that
-          stress uses. It has an input and no answer, so it reads `DONE`
+          stress uses. It has an input and no answer, so it reads `done`
           unless your solution crashes, runs out of time or a checker judges
           it. On the runner UI, `t` does the same.
 
@@ -608,18 +608,19 @@ Every command is a subcommand of `:Tuna` with tab-completion, and a lowercase
         opening mark, see |tuna-library|.
 
         It lists every snippet in files with the current file's extension. If
-        a file has no marked snippet, it is offered whole. A snippet's notes
-        are the comment lines right under its opening mark, up to the first
-        blank or code line. From a line starting with `Complexity:` to their
-        end, they are treated as the snippet's complexity. Typing narrows the
-        list: name and file name matches show up first, then the snippets
-        whose notes are matched, and then those whose code is. Beside the
-        list are the snippet's notes, its complexity and its code, each in a
-        pane of its own. While you type in the search box, `<Down>` and
-        `<Up>` move the highlight through the list, `<CR>` inserts the
-        highlighted snippet, and the pane keys (`switch_window_keys`) move
-        between the list and the panes beside it. Only the code is inserted,
-        re-indented to where the cursor is.
+        a file has no marked snippet, it is offered whole. Snippets of the
+        same name are told apart by a dimmed number. A snippet's notes are the
+        comment lines right under its opening mark, up to the first blank or
+        code line. From a line starting with `Complexity:` to their end, they
+        are treated as the snippet's complexity. Typing narrows the list:
+        name and file name matches show up first, then the snippets whose
+        notes are matched, and then those whose code is. Beside the list are
+        the snippet's notes, its complexity and its code, each in a pane of
+        its own. While you type in the search box, `<Down>` and `<Up>` move
+        the highlight through the list, `<CR>` inserts the highlighted
+        snippet, and the pane keys (`switch_window_keys`) move between the
+        list and the panes beside it. Only the code is inserted, re-indented
+        to where the cursor is.
 
         Since only the marked parts are copied, a library file can be a whole
         program whose `main` exercises its snippets, tested with `:Tuna run`
@@ -757,13 +758,13 @@ one prefix: >lua
 
 The preset groups keys by subject: `d` for downloads and `g` for "go to". A
 key inside a group has a short label that leaves out the group's word
-(`<leader>tdp` is `Problem`), so if you use which-key, name the groups in your
+(`<leader>tdp` is `problem`), so if you use which-key, name the groups in your
 config: >lua
 
     require("which-key").add({
-        { "<leader>t", group = "Tuna" },
-        { "<leader>td", group = "Download" },
-        { "<leader>tg", group = "Go to" },
+        { "<leader>t", group = "tuna" },
+        { "<leader>td", group = "download" },
+        { "<leader>tg", group = "go to" },
     })
 <
 Your own keys layer over the preset rather than replacing it, so one can be
@@ -798,6 +799,8 @@ tuna colours its windows with these highlight groups:
 - `TunaEditable`: the border of the panes you can type into.
 - `TunaMenuTitle`: the letters of the menu's banner.
 - `TunaDiffText`, `TunaDiffAdd` and `TunaDiffDelete`: the diff view.
+- `TunaFade1` to `TunaFade6`: a name fading out under its number in the
+  library, where it is too long for the list.
 
 tuna's colours are only defaults: define any of these groups yourself, or in
 your colorscheme, and yours win. tuna sets its defaults again after every

@@ -10,7 +10,7 @@
 --   * feed       — a pre-written input plays the other side, one line per turn: each
 --                  time the solution emits a line, the next input line is sent. If
 --                  the testcase has an expected output, the solution's stdout is
---                  judged against it; otherwise DONE.
+--                  judged against it; otherwise done.
 --   * interactor — a written interactor program (interactor.*) is cross-wired to the
 --                  solution and decides the verdict (exit 0 = accepted). Secondary:
 --                  used automatically only when an interactor.* sibling exists, or
@@ -151,7 +151,7 @@ end
 ---@param bufnr integer
 ---@param opts { win: integer?, before: fun()? }?
 local function offer_interactor(bufnr, opts)
-    require("tuna.workspace.scaffold").create_missing({ "interactor" }, bufnr, "The interactor source needs an interactor", opts)
+    require("tuna.workspace.scaffold").create_missing({ "interactor" }, bufnr, "the interactor source needs an interactor", opts)
 end
 
 --------------------------------------------------------------------------------
@@ -201,7 +201,7 @@ function InteractiveRunner:pane_titles()
     if not self:conversational() then
         return nil
     end
-    return { si = " Live " }
+    return { si = " live " }
 end
 
 ---In live mode the Live pane is typed into, so the UI must leave its letters alone
@@ -216,8 +216,8 @@ end
 -- the verdict. The other sources are named last, since switching is a command, not a key.
 local LEGEND = {
     live = {
-        { "you", "play the other side, in the Live column" },
-        { "start typing", "i, a, o or <CR> in the Live column" },
+        { "you", "play the other side, in the live column" },
+        { "start typing", "i, a, o or <CR> in the live column" },
         { "send a line", "<CR>" },
         { "the verdict", "none, you are the judge" },
     },
@@ -226,7 +226,7 @@ local LEGEND = {
         { "the verdict", "its output against the expected output" },
     },
     interactor = {
-        { "the interactor", "plays the other side, in the Live column" },
+        { "the interactor", "plays the other side, in the live column" },
         { "the verdict", "the interactor's exit code, 0 is correct" },
     },
 }
@@ -242,7 +242,7 @@ function InteractiveRunner:legend_rows()
         end
     end
     rows[#rows + 1] = { "other sources", ":Tuna run interactive " .. table.concat(others, " or ") }
-    return { title = "INTERACTIVE, " .. self.source:upper(), rows = rows }
+    return { title = "interactive, " .. self.source, rows = rows }
 end
 
 ---One extra "Run" pane row, under the judge: which side is playing the interactor. A
@@ -278,7 +278,7 @@ function InteractiveRunner:on_build_failed()
     self:update_ui(true)
 end
 
----End the session running now, and only it: its row reads `KILLED`, as a testcase stopped in
+---End the session running now, and only it: its row reads `killed`, as a testcase stopped in
 ---any mode does, and the run goes on to the next one.
 function InteractiveRunner:kill_process()
     local tc = self.active_index and self.tcdata[self.active_index]
@@ -656,7 +656,7 @@ end
 function InteractiveRunner:run_live(idx, on_done)
     local tc = self.tcdata[idx]
     self.active_index = idx
-    tc.status, tc.hlgroup = "LIVE", "TunaRunning"
+    tc.status, tc.hlgroup = "live", "TunaRunning"
     tc.stdout, tc.stderr, tc.log = "", "", {}
     self:update_ui(true)
 
@@ -672,17 +672,17 @@ function InteractiveRunner:run_live(idx, on_done)
             self:update_ui(false)
         end,
         on_error = function(msg)
-            tc.status, tc.hlgroup, tc.stderr = "FAILED", "TunaWarning", msg
+            tc.status, tc.hlgroup, tc.stderr = "failed", "TunaWarning", msg
             log_note(tc, msg)
             self.sol_in = nil
             self:update_ui(true)
             on_done()
         end,
         on_exit = function(code, signal)
-            -- You are the judge, so a session that ended on its own is DONE; one stopped or
+            -- You are the judge, so a session that ended on its own is `done`; one stopped or
             -- crashed ends the way a testcase would.
             local ended, hl = core.ending({ code = code, signal = signal, killed = tc.killed })
-            tc.status, tc.hlgroup = ended or "DONE", hl or "TunaDone"
+            tc.status, tc.hlgroup = ended or "done", hl or "TunaDone"
             self.sol_in = nil
             self:update_ui(true)
             on_done()
@@ -696,7 +696,7 @@ end
 function InteractiveRunner:run_feed(idx, on_done)
     local tc = self.tcdata[idx]
     self.active_index = idx
-    tc.status, tc.hlgroup = "RUNNING", "TunaRunning"
+    tc.status, tc.hlgroup = "running", "TunaRunning"
     tc.stdout, tc.stderr = "", ""
     self:update_ui(true)
 
@@ -739,7 +739,7 @@ function InteractiveRunner:run_feed(idx, on_done)
             timed_out = true
         end,
         on_error = function(msg)
-            tc.status, tc.hlgroup, tc.stderr = "FAILED", "TunaWarning", msg
+            tc.status, tc.hlgroup, tc.stderr = "failed", "TunaWarning", msg
             self.sol_in = nil
             self:update_ui(true)
             on_done()
@@ -779,7 +779,7 @@ end
 function InteractiveRunner:run_interactor(idx, on_done)
     local tc = self.tcdata[idx]
     self.active_index = idx
-    tc.status, tc.hlgroup = "RUNNING", "TunaRunning"
+    tc.status, tc.hlgroup = "running", "TunaRunning"
     tc.stdout, tc.stderr, tc.log = "", "", {}
     self:update_ui(true)
 
@@ -824,10 +824,10 @@ function InteractiveRunner:run_interactor(idx, on_done)
         vim.schedule(function()
             if failed then
                 -- The session never happened (the interactor would not start): that is
-                -- not a DONE, which reads as a session that ran and was not judged.
-                tc.status, tc.hlgroup = "FAILED", "TunaWarning"
+                -- not a `done`, which reads as a session that ran and was not judged.
+                tc.status, tc.hlgroup = "failed", "TunaWarning"
             elseif tc.killed then
-                tc.status, tc.hlgroup = "KILLED", "TunaWarning"
+                tc.status, tc.hlgroup = "killed", "TunaWarning"
             elseif status then
                 tc.status, tc.hlgroup = status, hl
             else
@@ -858,7 +858,7 @@ function InteractiveRunner:run_interactor(idx, on_done)
         for _, p in ipairs({ sol_in, sol_out, int_in, int_out, int_err }) do
             safe_close(p)
         end
-        tc.status, tc.hlgroup, tc.stderr = "FAILED", "TunaWarning", "could not start solution"
+        tc.status, tc.hlgroup, tc.stderr = "failed", "TunaWarning", "could not start solution"
         log_note(tc, tc.stderr)
         self:update_ui(true)
         return on_done()
@@ -986,7 +986,7 @@ function InteractiveRunner:run_sessions()
         k = k + 1
         if k > #order or self.stopped then
             for j = k, #order do -- stopped: the sessions after this one never started
-                self.tcdata[order[j]].status, self.tcdata[order[j]].hlgroup = "NOT RUN", "TunaDone"
+                self.tcdata[order[j]].status, self.tcdata[order[j]].hlgroup = "not run", "TunaDone"
             end
             self.completed = true
             core.save_buffer_verdict(self.bufnr, self.tcdata)
@@ -998,7 +998,7 @@ function InteractiveRunner:run_sessions()
     step()
 end
 
----Build the testcase rows (plus the solution Compile row).
+---Build the testcase rows (plus the solution compile row).
 function InteractiveRunner:load_rows()
     self.tcdata = {}
     if self.compile_entry then
@@ -1134,7 +1134,7 @@ function M.run(bufnr, args, opts)
     core.register(M.active, bufnr, ir)
 
     -- What this run compiles, declared before the board opens so the build step is laid out
-    -- once: the solution is the Compile row itself, the interactor is one when it plays the
+    -- once: the solution is the compile row itself, the interactor is one when it plays the
     -- other side, and the checker is one whenever it is a program of its own.
     ir:plan_builds({ source == "interactor" and ir.interactor or false, ir.checker })
 

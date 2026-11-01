@@ -163,7 +163,7 @@ end
 ---
 ---For an **answer** they are two different things, so nothing may be normalized away:
 ---an absent answer means the testcase is not judged (`compare_output` returns nil, the
----verdict is DONE), while an answer that is present and empty means the solution must
+---verdict is done), while an answer that is present and empty means the solution must
 ---print nothing. Only file *presence* can carry that, which is why an empty answer is
 ---never written by accident — `write_or_delete` removes it unless `keep_empty` says the
 ---user asked for one — and why what is there must be loaded as it is.
@@ -1177,9 +1177,9 @@ function M.offer_case_counts(bufnr, numbers, original_input, on_settled)
     end
 
     require("tuna.ui.widgets").menu({
-        ("Yes: %d becomes %d here, and each new testcase starts with 1"):format(total, remaining),
-        "No, leave the numbers alone",
-    }, ("Testcase %d starts with '%d', is that a case count?"):format(numbers[1], total), function(idx)
+        ("yes: %d becomes %d here, and each new testcase starts with 1"):format(total, remaining),
+        "no, leave the numbers alone",
+    }, ("testcase %d starts with '%d', is that a case count?"):format(numbers[1], total), function(idx)
         settle(idx == 1)
     end, vim.api.nvim_get_current_win(), function()
         settle(false) -- dismissed: "no", the answer that changes nothing

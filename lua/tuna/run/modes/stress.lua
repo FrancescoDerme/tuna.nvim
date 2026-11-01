@@ -103,10 +103,10 @@ end
 ---@param opts { win: integer?, before: fun()? }?
 ---@param hunt fun()? the search without a bruteforce, offered when that is all that is missing
 local function offer_helpers(absent, bufnr, opts, hunt)
-    local title = "Stress needs a " .. table.concat(absent, " and a ")
+    local title = "stress needs a " .. table.concat(absent, " and a ")
     opts = vim.tbl_extend("force", opts or {}, {
         instead = hunt and #absent == 1 and absent[1] == "bruteforce"
-            and { label = "Search for crashes without one", choose = hunt }
+            and { label = "search for crashes without one", choose = hunt }
             or nil,
     })
     require("tuna.workspace.scaffold").create_missing(absent, bufnr, title, opts)
@@ -129,7 +129,7 @@ function StressRunner:legend_rows()
             { " ", "runs out of time or exits with an error" },
         })
     end
-    return { title = "STRESS", rows = rows }
+    return { title = "stress", rows = rows }
 end
 
 ---The bruteforce the search compares with, on a row of its own under the judge: `none` in a
@@ -169,9 +169,9 @@ end
 ---@return string
 function StressRunner:row_label(tc)
     if tc.tcnum == SEARCH then
-        return "TC " .. self.next_num
+        return "tc " .. self.next_num
     end
-    return type(tc.tcnum) == "number" and ("TC " .. tc.tcnum) or tostring(tc.tcnum)
+    return type(tc.tcnum) == "number" and ("tc " .. tc.tcnum) or tostring(tc.tcnum)
 end
 
 ---A testcase added, restored or split off while the board is idle goes above the search row,
@@ -185,7 +185,7 @@ function StressRunner:add_testcase_row(tcnum)
     self.next_num = math.max(self.next_num, tcnum + 1)
 end
 
----How many rows stand for a testcase on disk: neither the Compile row nor the search
+---How many rows stand for a testcase on disk: neither the compile row nor the search
 ---row is one, and counting either would trip `max_saved` early.
 ---@return integer
 function StressRunner:testcase_count()
@@ -206,7 +206,7 @@ end
 ---@return table
 function StressRunner:search_row()
     if not self.search_entry then
-        self.search_entry = { tcnum = SEARCH, stdin = "", expected = nil, status = "STRESS", hlgroup = "TunaRunning" }
+        self.search_entry = { tcnum = SEARCH, stdin = "", expected = nil, status = "stress", hlgroup = "TunaRunning" }
         table.insert(self.tcdata, self.search_entry)
         self:update_ui(true)
     end
@@ -217,7 +217,7 @@ end
 ---up carrying a verdict stays, the way a testcase that failed stays on the board — it is the
 ---answer to what happened, and the input it holds is what there is to look at.
 function StressRunner:drop_search_row()
-    if not self.search_entry or self.search_entry.status ~= "STRESS" then
+    if not self.search_entry or self.search_entry.status ~= "stress" then
         self.search_entry = nil
         return
     end
@@ -251,12 +251,12 @@ function StressRunner:idle()
     return self.preloaded or (self:aborted() and not self.rerunning)
 end
 
----`NOT RUN` is a testcase's word for "no verdict yet"; the search row has no verdict to
+---`not run` is a testcase's word for "no verdict yet"; the search row has no verdict to
 ---have, so it goes on saying what it is for whether or not anything has run.
 function StressRunner:mark_not_run()
     core.RunnerCore.mark_not_run(self)
     if self.search_entry then
-        self.search_entry.status, self.search_entry.hlgroup = "STRESS", "TunaRunning"
+        self.search_entry.status, self.search_entry.hlgroup = "stress", "TunaRunning"
     end
 end
 
@@ -309,7 +309,7 @@ end
 ---  a search with no bruteforce, saved with no answer
 ---@param sol_out string the solution's (wrong) output
 ---@param sol_err string the solution's stderr
----@param status string the verdict it earned, in a testcase's words (`WRONG`, `TIMEOUT`, `SIG n`…)
+---@param status string the verdict it earned, in a testcase's words (`wrong`, `timeout`, `sig n`…)
 ---@param hlgroup string? its colour
 function StressRunner:record_counterexample(i, input, expected, sol_out, sol_err, status, hlgroup)
     -- Don't save a counterexample whose input we already have (as a pre-existing
@@ -361,7 +361,7 @@ end
 ---@param i integer the iteration it failed on
 ---@param output string? the failing process's stderr/stdout
 ---@param reason string? how it failed, in words
----@param status string? the verdict for the selector (`core.ending`'s), else FAILED
+---@param status string? the verdict for the selector (`core.ending`'s), else failed
 ---@param hlgroup string? its colour
 function StressRunner:helper_failed(label, i, output, reason, status, hlgroup)
     -- The seed is what reproduces the input, when the generator was handed one.
@@ -369,7 +369,7 @@ function StressRunner:helper_failed(label, i, output, reason, status, hlgroup)
     local what = ("%s %s (%s)"):format(label, reason or "failed", which)
     local row = self.search_entry
     if row then
-        row.status = status or "FAILED"
+        row.status = status or "failed"
         row.hlgroup = hlgroup or "TunaWarning"
         local said = output and vim.trim(output) ~= "" and output or nil
         row.stderr = said and (what .. "\n\n" .. said) or what
@@ -453,7 +453,7 @@ function StressRunner:generation(i)
                 -- every input would look like a counterexample.
                 local ref_failed, ref_hl, ref_words = core.ending(rres, self.ref_timeout)
                 if ref_failed then
-                    local said = ref_failed == "TIMEOUT" and BRUTEFORCE_TIME_HINT or rres.stderr
+                    local said = ref_failed == "timeout" and BRUTEFORCE_TIME_HINT or rres.stderr
                     return self:helper_failed("bruteforce", i, said, ref_words, ref_failed, ref_hl)
                 end
                 local expected = rres.stdout or ""
@@ -478,7 +478,7 @@ function StressRunner:generation(i)
                         return self:helper_failed("checker", i, message, "gave no verdict")
                     end
                     if correct == false then
-                        self:record_counterexample(i, input, expected, sol_out, "", "WRONG", "TunaWrong")
+                        self:record_counterexample(i, input, expected, sol_out, "", "wrong", "TunaWrong")
                     else
                         self:generation(i + 1)
                     end
@@ -532,7 +532,7 @@ end
 ---ending — a search that found its counterexample on the first seed would otherwise leave
 ---half the testcases on disk sitting at no verdict.
 function StressRunner:run_existing()
-    -- The real testcase rows (neither the Compile row nor the search row).
+    -- The real testcase rows (neither the compile row nor the search row).
     local idxs = {}
     for i, tc in ipairs(self.tcdata) do
         if type(tc.tcnum) == "number" then
@@ -734,11 +734,11 @@ function M.run(bufnr, count_override, opts)
     core.register(M.active, bufnr, sr)
 
     -- What this run compiles, declared before the board opens so the build step is laid out
-    -- once: the solution is the Compile row itself, and the generator, the bruteforce and a
+    -- once: the solution is the compile row itself, and the generator, the bruteforce and a
     -- checker each get a pane beside it.
     sr:plan_builds(sr:search_helpers())
 
-    -- Open the runner UI with the rows listed (the Compile row, the testcases on disk and the
+    -- Open the runner UI with the rows listed (the compile row, the testcases on disk and the
     -- search's row) right away.
     sr:load_testcases()
     if opts.show_only then

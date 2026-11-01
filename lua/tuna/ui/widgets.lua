@@ -391,8 +391,8 @@ end
 ---What a save that would leave a real answer empty asks, in the runner UI and the editor alike:
 ---absent and empty mean different things, and the panes cannot say which was meant.
 ---@param tcnum integer
----@param back_to integer the window "Keep editing" returns to
----@param proceed fun(expect_empty_output: boolean) not called on "Keep editing", or dismissed
+---@param back_to integer the window "keep editing" returns to
+---@param proceed fun(expect_empty_output: boolean) not called on "keep editing", or dismissed
 function M.ask_empty_answer(tcnum, back_to, proceed)
     -- Opened *out* of the write command rather than inside it. A float entered from a
     -- `BufWriteCmd` does not keep the focus: Vim restores the window the command ran in
@@ -400,8 +400,8 @@ function M.ask_empty_answer(tcnum, back_to, proceed)
     -- still in the pane behind it and no way to answer without reaching for the mouse.
     vim.schedule(function()
         M.menu(
-            { "Don't specify output", "Expect empty output", "Keep editing" },
-            "The answer to testcase " .. tcnum .. " is empty",
+            { "don't specify output", "expect empty output", "keep editing" },
+            "the answer to testcase " .. tcnum .. " is empty",
             function(idx)
                 if idx == 1 or idx == 2 then
                     proceed(idx == 2)
@@ -515,8 +515,8 @@ function M.editor(bufnr, tcnum, input_content, output_content, callback, restore
 
     -- Place the two panes symmetrically about the editor's vertical centre.
     local in_win, out_win
-    editor.input_buf, in_win = make_pane("Input", math.floor(vim_width / 2) - width - 1, input_lines)
-    editor.output_buf, out_win = make_pane("Output", math.floor(vim_width / 2) + 1, output_lines)
+    editor.input_buf, in_win = make_pane("input", math.floor(vim_width / 2) - width - 1, input_lines)
+    editor.output_buf, out_win = make_pane("output", math.floor(vim_width / 2) + 1, output_lines)
     editor.input_win, editor.output_win = in_win, out_win
     local focus = in_output and out_win or in_win
     api.nvim_set_current_win(focus)
@@ -604,8 +604,8 @@ function M.editor(bufnr, tcnum, input_content, output_content, callback, restore
         local back_to = api.nvim_get_current_win()
         local label = vim.trim(editor.tcnum)
         M.menu(
-            { "Save and close", "Discard and close", "Keep editing" },
-            "Unsaved testcase" .. (label ~= "" and (" " .. label) or ""),
+            { "save and close", "discard and close", "keep editing" },
+            "unsaved testcase" .. (label ~= "" and (" " .. label) or ""),
             function(idx)
                 if idx == 1 then
                     save(close)
@@ -645,7 +645,7 @@ function M.editor(bufnr, tcnum, input_content, output_content, callback, restore
     end
 
     -- A save can ask a question, so one that also closes is held until it is answered: left
-    -- alone, Vim would close the panes first, and "Keep editing" would have nothing to keep.
+    -- alone, Vim would close the panes first, and "keep editing" would have nothing to keep.
     api.nvim_create_autocmd("CmdlineLeave", {
         group = api.nvim_create_augroup("tuna_editor_quit", { clear = true }),
         callback = function()
@@ -726,7 +726,10 @@ end
 ---@field id integer which opening this is, for rows arriving later (`menu_items`)
 ---@field relist fun()? shows `items` again for the search as it stands
 ---@field dismiss fun()? closes the menu as a cancel does
-local menu = { ui_visible = false, query = "", shown = {}, previews = {}, rebuilding = false, id = 0 }
+---@field tags table<integer, string> dimmed text after an item's label, by its index in `items`
+---@field drawn_scroll integer? how far the list was scrolled sideways when its tags were drawn
+local menu = { ui_visible = false, query = "", shown = {}, previews = {}, rebuilding = false, id = 0, tags = {} }
+local menu_ns = api.nvim_create_namespace("tuna_menu")
 
 ---The screen rows `lines` take in a window `width` columns wide that wraps them at word
 ---boundaries ('linebreak').
@@ -769,6 +772,18 @@ function M.sequence_width(names, previews)
     return math.max(math.floor(vim_width * 0.5), math.min(widest + 4, math.floor(vim_width * 0.7)))
 end
 
+---@class tuna.MenuOpts
+---@field notice { title: string?, lines: string[] }? a read-only pane *above* the menu, for
+---  something the user needs to know before choosing (e.g. that a scan was partial)
+---@field row integer? the row the cursor starts on (default 1), so a caller asking the same
+---  question over and over can leave the answer last given under the cursor
+---@field search (fun(query: string): integer[])? adds a search pane above the list, focused and
+---  typing: on every change the list shows the items `search` returns for what is typed, in its
+---  order (indices into `items`, which `on_choice` and `preview.content` still get). With one,
+---  `items` may start empty, for `menu_items` to fill
+---@field tags table<integer, string>? dimmed text after an item's label, by its index in
+---  `items`, drawn beside the row rather than in it, and going wherever a search moves the item
+
 ---Open a generic single-choice menu. `on_choice`
 ---receives the 1-based index of the picked item. An optional `preview` renders a
 ---read-only pane *under* the menu (used by `:Tuna clean` to show the file about to
@@ -785,16 +800,11 @@ end
 ---  processor) isn't left hanging on a cancellation
 ---@param preview tuna.MenuPreview? content pane(s); with `content` they follow the highlighted
 ---  row (pin `width`/`height`)
----@param notice { title: string?, lines: string[] }? a read-only pane *above* the menu,
----  for something the user needs to know before choosing (e.g. that a scan was partial)
----@param row integer? the row the cursor starts on (default 1), so a caller asking the same
----  question over and over can leave the answer last given under the cursor
----@param search (fun(query: string): integer[])? adds a search pane above the list, focused
----  and typing: on every change the list shows the items `search` returns for what is typed,
----  in its order (indices into `items`, which `on_choice` and `preview.content` still get).
----  With one, `items` may start empty, for `menu_items` to fill
+---@param opts tuna.MenuOpts?
 ---@return integer? id the opening, for `menu_items`
-function M.menu(items, title, on_choice, restore_winid, on_close, preview, notice, row, search)
+function M.menu(items, title, on_choice, restore_winid, on_close, preview, opts)
+    opts = opts or {}
+    local search = opts.search
     ---Close every window of the open menu without it counting as a dismissal.
     local function take_down()
         -- The list's WinClosed is told by `skip_close`, the search pane's by `rebuilding`.
@@ -848,14 +858,15 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
         end
         menu.id = menu.id + 1
         menu.items = items
-        menu.title = title and (" " .. title .. " ") or " Tuna "
+        menu.title = title and (" " .. title .. " ") or " tuna "
         menu.on_choice = on_choice
         menu.on_close = on_close
         menu.restore_winid = restore_winid
         menu.preview = preview
-        menu.notice = notice
-        menu.row = row
+        menu.notice = opts.notice
+        menu.row = opts.row
         menu.search = search
+        menu.tags = opts.tags or {}
         menu.query = ""
         menu.focus_pane = search and "search" or "list"
         menu.inserting = search ~= nil
@@ -892,6 +903,95 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
         return out
     end
 
+    ---The cells item `idx` needs on its row: its label, a space and its tag.
+    ---@param idx integer
+    ---@return integer
+    local function item_width(idx)
+        local tag = menu.tags[idx]
+        return api.nvim_strwidth(menu.items[idx]) + (tag and 1 + api.nvim_strwidth(tag) or 0)
+    end
+
+    ---The widest of the title and the items, for a width that follows them.
+    ---@return integer
+    local function widest_item()
+        local widest = api.nvim_strwidth(menu.title)
+        for idx in ipairs(menu.items) do
+            widest = math.max(widest, item_width(idx))
+        end
+        return widest
+    end
+
+    ---Fade the cells of `label` leading up to cell `edge`, where what covers the rest starts.
+    ---@param buf integer
+    ---@param line integer 0-based
+    ---@param label string
+    ---@param edge integer
+    local function fade_label(buf, line, label, edge)
+        local steps = #require("tuna").FADE
+        local starts = vim.str_utf_pos(label)
+        local cell = 0
+        for i, start in ipairs(starts) do
+            local stop = (starts[i + 1] or #label + 1) - 1
+            local width = api.nvim_strwidth(label:sub(start, stop))
+            if cell + width > edge then
+                return
+            end
+            local step = steps - (edge - cell) + 1
+            if step >= 1 then
+                api.nvim_buf_set_extmark(buf, menu_ns, line, start - 1, { end_col = stop, hl_group = "TunaFade" .. step })
+            end
+            cell = cell + width
+        end
+    end
+
+    ---How far the list is scrolled sideways, in cells.
+    ---@return integer
+    local function list_scroll()
+        if menu.winid and api.nvim_win_is_valid(menu.winid) and api.nvim_win_get_buf(menu.winid) == menu.menu_buf then
+            return api.nvim_win_call(menu.winid, vim.fn.winsaveview).leftcol
+        end
+        return 0
+    end
+
+    ---Draw the tags of the rows listed. A tag follows its label, or where they do not both fit
+    ---in `list_width` stays at the edge, over the label, whose last cells fade out under it so
+    ---what is covered does not read as all there is. The cells at the edge change as the list
+    ---scrolls sideways, so this runs again when it does.
+    ---@param list_width integer
+    local function draw_tags(list_width)
+        local buf = menu.menu_buf
+        api.nvim_buf_clear_namespace(buf, menu_ns, 0, -1)
+        local scrolled, fading = list_scroll(), false
+        menu.drawn_scroll = scrolled
+        for line, idx in ipairs(menu.shown) do
+            local tag = menu.tags[idx]
+            if tag then
+                local fits = item_width(idx) - scrolled <= list_width
+                api.nvim_buf_set_extmark(buf, menu_ns, line - 1, 0, {
+                    virt_text = { { fits and "" or " " }, { tag, "Comment" } },
+                    virt_text_pos = fits and "eol" or "right_align",
+                    hl_mode = "combine",
+                })
+                if not fits then
+                    if not fading then
+                        fading = true
+                        require("tuna").setup_fades()
+                    end
+                    fade_label(buf, line - 1, menu.items[idx], scrolled + list_width - api.nvim_strwidth(tag) - 1)
+                end
+            end
+        end
+    end
+
+    ---Fill the list with the listed items and their tags.
+    ---@param list_width integer
+    local function show_rows(list_width)
+        vim.bo[menu.menu_buf].modifiable = true
+        api.nvim_buf_set_lines(menu.menu_buf, 0, -1, false, labels())
+        vim.bo[menu.menu_buf].modifiable = false
+        draw_tags(list_width)
+    end
+
     ---What each preview pane shows for item `idx`, in the order of `specs`.
     ---@param idx integer?
     ---@return table[]
@@ -921,7 +1021,7 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
         local idx = menu.shown[row]
         local out = item_data(idx)
         if not idx then
-            out[#specs] = { title = "No match", lines = {} }
+            out[#specs] = { title = "no match", lines = {} }
         end
         return out
     end
@@ -941,10 +1041,7 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
         -- Display width, not byte length: a multibyte title (a problem name in a
         -- `already exists` prompt) is fewer cells than bytes, and sizing by bytes
         -- made such floats visibly too wide.
-        width = api.nvim_strwidth(menu.title)
-        for _, l in ipairs(menu.items) do
-            width = math.max(width, api.nvim_strwidth(l))
-        end
+        width = widest_item()
         for _, d in ipairs(shown) do
             width = math.max(width, api.nvim_strwidth(d.title or "") + 4)
             for _, l in ipairs(d.lines or {}) do
@@ -958,11 +1055,7 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
     -- as its widest label, and at most two fifths of the float.
     local list_w, pane_w, pane_col = width, width, col
     if beside then
-        list_w = api.nvim_strwidth(menu.title)
-        for _, l in ipairs(menu.items) do
-            list_w = math.max(list_w, api.nvim_strwidth(l))
-        end
-        list_w = beside.list_width or math.min(math.max(list_w + 2, 24), math.floor(width * 0.4))
+        list_w = beside.list_width or math.min(math.max(widest_item() + 2, 24), math.floor(width * 0.4))
         pane_w = math.max(1, width - list_w - 2)
         pane_col = col + list_w + 2
     end
@@ -1097,8 +1190,7 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
     end
 
     menu.menu_buf = api.nvim_create_buf(false, true)
-    api.nvim_buf_set_lines(menu.menu_buf, 0, -1, false, labels())
-    vim.bo[menu.menu_buf].modifiable = false
+    show_rows(list_w)
 
     -- With a search, the list is as tall as the whole of it would be, so it does not
     -- resize as the search narrows it.
@@ -1117,6 +1209,15 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
         cursorline = true,
     })
     api.nvim_win_set_cursor(menu.winid, { start_row, 0 })
+    api.nvim_create_autocmd("WinScrolled", {
+        buffer = menu.menu_buf,
+        callback = function()
+            -- `WinScrolled` also means a scroll up or down, which moves no cell of a row.
+            if menu.ui_visible and api.nvim_win_is_valid(menu.winid) and list_scroll() ~= menu.drawn_scroll then
+                draw_tags(list_w)
+            end
+        end,
+    })
 
     ---Show the preview of the list's row `row`, unless it shows that item already.
     ---@param row integer
@@ -1188,7 +1289,7 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
             col = col,
             border = cfg.floating_border,
             border_highlight = cfg.floating_border_highlight,
-            title = " Search ",
+            title = " search ",
         })
     else
         menu.search_win, menu.search_buf = nil, nil
@@ -1223,9 +1324,7 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, notic
     ---List what the search finds now, from the first row.
     local function relist()
         menu.shown = listed()
-        vim.bo[menu.menu_buf].modifiable = true
-        api.nvim_buf_set_lines(menu.menu_buf, 0, -1, false, labels())
-        vim.bo[menu.menu_buf].modifiable = false
+        show_rows(list_w)
         api.nvim_win_set_cursor(menu.winid, { 1, 0 })
         preview_row(1)
     end

@@ -22,7 +22,7 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     once the row it shows fits, lualine told to draw the bar at once as a float takes focus and
     nothing copied while it is loaded, the testcase editor's two panes together `editor_ui.width` of the
     editor, a menu of varying previews as wide as the widest, between half and seven tenths
-    of the editor, the key legend's two columns closing together when one is closed
+    of the editor, the key legend's boxes closing together when one is closed, the pane keys going between them
     with `:q`, a menu's starting row and preview, a pane worth pasting from copied from in
     Normal and Visual mode with nothing a selection does raising `E21` while a list and any
     other pane start no selection, a menu's search (opened typing, narrowing the list before
@@ -64,7 +64,10 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     unclosed guard warned about once, a snippet's notes (in its comment syntax, kept out of its
     code, ended by a blank line, the complexity from `Complexity:` to their end however it was
     wrapped), notes searched between names and code, the picker's panes and size (options of
-    its own, the runner UI's by default), and a snippet inserted a level inside a block from its
+    its own, the runner UI's by default), snippets of one exact name numbered by file then line
+    (a menu's `tags`: beside the row and not in it, following their item through a search, in
+    the list's width, gone from the next menu, at the edge over a label fading out where the
+    two do not fit, as scrolled sideways, in colours read as it fades, a user's kept), and a snippet inserted a level inside a block from its
     opening line or a blank line in it (by `indentexpr`, evaluated with the cursor on that line,
     over `cindent`, else the line above's, in tabs where the buffer uses them), its nesting kept
     and one undo taking it back;
@@ -161,7 +164,7 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     the stress search trusts (a bruteforce that crashed or ran past its own budget saving
     nothing, one that printed nothing saving an empty answer, the row the search is shown on,
     when it is listed and that it stays last and numbered past every testcase while the board is
-    edited, a helper that failed reported on that row and on the Compile row rather than in a
+    edited, a helper that failed reported on that row and on the compile row rather than in a
     float, the search running beside the testcases on disk rather than after them, every run
     searching from a seed of its own and the Run pane showing the one being tried, a search with
     no bruteforce (never picked by a bare `:Tuna run`, offered beside the bruteforce's starter,
@@ -171,10 +174,10 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     that did not build or gives no verdict stopping it and a restart judging with the checker as
     it is now, a failed build finishing it and spawning nothing behind it, in every mode that
     builds a solution of its own), a stop in every mode (nothing started after it, the rows it
-    had not reached `NOT RUN`, a stopped session `KILLED`, the board idle), `<C-r>` building the
+    had not reached `not run`, a stopped session `killed`, the board idle), `<C-r>` building the
     solution again and running after a stop, reusing a build (the files its stamp reads: headers
     beside it and through `-I` and `-Idir`, none of the compiler's own, an include cycle; a flag
-    changing it; a file touched or an edit undone being no change; a reused row reading `CACHED`
+    changing it; a file touched or an edit undone being no change; a reused row reading `cached`
     with its compiler's words; a missing program or a failed build never reused by another run;
     run-all and the helpers going by the same rule; a helper's build answered within its run
     without its sources read, a failure included; Rust never reused across runs), headers never
@@ -185,7 +188,7 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     titles and a bad grid said once as the board re-tiles, the pane keys moving from the cursor,
     from a zoom as from its pane and, from insert mode, typing on into an editable pane and
     stopping in a read-only one, the selector's cursorline always and a pane's or the zoom's
-    only while focused, a row reading `EDITED` for what is typed and not for a pane's own
+    only while focused, a row reading `edited` for what is typed and not for a pane's own
     filling, the cursorline kept in diff mode, what a diff paints (only the disagreeing tokens on
     a line that disagrees, a cell where the output ends short and none at the cursor where the
     answer does, a line the other lacks coloured whole), an answer stored empty compared and
@@ -194,7 +197,7 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     not saved offering a first run and no Discard, a run asked for happening on a board listed
     before any run, `<C-r>` after a save running every testcase once, a quit left with `<Esc>` or
     spelled by a search doing nothing, `:wq!` keeping the edit it writes, Discard taking a row
-    never saved with it, every save settling an empty answer and `Keep editing` stopping what
+    never saved with it, every save settling an empty answer and `keep editing` stopping what
     followed it, `:w` from a read-only pane,
     a file opened from the board opening where the board was opened over and the board put away,
     a row added or restored going into number order and selected, the cursor with it, a
@@ -208,7 +211,7 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     and a testcase added there added under every solution, a testcase generated (from the
     command, written with no answer under the lowest free number and handed a seed the
     message names, or none with `pass_seed` off; on a board, a row selected and run reading
-    `DONE`; the command handing it to a board open on the solution; a failed generator writing
+    `done`; the command handing it to a board open on the solution; a failed generator writing
     nothing; a missing one offering its starter), the selection staying under the
     solution it is on through a delete, a restore and an add, a delete taking the edit typed and
     not yet captured, a cursor event before the render that follows rows moved being no move by
@@ -221,7 +224,7 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     key doing nothing in a zoom). `testcases.lua` also covers the `single_file` rewrite keeping
     untouched testcases, the editor's blank Output pane saying what it means and a save leaving
     an answer stored empty as it was, a real one left empty asked about by `:w`, `:wq`, `:x`,
-    `ZZ` and `Save and close`, each waiting on the answer, a quit left with `<Esc>` or spelled by
+    `ZZ` and `save and close`, each waiting on the answer, a quit left with `<Esc>` or spelled by
     a search doing nothing, a conversion through every backend keeping an answer stored empty and leaving no layout behind (the store's root kept), which testcase a command
     without a number acts on, and sharing a folder's testcases (offered for a solution with none
     when exactly one other has some, never for several sets, a format or `testcases_directory`
@@ -239,7 +242,7 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
   the render land" was for. In `runner.lua`, `drain(ui)` adds the board's own pending work
   (a render, a re-tiling, the settle pass), and `settled(runner)` waits for the run to be over
   (idle, no row running or being judged), never for words on the rows, which a run can
-  legitimately leave blank or `NOT RUN`. A test that something does *not* happen relies on
+  legitimately leave blank or `not run`. A test that something does *not* happen relies on
   these to have waited long enough, so mutation-check it.
 - **Mutation-check new tests**: break the rule each test describes and confirm it fails, and
   confirm a harmless edit doesn't.

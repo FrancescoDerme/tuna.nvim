@@ -104,7 +104,7 @@ specific Vim error about a buffer the user never opened.
   the runner UI does, with no keys of its own for it: `:w` saves (`BufWriteCmd`), `:wq`
   and `:x` save and close, and `q` or `cancel_keys` go through `request_close`, which
   compares the panes with what was last saved (`editor.saved`) and asks
-  `Save and close` / `Discard and close` / `Keep editing` (also what dismissal gives) only
+  `save and close` / `discard and close` / `keep editing` (also what dismissal gives) only
   when something would be lost. A `<C-s>` there would mean the opposite of the runner
   UI's `stop_all`. A resize rebuilds both panes in the pane, cursor and mode the user was in;
   `skip_close` keeps the panes' `WinClosed` from running the real close (which leaves insert
@@ -113,11 +113,11 @@ specific Vim error about a buffer the user never opened.
   save and its callback: `commands.edit_testcase` leaves an answer stored empty or absent as it
   was, and asks about a real one left empty.
 - `ask_empty_answer` is that question, here since the runner UI and the editor both ask it:
-  `Don't specify output` / `Expect empty output` / `Keep editing`. It opens with `vim.schedule`,
+  `don't specify output` / `expect empty output` / `keep editing`. It opens with `vim.schedule`,
   as a float entered inside `BufWriteCmd` loses focus when the write finishes.
 - A save can ask, so a typed `:wq`, `:x` or `:wqa` in the editor is held in `CmdlineLeave`
   (`surface.quit_command`, as in the runner UI), and `ZZ` is mapped, or Vim would close the panes
-  before the answer and leave `Keep editing` nothing to keep. A `:wq` from a script cannot be
+  before the answer and leave `keep editing` nothing to keep. A `:wq` from a script cannot be
   held: the panes close, and the answer still lands, which `save` guards for.
 - `menu`: optional `on_close`; `preview` (fixed lines or cursor-following `content(idx)`, colour
   via `'syntax'` not `'filetype'`, list capped at `MENU_LIST_SHARE` of the height, read-only and
@@ -130,7 +130,17 @@ specific Vim error about a buffer the user never opened.
   list leads to the code and the search pane to the notes. A `readout` pane (the library's
   complexity) is passed over in both layouts, as the runner UI passes over its Run pane, and the
   pane keys still lead out of it; `notice` pane above the menu, outside the focus cycle; `row`
-  to start the cursor on (a resize keeps the row it is on); `search(query)`, a one-row pane
+  to start the cursor on (a resize keeps the row it is on); `tags`, dimmed text by the item's index,
+  virtual text so a row's text stays its label, drawn again whenever the list is, so a tag goes
+  with its item, and counted in the list's width. It follows its label, past the line's end;
+  where the two do not fit it stays at the window's edge, over the label, whose last cells take
+  `TunaFade1` and on (`init.setup_fades`, the float's text mixed into its background, read as
+  a label fades since a float's colours may change with no event, and set only on a change,
+  as setting a group redraws every window): cut off with the label, the tag
+  would be gone where it is needed, and always at the edge it would sit apart from a short
+  label. The cells at the edge depend on how far the list is scrolled, so `WinScrolled` draws
+  them again, when it was sideways;
+  `search(query)`, a one-row pane
   above the list, opened focused and typing, whose text the list is narrowed to (`shown`,
   indices into `items`, which `on_choice` and `content` still get). The list keeps the height of
   the whole, so it does not resize as it narrows. The change events (`TextChangedI`) are not the
