@@ -176,7 +176,8 @@ t.eq("a setting that means nothing reads as automatic", { tools.get_mode(l2sol),
 --------------------------------------------------------------------------------
 
 local real_system = vim.system
-vim.system = function(_, _, on_exit)
+vim.system = function(_, opts, on_exit)
+    on_exit = t.streamed(opts, on_exit)
     if on_exit then
         vim.schedule(function()
             on_exit({ code = 0, signal = 0, stdout = "", stderr = "" })

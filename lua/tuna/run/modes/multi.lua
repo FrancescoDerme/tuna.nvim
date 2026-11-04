@@ -272,13 +272,17 @@ function MultiRunner:compile_solution(sol, cb)
     -- pcall'd: a compiler that is not installed makes `vim.system` itself throw, and
     -- that is this solution's `ce`, not an editor error.
     local ok, err = pcall(
-        vim.system,
+        tools.system,
         vim.list_extend({ sol.cc.exec }, vim.deepcopy(sol.cc.args)),
         { cwd = self.compdir },
+        tools.output_limit(self.config),
         function(res)
             vim.schedule(function()
                 hrow.compile_output = (res.stdout or "") .. (res.stderr or "")
-                if res.code ~= 0 then
+                if res.over then
+                    hrow.compile_output = ("[the compiler printed more than %s]\n"):format(tools.size_words(res.over)) .. hrow.compile_output
+                end
+                if not tools.clean_exit(res) then
                     hrow.status, hrow.hlgroup = "ce", "TunaWarning"
                     self:set_cases(sol, "—", "TunaDone")
                     self:update_ui(true)

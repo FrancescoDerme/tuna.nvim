@@ -514,7 +514,7 @@ end
 ---@param cb fun(res: vim.SystemCompleted)
 function StressRunner:spawn(label, i, cmd, opts, cb)
     opts.cwd, opts.env = self.rundir, tools.RUN_ENV
-    local ok, err = pcall(vim.system, cmd, opts, function(res)
+    local ok, err = pcall(tools.system, cmd, opts, tools.output_limit(self.config), function(res)
         vim.schedule(function()
             if not self:aborted() then
                 cb(res)

@@ -115,6 +115,7 @@ end
 function M.judged(status)
     return status == "correct"
         or status == "wrong"
+        or status == "ole"
         or status == "timeout"
         or status:match("^ret ") ~= nil
         or status:match("^sig ") ~= nil
@@ -161,12 +162,15 @@ end
 ---How a process that did not exit cleanly ended: the verdict a row wears for it, its colour,
 ---and the same in words, or nil for a clean exit. One vocabulary for every mode and every
 ---process, a testcase, a session or a stress helper alike. `vim.system` marks its own timeout
----kill with code 124 and SIGTERM, which reads as a timeout too.
----@param how { code: integer?, signal: integer?, timed_out: boolean?, killed: boolean? }
+---kill with code 124 and SIGTERM, which reads as a timeout too. One stopped for printing past
+---`maximum_output` (`over`, its limit) reads `ole`, as a judge says output limit exceeded.
+---@param how { code: integer?, signal: integer?, timed_out: boolean?, killed: boolean?, over: integer? }
 ---@param timeout integer? the budget it had, in milliseconds, for the words
 ---@return string? status, string? hlgroup, string? words
 function M.ending(how, timeout)
-    if how.timed_out or (how.code == 124 and how.signal == 15) then
+    if how.over then
+        return "ole", "TunaWrong", ("printed more than %s"):format(tools.size_words(how.over))
+    elseif how.timed_out or (how.code == 124 and how.signal == 15) then
         return "timeout", "TunaWrong", ("timed out after %.1f s"):format((timeout or 0) / 1000)
     elseif how.killed then
         return "killed", "TunaWarning", "was stopped"
@@ -346,7 +350,7 @@ function RunnerCore:build_solution(cont)
         return
     end
     self:execute_process(1, r.cc, r.compile_directory, { judge = false }, function()
-        if tc.exit_code == 0 then
+        if tools.clean_exit({ code = tc.exit_code, signal = tc.exit_signal, over = tc.over }) then
             remember(tc.stdout, tc.stderr)
             cont()
         else
@@ -472,13 +476,11 @@ function RunnerCore:pane_content(tc, name)
         -- stderr *is* the explanation of the verdict ("wrong answer: expected 5, got
         -- 3"), and a `wrong` with the reason collected but never shown is a checker the
         -- user cannot hear.
+        -- First, so a long stderr, which the pane cuts off, cannot take the reason with it.
         local msg = tc.checker_message
         if msg and msg ~= "" then
             local err = tc.stderr or ""
-            if err ~= "" and not err:match("\n$") then
-                err = err .. "\n"
-            end
-            return err .. "checker: " .. msg
+            return "checker: " .. msg .. (err ~= "" and ("\n" .. err) or "")
         end
         return tc.stderr
     end
@@ -607,7 +609,7 @@ function RunnerCore:build_sources(tc)
             label = name ~= "" and vim.fn.fnamemodify(name, ":t") or "solution",
             role = "solution",
             output = compiler_text(tc.stderr, tc.stdout),
-            failed = tc.exit_code ~= nil and tc.exit_code ~= 0,
+            failed = tc.exit_code ~= nil and not tools.clean_exit({ code = tc.exit_code, signal = tc.exit_signal, over = tc.over }),
             done = tc.exit_code ~= nil,
         },
     }
@@ -675,6 +677,7 @@ function RunnerCore:reset_row(tc)
     tc.timed_out = false
     tc.exit_code = nil
     tc.exit_signal = nil
+    tc.over = nil
 end
 
 ---Spawn one `tcdata` process and, on a clean exit, judge it. Used by every
@@ -724,7 +727,7 @@ function RunnerCore:execute_process(tcindex, cmd, dir, opts, on_done)
         stdin = tc.stdin
     end
     local argv = vim.list_extend({ cmd.exec }, cmd.args or {})
-    local ok, handle = pcall(vim.system, argv, { cwd = dir, stdin = stdin, env = tools.RUN_ENV }, function(res)
+    local ok, handle = pcall(tools.system, argv, { cwd = dir, stdin = stdin, env = tools.RUN_ENV }, tools.output_limit(self.config), function(res)
         -- on_exit is a fast context; defer API/UI work to the main loop.
         vim.schedule(function()
             self:finish_process(tc, run_id, timer, res, opts, on_done)
@@ -797,6 +800,7 @@ function RunnerCore:finish_process(tc, run_id, timer, res, opts, on_done)
     tc.exit_signal = res.signal
     tc.stdout = res.stdout or ""
     tc.stderr = res.stderr or ""
+    tc.over = res.over
     tc.handle = nil
 
     local function finalize()
@@ -811,6 +815,7 @@ function RunnerCore:finish_process(tc, run_id, timer, res, opts, on_done)
         signal = tc.exit_signal,
         timed_out = tc.timed_out,
         killed = tc.killed,
+        over = res.over,
     })
     if ended then
         tc.status, tc.hlgroup = ended, hl

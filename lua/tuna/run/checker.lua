@@ -59,10 +59,18 @@ function M.judge(tc, checker, compare_method, callback)
             ANSWER = utils.temp_file(tc.expected),
         }
         local argv = vim.list_extend({ checker.exec }, tools.expand_args(checker.args, files))
-        local ok, err = pcall(vim.system, argv, { text = true, cwd = checker.cwd, env = tools.RUN_ENV }, function(res)
+        local limit = checker.output_limit or tools.output_limit()
+        local ok, err = pcall(tools.system, argv, { text = true, cwd = checker.cwd, env = tools.RUN_ENV }, limit, function(res)
             vim.schedule(function()
                 for _, path in pairs(files) do
                     utils.delete_file(path)
+                end
+                -- Stopped, or killed by a signal, a checker exits with code 0 all the same, and
+                -- has said nothing about the output.
+                if res.over then
+                    return callback(nil, ("checker printed more than %s"):format(tools.size_words(res.over)))
+                elseif (res.signal or 0) ~= 0 then
+                    return callback(nil, ("checker was killed by signal %d"):format(res.signal))
                 end
                 local msg = res.stderr ~= "" and res.stderr or res.stdout
                 msg = msg ~= "" and vim.trim(msg) or nil

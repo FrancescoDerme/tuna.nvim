@@ -90,6 +90,33 @@ function M.tempdir()
     return dir
 end
 
+---A stand-in for `vim.system`'s `on_exit`, wrapping the one it was given: what the result says
+---was printed goes to the `stdout`/`stderr` callbacks the stand-in was handed, as `vim.system`
+---hands it, and is then left off the result, which `vim.system` gives back without the
+---streams it was handed callbacks for.
+---@param opts table? the options the stand-in was called with
+---@param on_exit function?
+---@return function?
+function M.streamed(opts, on_exit)
+    if not on_exit then
+        return nil
+    end
+    return function(res, ...)
+        res = vim.deepcopy(res or {})
+        for _, name in ipairs({ "stdout", "stderr" }) do
+            local feed = opts and opts[name]
+            if type(feed) == "function" then
+                if res[name] and res[name] ~= "" then
+                    feed(nil, res[name])
+                end
+                feed(nil, nil)
+                res[name] = nil
+            end
+        end
+        return on_exit(res, ...)
+    end
+end
+
 ---Write `text` to `dir/name`.
 function M.write(dir, name, text)
     local f = assert(io.open(dir .. "/" .. name, "w"))

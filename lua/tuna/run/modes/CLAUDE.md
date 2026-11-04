@@ -11,8 +11,8 @@ The rules that hold everywhere are in the root `CLAUDE.md`.
   Every run builds them through `build_helpers` (an unchanged one is reused, and an edited
   one, or one that failed, is built again, rather than the search spawning a binary that
   was never produced). Each step of the search goes through `spawn`, which `pcall`s
-  `vim.system` (a missing binary makes it throw), reports a failed start as that step's
-  failure, and drops a result that lands after a stop.
+  `tools.system` (a missing binary makes `vim.system` throw), reports a failed start as that
+  step's failure, and drops a result that lands after a stop.
 - **Two lanes.** The testcases already on disk re-run through the solution as soon as it is
   built (`build_all`'s `on_solution`, while the generator and bruteforce are still
   compiling), and the search starts as soon as all three are built, not when the re-runs
@@ -123,6 +123,21 @@ The rules that hold everywhere are in the root `CLAUDE.md`.
   source, resolves and prepares the interactor again, offering its starter when it is absent
   and reporting a broken configured one, instead of running; `whole` (a run of every session)
   builds the solution too.
+- **A session is bounded as its pipes are read** (`within`, in the fast context, before
+  anything is scheduled): past `maximum_output`, the solution's two streams in live and feed,
+  everything the two sides print in interactor, it is killed and reads `ole`, the chunk over the
+  line dropped and a note put in the Errors column (feed's Errors pane). Scheduled first, a
+  program printing in a loop would fill the queue faster than it empties. What was read before
+  a session ended is still its output: `done` (the process gone, the fast context's to read)
+  never drops a queued chunk, `settled` (its end handled, on the main loop, after them) does, and
+  the interactor's limit ends the session from the main loop for the same reason, its exit
+  callbacks leaving the ending to it. Read the other way, a program that prints and exits loses
+  the end of its output. The columns show the latest `SHOWN_ROWS` of the
+  conversation under a note of how many went before, and `tc.log` keeps no more than twice that
+  (`log.dropped` counts the rest), since a session is drawn whole on every render and each
+  render would otherwise cost more than the last, until reading fell behind printing. Live and
+  interactor collect `tc.stdout` in pieces joined when the session ends, nothing reading it
+  before (their panes are the log); feed shows it as it streams, so it is joined once a tick.
 - Sessions run one at a time (`run_sessions`). `kill_process` ends the one running, marking
   its row `killed` so every source's exit path reads `killed`; `kill_all_processes` also sets
   `stopped`, and no session starts after it.

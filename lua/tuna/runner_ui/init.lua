@@ -88,11 +88,48 @@ local augroup_counter = 0
 -- The four detail panes, in the order they are filled.
 local detail_windows = { "so", "eo", "si", "se" }
 
+-- What a pane holding a program's own words shows of them, in bytes. Up to `maximum_output` may
+-- be kept, and drawn whole, a pane of millions of lines makes every redraw, search and diff
+-- slow. The input and the answer are the testcase's files, and saved from their panes, so they
+-- are never cut.
+local SHOWN = 1024 * 1024
+
+---`text` as a pane of what a program said shows it: whole when it is short, else up to `SHOWN`
+---bytes, cut at a line's end where there is one, under which a last line says how much is left
+---out. Judging reads the whole of it.
+---@param text string
+---@return string shown, { bytes: integer, lines: integer }? kept how much of it is shown, when cut
+local function shown_part(text)
+    if #text <= SHOWN then
+        return text, nil
+    end
+    local kept = text:sub(1, SHOWN):match("^.*\n") or text:sub(1, SHOWN)
+    local _, breaks = kept:gsub("\n", "")
+    local whole = kept:sub(-1) == "\n"
+    local note = ("… %s more, not shown"):format(require("tuna.run.tools").size_words(#text - #kept))
+    return kept .. (whole and "" or "\n") .. note, { bytes = #kept, lines = breaks + (whole and 0 or 1) }
+end
+
+---The first `n` lines of `text`.
+---@param text string
+---@param n integer
+---@return string
+local function first_lines(text, n)
+    local at = 0
+    for _ = 1, n do
+        at = text:find("\n", at + 1, true)
+        if not at then
+            return text
+        end
+    end
+    return text:sub(1, at - 1)
+end
+
 ---@class tuna.RunnerUI
 ---@field runner tuna.RunnerCore
 ---@field config table
 ---@field interface table popup or split interface
----@field windows table<string, { bufnr: integer, winid: integer?, title: string, baseline: string[]? }>
+---@field windows table<string, { bufnr: integer, winid: integer?, title: string, baseline: string[]?, cut: { bytes: integer, lines: integer }? }>
 ---@field ui_visible boolean
 ---@field update_windows boolean redraw the selector on next update
 ---@field update_details boolean redraw the detail panes on next update
@@ -2342,10 +2379,21 @@ function RunnerUI:render_diff()
 
     ---@cast output string?
     ---@cast expected string
+    -- An output the pane cuts off is compared as far as the pane shows it, the answer as many
+    -- lines with it and no longer: past that the two panes show nothing to mark, and judging
+    -- read the whole. The cache keeps the texts as they came, which is what it is asked about.
+    local came_out, came_exp = output, expected
+    local cut = so.cut
+    if cut and output then
+        -- Both as whole lines, no newline after the last: one side ending in one where the other
+        -- does not is a difference `exact` would mark on a row that is correct.
+        output = first_lines(output:sub(1, cut.bytes), cut.lines)
+        expected = first_lines(expected, cut.lines):sub(1, SHOWN)
+    end
     local res = diff.compute(output, expected, self.runner:effective_compare())
     paint_diff(so.bufnr, res.out)
     paint_diff(eo.bufnr, res.exp)
-    self.diff_cache = { tc = tc, out = output, exp = expected, first = res.first }
+    self.diff_cache = { tc = tc, out = came_out, exp = came_exp, first = res.first }
     return res.first
 end
 
@@ -3174,6 +3222,11 @@ function RunnerUI:update_ui()
                     elseif pending and name == "eo" then
                         content = pending.expected
                     end
+                    -- How much of what the program said is on screen, when not all of it.
+                    self.windows[name].cut = nil
+                    if (name == "so" or name == "se") and type(content) == "string" then
+                        content, self.windows[name].cut = shown_part(content)
+                    end
                     if content ~= SKIP then
                         local shown = surface.render(self.windows[name].bufnr, content, { modifiable = writable })
                         -- Deliberately *not* marked modified when an unwritten edit is
@@ -3185,8 +3238,11 @@ function RunnerUI:update_ui()
                         -- against the latter, a restored edit would compare equal to
                         -- itself and stop counting as unsaved.
                         local stored = base ~= SKIP and base or "" ---@cast stored string
-                        self.windows[name].baseline = content == base and shown
-                            or vim.split(stored, "\n", { plain = true })
+                        -- Only the panes a testcase is typed into are measured against one.
+                        if name == "si" or name == "eo" then
+                            self.windows[name].baseline = content == base and shown
+                                or vim.split(stored, "\n", { plain = true })
+                        end
                     end
                 end
                 -- A mode that draws panes itself (interactive's conversation columns,
@@ -3214,6 +3270,12 @@ function RunnerUI:update_ui()
 end
 
 -- The pure half of the selector's layout, for the test suite.
-M._test = { selector_columns = selector_columns, build_text = build_text, build_titles = build_titles, paint_diff = paint_diff }
+M._test = {
+    selector_columns = selector_columns,
+    build_text = build_text,
+    build_titles = build_titles,
+    paint_diff = paint_diff,
+    shown_part = shown_part,
+}
 
 return M

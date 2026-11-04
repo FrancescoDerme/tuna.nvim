@@ -48,6 +48,10 @@ M.defaults = {
     },
     multiple_testing = -1, -- testcases to run at once: -1 = CPU count, 0 = all, n = n
     maximum_time = 5000, -- per-process time limit in ms (process is killed past it)
+    -- What a process may print, stdout and stderr together, in bytes: one printing past it is
+    -- stopped there and reads `ole`, so a program printing forever is caught at once rather
+    -- than filling memory until its time is up. 0 for no limit.
+    maximum_output = 16 * 1024 * 1024,
     -- "exact" | "squish" | { "float", tol = 1e-6 } | the name of one of your own
     -- (`compare_methods`). "float" compares token-wise, accepting numeric tokens within
     -- `tol` absolute or relative error (non-numeric tokens must match exactly) — for

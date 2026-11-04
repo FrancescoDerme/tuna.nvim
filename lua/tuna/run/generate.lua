@@ -47,7 +47,8 @@ function M.input(bufnr, cfg, on_input)
             argv[#argv + 1] = tostring(seed)
         end
         local timeout = core.time_limit(cfg)
-        local started, spawn_err = pcall(vim.system, argv, { cwd = spec.cwd, env = tools.RUN_ENV, timeout = timeout }, function(res)
+        local opts = { cwd = spec.cwd, env = tools.RUN_ENV, timeout = timeout }
+        local started, spawn_err = pcall(tools.system, argv, opts, tools.output_limit(cfg), function(res)
             vim.schedule(function()
                 local failed, _, words = core.ending(res, timeout)
                 if failed then

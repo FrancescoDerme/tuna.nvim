@@ -51,6 +51,7 @@ local real_system = vim.system
 local function stub_system()
     spawns = {}
     vim.system = function(argv, opts, on_exit)
+        on_exit = t.streamed(opts, on_exit)
         spawns[#spawns + 1] = { argv = argv, stdin = opts and opts.stdin, env = opts and opts.env }
         if on_exit then
             vim.schedule(function()
@@ -277,6 +278,7 @@ do
     local function run_once(compiler_code)
         spawns = {}
         vim.system = function(argv, opts, on_exit)
+            on_exit = t.streamed(opts, on_exit)
             spawns[#spawns + 1] = { argv = argv, stdin = opts and opts.stdin }
             local building = argv[1] == "g++"
             vim.schedule(function()
@@ -334,7 +336,8 @@ do
     ---anew, so a new run is a copy of the spec, and the same table is the same run.
     local function prepared(spec, code)
         spawns = {}
-        vim.system = function(argv, _, on_exit)
+        vim.system = function(argv, opts, on_exit)
+            on_exit = t.streamed(opts, on_exit)
             spawns[#spawns + 1] = { argv = argv }
             vim.schedule(function()
                 on_exit({ code = code or 0, signal = 0, stdout = "", stderr = "" })
@@ -1234,7 +1237,8 @@ vim.system = real_system
 
 -- A build that fails leaves nothing running, so the runner must say it is idle: left
 -- claimed, every edit is refused with "wait for the run to finish" for good.
-vim.system = function(_, _, on_exit)
+vim.system = function(_, opts, on_exit)
+    on_exit = t.streamed(opts, on_exit)
     if on_exit then
         vim.schedule(function()
             on_exit({ code = 1, signal = 0, stdout = "", stderr = "error" })
@@ -1424,6 +1428,7 @@ do
     -- releases it, which is how the search is caught in the middle of an iteration.
     local script, budgets, held, calls, envs = {}, {}, nil, {}, {}
     vim.system = function(argv, opts, on_exit)
+        on_exit = t.streamed(opts, on_exit)
         local name = vim.fn.fnamemodify(argv[1], ":t")
         local res = script[name]
         calls[#calls + 1] = name
@@ -1870,7 +1875,8 @@ do
     -- quietly, so each pane can be told apart by what is in it and the build step is one
     -- that only its helpers had anything to say about.
     local warns = { ["gen.cpp"] = true, ["checker.cpp"] = true }
-    vim.system = function(argv, _, on_exit)
+    vim.system = function(argv, opts, on_exit)
+        on_exit = t.streamed(opts, on_exit)
         local said = ""
         for _, a in ipairs(argv) do
             if warns[a] then
@@ -2073,7 +2079,8 @@ do
         compile_command = { cpp = { exec = ccx, args = { "$(FNAME)", "-again" } } },
         run_command = { cpp = { exec = solx } },
     })
-    vim.system = function(argv, _, on_exit)
+    vim.system = function(argv, opts, on_exit)
+        on_exit = t.streamed(opts, on_exit)
         local broke = vim.tbl_contains(argv, "gen.cpp")
         if on_exit then
             vim.schedule(function()
@@ -2115,7 +2122,7 @@ do
         run_command = { cpp = { exec = solx } },
     })
     local inflight = {}
-    vim.system = function(argv, _, _)
+    vim.system = function(argv, opts, _)
         for _, a in ipairs(argv) do
             if a:match("%.cpp$") then
                 inflight[a] = true
@@ -2142,7 +2149,8 @@ do
     })
     local release
     require("tuna.run.tools")._test.forget_builds() -- the checker built cleanly in the searches above
-    vim.system = function(argv, _, on_exit)
+    vim.system = function(argv, opts, on_exit)
+        on_exit = t.streamed(opts, on_exit)
         local function answer(code, said)
             on_exit({ code = code, signal = 0, stdout = "", stderr = said or "" })
         end
@@ -3103,6 +3111,7 @@ do
         clear_runners()
         spawns = {}
         vim.system = function(argv, opts, on_exit)
+            on_exit = t.streamed(opts, on_exit)
             spawns[#spawns + 1] = { argv = argv, stdin = opts and opts.stdin }
             local code = argv[1] == compiler and compile_code or 0
             if on_exit then
@@ -3291,7 +3300,8 @@ end
 local built = 0
 for _, board in ipairs(boards) do
     spawns = {}
-    vim.system = function(argv, _, on_exit)
+    vim.system = function(argv, opts, on_exit)
+        on_exit = t.streamed(opts, on_exit)
         spawns[#spawns + 1] = { argv = argv }
         local broke = argv[1] == "g++"
         if on_exit then
@@ -3387,7 +3397,8 @@ end
 -- that never ran say so, and the board is idle again, so it can be edited.
 local function hanging_system()
     spawns = {}
-    vim.system = function(argv, _, on_exit)
+    vim.system = function(argv, opts, on_exit)
+        on_exit = t.streamed(opts, on_exit)
         spawns[#spawns + 1] = { argv = argv }
         if argv[1] == "g++" then -- a build finishes at once, a solution runs until stopped
             vim.schedule(function()
@@ -3589,7 +3600,8 @@ vim.system = real_system
 -- compile by hand rather than through a testcase row, and a row that is building has to say so
 -- or the board moves off it before there is anything to move to.
 local held_exit
-vim.system = function(argv, _, on_exit)
+vim.system = function(argv, opts, on_exit)
+    on_exit = t.streamed(opts, on_exit)
     -- The helpers' builds answer at once: the build being held is the solution's.
     if vim.tbl_contains(argv, "gen.cpp") or vim.tbl_contains(argv, "brute.cpp") then
         vim.schedule(function()
@@ -3643,7 +3655,8 @@ end
 vim.system = real_system
 
 -- A build with something to say keeps the cursor: that row is the answer to the run.
-vim.system = function(argv, _, on_exit)
+vim.system = function(argv, opts, on_exit)
+    on_exit = t.streamed(opts, on_exit)
     if on_exit then
         vim.schedule(function()
             on_exit({ code = 0, signal = 0, stdout = "", stderr = "warning: unused variable" })
@@ -3735,7 +3748,8 @@ do
     tcs.buf_save_testcase(ebuf, 0, "in\n", "", true)
     tcs.buf_save_testcase(ebuf, 1, "in\n", nil)
     tcs.buf_save_testcase(ebuf, 2, "in\n", "8\n")
-    vim.system = function(argv, _, on_exit)
+    vim.system = function(argv, opts, on_exit)
+        on_exit = t.streamed(opts, on_exit)
         local out = vim.tbl_contains(argv, "-o") and "" or "8\n2 2 2\n"
         vim.schedule(function()
             on_exit({ code = 0, signal = 0, stdout = out, stderr = "" })
@@ -3855,7 +3869,8 @@ do
     vim.bo.filetype = "cpp"
     local rbuf = vim.api.nvim_get_current_buf()
     local runs = 0
-    vim.system = function(argv, _, on_exit)
+    vim.system = function(argv, opts, on_exit)
+        on_exit = t.streamed(opts, on_exit)
         local compile = vim.tbl_contains(argv, "-o")
         runs = runs + (compile and 0 or 1)
         vim.schedule(function()
@@ -3923,6 +3938,7 @@ do
     local stdins = {}
     local counted = vim.system
     vim.system = function(argv, opts, on_exit)
+        on_exit = t.streamed(opts, on_exit)
         if not vim.tbl_contains(argv, "-o") then
             stdins[#stdins + 1] = vim.trim(opts.stdin or "")
         end
@@ -4291,7 +4307,8 @@ do
     vim.bo.filetype = "cpp"
     local buf = vim.api.nvim_get_current_buf()
     local gen_argv, gen_result = nil, nil
-    vim.system = function(argv, _, on_exit)
+    vim.system = function(argv, opts, on_exit)
+        on_exit = t.streamed(opts, on_exit)
         local name = vim.fn.fnamemodify(argv[1], ":t")
         local res = { stdout = name == "solx" and "6\n" or "" }
         if name == "genx" then
@@ -4394,7 +4411,8 @@ do
         long[i] = tostring(i)
     end
     local output = table.concat(long, "\n") .. "\n"
-    vim.system = function(_, _, on_exit)
+    vim.system = function(_, opts, on_exit)
+        on_exit = t.streamed(opts, on_exit)
         if on_exit then
             vim.schedule(function()
                 on_exit({ code = 0, signal = 0, stdout = output, stderr = "" })
@@ -4458,6 +4476,440 @@ do
     vim.cmd("enew")
     vim.cmd("silent! bwipeout! " .. obuf)
     vim.fn.delete(odir, "rf")
+end
+
+--------------------------------------------------------------------------------
+-- A program printing without end, run for real: no stand-in can print forever.
+--------------------------------------------------------------------------------
+
+-- What a process prints is kept up to `maximum_output`, stdout and stderr together, and it is
+-- stopped the moment it passes it, rather than filling memory until its time is up.
+do
+    vim.system = real_system
+    local tools = require("tuna.run.tools")
+    local function run(argv, limit, opts)
+        local got
+        local start = vim.uv.hrtime()
+        tools.system(argv, opts or {}, limit, function(res)
+            got = res
+        end)
+        vim.wait(10000, function()
+            return got ~= nil
+        end, 10)
+        return got or {}, (vim.uv.hrtime() - start) / 1e6
+    end
+    local res, ms = run({ "sh", "-c", "exec yes" }, 100000)
+    t.eq("a program printing forever is stopped at the limit, which it names", { res.over, #res.stdout, res.signal }, { 100000, 100000, 9 })
+    t.ok("at once, not when its time is up", ms < 2000, ms)
+    res = run({ "sh", "-c", "printf 0123456789" }, 10)
+    t.eq("one printing exactly the limit is left alone", { over = res.over, out = res.stdout, code = res.code }, { out = "0123456789", code = 0 })
+    res = run({ "sh", "-c", "printf 01234; printf 56789x >&2" }, 10)
+    t.eq("stdout and stderr count together", { res.over, res.stdout .. res.stderr }, { 10, "0123456789" })
+    res = run({ "sh", "-c", "printf 'a\r\nb'" }, 100, { text = true })
+    t.eq("text keeps its meaning", res.stdout, "a\nb")
+    res = run({ "sh", "-c", "head -c 300000 /dev/zero" }, nil)
+    t.eq("and no limit is no limit", { over = res.over, size = #res.stdout }, { size = 300000 })
+
+    local core = require("tuna.run.core")
+    t.eq("a process stopped there reads ole, in words naming the limit", { core.ending({ over = 16 * 1024 * 1024 }) }, {
+        "ole",
+        "TunaWrong",
+        "printed more than 16 MiB",
+    })
+    t.eq("its words never round a limit away", { tools.size_words(1536), tools.size_words(512), tools.size_words(3 * 1024 * 1024) }, {
+        "1.5 KiB",
+        "512 bytes",
+        "3 MiB",
+    })
+end
+
+-- On a board: the row reads `ole`, the Output pane shows the first of it with a line saying how
+-- much is not shown, and the diff compares as far as the pane shows.
+do
+    vim.system = real_system
+    local fdir = t.tempdir()
+    t.write(fdir, "flood.tunaflood", "")
+    vim.cmd("edit " .. fdir .. "/flood.tunaflood")
+    vim.bo.filetype = "tunaflood"
+    local fbuf = vim.api.nvim_get_current_buf()
+    require("tuna").setup({ run_command = { tunaflood = { exec = "sh", args = { "-c", "exec yes" } } }, maximum_output = 2 * 1024 * 1024 })
+    tcs.buf_save_testcase(fbuf, 0, "1\n", ("y\n"):rep(600000))
+    local fr = require("tuna.run").new(fbuf)
+    fr:run_testcases(tcs.buf_get_testcases(fbuf))
+    fr:show_ui()
+    settled(fr)
+    drain(fr.ui)
+    local row = fr.tcdata[#fr.tcdata]
+    t.eq("the row reads ole, with what came before kept", { row.status, #row.stdout }, { "ole", 2 * 1024 * 1024 })
+    local so = fr.ui.windows.so.bufnr
+    local count = vim.api.nvim_buf_line_count(so)
+    t.eq("the Output pane shows the first of it", count, 1024 * 1024 / 2 + 1)
+    t.eq("and says how much it leaves out", vim.api.nvim_buf_get_lines(so, -2, -1, false)[1], "… 1 MiB more, not shown")
+    fr.ui:toggle_diff_view()
+    local marks = 0
+    local diff_ns = vim.api.nvim_get_namespaces().tuna_runner_diff
+    for _, w in ipairs({ fr.ui.windows.so, fr.ui.windows.eo }) do
+        marks = marks + #vim.api.nvim_buf_get_extmarks(w.bufnr, diff_ns, 0, -1, {})
+    end
+    t.eq("the diff marks nothing past what the Output pane shows", marks, 0)
+    fr.ui:toggle_diff_view()
+    fr:delete_ui()
+    tcs.buf_delete_testcase(fbuf, 0)
+
+    -- A live session is stopped there too, and its columns show the latest of the conversation.
+    local ir
+    require("tuna.run.modes.interactive").run(fbuf, { "live" })
+    vim.wait(10000, function()
+        ir = require("tuna.run.modes.interactive").active[fbuf]
+        local last = ir and ir.tcdata[#ir.tcdata]
+        return last ~= nil and last.status == "ole"
+    end, 20)
+    local session = ir and ir.tcdata[#ir.tcdata] or {}
+    t.eq("a live session printing forever reads ole", session.status, "ole")
+    t.ok("keeping what it printed up to the limit", #(session.stdout or "") <= 2 * 1024 * 1024 and #(session.stdout or "") > 1024 * 1024, #(session.stdout or ""))
+    local shown = require("tuna.run.modes.interactive")._test
+    if shown and shown.conversation then
+        local cols = shown.conversation(session.log)
+        t.ok("its columns show the latest rows under a note of the rest", #cols.so <= 5001 and cols.se[1]:match("^%[%d+ earlier lines not shown%]$") ~= nil, { #cols.so, cols.se[1] })
+        t.ok("keeping no more of the log than the columns can show", #session.log <= 2 * 5000 + 1, #session.log)
+    end
+    if ir and ir.ui then
+        ir:delete_ui()
+    end
+    require("tuna").setup({})
+    vim.cmd("enew")
+    vim.cmd("silent! bwipeout! " .. fbuf)
+end
+
+-- A checker or a compiler stopped at the limit, or killed by a signal, exits with code 0 and
+-- the signal beside it: that is no verdict and no build, whatever the code says.
+do
+    vim.system = real_system
+    require("tuna").setup({ maximum_output = 1000 })
+    local checker = require("tuna.run.checker")
+    local function verdict(script)
+        local got, said, done
+        checker.judge({ stdin = "", stdout = "x", expected = "x" }, { exec = "sh", args = { "-c", script }, cwd = t.tempdir() }, "exact", function(correct, message)
+            got, said, done = correct, message, true
+        end)
+        vim.wait(5000, function()
+            return done
+        end, 10)
+        return got, said
+    end
+    local got, said = verdict("exec yes")
+    t.eq("a checker stopped at the limit gives no verdict", got, nil)
+    t.has("and says why", said or "", "printed more than")
+    got = verdict("kill -9 $$")
+    t.eq("nor does one killed by a signal", got, nil)
+    t.eq("while one exiting 0 accepts", verdict("exit 0"), true)
+
+    local tools = require("tuna.run.tools")
+    local bdir = t.tempdir()
+    t.write(bdir, "helper.c", "")
+    local built, err
+    tools.prepare({ source = bdir .. "/helper.c", compile = { exec = "sh", args = { "-c", "exec yes" } }, compile_dir = bdir, exec = bdir .. "/helper", cwd = bdir }, function(ok, msg)
+        built, err = ok, msg or ""
+    end)
+    vim.wait(5000, function()
+        return built ~= nil
+    end, 10)
+    t.eq("a helper's compiler stopped at the limit has built nothing", built, false)
+    t.has("and says why", err or "", "compilation failed, the compiler printed more than 1000 bytes:\n")
+    local hspec = tools.helper("interactor", bdir .. "/helper.c", vim.tbl_deep_extend("force", require("tuna.config").current_setup, {
+        maximum_output = 4096,
+        interactive = { interactor = { exec = "sh", args = { "-c", "true" } } },
+    }))
+    t.eq("a helper is held to the limit of the config it was found under", hspec and hspec.output_limit, 4096)
+    -- And its build is held to that limit, not the one set up, here far smaller.
+    t.write(bdir, "own.c", "")
+    built = nil
+    tools.prepare({ source = bdir .. "/own.c", compile = { exec = "sh", args = { "-c", "head -c 5000 /dev/zero" } }, compile_dir = bdir, exec = "true", cwd = bdir, output_limit = 1000000 }, function(ok)
+        built = ok
+    end)
+    vim.wait(5000, function()
+        return built ~= nil
+    end, 10)
+    t.eq("a helper builds under the limit it carries", built, true)
+
+    local cdir = t.tempdir()
+    t.write(cdir, "flood.tunaflood", "")
+    vim.cmd("edit " .. cdir .. "/flood.tunaflood")
+    vim.bo.filetype = "tunaflood"
+    local cbuf = vim.api.nvim_get_current_buf()
+    require("tuna").setup({
+        maximum_output = 1000,
+        compile_command = { tunaflood = { exec = "sh", args = { "-c", "exec yes" } } },
+        run_command = { tunaflood = { exec = "sh", args = { "-c", "echo ran" } } },
+    })
+    tcs.buf_save_testcase(cbuf, 0, "1\n", "ran\n")
+    local cr = require("tuna.run").new(cbuf)
+    cr:run_testcases(tcs.buf_get_testcases(cbuf))
+    settled(cr)
+    t.eq("a solution's compiler stopped at the limit fails the build, and nothing runs", { cr.tcdata[1].status, cr.tcdata[2].stdout }, { "ole", nil })
+    t.eq("and the build step says its source failed", cr:build_sources(cr.tcdata[1])[1].failed, true)
+    cr:reset_row(cr.tcdata[1])
+    t.eq("a row reset forgets it was stopped", cr.tcdata[1].over, nil)
+    cr:delete_ui()
+    require("tuna.run.modes.multi").run(cbuf)
+    local mr
+    vim.wait(5000, function()
+        mr = require("tuna.run.modes.multi").active[cbuf]
+        return mr ~= nil and mr.tcdata[1] and mr.tcdata[1].status ~= "compiling" and mr.tcdata[1].status ~= ""
+    end, 10)
+    t.eq("and run-all reads it as a solution that did not compile", mr and mr.tcdata[1].status, "ce")
+    t.has("saying why", mr and mr.tcdata[1].compile_output or "", "[the compiler printed more than 1000 bytes]")
+    if mr and mr.ui then
+        mr:delete_ui()
+    end
+    tcs.buf_delete_testcase(cbuf, 0)
+    require("tuna").setup({})
+    vim.cmd("enew")
+    vim.cmd("silent! bwipeout! " .. cbuf)
+
+    local core = require("tuna.run.core")
+    t.eq("a row that printed too much is judged, and failed", core.judged("ole"), true)
+end
+
+-- What was read before a session ended is kept, up to the limit, in live and with an
+-- interactor, and the note of why it ended comes last. A feed session ends the same way.
+do
+    vim.system = real_system
+    local idir = t.tempdir()
+    t.write(idir, "flood.tunaflood", "")
+    vim.cmd("edit " .. idir .. "/flood.tunaflood")
+    vim.bo.filetype = "tunaflood"
+    local ibuf = vim.api.nvim_get_current_buf()
+    local limit = 2 * 1024 * 1024
+    require("tuna").setup({
+        run_command = { tunaflood = { exec = "sh", args = { "-c", "exec yes" } } },
+        maximum_output = limit,
+        interactive = { interactor = { exec = "sh", args = { "-c", "exec cat > /dev/null" } } },
+    })
+    tcs.buf_save_testcase(ibuf, 0, "1\n", "1\n")
+    local interactive = require("tuna.run.modes.interactive")
+    local conv = interactive._test
+    for _, source in ipairs({ "live", "interactor", "feed" }) do
+        interactive.run(ibuf, { source })
+        local ir
+        vim.wait(10000, function()
+            ir = interactive.active[ibuf]
+            local last = ir and ir.tcdata[#ir.tcdata]
+            return last ~= nil and last.status == "ole" and (ir.completed or source ~= "feed")
+        end, 20)
+        local session = ir and ir.tcdata[#ir.tcdata] or {}
+        local kept = #(session.stdout or "")
+        t.eq(source .. ": a session printing forever reads ole", session.status, "ole")
+        t.ok(source .. ": keeping what it printed, up to a read short of the limit", kept <= limit and limit - kept <= 128 * 1024, { kept, limit })
+        if source == "feed" then
+            t.has("feed: and saying why in its Errors", session.stderr or "", "[printed more than 2 MiB]")
+        else
+            local cols = conv.conversation(session.log)
+            t.eq(source .. ": the note of why it ended is last", cols.se[#cols.se], "[printed more than 2 MiB]")
+        end
+        if ir and ir.ui then
+            ir:delete_ui()
+        end
+    end
+    tcs.buf_delete_testcase(ibuf, 0)
+    require("tuna").setup({})
+    vim.cmd("enew")
+    vim.cmd("silent! bwipeout! " .. ibuf)
+end
+
+-- The checker's reason leads the Errors pane, where a long stderr cut off cannot take it along.
+do
+    local core = require("tuna.run.core")
+    local said = core.RunnerCore.pane_content({}, { stderr = "debug\n", checker_message = "3rd numbers differ" }, "se")
+    t.eq("the checker's reason comes before what the program wrote", said, "checker: 3rd numbers differ\ndebug\n")
+end
+
+-- A pane cuts a program's words at a line's end, or, on a line longer than what it shows, at
+-- what it shows, and says exactly how much is left.
+do
+    local shown_part = require("tuna.runner_ui")._test.shown_part
+    local mib = 1024 * 1024
+    local text, kept = shown_part(("x"):rep(2 * mib))
+    t.eq("one long line is cut at what is shown", { kept, #text }, { { bytes = mib, lines = 1 }, mib + #"\n… 1 MiB more, not shown" })
+    text, kept = shown_part(("ab\n"):rep(mib))
+    local left = 3 * mib - kept.bytes
+    t.eq("lines are cut at a line's end", text:sub(kept.bytes, kept.bytes), "\n")
+    t.has("and the rest counted to the byte", text, ("… %s more, not shown"):format(require("tuna.run.tools").size_words(left)))
+    t.eq("what fits is shown whole", { shown_part("short\n") }, { "short\n" })
+end
+
+-- The diff stops where the Output pane does, on one long line as on many, and asks for no diff
+-- again while the texts are the same.
+do
+    vim.system = real_system
+    local ddir = t.tempdir()
+    t.write(ddir, "line.tunaflood", "")
+    vim.cmd("edit " .. ddir .. "/line.tunaflood")
+    vim.bo.filetype = "tunaflood"
+    local dbuf = vim.api.nvim_get_current_buf()
+    local mib = 1024 * 1024
+    require("tuna").setup({ run_command = { tunaflood = { exec = "sh", args = { "-c", "head -c 2097152 /dev/zero | tr '\\0' x" } } } })
+    -- The answer disagrees only past what the pane shows.
+    tcs.buf_save_testcase(dbuf, 0, "1\n", ("x"):rep(mib + 100) .. "y" .. ("x"):rep(mib - 101))
+    local dr = require("tuna.run").new(dbuf)
+    dr:run_testcases(tcs.buf_get_testcases(dbuf))
+    dr:show_ui()
+    settled(dr)
+    drain(dr.ui)
+    t.eq("an output on one line past the pane reads wrong", dr.tcdata[#dr.tcdata].status, "wrong")
+    local diff = require("tuna.run.diff")
+    local real_compute, computed = diff.compute, 0
+    diff.compute = function(...)
+        computed = computed + 1
+        return real_compute(...)
+    end
+    dr.ui:toggle_diff_view()
+    local marks = 0
+    local diff_ns = vim.api.nvim_get_namespaces().tuna_runner_diff
+    for _, w in ipairs({ dr.ui.windows.so, dr.ui.windows.eo }) do
+        marks = marks + #vim.api.nvim_buf_get_extmarks(w.bufnr, diff_ns, 0, -1, {})
+    end
+    t.eq("the diff marks nothing the pane does not show", marks, 0)
+    dr.ui:render_diff()
+    dr.ui:render_diff()
+    diff.compute = real_compute
+    t.eq("and is not asked again while the texts are the same", computed, 1)
+    dr.ui:toggle_diff_view()
+    dr:delete_ui()
+    tcs.buf_delete_testcase(dbuf, 0)
+    require("tuna").setup({})
+    vim.cmd("enew")
+    vim.cmd("silent! bwipeout! " .. dbuf)
+end
+
+-- A session that prints and exits at once keeps all of it: its exit can arrive before the last
+-- of what it printed has been handled, which is still its output.
+do
+    vim.system = real_system
+    local edir = t.tempdir()
+    t.write(edir, "tail.tunaflood", "")
+    vim.cmd("edit " .. edir .. "/tail.tunaflood")
+    vim.bo.filetype = "tunaflood"
+    local ebuf = vim.api.nvim_get_current_buf()
+    require("tuna").setup({
+        run_command = { tunaflood = { exec = "sh", args = { "-c", "head -c 300000 /dev/zero | tr '\\0' x; printf done" } } },
+        interactive = { interactor = { exec = "sh", args = { "-c", "exec cat > /dev/null" } } },
+    })
+    tcs.buf_save_testcase(ebuf, 0, "1\n", "1\n")
+    local interactive = require("tuna.run.modes.interactive")
+    for _, source in ipairs({ "live", "interactor", "feed" }) do
+        local sizes = {}
+        for _ = 1, 5 do
+            interactive.run(ebuf, { source })
+            local ir
+            vim.wait(10000, function()
+                ir = interactive.active[ebuf]
+                local last = ir and ir.tcdata[#ir.tcdata]
+                return last ~= nil and ir.completed and last.status ~= "" and last.status ~= "running" and last.status ~= "live"
+            end, 5)
+            local session = ir and ir.tcdata[#ir.tcdata] or {}
+            sizes[#sizes + 1] = #(session.stdout or "")
+            if ir and ir.ui then
+                ir:delete_ui()
+            end
+        end
+        t.eq(source .. ": a session that prints and exits keeps every byte", sizes, { 300004, 300004, 300004, 300004, 300004 })
+    end
+    tcs.buf_delete_testcase(ebuf, 0)
+    require("tuna").setup({})
+    vim.cmd("enew")
+    vim.cmd("silent! bwipeout! " .. ebuf)
+end
+
+-- A correct output cut off by its pane marks nothing under `exact`, which a newline after the
+-- last line shown on one side and not on the other would.
+do
+    vim.system = real_system
+    local xdir = t.tempdir()
+    t.write(xdir, "exact.tunaflood", "")
+    vim.cmd("edit " .. xdir .. "/exact.tunaflood")
+    vim.bo.filetype = "tunaflood"
+    local xbuf = vim.api.nvim_get_current_buf()
+    require("tuna").setup({
+        output_compare_method = "exact",
+        run_command = { tunaflood = { exec = "sh", args = { "-c", "yes | head -c 2097152" } } },
+    })
+    tcs.buf_save_testcase(xbuf, 0, "1\n", ("y\n"):rep(1024 * 1024))
+    local xr = require("tuna.run").new(xbuf)
+    xr:run_testcases(tcs.buf_get_testcases(xbuf))
+    xr:show_ui()
+    settled(xr)
+    drain(xr.ui)
+    t.eq("a long output that is right reads correct", xr.tcdata[#xr.tcdata].status, "correct")
+    xr.ui:toggle_diff_view()
+    local marks = 0
+    local diff_ns = vim.api.nvim_get_namespaces().tuna_runner_diff
+    for _, w in ipairs({ xr.ui.windows.so, xr.ui.windows.eo }) do
+        marks = marks + #vim.api.nvim_buf_get_extmarks(w.bufnr, diff_ns, 0, -1, {})
+    end
+    t.eq("and its diff, cut where the pane is, marks nothing under exact", marks, 0)
+    xr.ui:toggle_diff_view()
+    xr:delete_ui()
+    tcs.buf_delete_testcase(xbuf, 0)
+
+    -- A session printing without a newline, or on stderr, is bounded the same way: its row ends
+    -- in `…` rather than growing with all it prints.
+    local interactive = require("tuna.run.modes.interactive")
+    for _, case in ipairs({ { "no newline", "exec tr '\\0' x < /dev/zero" }, { "stderr", "exec yes >&2" } }) do
+        require("tuna").setup({
+            maximum_output = 2 * 1024 * 1024,
+            run_command = { tunaflood = { exec = "sh", args = { "-c", case[2] } } },
+        })
+        interactive.run(xbuf, { "live" })
+        local ir
+        vim.wait(10000, function()
+            ir = interactive.active[xbuf]
+            local last = ir and ir.tcdata[#ir.tcdata]
+            return last ~= nil and last.status == "ole"
+        end, 10)
+        local session = ir and ir.tcdata[#ir.tcdata] or {}
+        local longest = 0
+        for _, entry in ipairs(session.log or {}) do
+            longest = math.max(longest, #entry.text)
+        end
+        t.eq(case[1] .. ": a session flooding reads ole", session.status, "ole")
+        t.ok(case[1] .. ": with no row longer than a row is kept", longest <= 2000 + #"…", longest)
+        if ir and ir.ui then
+            ir:delete_ui()
+        end
+    end
+    require("tuna").setup({})
+    vim.cmd("enew")
+    vim.cmd("silent! bwipeout! " .. xbuf)
+end
+
+-- One piece longer than a row, with no newline, is clipped as it arrives too.
+do
+    vim.system = real_system
+    local odir = t.tempdir()
+    t.write(odir, "once.tunaflood", "")
+    vim.cmd("edit " .. odir .. "/once.tunaflood")
+    vim.bo.filetype = "tunaflood"
+    local obuf = vim.api.nvim_get_current_buf()
+    require("tuna").setup({ run_command = { tunaflood = { exec = "sh", args = { "-c", "head -c 5000 /dev/zero | tr '\\0' x" } } } })
+    local interactive = require("tuna.run.modes.interactive")
+    interactive.run(obuf, { "live" })
+    local ir
+    vim.wait(10000, function()
+        ir = interactive.active[obuf]
+        local last = ir and ir.tcdata[#ir.tcdata]
+        return last ~= nil and last.status == "done"
+    end, 10)
+    local session = ir and ir.tcdata[#ir.tcdata] or {}
+    local row = (session.log or {})[1] or { text = "" }
+    t.eq("a long line in one piece is a row cut short", { #row.text, row.text:sub(-#"…") }, { 2000 + #"…", "…" })
+    t.eq("while the output keeps all of it", #(session.stdout or ""), 5000)
+    if ir and ir.ui then
+        ir:delete_ui()
+    end
+    require("tuna").setup({})
+    vim.cmd("enew")
+    vim.cmd("silent! bwipeout! " .. obuf)
 end
 
 t.report()

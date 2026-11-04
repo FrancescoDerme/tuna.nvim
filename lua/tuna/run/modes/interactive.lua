@@ -45,6 +45,32 @@ local function pipe()
     return assert(uv.new_pipe(false))
 end
 
+---A budget of `limit` bytes over what a session prints, counted as it is read, in the fast
+---context: scheduled first, a program printing in a loop would fill the editor's queue faster
+---than it empties. `on_over` runs once, as the budget runs out, and nothing more fits after.
+---@param limit integer? none when nil
+---@param on_over fun()
+---@return fun(data: string): boolean within whether `data` still fits
+---@return fun(): boolean over whether the budget ran out
+local function budget(limit, on_over)
+    local printed, over = 0, false
+    local function within(data)
+        if over then
+            return false
+        end
+        printed = printed + #data
+        if limit and printed > limit then
+            over = true
+            on_over()
+            return false
+        end
+        return true
+    end
+    return within, function()
+        return over
+    end
+end
+
 ---Kill a process handle that may have exited already.
 ---@param handle uv.uv_process_t?
 local function kill(handle)
@@ -59,6 +85,28 @@ end
 
 -- The columns a conversation is laid out in, left to right beside the selector.
 local CONVERSATION_PANES = { "se", "so", "si" }
+
+-- How many rows of a conversation its columns show, the latest ones, and so how many its log
+-- keeps. A session is drawn whole again on every render, so a program printing in a loop would
+-- make each render cost more than the last, until reading its output fell behind printing it.
+-- What the columns never show is only counted (`log.dropped`): `tc.stdout` holds the output.
+local SHOWN_ROWS = 5000
+
+-- How long a row of a conversation grows before it ends in `…`: a program printing without a
+-- newline would otherwise build one row as long as all it prints, copied on every piece and
+-- drawn whole on every render.
+local ROW_BYTES = 2000
+
+---`text` as a row holds it: whole, or its first `ROW_BYTES` bytes, a character never split, and
+---`…`, with `true` when it was cut.
+---@param text string
+---@return string, true?
+local function clipped(text)
+    if #text <= ROW_BYTES then
+        return text, nil
+    end
+    return text:sub(1, ROW_BYTES + vim.str_utf_end(text, ROW_BYTES)) .. "…", true
+end
 
 ---Append what one side said to a session's conversation. Each entry of `tc.log` is one
 ---row, owned by the column that wrote it; the other columns are blank on that row, which
@@ -84,13 +132,22 @@ local function log_append(tc, col, data)
         local last = tc.log[#tc.log]
         local entry
         if i == 1 and last and last.col == col and last.open then
-            last.text = last.text .. piece
+            if not last.cut then
+                last.text, last.cut = clipped(last.text .. piece)
+            end
             entry = last
         else
-            entry = { col = col, text = piece }
+            entry = { col = col }
+            entry.text, entry.cut = clipped(piece)
             tc.log[#tc.log + 1] = entry
         end
         entry.open = i == #pieces and not ends_line
+    end
+    -- Trimmed in batches, so each row costs the same however long the session runs.
+    if #tc.log > 2 * SHOWN_ROWS then
+        local kept = { dropped = (tc.log.dropped or 0) + #tc.log - SHOWN_ROWS }
+        table.move(tc.log, #tc.log - SHOWN_ROWS + 1, #tc.log, 1, kept)
+        tc.log = kept
     end
 end
 
@@ -108,13 +165,21 @@ local function log_note(tc, text)
 end
 
 ---Lay a conversation out as the lines of its three columns: one row per entry, blank in
----every column but the one that wrote it. The three come back the same length, so the
----columns stay line for line.
+---every column but the one that wrote it, its latest `SHOWN_ROWS` under a note of how many
+---went before. The three come back the same length, so the columns stay line for line.
 ---@param log table[]?
 ---@return table<string, string[]>
 local function conversation(log)
+    log = log or {}
     local out = { so = {}, se = {}, si = {} }
-    for _, entry in ipairs(log or {}) do
+    local first = math.max(1, #log - SHOWN_ROWS + 1)
+    local earlier = (log.dropped or 0) + first - 1
+    if earlier > 0 then
+        out.so[1], out.si[1] = "", ""
+        out.se[1] = ("[%d earlier lines not shown]"):format(earlier)
+    end
+    for i = first, #log do
+        local entry = log[i]
         for _, col in ipairs(CONVERSATION_PANES) do
             out[col][#out[col] + 1] = col == entry.col and entry.text or ""
         end
@@ -569,16 +634,31 @@ end
 -- Sessions
 --------------------------------------------------------------------------------
 
+-- How long a session waits, past its solution's exit, for the end of its output: a child the
+-- solution left behind (a shell's) can hold a pipe open for ever.
+local LINGER = 200
+
 ---Spawn the solution with three pipes and forward its output through `cbs`.
----`cbs`: on_stdout(data), on_stderr(data), on_exit(code, signal), on_error(msg),
----optional on_timeout() when `cbs.timed` and `self.timeout` are set.
+---`cbs`: on_stdout(data), on_stderr(data), on_exit(code, signal, over), on_error(msg),
+---optional on_timeout() when `cbs.timed` and `self.timeout` are set. A solution printing past
+---`maximum_output` is stopped there, and `over` is that limit. The session ends once the
+---process is gone and all it printed is read: its exit can come before the last of its output,
+---which is still its output, so `LINGER` past the exit it ends whatever is left open.
 ---@param cbs table
 function InteractiveRunner:spawn_solution(cbs)
     local sol_in, sol_out, sol_err = pipe(), pipe(), pipe()
     self.sol_in = sol_in
-    local timer
-    local done = false
+    local timer, linger
+    -- `done` is the session over, read in the fast context; `settled` is its end handled, on the
+    -- main loop after whatever was read before it, which is still to be shown.
+    local done, settled = false, false
+    local exit_code, exit_signal, lingered = nil, nil, false
+    local open = { out = true, err = true }
     local handle
+    local limit = tools.output_limit(self.config)
+    local within, over = budget(limit, function()
+        kill(handle)
+    end)
 
     local function cleanup()
         for _, p in ipairs({ sol_in, sol_out, sol_err }) do
@@ -586,10 +666,25 @@ function InteractiveRunner:spawn_solution(cbs)
                 p:close()
             end
         end
-        if timer and not timer:is_closing() then
-            timer:stop()
-            timer:close()
+        for _, t in ipairs({ timer, linger }) do
+            if t and not t:is_closing() then
+                t:stop()
+                t:close()
+            end
         end
+    end
+
+    local function finish()
+        if done or exit_code == nil or ((open.out or open.err) and not lingered) then
+            return
+        end
+        done = true
+        self.sol_handle = nil
+        cleanup()
+        vim.schedule(function()
+            settled = true
+            cbs.on_exit(exit_code, exit_signal, over() and limit or nil)
+        end)
     end
 
     handle = uv.spawn(self.r.rc.exec, {
@@ -598,15 +693,17 @@ function InteractiveRunner:spawn_solution(cbs)
         env = tools.spawn_env(),
         stdio = { sol_in, sol_out, sol_err },
     }, function(code, signal)
-        if done then
-            return
+        exit_code, exit_signal = code, signal
+        linger = uv.new_timer()
+        if linger then
+            linger:start(LINGER, 0, function()
+                lingered = true
+                finish()
+            end)
+        else
+            lingered = true
         end
-        done = true
-        self.sol_handle = nil
-        cleanup()
-        vim.schedule(function()
-            cbs.on_exit(code, signal)
-        end)
+        finish()
     end)
 
     if not handle then
@@ -618,31 +715,36 @@ function InteractiveRunner:spawn_solution(cbs)
     end
     self.sol_handle = handle
 
-    sol_out:read_start(function(err, data)
-        if err or done or not data then
-            return
-        end
-        vim.schedule(function()
-            if not done then
-                cbs.on_stdout(data)
+    ---Read one of the solution's streams into `forward`, on the main loop, until its end.
+    ---@param p uv.uv_pipe_t
+    ---@param which "out"|"err"
+    ---@param forward fun(data: string)
+    local function read(p, which, forward)
+        p:read_start(function(err, data)
+            if done then
+                return
             end
-        end)
-    end)
-    sol_err:read_start(function(err, data)
-        if err or done or not data then
-            return
-        end
-        vim.schedule(function()
-            if not done then
-                cbs.on_stderr(data)
+            if err or not data then
+                open[which] = false
+                return finish()
             end
+            if not within(data) then
+                return
+            end
+            vim.schedule(function()
+                if not settled then
+                    forward(data)
+                end
+            end)
         end)
-    end)
+    end
+    read(sol_out, "out", cbs.on_stdout)
+    read(sol_err, "err", cbs.on_stderr)
 
     if self.timeout and cbs.timed then
         timer = assert(uv.new_timer())
         timer:start(self.timeout, 0, function()
-            if not done then
+            if not done and exit_code == nil then
                 vim.schedule(cbs.on_timeout)
                 kill(handle)
             end
@@ -659,29 +761,37 @@ function InteractiveRunner:run_live(idx, on_done)
     tc.status, tc.hlgroup = "live", "TunaRunning"
     tc.stdout, tc.stderr, tc.log = "", "", {}
     self:update_ui(true)
+    -- Joined once the session ends: the columns show the log, so nothing reads them before, and
+    -- joined as they arrive they would be copied whole on every piece.
+    local out, errs = {}, {}
 
     self:spawn_solution({
         on_stdout = function(data)
-            tc.stdout = tc.stdout .. data
+            out[#out + 1] = data
             log_append(tc, "so", data)
             self:update_ui(false)
         end,
         on_stderr = function(data)
-            tc.stderr = tc.stderr .. data
+            errs[#errs + 1] = data
             log_append(tc, "se", data)
             self:update_ui(false)
         end,
         on_error = function(msg)
             tc.status, tc.hlgroup, tc.stderr = "failed", "TunaWarning", msg
+            tc.stdout = table.concat(out)
             log_note(tc, msg)
             self.sol_in = nil
             self:update_ui(true)
             on_done()
         end,
-        on_exit = function(code, signal)
+        on_exit = function(code, signal, over)
             -- You are the judge, so a session that ended on its own is `done`; one stopped or
             -- crashed ends the way a testcase would.
-            local ended, hl = core.ending({ code = code, signal = signal, killed = tc.killed })
+            local ended, hl, words = core.ending({ code = code, signal = signal, killed = tc.killed, over = over })
+            tc.stdout, tc.stderr = table.concat(out), table.concat(errs)
+            if over then
+                log_note(tc, "[" .. words .. "]")
+            end
             tc.status, tc.hlgroup = ended or "done", hl or "TunaDone"
             self.sol_in = nil
             self:update_ui(true)
@@ -719,11 +829,34 @@ function InteractiveRunner:run_feed(idx, on_done)
         end
     end
 
+    -- What arrives is joined once a tick rather than once a piece: the Output and Errors panes
+    -- show it as it streams, and joined piece by piece it would be copied whole every time.
+    local pending, flushing = { stdout = {}, stderr = {} }, false
+    local function flush()
+        for _, field in ipairs({ "stdout", "stderr" }) do
+            if #pending[field] > 0 then
+                tc[field] = tc[field] .. table.concat(pending[field])
+                pending[field] = {}
+            end
+        end
+    end
+    local function queue(field, data)
+        local parts = pending[field]
+        parts[#parts + 1] = data
+        if not flushing then
+            flushing = true
+            vim.schedule(function()
+                flushing = false
+                flush()
+                self:update_ui(false)
+            end)
+        end
+    end
+
     self:spawn_solution({
         timed = true,
         on_stdout = function(data)
-            tc.stdout = tc.stdout .. data
-            self:update_ui(false)
+            queue("stdout", data)
             -- One input line per *line* of output: a chunk carrying several newlines
             -- is several completed turns, and answering it with a single line
             -- deadlocked any protocol that prints more than one line per query.
@@ -732,8 +865,7 @@ function InteractiveRunner:run_feed(idx, on_done)
             end
         end,
         on_stderr = function(data)
-            tc.stderr = tc.stderr .. data
-            self:update_ui(false)
+            queue("stderr", data)
         end,
         on_timeout = function()
             timed_out = true
@@ -744,9 +876,13 @@ function InteractiveRunner:run_feed(idx, on_done)
             self:update_ui(true)
             on_done()
         end,
-        on_exit = function(code, signal)
+        on_exit = function(code, signal, over)
             self.sol_in = nil
-            local ended, hl = core.ending({ code = code, signal = signal, timed_out = timed_out, killed = tc.killed })
+            flush()
+            local ended, hl, words = core.ending({ code = code, signal = signal, timed_out = timed_out, killed = tc.killed, over = over })
+            if over then
+                tc.stderr = tc.stderr .. (tc.stderr ~= "" and "\n" or "") .. "[" .. words .. "]"
+            end
             if ended then
                 tc.status, tc.hlgroup = ended, hl
                 self:update_ui(true)
@@ -794,6 +930,13 @@ function InteractiveRunner:run_interactor(idx, on_done)
     local int_in, int_out, int_err = pipe(), pipe(), pipe()
     local sol_handle, int_handle, timer
     local done, verdict, int_exited, failed = false, nil, false, false
+    local limit = tools.output_limit(self.config)
+    local over = false
+    -- Joined once the session ends, as in live: the columns show the log. tuna's own notes go
+    -- into `errs` too, in the order they come.
+    local out, errs = {}, {}
+    -- The session's end handled, on the main loop: what was read before it is still shown.
+    local settled = false
 
     local function safe_close(h)
         if h and not h:is_closing() then
@@ -822,6 +965,8 @@ function InteractiveRunner:run_interactor(idx, on_done)
         utils.delete_file(answer_file)
         self.sol_handle, self.int_handle = nil, nil
         vim.schedule(function()
+            settled = true
+            tc.stdout, tc.stderr = table.concat(out), table.concat(errs)
             if failed then
                 -- The session never happened (the interactor would not start): that is
                 -- not a `done`, which reads as a session that ran and was not judged.
@@ -847,9 +992,9 @@ function InteractiveRunner:run_interactor(idx, on_done)
         safe_close(sol_handle)
         sol_handle = nil
         local ended, hl, words = core.ending({ code = code, signal = signal })
-        if ended and not int_exited and not done then
+        if ended and not int_exited and not done and not over then
             local note = "[solution " .. words .. "]"
-            tc.stderr = (tc.stderr or "") .. "\n" .. note
+            errs[#errs + 1] = "\n" .. note
             log_note(tc, note)
             finish(ended, hl)
         end
@@ -875,20 +1020,41 @@ function InteractiveRunner:run_interactor(idx, on_done)
         int_handle = nil
         int_exited = true
         verdict = (code == 0 and (not signal or signal == 0))
-        finish()
+        -- Stopped at the limit, the session's end is already on its way.
+        if not over then
+            finish()
+        end
     end)
     if not int_handle then
-        tc.stderr = "could not start interactor '" .. tostring(self.interactor.exec) .. "'"
-        log_note(tc, tc.stderr)
+        local said = "could not start interactor '" .. tostring(self.interactor.exec) .. "'"
+        errs[#errs + 1] = said
+        log_note(tc, said)
         failed = true
         finish()
         return
     end
     self.int_handle = int_handle
 
+    -- What the two print together has one budget. Past it they are stopped, and the session
+    -- ended once what they printed before is shown, on the main loop.
+    local within = budget(limit, function()
+        over = true
+        kill(sol_handle)
+        kill(int_handle)
+        vim.schedule(function()
+            local ended, hl, words = core.ending({ over = limit })
+            errs[#errs + 1] = "\n[" .. words .. "]"
+            log_note(tc, "[" .. words .. "]")
+            finish(ended, hl)
+        end)
+    end)
+
     -- Cross-wire, teeing each side of the exchange into the transcript.
     sol_out:read_start(function(err, data)
         if err or done then
+            return
+        end
+        if data and not within(data) then
             return
         end
         if data then
@@ -896,8 +1062,8 @@ function InteractiveRunner:run_interactor(idx, on_done)
                 int_in:write(data)
             end
             vim.schedule(function()
-                if not done then
-                    tc.stdout = (tc.stdout or "") .. data
+                if not settled then
+                    out[#out + 1] = data
                     log_append(tc, "so", data)
                     self:update_ui(false)
                 end
@@ -910,12 +1076,15 @@ function InteractiveRunner:run_interactor(idx, on_done)
         if err or done then
             return
         end
+        if data and not within(data) then
+            return
+        end
         if data then
             if not sol_in:is_closing() then
                 sol_in:write(data)
             end
             vim.schedule(function()
-                if not done then
+                if not settled then
                     log_append(tc, "si", data)
                     self:update_ui(false)
                 end
@@ -925,10 +1094,10 @@ function InteractiveRunner:run_interactor(idx, on_done)
         end
     end)
     int_err:read_start(function(err, data)
-        if not err and data then
+        if not err and data and not done and within(data) then
             vim.schedule(function()
-                if not done then
-                    tc.stderr = (tc.stderr or "") .. data
+                if not settled then
+                    errs[#errs + 1] = data
                     log_append(tc, "se", data)
                     self:update_ui(false)
                 end
@@ -939,9 +1108,9 @@ function InteractiveRunner:run_interactor(idx, on_done)
     if self.timeout then
         timer = assert(uv.new_timer())
         timer:start(self.timeout, 0, function()
-            if not done then
+            if not done and not over then
                 local ended, hl, words = core.ending({ timed_out = true }, self.timeout)
-                tc.stderr = (tc.stderr or "") .. "\n[" .. words .. "]"
+                errs[#errs + 1] = "\n[" .. words .. "]"
                 log_note(tc, "[" .. words .. "]")
                 finish(ended, hl)
             end

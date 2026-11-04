@@ -36,6 +36,7 @@ M.SCAFFOLDS = vim.list_extend({ "solution" }, M.ROLES)
 ---@field source string? the file it is built from
 ---@field compile { exec: string, args: string[] }? its compile command, nil when there is none
 ---@field compile_dir string?
+---@field output_limit integer? what it may print, from the config it was found under
 
 -- Filetypes by extension, for the session. Listing a folder's solutions asks for the
 -- language of every file there (testcases and binaries included), across every problem
@@ -386,6 +387,80 @@ function M.spawn_env()
     return out
 end
 
+---What a process may print, in bytes, or nil for no limit (`maximum_output`): a buffer's
+---config, or as set up for what knows none (a checker, a compiler).
+---@param cfg table?
+---@return integer?
+function M.output_limit(cfg)
+    local limit = (cfg or require("tuna.config").current_setup).maximum_output
+    return (limit and limit > 0) and limit or nil
+end
+
+---`vim.system` with a ceiling on what the process may print: past `limit` bytes of stdout
+---and stderr together it is killed at once, and `res.over` is that limit, the output kept up to
+---it. Left to `vim.system`, every byte is kept until the process exits, so a program printing
+---in a loop fills memory at the speed it prints until its time runs out.
+---@param argv string[]
+---@param opts table `vim.system` options, its own `stdout`/`stderr` aside
+---@param limit integer? bytes, nil for none (`output_limit`)
+---@param on_exit fun(res: vim.SystemCompleted|{ over: integer? })
+---@return vim.SystemObj
+function M.system(argv, opts, limit, on_exit)
+    local proc ---@type vim.SystemObj?
+    local size, over = 0, false
+    local out, err = {}, {}
+    ---What one stream hands over, kept while there is room. Runs in a fast context.
+    local function sink(chunks)
+        return function(_, data)
+            if not data or over then
+                return
+            end
+            if limit and size + #data > limit then
+                chunks[#chunks + 1] = data:sub(1, limit - size)
+                size, over = limit, true
+                if proc then
+                    proc:kill("sigkill")
+                end
+                return
+            end
+            chunks[#chunks + 1] = data
+            size = size + #data
+        end
+    end
+    local text = opts.text
+    opts = vim.tbl_extend("force", opts, { stdout = sink(out), stderr = sink(err), text = false })
+    proc = vim.system(argv, opts, function(res)
+        res.stdout, res.stderr = table.concat(out), table.concat(err)
+        if text then
+            res.stdout, res.stderr = res.stdout:gsub("\r\n", "\n"), (res.stderr:gsub("\r\n", "\n"))
+        end
+        res.over = over and limit or nil
+        on_exit(res)
+    end)
+    return proc
+end
+
+---A number of bytes in words, as a limit is said: `16 MiB`, `512 KiB`, `100 bytes`.
+---@param bytes integer
+---@return string
+function M.size_words(bytes)
+    if bytes >= 1024 * 1024 then
+        return ("%g MiB"):format(math.floor(bytes / 1024 / 1024 * 10 + 0.5) / 10)
+    elseif bytes >= 1024 then
+        return ("%g KiB"):format(math.floor(bytes / 1024 * 10 + 0.5) / 10)
+    end
+    return ("%d bytes"):format(bytes)
+end
+
+---Whether a process ended on its own with nothing to report: exit code 0, no signal, nothing
+---cut off. A process killed by a signal, the one `system` stops at the limit among them, exits
+---with code 0 and the signal beside it, so the code alone takes it for a success.
+---@param res { code: integer?, signal: integer?, over: integer? }
+---@return boolean
+function M.clean_exit(res)
+    return res.code == 0 and (res.signal or 0) == 0 and not res.over
+end
+
 ---The helper filling `role` for a solution, as a spec ready to prepare and spawn, or nil
 ---when there is none. One rule for every role: a helper set in the config (`checker`,
 ---`stress.generator`, `stress.bruteforce`, `interactive.interactor`) is used instead of a
@@ -397,7 +472,7 @@ end
 ---@param cfg table resolved configuration
 ---@return tuna.HelperSpec? spec
 ---@return string? note why a configured helper can't be used, when it can't
-function M.helper(role, solution, cfg)
+local function find_helper(role, solution, cfg)
     local set = cfg ---@type any
     for _, key in ipairs(ROLE_OPTION[role]) do
         set = type(set) == "table" and set[key] or nil
@@ -431,6 +506,22 @@ function M.helper(role, solution, cfg)
     end
     local path = M.find(dir, role, cfg)
     return path and spec_for_file(role, path, cfg) or nil
+end
+
+
+---The helper filling `role` for a solution (`find_helper`), with the limit on what it may print
+---taken from the same config, so a `.tuna.lua`'s `maximum_output` holds for it as for the
+---solution.
+---@param role string
+---@param solution string
+---@param cfg table
+---@return tuna.HelperSpec? spec, string? note
+function M.helper(role, solution, cfg)
+    local spec, note = find_helper(role, solution, cfg)
+    if spec then
+        spec.output_limit = M.output_limit(cfg)
+    end
+    return spec, note
 end
 
 --------------------------------------------------------------------------------
@@ -667,15 +758,16 @@ function M.prepare(spec, cb)
     -- pcall'd: a compiler that is not installed makes `vim.system` itself throw, and
     -- every queued caller still has to hear the answer — an exception here left
     -- `compiling` set and the queue waiting forever.
-    local ok, spawn_err = pcall(vim.system, argv, { cwd = spec.compile_dir }, function(res)
+    local ok, spawn_err = pcall(M.system, argv, { cwd = spec.compile_dir }, spec.output_limit or M.output_limit(), function(res)
         vim.schedule(function()
-            if res.code == 0 then
+            if M.clean_exit(res) then
                 -- Warnings are kept as well as errors: the build step shows what each
                 -- source's compiler said, and a helper that built with warnings has
                 -- something to say about it.
                 settle(true, nil, res.stderr)
             else
-                settle(false, "compilation failed:\n" .. (res.stderr or ""))
+                local why = res.over and (", the compiler printed more than %s"):format(M.size_words(res.over)) or ""
+                settle(false, "compilation failed" .. why .. ":\n" .. (res.stderr or ""))
             end
         end)
     end)

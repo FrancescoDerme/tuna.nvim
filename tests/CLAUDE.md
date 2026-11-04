@@ -183,7 +183,14 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     without its sources read, a failure included; Rust never reused across runs), headers never
     taken for a solution or a helper (a run from one running the solution beside it, run-all,
     `solution_in`, a contest's problems, `:Tuna pin` and, in `menu.lua`, the command list), the
-    ending vocabulary, and run-all's headers counting judged rows only, using real UI windows,
+    ending vocabulary, and run-all's headers counting judged rows only, a program printing without
+    end run for real (`exec yes`, as a shell's child would outlive the kill: stopped at the limit
+    with what came before kept, stdout and stderr together, the row reading `ole`, the Output pane
+    cut with a note and the diff no further, on one long line too and asked again only for new
+    texts, a checker or a compiler so stopped, or killed by a signal, giving no verdict and no
+    build, `ole` judged, the checker's reason first in Errors, and every source's session stopped
+    likewise with its note last, its columns and log bounded, while one that prints and exits
+    keeps every byte), using real UI windows,
     in both interfaces where the grid changes (focus, the selector's row and line numbers,
     titles and a bad grid said once as the board re-tiles, the pane keys moving from the cursor,
     from a zoom as from its pane and, from insert mode, typing on into an editable pane and

@@ -255,6 +255,13 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
   gating on the spawn would leave exactly the rows worth comparing unmarked. An empty pane is
   compared only where the answer is stored empty (`tc.expected == ""`), so the marks follow the
   verdict there; no answer is not judged, and an answer cleared and unsaved is `:w`'s question.
+- **The Output and Errors panes show the first `SHOWN` bytes** of what a program said (`shown_part`),
+  cut at a line's end under a line saying how much is left out, as up to `maximum_output` may be
+  kept and a pane of millions of lines makes every redraw, search and diff slow. Judging reads
+  the whole. Input and Expected Output are never cut: they are the testcase's files, saved from
+  their panes. The diff compares what the Output pane shows of the output and as many lines of
+  the answer, no longer (`w.cut`), or every answer line past the cut would be marked as missing. Only `si` and `eo` keep a
+  `baseline`, the one thing an edit is measured against.
 - `mark_empty_answer` has a blank Expected Output pane say what it means
   (`testcases.empty_answer_words` through `surface.note_when_empty`), a blank pane alone not
   telling an answer stored empty from none. It runs on every render of the details and on every

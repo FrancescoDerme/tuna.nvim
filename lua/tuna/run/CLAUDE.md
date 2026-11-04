@@ -107,7 +107,7 @@ hold everywhere are in the root `CLAUDE.md`.
 ## Runners
 
 **`RunnerCore` (`run/core.lua`)** is the base of every mode (subclassed with `M.extend()`).
-- `tcdata` rows. `execute_process(tcindex, cmd, dir, opts, on_done)` spawns via `vim.system`
+- `tcdata` rows. `execute_process(tcindex, cmd, dir, opts, on_done)` spawns via `tools.system`
   with its own timeout timer (timeout, killed, sig, ret), then judges with `checker.judge`
   unless `opts.judge == false` (the compile row), setting `judging` while it waits. Every
   program tuna runs (testcases, the checker, the stress search's steps, a session's solution and
@@ -170,8 +170,21 @@ hold everywhere are in the root `CLAUDE.md`.
   `build_spoke`/`build_pending` answer whether the step had anything to say and whether it is
   over, which is what decides if the cursor may be handed to the first testcase. Run-all has no
   build step: each solution's build is a row of its own.
-- `M.time_limit(cfg)` and `M.parallelism(cfg, jobs)` are how every mode reads `maximum_time`
-  and `multiple_testing`.
+- `M.time_limit(cfg)`, `tools.output_limit(cfg)` and `M.parallelism(cfg, jobs)` are how every
+  mode reads `maximum_time`, `maximum_output` and `multiple_testing`.
+- **What a process prints is bounded as it is read.** Every `vim.system` spawn goes through
+  `tools.system`, which collects stdout and stderr through callbacks and kills the process the
+  moment the two together pass the limit (`res.over`, the limit itself, so every ending says it
+  in the same words), keeping what came before: left to `vim.system`, every byte is kept until
+  exit, so a program printing in a loop fills memory at the speed it prints until its time runs
+  out, and the time limit comes too late. A checker and a compiler know no buffer's config and
+  take `maximum_output` as set up (`output_limit()`). A process run through a shell keeps a
+  child the kill does not reach, as with the time limit. The tests' stand-ins for `vim.system`
+  feed the stream callbacks they are handed (`t.streamed`), as `vim.system` does.
+- **A clean exit is code 0, no signal and nothing cut off** (`tools.clean_exit`). A process
+  killed by a signal, the one stopped at the limit among them, exits with code 0 and the signal
+  beside it, so every build (`build_solution`, `prepare`, run-all's `compile_solution`) reads
+  success through it, and a checker so ended gives no verdict rather than `correct`.
 - **One vocabulary for a verdict**: `M.verdict(correct)` is what a judged row wears
   (`correct`, `wrong`, `done` with no answer), in every mode. What `tc.status` holds is what the
   row shows, so the runs compare the words on screen (`M.judged`, `^sig `), and nothing lowers
@@ -179,7 +192,8 @@ hold everywhere are in the root `CLAUDE.md`.
 - `M.register(registry, bufnr, runner)` is how every mode keeps its runner by buffer: one
   `BufUnload` watcher per registry and buffer, however often the buffer is run.
 - **One vocabulary for an ending**: `M.ending(how, timeout)` gives the status, colour and
-  words for a process that did not exit cleanly (`timeout`, `killed`, `sig n`, `ret n`,
+  words for a process that did not exit cleanly (`ole` for one stopped at `maximum_output`, a
+  judge's word for it, `timeout`, `killed`, `sig n`, `ret n`,
   `vim.system`'s own timeout kill, code 124 and SIGTERM, reading as a timeout), for a testcase
   (`finish_process`), an interactive session and a stress helper alike.
 - **Stopping**: `kill_process(idx)` ends one row and the run goes on; `kill_all_processes`
@@ -196,7 +210,7 @@ hold everywhere are in the root `CLAUDE.md`.
   a run finishes: normal `check_complete`, run-all's `settle` (`save_local_verdicts`, each
   solution over its own case rows), and interactive session ends (`save_buffer_verdict` skips a
   wiped buffer). Stress saves none. Only judged rows count (`M.judged`, which run-all's header
-  counts use too) (correct passes; wrong, timeout, ret, sig fail), so a run that judged nothing
+  counts use too) (correct passes; wrong, ole, timeout, ret, sig fail), so a run that judged nothing
   leaves the entry alone. The source hash is recorded, and `local_verdict` answers only while
   it matches.
 
@@ -247,8 +261,9 @@ to disk under a number such a row holds, it would be overwritten by that row's s
 **Checker (`checker.lua`)**: `"builtin"` (what `resolve_checker` returns when there is no
 checker) delegates to `compare.lua`. An external checker runs
 as `checker <input> <output> <answer>` (exit 0 means correct) and is compiled via
-`tools.prepare`. Its message (`tc.checker_message`) is appended to the Errors pane by the base
-`pane_content`, and `reset_row` clears it. A checker that did not build or cannot start gives
+`tools.prepare`. Its message (`tc.checker_message`) leads the Errors pane, above the program's
+stderr, in the base `pane_content`, so a stderr the pane cuts off cannot take the reason with
+it, and `reset_row` clears it. A checker that did not build or cannot start gives
 no verdict, and says so on the row alone, never in a notification: the build step already
 shows why, beside the other sources, and a notification per testcase would repeat it. Stress
 builds the checker with its generator and bruteforce (`search_helpers`) and stops on an input
