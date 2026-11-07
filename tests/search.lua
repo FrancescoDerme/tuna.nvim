@@ -221,10 +221,14 @@ t.eq("picking a contest opens a problem in it", file, root .. "/flat/A.cpp")
 t.eq("and moves to the contest", cwd, root .. "/flat")
 
 -- What it says when there is nothing to show, and when it stopped short.
-local said = {}
+-- A picker closed for having nothing to show leaves insert mode, which clears the command line:
+-- what the walk has to say comes after that, or it is gone before it can be read.
+local said, open_when_said, mode_when_said = {}, {}, {}
 local quiet = vim.notify
 vim.notify = function(msg)
     said[#said + 1] = msg
+    open_when_said[#open_when_said + 1] = list_buffer() ~= nil
+    mode_when_said[#mode_when_said + 1] = api.nvim_get_mode().mode
 end
 local function search_with(opts)
     said = {}
@@ -244,13 +248,75 @@ vim.wait(100, function()
     return not list_buffer()
 end, 5)
 t.eq("and closes the picker", list_buffer(), nil)
+t.eq("saying so once it has closed", open_when_said[#open_when_said], false)
 t.has("a walk stopped by its budget says so", search_with({
     downloaded_problems_path = root .. "/$(PROBLEM)/main.$(FEXT)",
     downloaded_contests_directory = root .. "/$(CONTEST)",
     search = { max_entries = 1 },
 }), "stopped after 1 entries")
+-- A tree of its own: its one problem's folder is listed first, and the budget runs out on the
+-- folders after it, which are what a walk cut short leaves out.
+local short = vim.fs.normalize(t.tempdir())
+problem(short .. "/a", "main.cpp", "Kiwis", nil, "https://x.test/kiwis")
+for i = 1, 20 do
+    vim.fn.mkdir(("%s/z%02d"):format(short, i), "p")
+end
+t.has("a walk stopped short that still found rows says so", search_with({
+    downloaded_problems_path = short .. "/$(PROBLEM)/main.$(FEXT)",
+    downloaded_contests_directory = short .. "/$(CONTEST)",
+    search = { max_entries = 5 },
+}), "stopped after 5 entries")
+t.eq("at once, its picker left open", open_when_said[#open_when_said], true)
+close_picker()
+
+-- Typing, as the picker opens from a key: closed, its notice waits for insert mode to end.
+local empty_paths = {
+    downloaded_problems_path = empty .. "/$(PROBLEM).$(FEXT)",
+    downloaded_contests_directory = empty .. "/$(CONTEST)",
+}
+require("tuna").setup(empty_paths)
+said, mode_when_said = {}, {}
+function _G.tuna_search_now()
+    search.open(api.nvim_get_current_buf())
+end
+function _G.tuna_until_closed()
+    vim.wait(1000, function()
+        return list_buffer() == nil
+    end, 5)
+end
+press("<Cmd>lua tuna_search_now()<CR><Cmd>lua tuna_until_closed()<CR>")
+vim.wait(1000, function()
+    return #said > 0
+end, 5)
+t.eq("a picker closed while typing says why once insert mode is left", { #said, mode_when_said[1] }, { 1, "n" })
+
+-- One already dismissed says it at once, whatever mode another float or buffer is in.
+said, mode_when_said = {}, {}
+local widgets = require("tuna.ui.widgets")
+function _G.tuna_search_then_other()
+    search.open(api.nvim_get_current_buf())
+    widgets.menu({ "other" }, "another", function() end, nil, nil, nil, {
+        search = function()
+            return { 1 }
+        end,
+    })
+end
+function _G.tuna_until_said()
+    vim.wait(1000, function()
+        return #said > 0
+    end, 5)
+end
+press("<Cmd>lua tuna_search_then_other()<CR><Cmd>lua tuna_until_said()<CR>")
+t.eq("one already replaced says it at once, not when some other typing ends", { #said, mode_when_said[1] }, { 1, "i" })
+for _, w in ipairs(api.nvim_list_wins()) do
+    if api.nvim_win_is_valid(w) and api.nvim_win_get_config(w).relative ~= "" then
+        pcall(api.nvim_win_close, w, true)
+    end
+end
+vim.cmd.stopinsert()
 vim.notify = quiet
 
 vim.fn.delete(root, "rf")
 vim.fn.delete(empty, "rf")
+vim.fn.delete(short, "rf")
 t.report()

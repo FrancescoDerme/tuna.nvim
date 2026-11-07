@@ -186,7 +186,10 @@ problems and remembering them. The rules that hold everywhere are in the root `C
   not following symlinks. The picker opens before it, empty, and the rows arrive through
   `widgets.menu_items`: opened after the walk, a frame with nothing on it goes by when it
   replaces the board, and what is typed meanwhile lands on the buffer underneath.
-  Nothing is cached: a walk is cheap and an index could go stale.
+  Nothing is cached: a walk is cheap and an index could go stale. What the walk has to say
+  (nothing found, a walk cut short) comes after the rows reach the picker: none close it, and
+  a picker it closed waits on `widgets.after_insert`, while one left open, or already
+  dismissed, says it at once.
   - **Sidecars are the source, not paths.** A `task` entry says a file is a solution and gives
     its name and contest whatever the folders are called, where a path means something only under
     a template that happens to spell them out. So a file with no `task` (never downloaded or

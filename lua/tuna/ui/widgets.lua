@@ -1557,17 +1557,39 @@ end
 ---narrows these. None left to show closes it. Does nothing once that opening is gone.
 ---@param id integer what `menu` returned
 ---@param items string[]
+---@return boolean closed whether it closed the menu, for a caller with something to say
+---  about why to wait for `after_insert`
 function M.menu_items(id, items)
     if not menu.ui_visible or menu.id ~= id then
-        return
+        return false
     end
     if #items == 0 then
         menu.dismiss()
-        return
+        return true
     end
     menu.items = items
     menu.query = table.concat(api.nvim_buf_get_lines(menu.search_buf, 0, -1, false), " ")
     menu.relist()
+    return false
+end
+
+---Run `fn` once insert mode has been left, or now outside it. A typing float closed by code
+---leaves insert mode only once the code returns, and leaving it clears the command line, so a
+---notice given in between is gone before it can be read: one about why the float closed waits
+---for this.
+---@param fn fun()
+function M.after_insert(fn)
+    if not vim.fn.mode():find("^i") then
+        return fn()
+    end
+    api.nvim_create_autocmd("ModeChanged", {
+        pattern = "i*:*",
+        once = true,
+        -- The command line is cleared after the event, so on the next tick.
+        callback = function()
+            vim.schedule(fn)
+        end,
+    })
 end
 
 --------------------------------------------------------------------------------

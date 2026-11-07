@@ -152,8 +152,12 @@ specific Vim error about a buffer the user never opened.
   its panes by hand closes the whole menu, as closing the list does. A resize keeps the search,
   the pane focused and whether it was typing. With a search `items` may start empty, for
   `menu_items(id, items)` to fill by the `id` `menu` returned (a later opening's list is left
-  alone), narrowed by what was typed meanwhile, and none closing it; `beside.list_width` keeps
+  alone), narrowed by what was typed meanwhile, and none closing it (it says whether it did); `beside.list_width` keeps
   the list's width from following rows that are not there yet.
+- `after_insert(fn)` runs `fn` once insert mode is left, on the tick after (`ModeChanged`
+  `i*:*`), or now outside it: a typing float closed by code leaves insert mode only once the code
+  returns, leaving it clears the command line after the event, and a notice given before is
+  gone before it can be read. Headless Neovim draws no screen, so a real terminal shows it.
 - `panels`: lists in columns where `<CR>` acts on the focused list only (the `:Tuna` menu).
   `form`: stacked lists where `<CR>` submits every selection (clean). A `panels` section may
   carry `highlights`, byte-range spans drawn as extmarks in `tuna_panels`. They differ in what

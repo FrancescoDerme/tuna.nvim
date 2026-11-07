@@ -278,19 +278,29 @@ function M.open(bufnr)
         }
     )
     walk(roots, cfg, function(found, truncated)
-        if truncated then
-            utils.notify(("search: stopped after %d entries, so only part was searched."):format(cfg.search.max_entries), "WARN")
-        end
         rows = catalogue(found)
-        if #rows == 0 then
-            utils.notify("search: nothing found, only problems downloaded or submitted with tuna are listed.", "WARN")
-        end
-        widgets.menu_items(
+        local closed = widgets.menu_items(
             id,
             vim.tbl_map(function(r)
                 return r.name
             end, rows)
         )
+        local function say()
+            if truncated then
+                utils.notify(("search: stopped after %d entries, so only part was searched."):format(cfg.search.max_entries), "WARN")
+            end
+            if #rows == 0 then
+                utils.notify("search: nothing found, only problems downloaded or submitted with tuna are listed.", "WARN")
+            end
+        end
+        -- No rows close the picker, and what the walk has to say then waits for the insert mode
+        -- the picker leaves, or it is gone before it can be read. A picker left open, or one
+        -- already dismissed, says it at once.
+        if closed then
+            widgets.after_insert(say)
+        else
+            say()
+        end
     end)
 end
 

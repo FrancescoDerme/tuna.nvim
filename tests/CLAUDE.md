@@ -121,7 +121,8 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     taken for one), what the walk passes over (dot-directories, `skip_directories`, symlinks,
     `ignored_directories`, a broken sidecar), the order, `rank`, a row saying its judge once and
     found by it all the same, picking going there and what
-    it says when it finds nothing or is cut short;
+    it says when it finds nothing or is cut short (once the picker has
+    closed, or at once while it stays open);
   - `download.lua`: the listener's boundary, a request handled while its sender is still
     connected, and what is stored (an empty answer kept, no file refused, a typed `~` path,
     the solution's template filled in, the problem recorded as the file's own, tuna's starter
