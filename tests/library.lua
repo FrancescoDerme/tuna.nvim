@@ -238,21 +238,21 @@ do
         local ns = vim.api.nvim_get_namespaces().tuna_menu
         for _, m in ipairs(vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, { details = true })) do
             local chunk = m[4].virt_text[#m[4].virt_text]
-            out[m[2] + 1] = ("%s + %s %s %s"):format(out[m[2] + 1], chunk[1], chunk[2], m[4].virt_text_pos)
+            out[m[2] + 1] = ("%s + %s %s %s %s"):format(out[m[2] + 1], chunk[1], chunk[2], m[4].virt_text_pos, m[4].hl_mode)
         end
         return out
     end
     t.eq("a row holds the name, with the number dimmed after it", { rows()[1], rows()[2], rows()[3], rows()[4] }, {
         "Twin",
-        "twin + (1) Comment eol",
-        "twin + (2) Comment eol",
-        "twin + (3) Comment eol",
+        "twin + (1) Comment eol combine",
+        "twin + (2) Comment eol combine",
+        "twin + (3) Comment eol combine",
     })
     t.eq("the list is wide enough for the number too", vim.api.nvim_win_get_width(list), 30 + 1 + 3 + 2)
     local search = vim.api.nvim_win_get_buf(pane("search"))
     vim.api.nvim_buf_set_lines(search, 0, -1, false, { "b.cpp" })
     vim.api.nvim_exec_autocmds("TextChangedI", { buffer = search })
-    t.eq("a search keeps each snippet's own number", { rows()[1], rows()[2] }, { "twin + (2) Comment eol", "twin + (3) Comment eol" })
+    t.eq("a search keeps each snippet's own number", { rows()[1], rows()[2] }, { "twin + (2) Comment eol combine", "twin + (3) Comment eol combine" })
     vim.api.nvim_buf_set_lines(search, 0, -1, false, { "zone" })
     vim.api.nvim_exec_autocmds("TextChangedI", { buffer = search })
     t.eq("and a row taken over by a name of its own has none", rows(), { "zone" })

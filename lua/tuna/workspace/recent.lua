@@ -578,7 +578,7 @@ function M.open_pinned(index)
     open_remembered(p, "pin")
 end
 
----Open a solution found by `:Tuna go search` and cd to its directory.
+---Open a solution found by `:Tuna find` and cd to its directory.
 ---@param file string
 function M.open_solution(file)
     open_remembered({ file = file, dir = vim.fs.dirname(file) }, "search")

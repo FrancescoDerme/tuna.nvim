@@ -294,11 +294,18 @@ M.defaults = {
         header = nil,
     },
 
-    -- `:Tuna go search`, which looks where downloads land, passing over dot-directories and
+    -- `:Tuna find`, which looks where downloads land, passing over dot-directories and
     -- `clean.skip_directories`.
     search = {
         -- The walk stops after this many filesystem entries and says it was cut short.
         max_entries = 100000,
+        -- A solution's tags, which a search matches as it matches a name: a Lua pattern over
+        -- its first `tag_lines` lines, whose capture is a comma-separated list, so
+        -- `// tags: binary search, greedy` or one `// tag:` line per tag. They are copied into
+        -- the sidecar whenever the file is read or written in Neovim, so a tag added
+        -- elsewhere is found once the file has been opened. false for none.
+        tags = "%f[%w]tags?:%s*(.-)%s*$",
+        tag_lines = 10,
     },
 
     -- `:Tuna go` and the menu: how many problems and contests are remembered, most

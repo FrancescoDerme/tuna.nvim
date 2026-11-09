@@ -2280,6 +2280,7 @@ local function paint_diff(bufnr, marks)
                     api.nvim_buf_set_extmark(bufnr, diff_ns, lnum - 1, s, {
                         virt_text = { { " ", diff.TEXT } },
                         virt_text_pos = "inline",
+                        hl_mode = "combine",
                         priority = 200,
                     })
                 end

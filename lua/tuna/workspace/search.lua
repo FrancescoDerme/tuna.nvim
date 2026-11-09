@@ -1,9 +1,9 @@
 -- lua/tuna/workspace/search.lua
 --
--- `:Tuna go search`: every problem and contest under where downloads land, searched by name
--- and opened as `:Tuna go` opens one. The sidecars are the source: a `task` entry says a file
--- is a problem's solution, and gives its name and contest whatever the folders are called.
--- Nothing is kept between searches, so nothing here can go stale.
+-- `:Tuna find`: every problem and contest under where downloads land, searched by name, contest
+-- and tags, and opened as `:Tuna go` opens one. The sidecars are the source: a `task` entry says
+-- a file is a problem's solution, and gives its name and contest whatever the folders are
+-- called, and a `tags` entry its tags (`tags.lua`). Nothing is kept between searches.
 
 local api = vim.api
 local uv = vim.uv
@@ -16,7 +16,8 @@ local M = {}
 
 ---@class tuna.SearchRow
 ---@field name string what the list shows
----@field text string what a search matches
+---@field text string what a search matches: the name, the contest and the tags
+---@field tags string[]? a problem's tags, which a search ranks first
 ---@field path string the solution, or a contest's directory
 ---@field contest string? the contest's name, on a contest's row
 ---@field problems string[]? a contest's problem names, in file order
@@ -141,14 +142,19 @@ local function catalogue(found)
     for _, f in ipairs(found) do
         local store = sidecar.decode(f.content)
         local tasks = store and type(store.task) == "table" and store.task or {}
+        local tagged = store and type(store.tags) == "table" and store.tags or {}
         for base, task in pairs(tasks) do
             local file = f.dir .. "/" .. base
             if f.names[base] and type(task) == "table" and not recent.ignored(file) then
                 local name = type(task.name) == "string" and task.name or base
                 local group = type(task.group) == "string" and task.group or nil
+                local tags = type(tagged[base]) == "table" and vim.tbl_filter(function(tag)
+                    return type(tag) == "string"
+                end, tagged[base]) or {}
                 rows[#rows + 1] = {
                     name = group and (name .. "  " .. judges.label(group)) or name,
-                    text = name .. " " .. (group or ""),
+                    text = table.concat({ name, group or "", unpack(tags) }, " "),
+                    tags = tags,
                     path = file,
                 }
                 if group then
@@ -199,7 +205,10 @@ local function catalogue(found)
 end
 
 ---The rows a search shows, in order, as indices into `rows`: all of them with nothing typed,
----else those whose name and contest fuzzy-match, best first, the words in any order.
+---else those whose name, contest and tags fuzzy-match, the words in any order. A row with a tag
+---holding a word typed comes first, more such words first, then the best match: a tag is
+---written to be searched for, where letters scattered over a name match by chance, and `dp`
+---would otherwise rank every name with a d before a p over the problem tagged `interval dp`.
 ---@param rows tuna.SearchRow[]
 ---@param query string
 ---@return integer[]
@@ -216,9 +225,27 @@ local function rank(rows, query)
     for i, r in ipairs(rows) do
         keyed[i] = { text = r.text, idx = i }
     end
-    return vim.tbl_map(function(k)
-        return k.idx
-    end, vim.fn.matchfuzzy(keyed, typed, { key = "text" }))
+    local words = vim.split(typed, "%s+", { trimempty = true })
+    local found, hits, place = {}, {}, {}
+    for pos, k in ipairs(vim.fn.matchfuzzy(keyed, typed, { key = "text" })) do
+        local n = 0
+        for _, word in ipairs(words) do
+            for _, tag in ipairs(rows[k.idx].tags or {}) do
+                if tag:lower():find(word, 1, true) then
+                    n = n + 1
+                    break
+                end
+            end
+        end
+        found[pos], hits[k.idx], place[k.idx] = k.idx, n, pos
+    end
+    table.sort(found, function(a, b)
+        if hits[a] ~= hits[b] then
+            return hits[a] > hits[b]
+        end
+        return place[a] < place[b]
+    end)
+    return found
 end
 
 ---What the pane beside the list shows for a row: a problem's source, or a contest's problems.
@@ -235,9 +262,10 @@ local function pane_of(row)
     }
 end
 
----`:Tuna go search`: look under where downloads land, and go to what is picked. The picker
----opens at once and the rows arrive with the walk, so what is typed meanwhile is already the
----search, and nothing goes from the screen first when it is opened from the menu.
+---`:Tuna find`: look under where downloads land, and go to what is picked, problems listed
+---over contests. The picker opens at once and the rows arrive with the walk, so what is typed
+---meanwhile is already the search, and nothing goes from the screen first when it is opened
+---from the menu.
 ---@param bufnr integer
 function M.open(bufnr)
     local cfg = config.get_buffer_config(bufnr)
@@ -249,7 +277,7 @@ function M.open(bufnr)
     local widgets = require("tuna.ui.widgets")
     local id = widgets.menu(
         {},
-        "go to",
+        nil,
         function(idx)
             local row = rows[idx]
             if row.contest then
@@ -275,6 +303,13 @@ function M.open(bufnr)
             search = function(query)
                 return rank(rows, query)
             end,
+            search_title = "find",
+            lists = {
+                titles = { "problems", "contests" },
+                of = function(idx)
+                    return rows[idx].contest and 2 or 1
+                end,
+            },
         }
     )
     walk(roots, cfg, function(found, truncated)

@@ -8,7 +8,7 @@
 --     each with how it went. `<CR>` goes there. Pinned has no limit, so it is the list
 --     that scrolls when the column runs out of rows.
 --   * **Catch of the day** — what tuna can do from the file you are on. `<CR>` runs it. Over
---     it a hint for `/`, which searches every problem and contest (`:Tuna go search`).
+--     it a hint for `/`, which searches every problem and contest (`:Tuna find`).
 --
 -- The split is the point. The left column is *where you were*, the right is *what to
 -- do*, and both are lists you walk with `j`/`k` and act on with `<CR>` — so the board
@@ -574,7 +574,7 @@ function M.open(bufnr)
         { title = "contests", format = format(1), column = 1 },
         { title = "problems", format = format(2), column = 1 },
         { title = "pinned", format = format(3), column = 1 },
-        { items = { "press / to search" }, hint = true, column = 2 },
+        { items = { "press / to find" }, hint = true, column = 2 },
         { title = "catch of the day", items = labels, column = 2 },
     }, function(section, idx)
         if lists[section] then
@@ -590,7 +590,7 @@ function M.open(bufnr)
         end
     end, api.nvim_get_current_win(), nil, banner(config.get_buffer_config(sol)), {
         ["/"] = function()
-            require("tuna.commands").execute({ "go", "search" })
+            require("tuna.commands").execute({ "find" })
         end,
     })
 end

@@ -78,11 +78,12 @@ vim.api.nvim_create_autocmd({ "BufReadPost", "BufWritePost" }, {
     group = augroup,
     callback = function(ev)
         -- Read, and written again: an edit hides the verdict, and a write that takes the
-        -- source back to the one submitted brings it back.
+        -- source back to the one submitted brings it back. The file's tags are copied into
+        -- the sidecar then too, where `:Tuna find` reads them.
         -- Only a file with a sidecar beside it can have a verdict to restore, the one
-        -- `submit.restore` reads (the setup's `problem_store_file`), and looking for it
-        -- is a stat. `setup()` loads `config`, so a session it has not loaded uses the
-        -- default name.
+        -- `submit.restore` reads (the setup's `problem_store_file`), or be a problem find
+        -- lists, and looking for it is a stat. `setup()` loads `config`, so a session it has
+        -- not loaded uses the default name.
         local path = vim.api.nvim_buf_get_name(ev.buf)
         if path == "" then
             return
@@ -91,7 +92,8 @@ vim.api.nvim_create_autocmd({ "BufReadPost", "BufWritePost" }, {
         local store = config and config.current_setup.problem_store_file or ".tuna.json"
         if vim.uv.fs_stat(vim.fs.dirname(vim.fs.normalize(path)) .. "/" .. store) then
             require("tuna.problem.submit").restore(ev.buf)
+            require("tuna.problem.tags").sync(ev.buf)
         end
     end,
-    desc = "Restore a persisted Tuna submit verdict for a solution buffer",
+    desc = "Restore a Tuna submit verdict and copy a solution's tags into its sidecar",
 })

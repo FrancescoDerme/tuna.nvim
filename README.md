@@ -207,7 +207,7 @@ A step-by-step guide on setting this up, from pointing tuna at your tool to read
 - `:Tuna go problem` / `:Tuna go contest` move you back to what you were working on.
   The menu also provides access to your recent contests and problems.
 - `:Tuna go judge` opens the problem you are on in your browser.
-- `:Tuna go search`, or `/` in the menu, finds any problem or contest you have downloaded, by name.
+- [`:Tuna find`](REFERENCE.md#find), or `/` in the menu, finds any problem or contest you have downloaded, by name or by the tags you write in a solution's header, such as `// tags: binary search, greedy`.
 - `:Tuna pin` puts the problem you are on aside to solve later, and pinning it again lets it go.
   The menu provides access to your pinned problems.
 
@@ -221,7 +221,7 @@ Every deletion is confirmed one at a time, with the file in front of you.
 ### Keymaps
 
 Keymaps make the tuna experience much better.
-You can opt in to the default keymaps with one line: `keymaps = { preset = "<leader>t" }` gives `<leader>tr` run, `<leader>tu` runner UI, `<leader>ts` submit, `<leader>tn`/`<leader>tp` problem navigation, `<leader>tdc` download a contest and `<leader>tds` sync, `<leader>tf` pin, `<leader>tl` the library, `<leader>tw` the scratch, `<leader>tm` the menu, and more.
+You can opt in to the default keymaps with one line: `keymaps = { preset = "<leader>t" }` gives `<leader>tr` run, `<leader>tu` runner UI, `<leader>ts` submit, `<leader>tn`/`<leader>tp` problem navigation, `<leader>tdc` download a contest and `<leader>tds` sync, `<leader>tf` find, `<leader>tb` pin, `<leader>tl` the library, `<leader>tw` the scratch, `<leader>tm` the menu, and more.
 You can edit or drop any of them without giving up the rest.
 
 ### Statusline

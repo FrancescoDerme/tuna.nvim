@@ -547,14 +547,20 @@ function M.quit_command()
 end
 
 ---Show `words` dimmed in a buffer while it is empty, nothing with no `words`. Virtual text, so
----no part of its text. Asked on every edit, so it stays O(1) in the buffer's size: a buffer of
----one line, of no length, is told without reading it.
+---no part of its text, laid over what is under it (`hl_mode = "combine"`), as all of tuna's
+---is: replacing it, the words would cut the cursorline short of the line's start. Asked on every
+---edit, so it stays O(1) in the buffer's size: a buffer of one line, of no length, is told
+---without reading it.
 ---@param bufnr integer
 ---@param words string?
 function M.note_when_empty(bufnr, words)
     api.nvim_buf_clear_namespace(bufnr, note_ns, 0, -1)
     if words and api.nvim_buf_line_count(bufnr) == 1 and api.nvim_buf_get_offset(bufnr, 1) <= 1 then
-        api.nvim_buf_set_extmark(bufnr, note_ns, 0, 0, { virt_text = { { words, "Comment" } }, virt_text_pos = "overlay" })
+        api.nvim_buf_set_extmark(bufnr, note_ns, 0, 0, {
+            virt_text = { { words, "Comment" } },
+            virt_text_pos = "overlay",
+            hl_mode = "combine",
+        })
     end
 end
 

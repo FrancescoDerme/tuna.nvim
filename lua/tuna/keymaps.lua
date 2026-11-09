@@ -45,7 +45,7 @@ M.actions = {
     go_problem = "Tuna go problem", -- back to the problem/contest last worked on
     go_contest = "Tuna go contest",
     go_judge = "Tuna go judge", -- open the problem you are on in the browser
-    go_search = "Tuna go search", -- find any problem or contest by name
+    find = "Tuna find", -- any problem or contest by name
     scratch = "Tuna scratch", -- scratch solution to write in before the problem exists
     -- A download like the others, except it folds the `:Tuna scratch` file into the
     -- problem it opens — hence its name and its place in the download group.
@@ -60,11 +60,10 @@ M.actions = {
 --   <leader>tr  run             <leader>tm  menu        <leader>tdt  testcases
 --   <leader>tu  show ui         <leader>tw  scratch     <leader>tdp  problem
 --   <leader>ts  submit          <leader>tl  library     <leader>tdc  contest
---   <leader>tn  next problem    <leader>tf  pin         <leader>tds  sync
---   <leader>tp  prev problem                            <leader>tgp  problem
+--   <leader>tn  next problem    <leader>tb  pin         <leader>tds  sync
+--   <leader>tp  prev problem    <leader>tf  find        <leader>tgp  problem
 --                                                       <leader>tgc  contest
 --                                                       <leader>tgj  judge
---                                                       <leader>tgs  search
 --
 -- The labels above are the which-key entries. A key inside a group does not repeat
 -- what the group already says (`td` "download" → `problem`, `tg` "go to" →
@@ -90,7 +89,7 @@ M.preset = {
         submit = "s",
         next_problem = "n",
         prev_problem = "p",
-        pin = "f", -- f for "flag it for later": `p` is the previous problem
+        pin = "b", -- b for "bookmark": `p` is the previous problem
         -- The library inserts into the file you are in, so it is buffer-local like the
         -- rest of the editing actions.
         library = "l",
@@ -108,7 +107,7 @@ M.preset = {
         -- open yet.
         go_problem = "gp",
         go_contest = "gc",
-        go_search = "gs",
+        find = "f",
     },
 }
 
@@ -127,7 +126,6 @@ M.preset_labels = {
     go_problem = "problem", -- under "go to"
     go_contest = "contest",
     go_judge = "judge",
-    go_search = "search",
 }
 
 ---Expand `M.preset` against a prefix, with the user's own tables layered on top so a

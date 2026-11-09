@@ -78,6 +78,9 @@ end
 
 ---Check one surface's floats against the invariants.
 ---@param label string what was opened
+-- Virtual text checked by `conforms`, so the rule is known to have been put to the test.
+local virtual_seen = 0
+
 local function conforms(label)
     local wins = floats()
     ok(label .. ": is on screen", #wins > 0)
@@ -96,6 +99,14 @@ local function conforms(label)
         if not vim.bo[f.buf].modifiable then
             local live = live_change_keys(f.buf)
             ok(where .. ": change keys are inert", #live == 0, table.concat(live, " ") .. " -> E21")
+        end
+        -- Ghost text lies over what is under it, so a cursorline runs beneath it rather than
+        -- stopping short where it ends.
+        for _, m in ipairs(api.nvim_buf_get_extmarks(f.buf, -1, 0, -1, { details = true })) do
+            if m[4].virt_text then
+                virtual_seen = virtual_seen + 1
+                ok(where .. ": its virtual text combines with what is under it", m[4].hl_mode == "combine", m[4].hl_mode)
+            end
         end
     end
 end
@@ -323,6 +334,21 @@ widgets.form({ { title = "pick", items = { "a", "b" } } }, function() end)
 settle()
 conforms("widgets.form")
 close_layer(80)
+
+-- With ghost text in it: a form's typed-in row, labelled, and an editor's blank answer, noted.
+widgets.form({ { title = "pick", items = { "a" }, custom = { label = "custom: ", default = "" } } }, function() end)
+settle()
+conforms("widgets.form with a typed-in row")
+close_layer(80)
+widgets.editor(api.nvim_get_current_buf(), 0, "1\n", "", function() end, nil, {
+    answer_words = function()
+        return "no answer, not judged"
+    end,
+})
+settle()
+conforms("widgets.editor with no answer")
+close_layer(80)
+ok("the virtual text rule was put to the test", virtual_seen >= 2, virtual_seen)
 
 widgets.panels({ { title = "left", items = { "a", "b" } }, { title = "right", items = { "x" } } }, function() end,
     nil, nil, { "BANNER", "BANNER" })
@@ -848,6 +874,153 @@ do
     vim.api.nvim_exec_autocmds("InsertEnter", { buffer = ib })
     ok("and a prompt tells nvim-cmp once it loads", vim.deep_equal(told, { { ib, false } }), vim.inspect(told))
     package.loaded["cmp"] = nil
+    close_layer(80)
+end
+
+-- Several lists under one search, stacked in the left column: a list as tall as its items up
+-- to its share, the last the rest, and one holding none not drawn. One search narrows them all,
+-- the selection going to the list holding what it found first, and the list keys move through
+-- them as through one list, focus along with them from a list. Only the list the selection is
+-- in has a cursorline, and `<CR>` picks from it.
+do
+    local items = { "alpha", "beta", "one", "two", "three" }
+    local chosen
+    function _G.tuna_open_lists(late, only_second)
+        chosen = nil
+        local function of(i)
+            return (i <= 2 and not only_second) and 1 or 2
+        end
+        local id = widgets.menu(late and {} or items, nil, function(i)
+            chosen = i
+        end, nil, nil, {
+            beside = { width = 62, height = 20 },
+            content = function(i)
+                return { title = "about " .. items[i], lines = { items[i] } }
+            end,
+        }, {
+            search = function(q)
+                local out = {}
+                for i, item in ipairs(items) do
+                    if item:find(q, 1, true) then
+                        out[#out + 1] = i
+                    end
+                end
+                -- What matches best first: a whole name.
+                table.sort(out, function(a, b)
+                    return (items[a] == q and 0 or a) < (items[b] == q and 0 or b)
+                end)
+                return out
+            end,
+            search_title = "find",
+            lists = { titles = { "first", "second" }, of = of },
+        })
+        if late then
+            widgets.menu_items(id, items)
+        end
+    end
+    local function keys(k)
+        api.nvim_feedkeys(api.nvim_replace_termcodes(k, true, false, true), "x", false)
+    end
+    local function win_of(title)
+        for _, f in ipairs(floats()) do
+            local t = api.nvim_win_get_config(f.win).title
+            if t and vim.trim(t[1][1]) == title then
+                return f.win
+            end
+        end
+    end
+    local function rows_of(title)
+        local w = win_of(title)
+        return w and api.nvim_buf_get_lines(api.nvim_win_get_buf(w), 0, -1, false)
+    end
+    ---Which list has the cursorline, and the preview's title.
+    local function selection()
+        local lit = {}
+        for _, name in ipairs({ "first", "second" }) do
+            if win_of(name) and vim.wo[win_of(name)].cursorline then
+                lit[#lit + 1] = name
+            end
+        end
+        local about
+        for _, f in ipairs(floats()) do
+            local t = api.nvim_win_get_config(f.win).title
+            if t and t[1][1]:find("about") then
+                about = vim.trim(t[1][1])
+            end
+        end
+        return table.concat(lit, "+") .. " " .. tostring(about)
+    end
+    function _G.tuna_note()
+        tuna_probe[#tuna_probe + 1] = selection()
+    end
+
+    keys("<Cmd>lua tuna_open_lists()<CR><Esc>")
+    conforms("widgets.menu with several lists")
+    local search, first, second = win_of("find"), win_of("first"), win_of("second")
+    local function at(w)
+        return api.nvim_win_get_position(w)
+    end
+    ok(
+        "the search pane takes its title, and the lists stack under it, the first as tall as its items",
+        search and first and second and at(first)[2] == at(search)[2] and at(second)[2] == at(first)[2]
+            and at(second)[1] == at(first)[1] + api.nvim_win_get_height(first) + 2 and api.nvim_win_get_height(first) == 2
+            and at(second)[1] + api.nvim_win_get_height(second) + 2 - at(search)[1] == 20,
+        vim.inspect({ search and at(search), first and at(first), second and at(second) })
+    )
+    ok("each list holds its items", vim.deep_equal({ rows_of("first"), rows_of("second") }, { { "alpha", "beta" }, { "one", "two", "three" } }))
+    ok("the selection starts on the first item found, the cursorline only there", selection() == "first about alpha", selection())
+    close_layer(80)
+
+    _G.tuna_probe = {}
+    keys("<Cmd>lua tuna_open_lists()<CR><Down><Cmd>lua tuna_note()<CR><Down><Cmd>lua tuna_note()<CR><Up><Up><Up><Cmd>lua tuna_note()<CR><Esc>")
+    ok(
+        "the list keys move on from one list into the next, and round from the first to the last",
+        vim.deep_equal(tuna_probe, { "first about beta", "second about one", "second about three" }),
+        vim.inspect(tuna_probe)
+    )
+    close_layer(80)
+
+    keys("<Cmd>lua tuna_open_lists()<CR>t<CR>")
+    ok("a search narrows every list and <CR> picks what it found first", chosen == 2, chosen)
+    keys("<Cmd>lua tuna_open_lists()<CR>two<CR>")
+    ok("the selection going to the list holding it", chosen == 4, chosen)
+    local narrowed
+    function _G.tuna_rows()
+        narrowed = { rows_of("first"), rows_of("second") }
+    end
+    keys("<Cmd>lua tuna_open_lists()<CR>e<Down><Up><Cmd>lua tuna_rows()<CR><Esc>")
+    ok("both lists narrowed", vim.deep_equal(narrowed, { { "beta" }, { "one", "three" } }), vim.inspect(narrowed))
+    close_layer(80)
+
+    -- From a list, focus goes along into the next one, which takes the selection.
+    _G.tuna_probe = {}
+    function _G.tuna_where()
+        local t = api.nvim_win_get_config(0).title
+        tuna_probe[#tuna_probe + 1] = t and vim.trim(t[1][1]) or "?"
+    end
+    keys("<Cmd>lua tuna_open_lists()<CR><Esc><C-j><Cmd>lua tuna_where()<CR>jj<Cmd>lua tuna_where()<CR><Cmd>lua tuna_note()<CR><C-j><Cmd>lua tuna_where()<CR><Cmd>lua tuna_note()<CR>")
+    ok(
+        "a list's keys carry focus into the next list, and a list entered takes the selection",
+        vim.deep_equal(tuna_probe, { "first", "second", "second about one", "second", "second about one" }),
+        vim.inspect(tuna_probe)
+    )
+    keys("<C-k>")
+    ok("as the pane keys moving up into the other list do, on the row it was left on", selection() == "first about beta", selection())
+    keys("k")
+    widgets.menu(nil)
+    settle()
+    ok("a resize keeps the list selected and its row", selection() == "first about alpha", selection())
+    close_layer(80)
+
+    keys("<Cmd>lua tuna_open_lists(true)<CR><Esc>")
+    ok(
+        "rows arriving late are laid out as rows given at once",
+        win_of("first") and api.nvim_win_get_height(win_of("first")) == 2 and vim.deep_equal(rows_of("second"), { "one", "two", "three" }),
+        vim.inspect({ rows_of("first"), rows_of("second") })
+    )
+    close_layer(80)
+    keys("<Cmd>lua tuna_open_lists(false, true)<CR><Esc>")
+    ok("a list holding no item is not drawn", win_of("first") == nil and win_of("second") ~= nil and #rows_of("second") == 5)
     close_layer(80)
 end
 

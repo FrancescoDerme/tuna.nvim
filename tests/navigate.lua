@@ -133,7 +133,8 @@ t.eq("next, prev and go complete what they go to", {
     commands.complete("", "Tuna next ", 10),
     commands.complete("", "Tuna prev ", 10),
     commands.complete("", "Tuna go ", 8),
-}, { { "problem", "scaffold" }, { "problem", "scaffold" }, { "contest", "judge", "problem", "search" } })
+}, { { "problem", "scaffold" }, { "problem", "scaffold" }, { "contest", "judge", "problem" } })
+t.ok("and find is a command of its own", vim.tbl_contains(commands.complete("fi", "Tuna fi", 7), "find"), commands.complete("fi", "Tuna fi", 7))
 local function run(...)
     vim.cmd.edit(vim.fn.fnameescape(a .. "/main.cpp"))
     commands.execute({ ... })

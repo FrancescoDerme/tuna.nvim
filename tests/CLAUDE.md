@@ -14,7 +14,8 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
   no plugin files. Each file prints `N checks, M failures` through `tests/harness.lua`
   (`ok`/`eq`/`has`/`report`, and `drain`).
 - Files:
-  - `surfaces.lua`: conformance of every surface to the `surface.lua` contract, `FileType` fired
+  - `surfaces.lua`: conformance of every surface to the `surface.lua` contract (virtual text combining with
+    what is under it among it, ghost text shown to be checked), `FileType` fired
     for a surface and `Syntax` not, with `'eventignore'` put back, every float
     tagged before it is entered and its title centred, no float drawing a statusline of its own
     unless the statusline is global (read off the screen), every `runner_ui.mappings` key still

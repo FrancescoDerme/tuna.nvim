@@ -52,8 +52,12 @@ Every command is a subcommand of `:Tuna` with tab-completion, and a lowercase `:
   <td>go to the problem either side of this one in a contest, or to this problem's next source file</td>
 </tr>
 <tr>
-  <td><a href="#go"><code>:Tuna go [problem|contest|judge|search]</code></a></td>
-  <td>go back to what you were working on, open this problem on its judge, or find any other problem</td>
+  <td><a href="#go"><code>:Tuna go [problem|contest|judge]</code></a></td>
+  <td>go back to what you were working on, or open this problem on its judge</td>
+</tr>
+<tr>
+  <td><a href="#find"><code>:Tuna find</code></a></td>
+  <td>find any problem or contest by name</td>
 </tr>
 <tr>
   <td><a href="#pin"><code>:Tuna pin</code></a></td>
@@ -82,7 +86,7 @@ Every command is a subcommand of `:Tuna` with tab-completion, and a lowercase `:
 `:Tuna`, or `:Tuna menu`, opens the menu.
 On the left are recent contests, recent problems and pinned problems.
 On the right is what tuna can do from the file you are on.
-`<CR>` acts on the list you are in, `<C-hjkl>` (by default) move between the lists, and `/` runs [`:Tuna go search`](#go).
+`<CR>` acts on the list you are in, `<C-hjkl>` (by default) move between the lists, and `/` runs [`:Tuna find`](#find).
 
 ## run
 
@@ -252,7 +256,7 @@ Bare `:Tuna next` and `:Tuna prev` mean the problem.
 ## go
 
 ```
-:Tuna go [problem|contest|judge|search]
+:Tuna go [problem|contest|judge]
 ```
 
 `:Tuna go problem` and `:Tuna go contest` go back to the problem, or the contest, you were last working on, across restarts, and move Neovim's directory there with you.
@@ -260,8 +264,24 @@ Bare `:Tuna go` means the problem.
 
 `:Tuna go judge` opens the problem you are on in your browser.
 
-`:Tuna go search` finds any problem or contest by name and takes you there, with a preview of each solution.
+## find
+
+```
+:Tuna find
+```
+
+Finds any problem or contest by name and takes you there, with a preview of each solution.
 It looks under `downloaded_problems_path` and `downloaded_contests_directory`, and lists what tuna knows the name of, so a problem you downloaded or submitted.
+Problems are listed over contests, and what you type narrows both.
+
+A problem is also found by its tags, written in a comment among the first lines of its solution:
+
+```cpp
+// tags: binary search, greedy
+```
+
+`tag:` works as well as `tags:`, and so does one line per tag.
+tuna reads the tags whenever you open or save the solution in Neovim, so tags added in another editor are found once you have opened the file.
 
 ## pin
 
@@ -434,7 +454,7 @@ keymaps = {
 |               | `<leader>tu`                                | show the runner UI                  |
 |               | `<leader>ts`                                | submit                              |
 |               | `<leader>tn`, `<leader>tp`                  | next, previous problem              |
-|               | `<leader>tf`                                | pin                                 |
+|               | `<leader>tb`                                | pin                                 |
 |               | `<leader>tl`                                | library                             |
 |               | `<leader>tdt`                               | download testcases                  |
 |               | `<leader>tgj`                               | open the problem on its judge       |
@@ -442,7 +462,7 @@ keymaps = {
 |               | `<leader>tw`                                | scratch                             |
 |               | `<leader>tdp`, `<leader>tdc`, `<leader>tds` | download a problem, a contest, sync |
 |               | `<leader>tgp`, `<leader>tgc`                | back to the last problem, contest   |
-|               | `<leader>tgs`                               | search every problem and contest    |
+|               | `<leader>tf`                                | find any problem or contest         |
 
 The preset groups keys by subject: `d` for downloads and `g` for "go to".
 A key inside a group has a short label that leaves out the group's word (`<leader>tdp` is `problem`), so if you use which-key, name the groups in your config:
@@ -466,7 +486,7 @@ keymaps = {
 
 `mappings` are buffer-local, set for the solution filetypes in `keymaps.filetypes`, and `global` are set once and always there.
 
-Every action can be mapped this way. An action is a name for a `:Tuna` command with its arguments fixed. Actions are defined in `M.actions` in [`lua/tuna/keymaps.lua`](lua/tuna/keymaps.lua): `menu`, `run`, `run_all`, `run_stress`, `run_interactive`, `show_ui`, `add_testcase`, `edit_testcase`, `delete_testcase`, `generate_testcase`, `submit`, `submit_clear`, `download_testcases`, `download_problem`, `download_contest`, `download_sync`, `clean`, `pin`, `next_problem`, `prev_problem`, `next_scaffold`, `prev_scaffold`, `go_problem`, `go_contest`, `go_judge`, `go_search`, `scratch` and `library`.
+Every action can be mapped this way. An action is a name for a `:Tuna` command with its arguments fixed. Actions are defined in `M.actions` in [`lua/tuna/keymaps.lua`](lua/tuna/keymaps.lua): `menu`, `run`, `run_all`, `run_stress`, `run_interactive`, `show_ui`, `add_testcase`, `edit_testcase`, `delete_testcase`, `generate_testcase`, `submit`, `submit_clear`, `download_testcases`, `download_problem`, `download_contest`, `download_sync`, `clean`, `pin`, `next_problem`, `prev_problem`, `next_scaffold`, `prev_scaffold`, `go_problem`, `go_contest`, `go_judge`, `find`, `scratch` and `library`.
 
 ## Highlights
 

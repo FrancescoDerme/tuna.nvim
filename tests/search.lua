@@ -1,6 +1,6 @@
 -- tests/search.lua
 --
--- `:Tuna go search`: where it looks, what a sidecar makes of a file, how a search orders what
+-- `:Tuna find`: where it looks, what a sidecar makes of a file, how a search orders what
 -- it finds, and the picker going where it says.
 
 local t = dofile("tests/harness.lua")
@@ -70,19 +70,25 @@ require("tuna").setup({
 })
 vim.cmd.edit(vim.fn.fnameescape(root .. "/flat/A.cpp"))
 
----The buffer the picker's rows are in.
-local function list_buffer()
+---The window of the picker's pane titled `title`.
+local function pane(title)
     for _, w in ipairs(api.nvim_list_wins()) do
-        local title = api.nvim_win_get_config(w).title
-        if type(title) == "table" and vim.trim(title[1][1]) == "go to" then
-            return api.nvim_win_get_buf(w)
+        local t = api.nvim_win_get_config(w).title
+        if type(t) == "table" and vim.trim(t[1][1]) == title then
+            return w
         end
     end
 end
 
----The rows the picker lists.
-local function listed_rows()
-    local buf = list_buffer()
+---The buffer the picker's problems are in, or another list's.
+local function list_buffer(title)
+    local w = pane(title or "problems")
+    return w and api.nvim_win_get_buf(w)
+end
+
+---The rows the picker lists, its problems or another list's.
+local function listed_rows(title)
+    local buf = list_buffer(title)
     return buf and api.nvim_buf_get_lines(buf, 0, -1, false) or {}
 end
 
@@ -99,6 +105,13 @@ local function open_picker()
     filled()
 end
 
+-- `:Tuna find` is what opens it.
+vim.cmd("Tuna find")
+filled()
+t.ok(":Tuna find opens the picker", list_buffer() ~= nil)
+vim.cmd.stopinsert()
+api.nvim_feedkeys(api.nvim_replace_termcodes("<Esc>", true, false, true), "x", false)
+
 ---Dismiss the picker, typing or not.
 local function close_picker()
     vim.cmd.stopinsert()
@@ -111,7 +124,7 @@ search.open(api.nvim_get_current_buf())
 t.eq("the picker is up when the command returns", { vim.bo.filetype, listed_rows() }, { "tuna", { "" } })
 api.nvim_buf_set_lines(0, 0, -1, false, { "bananas" })
 filled()
-t.eq("what is typed before the rows arrive narrows them", listed_rows(), { "B. Bananas  Round 7" })
+t.eq("what is typed before the rows arrive narrows them", { listed_rows("contests"), listed_rows() }, { { "" }, { "B. Bananas  Round 7" } })
 close_picker()
 
 -- Rows arrive for the opening that asked for them, not whatever is open by then.
@@ -127,7 +140,12 @@ t.eq("rows for a menu since replaced leave the next one alone", api.nvim_buf_get
 press("<Esc>")
 
 open_picker()
-local listed = listed_rows()
+local listed = { listed_rows("contests"), listed_rows() }
+t.eq(
+    "the box typed in is titled find, problems listed over contests, and nothing is titled go to",
+    { pane("find") ~= nil, pane("go to"), pane("search"), api.nvim_win_get_position(pane("problems"))[1] < api.nvim_win_get_position(pane("contests"))[1] },
+    { true, nil, nil, true }
+)
 -- A contest's pane has no language, so it must not keep the colours of the source before it.
 local function pane_syntax()
     for _, w in ipairs(api.nvim_list_wins()) do
@@ -138,7 +156,9 @@ local function pane_syntax()
         end
     end
 end
-press("<Down>")
+-- From the first contest down past the last, round into the problems, and back up into the
+-- contests.
+press("<Down><Down>")
 vim.wait(100, function()
     return pane_syntax() == "cpp"
 end, 5)
@@ -150,17 +170,18 @@ end, 5)
 t.eq("and a contest's problems are not", pane_syntax(), "")
 close_picker()
 t.eq("every problem and contest and nothing else, what is recent first, then by path", listed, {
-    "Round 8",
-    "A. Cherries  Round 8",
-    "Grapes  Spread",
-    "Honey  Spread",
-    "Round 7",
-    "A. Apples  Round 7",
-    "B. Bananas  Round 7",
-    "B. Dates  Round 8",
-    "Elderberries  Set",
-    "Figs  Figs group",
-    "Figs  Figs group",
+    { "Round 8", "Round 7" },
+    {
+        "A. Cherries  Round 8",
+        "Grapes  Spread",
+        "Honey  Spread",
+        "A. Apples  Round 7",
+        "B. Bananas  Round 7",
+        "B. Dates  Round 8",
+        "Elderberries  Set",
+        "Figs  Figs group",
+        "Figs  Figs group",
+    },
 })
 
 local rows = {
@@ -174,6 +195,17 @@ t.eq("a search matches the name", s.rank(rows, "bananas"), { 2 })
 t.eq("and the contest, in either case and word order", s.rank(rows, "CHERR 8"), { 3 })
 t.eq("a contest's own row ranks first for its name", s.rank(rows, "round 7")[1], 4)
 t.eq("what matches nothing shows nothing", s.rank(rows, "zzz"), {})
+local tagged_rows = {
+    { text = "Dynamic Paths Round 7", tags = {} },
+    { text = "Dp on trees Round 7", tags = {} },
+    { text = "Boxes Round 8 interval DP", tags = { "interval DP" } },
+    { text = "Coins Round 8 dp greedy", tags = { "dp", "greedy" } },
+}
+local by_tag = s.rank(tagged_rows, "dp")
+local tagged_first = { by_tag[1], by_tag[2] }
+table.sort(tagged_first)
+t.eq("a row tagged with what is typed comes before names it scatters over", { tagged_first, by_tag[3], by_tag[4] }, { { 3, 4 }, 2, 1 })
+t.eq("whatever matches the name better", s.rank(tagged_rows, "greedy dp")[1], 4)
 
 -- A group naming its judge twice reads as the contest, and is still found by the judge.
 local round = "Codeforces - Codeforces Round 9"
@@ -219,6 +251,56 @@ t.eq("and moves there", cwd, root .. "/contests/r7/B")
 file, cwd = pick("round 8", root .. "/flat/A.cpp")
 t.eq("picking a contest opens a problem in it", file, root .. "/flat/A.cpp")
 t.eq("and moves to the contest", cwd, root .. "/flat")
+
+-- Tags: written in the header, copied into the sidecar, found by a search.
+local tags = require("tuna.problem.tags")
+local cfg = require("tuna.config").get_buffer_config(api.nvim_get_current_buf())
+t.eq("a tags line is a comma list, in any comment, each tag once", tags.parse({
+    "// contest: Round 7",
+    "// tags: binary search,  greedy ",
+    "# tag: dp",
+    "/* tags: graphs, greedy */",
+    "// hashtags: not one",
+}, cfg), { "binary search", "greedy", "dp", "graphs" })
+local lines = {}
+for i = 1, cfg.search.tag_lines do
+    lines[i] = "int x" .. i .. ";"
+end
+lines[#lines + 1] = "// tags: too late"
+t.eq("only the header's lines are read", tags.parse(lines, cfg), {})
+t.eq("and none with the pattern off", tags.parse({ "// tags: dp" }, vim.tbl_deep_extend("force", cfg, { search = { tags = false } })), {})
+
+local tagged = root .. "/contests/r7/A/main.cpp"
+vim.cmd.edit(vim.fn.fnameescape(tagged))
+api.nvim_buf_set_lines(0, 0, 0, false, { "// tags: binary search, greedy" })
+vim.cmd("silent write")
+t.eq("writing a file copies its tags into the sidecar", sidecar.get_entry(tagged, "tags"), { "binary search", "greedy" })
+t.eq("found by a search", (function()
+    local found = {}
+    open_picker()
+    api.nvim_buf_set_lines(0, 0, -1, false, { "greedy" })
+    press("<Down><Up>")
+    found = { listed_rows("contests"), listed_rows() }
+    close_picker()
+    return found
+end)(), { { "" }, { "A. Apples  Round 7" } })
+vim.cmd.edit(vim.fn.fnameescape(tagged))
+api.nvim_buf_set_lines(0, 0, 1, false, {})
+vim.cmd("silent write")
+t.eq("and a write without them takes them out", sidecar.read(root .. "/contests/r7/A").tags, nil)
+vim.cmd("silent bwipeout!")
+t.write(root .. "/contests/r7/B", "main.cpp", "// tag: two pointers\nint main() {}\n")
+vim.cmd.edit(vim.fn.fnameescape(root .. "/contests/r7/B/main.cpp"))
+t.eq("tags written elsewhere are copied when the file is read", sidecar.get_entry(root .. "/contests/r7/B/main.cpp", "tags"), { "two pointers" })
+vim.cmd("silent bwipeout!")
+local loose = vim.fs.normalize(t.tempdir())
+t.write(loose, "main.cpp", "// tags: dp\nint main() {}\n")
+vim.cmd.edit(vim.fn.fnameescape(loose .. "/main.cpp"))
+vim.cmd("silent write")
+t.eq("a file with no sidecar is left without one", vim.uv.fs_stat(loose .. "/.tuna.json"), nil)
+vim.cmd("silent bwipeout!")
+vim.fn.delete(loose, "rf")
+vim.cmd.edit(vim.fn.fnameescape(root .. "/flat/A.cpp"))
 
 -- What it says when there is nothing to show, and when it stopped short.
 -- A picker closed for having nothing to show leaves insert mode, which clears the command line:

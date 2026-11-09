@@ -59,6 +59,11 @@ specific Vim error about a buffer the user never opened.
   file nobody wrote, on every float, is a large part of what a menu of panes takes to open. A
   pane's colours come from `'syntax'`, set by `fill_preview`, which clears them for content with
   no language.
+- **Virtual text lies over what is under it** (`hl_mode = "combine"`), wherever tuna draws it
+  (a blank pane's note, `note_when_empty`; the form's label; the diff's cell; the library's
+  number): its own colour on the line's, so a cursorline runs beneath it, where the default would
+  paint its cells alone and stop the cursorline where it ends. The conformance check holds every
+  float's to it.
 - `no_completion(buf)`: a buffer typed into as a prompt (the search pane, `input`, the form's
   custom row) keeps completion plugins out: blink.cmp's `vim.b.completion = false`, and
   nvim-cmp's `setup.buffer({ enabled = false })`, given when nvim-cmp is loaded, which a lazily
@@ -153,7 +158,15 @@ specific Vim error about a buffer the user never opened.
   the pane focused and whether it was typing. With a search `items` may start empty, for
   `menu_items(id, items)` to fill by the `id` `menu` returned (a later opening's list is left
   alone), narrowed by what was typed meanwhile, and none closing it (it says whether it did); `beside.list_width` keeps
-  the list's width from following rows that are not there yet.
+  the list's width from following rows that are not there yet. `search_title` names the search
+  pane. `lists` puts the items in several lists stacked under one search (`find`'s problems over
+  contests), each item in list `of(idx)`. A list's height follows the items it holds, not those
+  shown, so none resizes as a search narrows it: they share the rows smallest first, and one
+  holding none is not drawn, so rows arriving through `menu_items` build the windows again. The
+  selection is in one list at a time (`at`), the only one with a cursorline, which `<CR>` picks
+  from and the preview shows: a search puts it in the list holding what it found first, the
+  list keys move through the lists as through one, focus going along from a list, and a list
+  entered by the pane keys or the mouse takes it.
 - `after_insert(fn)` runs `fn` once insert mode is left, on the tick after (`ModeChanged`
   `i*:*`), or now outside it: a typing float closed by code leaves insert mode only once the code
   returns, leaving it clears the command line after the event, and a notice given before is

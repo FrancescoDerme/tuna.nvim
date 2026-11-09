@@ -556,7 +556,7 @@ do
     for _, w in ipairs(api.nvim_list_wins()) do
         local c = api.nvim_win_get_config(w)
         local line = c.relative ~= "" and api.nvim_buf_get_lines(api.nvim_win_get_buf(w), 0, 1, false)[1] or ""
-        if line:find("press / to search", 1, true) then
+        if line:find("press / to find", 1, true) then
             hint = { win = w, config = c, line = line }
         end
     end

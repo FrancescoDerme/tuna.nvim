@@ -156,6 +156,7 @@ lua/tuna/
     download.lua        Competitive Companion listener and writer
     judges.lua          judge/contest names from a task
     submit.lua          submit providers, verdict watching, lualine component
+    tags.lua            a solution's header tags, copied into its sidecar for :Tuna find
   workspace/          the files around problems
     scaffold.lua        starters for every role (solution and the helpers), the one template lookup
     scratch.lua         scratch solution, folded into a download by `download sync`
@@ -163,7 +164,7 @@ lua/tuna/
     library.lua         snippet library
     navigate.lua        :Tuna next / prev
     recent.lua          :Tuna go problem / contest, pinned problems, cwd changes
-    search.lua          :Tuna go search, every problem and contest by their sidecars
+    search.lua          :Tuna find, every problem and contest by their sidecars
 scaffolds/            the shipped starters, `<role>.<ext>`
 doc/tuna.txt          vimdoc
 REFERENCE.md          the reference (commands, configuration) the README links into
@@ -267,7 +268,7 @@ is relative. Every configured path goes through these: compile/running directori
     mode without forcing it and shows whether it is forced; a forced mode adds an entry making
     it automatic, and the checker entry shows automatic (with the file in use) or off.
   - A one-row hint over the commands names `/`, a board key (`panels`' `keys`) running
-    `:Tuna go search`. Search is a picker of its own rather than a pane of the board: three
+    `:Tuna find`. Search is a picker of its own rather than a pane of the board: three
     stacked lists sharing `recent_layout`'s columns could not narrow together cheaply.
   - Modules are required lazily.
 - **`keymaps.lua`**: `M.actions` maps actions to `:Tuna` commands. `mappings` are buffer-local
@@ -279,10 +280,11 @@ is relative. Every configured path goes through these: compile/running directori
   key are settled by whichever `wk.add` ran last, so the user names them (REFERENCE.md shows
   how). `clean` is not in the preset, nor are the testcase actions: testcases are added,
   edited and deleted on the runner UI, where they are seen, and most come from downloads.
-  `pin` is `f` ("flag it for later"), `p` being the previous problem.
+  `pin` is `b` ("bookmark"), `p` being the previous problem, and `find` is global `f`, as
+  `go to`'s keys are, wanted before any solution is open.
 - **`health.lua`**: read-only checks for Neovim version, setup, the executables named by
   compile/run commands, Competitive Companion, submit providers and optional plugins.
-- **`plugin/tuna.lua`** also wires `submit.restore` on `BufReadPost` and `BufWritePost` (only
+- **`plugin/tuna.lua`** also wires `submit.restore` and `tags.sync` on `BufReadPost` and `BufWritePost` (only
   for a file with a sidecar beside it, looked for with a stat, under the default name while
   `setup()` has not loaded `config`, so other files don't load `submit`), `VimResized` (a no-op
   while neither `widgets` nor the runner UI is loaded), and a `cnoreabbrev` so lowercase `:tuna`

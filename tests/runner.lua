@@ -1662,11 +1662,11 @@ do
     ui_test.paint_diff(painted, marks)
     local drawn = vim.tbl_map(function(m)
         local d = m[4]
-        return { m[2], m[3], d.end_col, d.hl_group or (d.virt_text and ("cell " .. d.virt_text[1][2] .. " " .. d.virt_text_pos)) }
+        return { m[2], m[3], d.end_col, d.hl_group or (d.virt_text and ("cell " .. d.virt_text[1][2] .. " " .. d.virt_text_pos .. " " .. d.hl_mode)) }
     end, vim.api.nvim_buf_get_extmarks(painted, ns, 0, -1, { details = true }))
     t.eq("a diff marks what disagrees, where a line ends short, and a line the other lacks", drawn, {
         { 0, 2, 3, "TunaDiffText" },
-        { 1, 5, nil, "cell TunaDiffText inline" },
+        { 1, 5, nil, "cell TunaDiffText inline combine" },
         { 2, 0, 5, "TunaDiffAdd" },
     })
 

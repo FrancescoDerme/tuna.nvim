@@ -40,7 +40,7 @@ t.ok("the first file read, with a sidecar beside it, has its verdict looked up",
 local restored = submit and submit.state[vim.fs.normalize(solved .. "/main.cpp")]
 t.eq("and restored, without setup()", restored and restored.state, "accepted")
 
-for _, name in ipairs({ "tuna.problem.submit", "tuna.problem.sidecar", "tuna.run.tools", "tuna.problem.testcases" }) do
+for _, name in ipairs({ "tuna.problem.submit", "tuna.problem.tags", "tuna.problem.sidecar", "tuna.run.tools", "tuna.problem.testcases" }) do
     package.loaded[name] = nil
 end
 local plain = t.tempdir()
@@ -57,6 +57,10 @@ t.eq("a key's label is lowercase, in a group or on its own", {
     vim.fn.maparg("<leader>tgp", "n", false, true).desc,
     vim.fn.maparg("<leader>tm", "n", false, true).desc,
 }, { "problem", "menu" })
+t.eq("find is on f, everywhere, and nothing is left on the old search key", {
+    vim.fn.maparg("<leader>tf", "n", false, true).rhs,
+    vim.fn.maparg("<leader>tgs", "n"),
+}, { "<cmd>Tuna find<cr>", "" })
 
 t.has(":Tuna completes its subcommands", table.concat(vim.fn.getcompletion("Tuna ", "cmdline"), " "), "run")
 

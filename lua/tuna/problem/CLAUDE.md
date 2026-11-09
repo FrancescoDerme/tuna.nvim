@@ -79,7 +79,12 @@ submissions. The rules that hold everywhere are in the root `CLAUDE.md`.
   - `run = { [basename] = { mode, source, checker, compare } }`, holding only what was forced,
     each value validated on read;
   - `results = { [basename] = { passed, total, hash } }`, the local verdict (see
-    `lua/tuna/run/CLAUDE.md`).
+    `lua/tuna/run/CLAUDE.md`);
+  - `tags = { [basename] = { tag, … } }`, the tags in the file's header, for `:Tuna find`
+    (`tags.lua`: `search.tags` matched over the first `search.tag_lines` lines, a comma list,
+    copied by `sync` from `plugin/tuna.lua`'s `BufReadPost`/`BufWritePost` when the file has
+    a sidecar beside it, and written only when they differ from what it holds, so a file with
+    none never writes).
 
   Entries are keyed by **basename** because one folder can hold several problems or several
   attempts. Writers merge. `set_entry(…, nil)` removes an entry and deletes the file once it is

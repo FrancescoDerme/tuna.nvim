@@ -18,6 +18,7 @@
 --                         — the per-problem run state of `tools.lua`
 --   results = { [basename] = { passed, total, hash } }
 --                         — the local verdict of the last finished run (`run/core.lua`)
+--   tags   = { [basename] = { tag, … } } — the tags in the file's header (`tags.lua`)
 --
 -- The per-file sections are keyed by file *basename* rather than by directory,
 -- because a folder may hold several problems (`a.cpp`, `b.cpp`) as easily as one
@@ -36,7 +37,7 @@ local M = {}
 -- The sections holding one entry per file, keyed by its basename, that go with their file. A
 -- file's `task` outlives it: a solution deleted and written again in a downloaded problem's
 -- folder is still that problem's.
-local PER_FILE = { "submit", "run", "results" }
+local PER_FILE = { "submit", "run", "results", "tags" }
 
 ---@param cfg table? resolved config (falls back to the current setup, then defaults)
 ---@return string

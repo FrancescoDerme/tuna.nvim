@@ -177,7 +177,8 @@ problems and remembering them. The rules that hold everywhere are in the root `C
     `tools.sources_in`, its solutions and helpers in name order, wrapping, since a handful
     of files is a ring to go round rather than a line with ends. From a file outside it (a
     header, a testcase) the step starts where that file would sort.
-- **`search.lua`**: `:Tuna go search`, a `widgets.menu` with a `search` and one pane `beside`,
+- **`search.lua`**: `:Tuna find`, a `widgets.menu` with a `search` titled `find`, two `lists`
+  (problems over contests: a name alone does not say which a row is) and one pane `beside`,
   sized as the runner UI. `root_of` takes the fixed start of `downloaded_problems_path` and
   `downloaded_contests_directory`, up to the first modifier other than `$(HOME)` and `$(CWD)`,
   so where it looks takes no option and leaves out what sits beside them (a snippet folder).
@@ -197,9 +198,12 @@ problems and remembering them. The rules that hold everywhere are in the root `C
   - A problem is a `task` entry whose file the walk saw beside the sidecar, as `task` outlives
     its file. A contest is a `group` naming two problems by `url`, in the folder holding them
     (`contest_dir`) and not listed when they are scattered. Rows are recent first (`recent`'s
-    lists), then by path, so a contest leads its problems. `rank` is `matchfuzzy` over `name
-    group`, the whole group, so typing a judge still finds a row whose `judges.label` left it
-    out.
+    lists), then by path. `rank` is `matchfuzzy` over `name group tags`, the whole group, so
+    typing a judge still finds a row whose `judges.label` left it out.
+  - **Tags are read from the sidecar** (`tags` section, `problem/tags.lua`), not the sources:
+    the walk reads sidecars only, and a source per problem would be a read for every solution.
+    They are copied there whenever the file is read or written in Neovim, so one tagged in
+    another editor is found once it has been opened.
   - It shows no verdicts: it is for reaching a known problem, nothing typed can match one, and
     checking one hashes every solution. Not a search of the recent lists either: they hold a
     handful of rows already on screen.
