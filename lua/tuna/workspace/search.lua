@@ -3,7 +3,7 @@
 -- `:Tuna find`: every problem and contest under where downloads land, searched by name, contest
 -- and tags, and opened as `:Tuna go` opens one. The sidecars are the source: a `task` entry says
 -- a file is a problem's solution, and gives its name and contest whatever the folders are
--- called, and a `tags` entry its tags (`tags.lua`). Nothing is kept between searches.
+-- called, and a `tags` entry a file's tags (`tags.lua`). Nothing is kept between searches.
 
 local api = vim.api
 local uv = vim.uv
@@ -14,13 +14,21 @@ local judges = require("tuna.problem.judges")
 
 local M = {}
 
+---@class tuna.SearchFile
+---@field name string its name in the problem's folder
+---@field tags string[] the tags in its header
+
 ---@class tuna.SearchRow
----@field name string what the list shows
+---@field name string what the list shows: a problem's name, or a contest's
 ---@field text string what a search matches: the name, the contest and the tags
----@field tags string[]? a problem's tags, which a search ranks first
----@field path string the solution, or a contest's directory
+---@field tags string[]? a problem's tags, from every file of it, which a search ranks first
+---@field files tuna.SearchFile[]? a problem's files: its solutions, then the other files tagged
+---@field path string what picking a problem opens: a solution, else one of its files; a
+---  contest's directory
+---@field label string? a problem's contest, as the judge names it
 ---@field contest string? the contest's name, on a contest's row
----@field problems string[]? a contest's problem names, in file order
+---@field members tuna.SearchRow[]? a contest's problems, in file order
+---@field opens string? the solution entering a contest opens first, as far as is known here
 
 ---The directory a download path starts in: what comes before the first modifier that
 ---changes from one problem to the next, as `$(HOME)` and `$(CWD)` do not.
@@ -132,61 +140,48 @@ local function contest_dir(problems)
     return nil
 end
 
----The rows for what `walk` found: a problem for each `task` entry whose file is still there,
----and a contest for each `group` naming two problems or more, recent ones first, then by path.
----@param found { dir: string, names: table<string, true>, content: string }[]
----@return tuna.SearchRow[]
-local function catalogue(found)
-    local recent = require("tuna.workspace.recent")
-    local rows, groups = {}, {}
-    for _, f in ipairs(found) do
-        local store = sidecar.decode(f.content)
-        local tasks = store and type(store.task) == "table" and store.task or {}
-        local tagged = store and type(store.tags) == "table" and store.tags or {}
-        for base, task in pairs(tasks) do
-            local file = f.dir .. "/" .. base
-            if f.names[base] and type(task) == "table" and not recent.ignored(file) then
-                local name = type(task.name) == "string" and task.name or base
-                local group = type(task.group) == "string" and task.group or nil
-                local tags = type(tagged[base]) == "table" and vim.tbl_filter(function(tag)
-                    return type(tag) == "string"
-                end, tagged[base]) or {}
-                rows[#rows + 1] = {
-                    name = group and (name .. "  " .. judges.label(group)) or name,
-                    text = table.concat({ name, group or "", unpack(tags) }, " "),
-                    tags = tags,
-                    path = file,
-                }
-                if group then
-                    groups[group] = groups[group] or {}
-                    table.insert(groups[group], { file = file, name = name, url = task.url })
-                end
+---The words of a query, lowercase.
+---@param query string
+---@return string[]
+local function words_of(query)
+    return vim.split(vim.trim(query:lower()), "%s+", { trimempty = true })
+end
+
+---Whether a typed word starts one of the words of `tag`, in either case: `dp` is in
+---`interval DP` and `bin` in `binary search`, but `a` is not in `math`, as a word typed for a
+---name would otherwise lift every tag holding its letter.
+---@param tag string
+---@param words string[] lowercase
+---@return boolean
+local function tag_matched(tag, words)
+    tag = tag:lower()
+    for _, word in ipairs(words) do
+        local from = 1
+        while true do
+            local at = tag:find(word, from, true)
+            if not at then
+                break
             end
+            if at == 1 or not tag:sub(at - 1, at - 1):match("%w") then
+                return true
+            end
+            from = at + 1
         end
     end
+    return false
+end
 
-    for group, problems in pairs(groups) do
-        local urls = {}
-        for _, p in ipairs(problems) do
-            urls[p.url or p.file] = true
-        end
-        table.sort(problems, function(a, b)
-            return a.file < b.file
-        end)
-        local dir = vim.tbl_count(urls) > 1 and contest_dir(problems) or nil
-        if dir then
-            rows[#rows + 1] = {
-                name = judges.label(group),
-                text = group,
-                path = dir,
-                contest = judges.label(group),
-                problems = vim.tbl_map(function(p)
-                    return p.name
-                end, problems),
-            }
-        end
-    end
-
+---The rows for what `walk` found. A problem is what the `task` entries of a folder name, one
+---row whatever number of attempts it has (one URL, else one name), listed while a file of it is
+---still there: a solution, or a helper tagged. Its tags are those of its solutions and of the
+---folder's helpers and headers, which serve each solution beside them, and picking it opens
+---the solution worked on last, else a conventional name, else the first. A contest is a
+---`group` naming two problems or more. Recent ones first, then by path.
+---@param found { dir: string, names: table<string, true>, content: string }[]
+---@param cfg table
+---@return tuna.SearchRow[]
+local function catalogue(found, cfg)
+    local recent = require("tuna.workspace.recent")
     local st = recent.snapshot()
     local place = {}
     for _, list in ipairs({ st.contests or {}, st.problems or {} }) do
@@ -194,6 +189,136 @@ local function catalogue(found)
             place[e.file or e.dir] = i
         end
     end
+    local prefer = {}
+    for i, name in ipairs(cfg.tool_names.solution or {}) do
+        prefer[name] = prefer[name] or i
+    end
+    local with_tags = type(cfg.search.tags) == "string" and cfg.search.tags ~= "" and (cfg.search.tag_lines or 0) > 0
+    local tools = require("tuna.run.tools")
+
+    local rows, groups = {}, {}
+    for _, f in ipairs(found) do
+        local store = sidecar.decode(f.content) or {}
+        local tasks = type(store.task) == "table" and store.task or {}
+        local tagged = with_tags and type(store.tags) == "table" and store.tags or {}
+        ---The tags of `base`, while it is there.
+        local function tags_of(base)
+            local list = f.names[base] and type(tagged[base]) == "table" and tagged[base] or {}
+            return vim.tbl_filter(function(tag)
+                return type(tag) == "string"
+            end, list)
+        end
+        ---Whether `a` is opened before `b`, of one problem's solutions.
+        local function before(a, b)
+            local pa, pb = place[f.dir .. "/" .. a] or math.huge, place[f.dir .. "/" .. b] or math.huge
+            if pa ~= pb then
+                return pa < pb
+            end
+            local ra, rb = prefer[vim.fn.fnamemodify(a, ":r")] or math.huge, prefer[vim.fn.fnamemodify(b, ":r")] or math.huge
+            if ra ~= rb then
+                return ra < rb
+            end
+            return a < b
+        end
+
+        -- In name order, so a problem's name and contest are the first of its attempts naming
+        -- them, whatever order the sidecar's keys come in.
+        local bases = vim.tbl_keys(tasks)
+        table.sort(bases)
+        local problems, keys = {}, {}
+        for _, base in ipairs(bases) do
+            local task = tasks[base]
+            if type(task) == "table" and not recent.ignored(f.dir .. "/" .. base) then
+                local key = type(task.url) == "string" and task.url or type(task.name) == "string" and task.name or base
+                if not problems[key] then
+                    problems[key], keys[#keys + 1] = { solutions = {} }, key
+                end
+                local p = problems[key]
+                table.insert(p.solutions, base)
+                for _, field in ipairs({ "name", "group", "url" }) do
+                    if p[field] == nil and type(task[field]) == "string" then
+                        p[field] = task[field]
+                    end
+                end
+            end
+        end
+        -- The helpers and headers tagged, which serve every solution beside them.
+        local others = {}
+        for base in pairs(tagged) do
+            local file = f.dir .. "/" .. base
+            if tools.is_support(file, cfg) and #tags_of(base) > 0 and not recent.ignored(file) then
+                others[#others + 1] = base
+            end
+        end
+        table.sort(others)
+        table.sort(keys)
+
+        for _, key in ipairs(keys) do
+            local p = problems[key]
+            local present = vim.tbl_filter(function(base)
+                return f.names[base]
+            end, p.solutions)
+            local files, all, seen = {}, {}, {}
+            for _, base in ipairs(vim.list_extend(vim.list_slice(present), others)) do
+                local tags = tags_of(base)
+                files[#files + 1] = { name = base, tags = tags }
+                for _, tag in ipairs(tags) do
+                    if not seen[tag] then
+                        seen[tag], all[#all + 1] = true, tag
+                    end
+                end
+            end
+            if #files > 0 then
+                table.sort(present, before)
+                local name = p.name or p.solutions[1]
+                local group = p.group
+                local row = {
+                    name = name,
+                    text = table.concat({ name, group or "", unpack(all) }, " "),
+                    tags = all,
+                    files = files,
+                    path = f.dir .. "/" .. (present[1] or files[1].name),
+                    label = group and judges.label(group) or nil,
+                    url = p.url,
+                }
+                rows[#rows + 1] = row
+                if group then
+                    groups[group] = groups[group] or {}
+                    table.insert(groups[group], row)
+                end
+            end
+        end
+    end
+
+    for group, members in pairs(groups) do
+        local urls = {}
+        for _, m in ipairs(members) do
+            urls[m.url or m.path] = true
+        end
+        table.sort(members, function(a, b)
+            return a.path < b.path
+        end)
+        local dir = vim.tbl_count(urls) > 1 and contest_dir(vim.tbl_map(function(m)
+            return { file = m.path }
+        end, members)) or nil
+        if dir then
+            local opens = members[1]
+            for _, m in ipairs(members) do
+                if (place[m.path] or math.huge) < (place[opens.path] or math.huge) then
+                    opens = m
+                end
+            end
+            rows[#rows + 1] = {
+                name = judges.label(group),
+                text = group,
+                path = dir,
+                contest = judges.label(group),
+                members = members,
+                opens = opens.path,
+            }
+        end
+    end
+
     table.sort(rows, function(a, b)
         local pa, pb = place[a.path] or math.huge, place[b.path] or math.huge
         if pa ~= pb then
@@ -206,16 +331,16 @@ end
 
 ---The rows a search shows, in order, as indices into `rows`: all of them with nothing typed,
 ---else those whose name, contest and tags fuzzy-match, the words in any order. A row with a tag
----holding a word typed comes first, more such words first, then the best match: a tag is
----written to be searched for, where letters scattered over a name match by chance, and `dp`
+---a word typed starts a word of comes first, more such words first, then the best match: a tag
+---is written to be searched for, where letters scattered over a name match by chance, and `dp`
 ---would otherwise rank every name with a d before a p over the problem tagged `interval dp`.
 ---@param rows tuna.SearchRow[]
 ---@param query string
 ---@return integer[]
 local function rank(rows, query)
     local out = {}
-    local typed = vim.trim(query:lower())
-    if typed == "" then
+    local words = words_of(query)
+    if #words == 0 then
         for i = 1, #rows do
             out[i] = i
         end
@@ -225,13 +350,12 @@ local function rank(rows, query)
     for i, r in ipairs(rows) do
         keyed[i] = { text = r.text, idx = i }
     end
-    local words = vim.split(typed, "%s+", { trimempty = true })
     local found, hits, place = {}, {}, {}
-    for pos, k in ipairs(vim.fn.matchfuzzy(keyed, typed, { key = "text" })) do
+    for pos, k in ipairs(vim.fn.matchfuzzy(keyed, table.concat(words, " "), { key = "text" })) do
         local n = 0
         for _, word in ipairs(words) do
             for _, tag in ipairs(rows[k.idx].tags or {}) do
-                if tag:lower():find(word, 1, true) then
+                if tag_matched(tag, { word }) then
                     n = n + 1
                     break
                 end
@@ -248,17 +372,37 @@ local function rank(rows, query)
     return found
 end
 
----What the pane beside the list shows for a row: a problem's source, or a contest's problems.
+---What the panes beside the list show for a row: a problem's files, each followed by its tags,
+---over the source picking it opens; a contest's problems, each followed by its tags, over the
+---solution entering it opens. A tag the search matches is drawn as text, the others dimmed.
 ---@param row tuna.SearchRow
----@return table
-local function pane_of(row)
-    if row.contest then
-        return { title = vim.fn.fnamemodify(row.path, ":~"), lines = row.problems }
+---@param words string[] what is typed, lowercase
+---@param source fun(path: string): string[] a file's lines
+---@param only integer? the one pane wanted
+---@return table[]
+local function panes_of(row, words, source, only)
+    local entries = row.files or vim.tbl_map(function(m)
+        return { name = m.name, tags = m.tags }
+    end, row.members)
+    local lines, marks = {}, {}
+    for i, e in ipairs(entries) do
+        local line = e.name .. (#e.tags > 0 and ":" or "")
+        for j, tag in ipairs(e.tags) do
+            line = line .. (j > 1 and ", " or " ") .. tag
+            if not tag_matched(tag, words) then
+                marks[#marks + 1] = { line = i - 1, col = #line - #tag, end_col = #line, group = "Comment" }
+            end
+        end
+        lines[i] = line
     end
+    local list = { title = row.label, lines = lines, highlights = marks }
+    if only == 1 then
+        return { list }
+    end
+    local path = row.opens or row.path
     return {
-        title = vim.fn.fnamemodify(row.path, ":~"),
-        lines = vim.split(utils.read_file(row.path) or "", "\n"),
-        filetype = vim.filetype.match({ filename = row.path }),
+        list,
+        { title = vim.fn.fnamemodify(path, ":~"), lines = source(path), filetype = vim.filetype.match({ filename = path }) },
     }
 end
 
@@ -272,7 +416,12 @@ function M.open(bufnr)
     local roots = { root_of(cfg.downloaded_problems_path), root_of(cfg.downloaded_contests_directory .. "/") }
     local cols, height = utils.get_ui_size()
     local width = math.floor(cols * cfg.popup_ui.width + 0.5)
-    local rows = {}
+    local rows, words, sources = {}, {}, {}
+    ---A file's lines, read once for the picker.
+    local function source(path)
+        sources[path] = sources[path] or vim.split(utils.read_file(path) or "", "\n")
+        return sources[path]
+    end
     local recent = require("tuna.workspace.recent")
     local widgets = require("tuna.ui.widgets")
     local id = widgets.menu(
@@ -294,13 +443,14 @@ function M.open(bufnr)
                 height = math.floor(height * cfg.popup_ui.height + 0.5),
                 list_width = math.floor(width * 0.4),
             },
-            selectable = true,
-            content = function(idx)
-                return pane_of(rows[idx])
+            panes = { { fit = true }, { selectable = true } },
+            content = function(idx, only)
+                return panes_of(rows[idx], words, source, only)
             end,
         },
         {
             search = function(query)
+                words = words_of(query)
                 return rank(rows, query)
             end,
             search_title = "find",
@@ -313,7 +463,7 @@ function M.open(bufnr)
         }
     )
     walk(roots, cfg, function(found, truncated)
-        rows = catalogue(found)
+        rows = catalogue(found, cfg)
         local closed = widgets.menu_items(
             id,
             vim.tbl_map(function(r)
@@ -339,6 +489,6 @@ function M.open(bufnr)
     end)
 end
 
-M._test = { root_of = root_of, catalogue = catalogue, rank = rank }
+M._test = { root_of = root_of, catalogue = catalogue, rank = rank, panes_of = panes_of }
 
 return M

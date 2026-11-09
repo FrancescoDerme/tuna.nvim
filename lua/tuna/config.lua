@@ -299,12 +299,14 @@ M.defaults = {
     search = {
         -- The walk stops after this many filesystem entries and says it was cut short.
         max_entries = 100000,
-        -- A solution's tags, which a search matches as it matches a name: a Lua pattern over
-        -- its first `tag_lines` lines, whose capture is a comma-separated list, so
-        -- `// tags: binary search, greedy` or one `// tag:` line per tag. They are copied into
-        -- the sidecar whenever the file is read or written in Neovim, so a tag added
-        -- elsewhere is found once the file has been opened. false for none.
-        tags = "%f[%w]tags?:%s*(.-)%s*$",
+        -- A problem's tags, which a search matches as it matches a name: a Lua pattern over
+        -- the first `tag_lines` lines of each of its files (a generator's too), whose capture
+        -- is a comma-separated list. The default takes `tags:` or `tag:`, in any case, right
+        -- after a comment's opening, so `// tags: binary search, greedy` or one `# tag:` line
+        -- per tag, and never code such as `tags: list[str] = []`. They are copied into the sidecar whenever the file is read or
+        -- written in Neovim, so a tag added elsewhere is found once the file has been opened.
+        -- false for none.
+        tags = "^%s*%p+%s*[Tt][Aa][Gg][Ss]?:%s*(.-)%s*$",
         tag_lines = 10,
     },
 

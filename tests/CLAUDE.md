@@ -29,6 +29,12 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     other pane start no selection, a menu's search (opened typing, narrowing the list before
     `<CR>` reads it, `j` typed and `<Down>` moving, the pane walk,
     typing again only where it was left typing, completion turned off in it and in `input`,
+    several lists under one search (stacked, narrowed together, the top one selected with nothing
+    typed, the list keys going round within one, the pane keys from the search going to the
+    selection's, a short editor leaving out the lists with no room and an emptied search bringing
+    the top one back, a pane key catching the search up before it moves, a rebuild keeping the
+    search's cursor), a preview asked again staying scrolled where its content is unchanged, a
+    pane's missing title clearing the one before,
     nvim-cmp told whether loaded already or loading on the prompt's `InsertEnter`, a resize
     keeping the search, nothing found choosing nothing), a menu's panes beside its list (the
     size given, centred as the runner UI's grid, a fitted pane's height and its absence when
@@ -116,14 +122,23 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     `go` completing their words, bare `next` stepping between problems, and the cursor placed
     under `solve(` before the file is drawn;
   - `search.lua`: the picker up before the walk ends and what was typed meanwhile narrowing the
-    rows, rows left out of a later menu, a contest's pane losing the colours of the source
-    before it, the roots a download path gives, what a sidecar lists (a task with its file
-    still there, a contest of two problems in one folder, no scattered group, no second attempt
-    taken for one), what the walk passes over (dot-directories, `skip_directories`, symlinks,
-    `ignored_directories`, a broken sidecar), the order, `rank`, a row saying its judge once and
-    found by it all the same, picking going there and what
-    it says when it finds nothing or is cut short (once the picker has
-    closed, or at once while it stays open);
+    rows, rows left out of a later menu, problems over contests with the selection starting on
+    the problems, the files pane over the coloured source, the roots a download path gives, what
+    a sidecar lists (a task with its file still there, a problem's attempts one row, a contest
+    of two problems in one folder, no scattered group, no second attempt taken for one), a
+    problem's files and tags (every file's, a tagged helper in a folder of several problems each
+    one's and an untasked solution's no one's, an attempt with no name taking another's, none
+    with `tag_lines` 0, a problem whose solution is gone found and opened by a tagged helper,
+    the conventional solution opened), the panes beside it (titled by the contest, matched tags as text and the
+    rest dimmed, the files given without reading the source, a contest's problems), what the
+    walk passes over (dot-directories, `skip_directories`, symlinks, `ignored_directories`, a
+    broken sidecar), the order, `rank` (tags first, a typed word lifting a tag only where it
+    starts one of its words), a row's name alone with its contest said once and found by it all
+    the same, picking going there, `:Tuna go` refusing a word it does not know, tags (parsed in
+    any case right after a comment's opening and before its end, never from code, a broken pattern
+    said once, copied from any file beside a sidecar on read and write, found once, nothing
+    copied with tags off and no sidecar made) and what it says when it finds nothing or is cut
+    short (once the picker has closed, or at once while it stays open);
   - `download.lua`: the listener's boundary, a request handled while its sender is still
     connected, and what is stored (an empty answer kept, no file refused, a typed `~` path,
     the solution's template filled in, the problem recorded as the file's own, tuna's starter

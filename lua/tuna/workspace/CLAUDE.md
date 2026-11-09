@@ -178,8 +178,13 @@ problems and remembering them. The rules that hold everywhere are in the root `C
     of files is a ring to go round rather than a line with ends. From a file outside it (a
     header, a testcase) the step starts where that file would sort.
 - **`search.lua`**: `:Tuna find`, a `widgets.menu` with a `search` titled `find`, two `lists`
-  (problems over contests: a name alone does not say which a row is) and one pane `beside`,
-  sized as the runner UI. `root_of` takes the fixed start of `downloaded_problems_path` and
+  (problems over contests: a name alone does not say which a row is) and two panes `beside`,
+  sized as the runner UI: a `fit` one with a problem's files, each followed by its tags (a
+  contest's problems, each with theirs), titled by its contest, over the source picking it opens.
+  The tags the search matches are drawn as text and the rest dimmed (`highlights`), so the
+  preview is asked again as the query changes (a pane whose content is unchanged is left
+  scrolled where it was), and `content(idx, 1)` answers the files alone,
+  which `fit` asks of every row; sources are read once per picker. `root_of` takes the fixed start of `downloaded_problems_path` and
   `downloaded_contests_directory`, up to the first modifier other than `$(HOME)` and `$(CWD)`,
   so where it looks takes no option and leaves out what sits beside them (a snippet folder).
   `walk` finds the
@@ -195,11 +200,23 @@ problems and remembering them. The rules that hold everywhere are in the root `C
     its name and contest whatever the folders are called, where a path means something only under
     a template that happens to spell them out. So a file with no `task` (never downloaded or
     submitted) is not listed, and a sidecar holding only `results` has no name to list it by.
-  - A problem is a `task` entry whose file the walk saw beside the sidecar, as `task` outlives
-    its file. A contest is a `group` naming two problems by `url`, in the folder holding them
-    (`contest_dir`) and not listed when they are scattered. Rows are recent first (`recent`'s
-    lists), then by path. `rank` is `matchfuzzy` over `name group tags`, the whole group, so
-    typing a judge still finds a row whose `judges.label` left it out.
+  - A problem is what a folder's `task` entries name, **one row** however many attempts it has
+    (one `url`, else one `name`), listed while one of its files is there: a solution the walk saw
+    beside the sidecar (`task` outlives its file), or a helper tagged. Its tags are its
+    solutions' and those of the folder's helpers and headers (`tools.is_support`), which serve
+    each solution beside them, so a folder of several problems gives each one a tagged
+    generator's, and never another problem's untasked solution. Its name and contest are the
+    first of its attempts naming them, in file order, as a submit records a task with neither.
+    Picking it opens the solution worked on last, else the first `tool_names.solution` name,
+    else the first, and with no solution left the tagged helper. The row is the problem's name
+    alone: the contest is the files pane's title. `tag_lines = 0` turns tags off as
+    `tags = false` does, the ones stored included. A contest is a `group` naming two problems by `url`, in
+    the folder holding them (`contest_dir`) and not listed when they are scattered. Rows are
+    recent first (`recent`'s lists), then by path. `rank` is `matchfuzzy` over
+    `name group tags`, the whole group, so typing a judge still finds a row whose
+    `judges.label` left it out, then lifts a row by the typed words that **start a word** of
+    one of its tags: a word found anywhere in a tag let the `a` of `2263 a` lift every tag
+    holding an a over the problem named A.
   - **Tags are read from the sidecar** (`tags` section, `problem/tags.lua`), not the sources:
     the walk reads sidecars only, and a source per problem would be a read for every solution.
     They are copied there whenever the file is read or written in Neovim, so one tagged in

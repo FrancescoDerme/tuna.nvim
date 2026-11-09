@@ -204,6 +204,8 @@ local MENU_LIST_SHARE, MENU_MIN_ROWS = 0.3, 5
 -- and hard to read past.
 local PANE_STEP = 2
 
+local preview_ns = api.nvim_create_namespace("tuna_preview")
+
 ---Put content into a read-only preview pane: the lines, the syntax colouring and the
 ---border title. The single place that knows how such a pane is filled, so a fixed
 ---preview and one that follows the cursor behave identically.
@@ -212,7 +214,7 @@ local PANE_STEP = 2
 ---FileType autocmds, which would attach an LSP and run ftplugins on it.
 ---@param bufnr integer preview buffer
 ---@param winid integer? preview window (for the title)
----@param data { title: string?, lines: string[]?, filetype: string? } what to show
+---@param data { title: string?, lines: string[]?, filetype: string?, highlights: { line: integer, col: integer, end_col: integer, group: string }[]? } what to show, `highlights` being byte ranges, 0-based
 ---@param defaults { title: string?, filetype: string? }? fallbacks for what `data` omits
 local function fill_preview(bufnr, winid, data, defaults)
     defaults = defaults or {}
@@ -223,6 +225,10 @@ local function fill_preview(bufnr, winid, data, defaults)
     api.nvim_buf_set_lines(bufnr, 0, -1, false, data.lines or {})
     vim.bo[bufnr].modifiable = false
     vim.bo[bufnr].modified = false
+    api.nvim_buf_clear_namespace(bufnr, preview_ns, 0, -1)
+    for _, h in ipairs(data.highlights or {}) do
+        pcall(api.nvim_buf_set_extmark, bufnr, preview_ns, h.line, h.col, { end_col = h.end_col, hl_group = h.group })
+    end
 
     -- Cleared as well as set: a pane that follows the cursor would otherwise colour text with
     -- no language as whatever the row before it was. Set only when it changes, as it reloads
@@ -237,8 +243,13 @@ local function fill_preview(bufnr, winid, data, defaults)
     local title = data.title or defaults.title
     if winid and api.nvim_win_is_valid(winid) then
         -- Centred, as every title tuna draws: a pane opened without one is given it here, and
-        -- Neovim would put it on the left.
-        api.nvim_win_set_config(winid, { title = title and (" " .. title .. " ") or nil, title_pos = title and "center" or nil })
+        -- Neovim would put it on the left. Content with none clears the one before it, which a
+        -- nil would leave, and only then, as a float with no border takes no title at all.
+        if title then
+            api.nvim_win_set_config(winid, { title = " " .. title .. " ", title_pos = "center" })
+        elseif api.nvim_win_get_config(winid).title then
+            api.nvim_win_set_config(winid, { title = "" })
+        end
         pcall(api.nvim_win_set_cursor, winid, { 1, 0 }) -- new content, read from the top
     end
 end
@@ -693,8 +704,8 @@ end
 ---  right of the search and list rather than under them, the whole float this size, borders
 ---  included, centred as the runner UI's grid is (not with a `notice`); `list_width` pins the
 ---  list's, for rows that arrive once it is open
----@field content (fun(idx: integer): table)? `{ title, lines, filetype }`, or with `panes` a
----  list of them
+---@field content (fun(idx: integer, pane: integer?): table)? `{ title, lines, filetype, highlights }`,
+---  or with `panes` a list of them, of which a call naming one `pane` needs only that one
 
 ---@class tuna.MenuList
 ---@field title string its window's title, padded
@@ -715,8 +726,9 @@ end
 ---@field preview tuna.MenuPreview?
 ---@field preview_idx integer? the item the preview shows
 ---@field row integer? the row of list `at` the cursor starts on
----@field previews { win: integer, buf: integer, i: integer, readout: boolean? }[] the preview
----  panes drawn, top to bottom, `i` being the pane's place in `preview.panes`
+---@field previews { win: integer, buf: integer, i: integer, readout: boolean?, drawn: table? }[] the
+---  preview panes drawn, top to bottom, `i` being the pane's place in `preview.panes` and `drawn`
+---  what it shows
 ---@field notice { title: string?, lines: string[] }?
 ---@field notice_win integer?
 ---@field notice_buf integer?
@@ -728,6 +740,7 @@ end
 ---@field focus_pane "search"|"list"|"preview"? the pane a resize puts focus back in
 ---@field focus_preview integer? which of `previews` it is
 ---@field inserting boolean? whether the search pane was left typing, so arriving back types again
+---@field search_col integer? the byte the search pane's cursor was on when a rebuild took it down
 ---@field rebuilding boolean the windows are being closed to be opened again
 ---@field id integer which opening this is, for rows arriving later (`menu_items`)
 ---@field relist fun()? shows `items` again for the search as it stands
@@ -789,7 +802,7 @@ end
 ---@field search_title string? the search pane's title (default `search`)
 ---@field lists { titles: string[], of: fun(idx: integer): integer }? the items in several lists
 ---  stacked under the search, titled `titles`, item `idx` in list `of(idx)` (`title` is then
----  unused): one search narrows them all, and the selection moves through them as one list
+---  unused): one search narrows them all, and the selection is in one of them at a time
 ---@field tags table<integer, string>? dimmed text after an item's label, by its index in
 ---  `items`, drawn beside the row rather than in it, and going wherever a search moves the item
 
@@ -848,9 +861,11 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, opts)
                 menu.focus_pane, menu.focus_preview = "preview", k
             end
         end
-        -- Typing, or not, is the search pane's: read there, and otherwise kept as it was left.
+        -- Typing, or not, is the search pane's: read there, and otherwise kept as it was left,
+        -- and where in the line it was.
         if menu.focus_pane == "search" then
             menu.inserting = vim.fn.mode() == "i"
+            menu.search_col = api.nvim_win_get_cursor(cur)[2]
         end
         -- A resize closes and rebuilds the windows; keep that self-inflicted
         -- WinClosed from being mistaken for a user cancellation (firing on_close).
@@ -883,6 +898,7 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, opts)
         menu.search_title = " " .. (opts.search_title or "search") .. " "
         menu.tags = opts.tags or {}
         menu.query = ""
+        menu.search_col = nil
         menu.focus_pane = search and "search" or "list"
         menu.inserting = search ~= nil
     end
@@ -1033,13 +1049,15 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, opts)
         draw_tags(l, list_width)
     end
 
-    ---What each preview pane shows for item `idx`, in the order of `specs`.
+    ---What each preview pane shows for item `idx`, in the order of `specs`, or with `pane` that
+    ---one alone (the others empty).
     ---@param idx integer?
+    ---@param pane integer?
     ---@return table[]
-    local function item_data(idx)
+    local function item_data(idx, pane)
         local got
         if idx then
-            local ok, data = pcall(pv.content, idx)
+            local ok, data = pcall(pv.content, idx, pane)
             got = ok and type(data) == "table" and (pv.panes and data or { data }) or nil
         end
         local out = {}
@@ -1086,9 +1104,10 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, opts)
     if #drawn == 0 then
         drawn = { 1 }
     end
-    -- The selection starts in the list it was in, else the one holding the first item found.
+    -- The selection starts in the list it was in, else the one holding the first item found, or
+    -- with nothing typed the top one.
     if not (menu.at and counts[menu.at] > 0) then
-        menu.at = first and list_of(first) or drawn[1]
+        menu.at = first and menu.query ~= "" and list_of(first) or drawn[1]
     end
     local sel = lists[menu.at]
     local start_row = math.min(math.max(menu.row or 1, 1), math.max(#sel.shown, 1))
@@ -1096,7 +1115,8 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, opts)
 
     ---The rows each list gets in a stack `footprint` rows tall, borders included: the lists drawn
     ---share it smallest first, each as tall as its items up to an even share of what is left, and
-    ---the last takes the rest. A list given fewer rows than items scrolls.
+    ---the last takes the rest. A list given fewer rows than items scrolls, and one left no row is
+    ---not drawn, the lowest first and the selection's last.
     ---@param footprint integer
     ---@return integer[] heights, 0 for a list not drawn
     local function list_heights(footprint)
@@ -1105,6 +1125,11 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, opts)
             heights[k] = 0
         end
         local order = vim.list_slice(drawn)
+        for j = #order, 1, -1 do
+            if #order * 3 > footprint and order[j] ~= menu.at then
+                table.remove(order, j)
+            end
+        end
         table.sort(order, function(a, b)
             return counts[a] < counts[b]
         end)
@@ -1157,7 +1182,7 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, opts)
     local function fit_rows(i, cap)
         local most = 0
         for idx = 1, #menu.items do
-            most = math.max(most, wrapped_rows(item_data(idx)[i].lines or {}, pane_w))
+            most = math.max(most, wrapped_rows(item_data(idx, i)[i].lines or {}, pane_w))
             if most >= cap then
                 return cap
             end
@@ -1321,18 +1346,25 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, opts)
     end
 
     ---Show the preview of the item selected, unless it shows that item already.
-    local function preview_selected()
+    ---With `again`, the item's panes are asked again even when it is the one shown, for content
+    ---that follows what is typed; a pane whose content is what it shows is left as it is, read
+    ---where it was scrolled to.
+    ---@param again boolean?
+    local function preview_selected(again)
         if not (pv and pv.content and #menu.previews > 0) then
             return
         end
         local idx = selected()
-        if idx == menu.preview_idx then
+        if idx == menu.preview_idx and not again then
             return
         end
         menu.preview_idx = idx
         local data = preview_data(idx)
         for _, p in ipairs(menu.previews) do
-            fill_preview(p.buf, p.win, data[p.i], specs[p.i])
+            if not vim.deep_equal(p.drawn, data[p.i]) then
+                p.drawn = data[p.i]
+                fill_preview(p.buf, p.win, data[p.i], specs[p.i])
+            end
         end
     end
 
@@ -1373,7 +1405,7 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, opts)
             vim.wo[win].linebreak = spec.wrap == true
             surface.follow_cursorline(win)
             fill_preview(buf, win, shown[i], spec)
-            menu.previews[#menu.previews + 1] = { win = win, buf = buf, i = i, readout = spec.readout }
+            menu.previews[#menu.previews + 1] = { win = win, buf = buf, i = i, readout = spec.readout, drawn = shown[i] }
             pv_row = pv_row + heights[i] + PANE_STEP
         end
     end
@@ -1426,19 +1458,33 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, opts)
     end
 
     ---List what the search finds now, each list from its first row, the selection in the list
-    ---holding the first item found.
+    ---holding the first item found, or with nothing typed the top one. The preview is drawn
+    ---again, the same item's too, as what it shows may follow what is typed. A list left out for
+    ---want of room is drawn, in place of another, when it holds what was found first, or is the
+    ---top one with nothing typed.
     local function relist()
         local found = partition()
-        for _, l in ipairs(lists) do
+        local want = found and menu.query ~= "" and list_of(found)
+        local needed = want or (menu.query == "" and drawn[1])
+        if needed and not lists[needed].win then
+            menu.at, menu.row = needed, 1
+            M.menu(nil)
+            return
+        end
+        local top
+        for k, l in ipairs(lists) do
             if l.win and api.nvim_win_is_valid(l.win) then
+                top = top or k
                 show_rows(l, list_w)
                 api.nvim_win_set_cursor(l.win, { 1, 0 })
             end
         end
-        if found then
-            select_list(list_of(found))
+        if want then
+            select_list(want)
+        elseif top then
+            select_list(top)
         end
-        preview_selected()
+        preview_selected(true)
     end
     menu.relist = relist
     menu.dismiss = close
@@ -1468,37 +1514,15 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, opts)
         end
     end
 
-    ---Move the selection, from whichever pane the key was pressed in. Through several lists
-    ---it moves as through one, on from the last row of one to the first of the next, focus
-    ---going along when it was in the list left.
+    ---Move the selection within the list holding it, from whichever pane the key was pressed
+    ---in, round at its ends as every list goes (`move_cursor`). Another list is reached with the
+    ---pane keys.
     ---@param delta integer
     local function step(delta)
         refilter()
-        local seq, pos = {}, nil
-        for k, l in ipairs(lists) do
-            if l.win and api.nvim_win_is_valid(l.win) then
-                local at = k == menu.at and api.nvim_win_get_cursor(l.win)[1]
-                for r = 1, #l.shown do
-                    seq[#seq + 1] = { k, r }
-                    if r == at then
-                        pos = #seq
-                    end
-                end
-            end
-        end
-        if #seq < 2 or #drawn == 1 then
-            if lists[menu.at].win then
-                move_cursor(lists[menu.at].win, #lists[menu.at].shown, delta)
-            end
-        else
-            pos = ((pos or (delta > 0 and 0 or 1)) - 1 + delta * vim.v.count1) % #seq + 1
-            local k, r = seq[pos][1], seq[pos][2]
-            local into = api.nvim_get_current_win() == lists[menu.at].win and k ~= menu.at
-            api.nvim_win_set_cursor(lists[k].win, { r, 0 })
-            select_list(k)
-            if into then
-                api.nvim_set_current_win(lists[k].win)
-            end
+        local l = lists[menu.at]
+        if l.win and api.nvim_win_is_valid(l.win) then
+            move_cursor(l.win, #l.shown, delta)
         end
         preview_selected()
     end
@@ -1507,7 +1531,7 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, opts)
     local panes = sr and { { win = menu.search_win, buf = menu.search_buf } } or {}
     for k, l in ipairs(lists) do
         if l.win then
-            panes[#panes + 1] = { win = l.win, buf = l.buf }
+            panes[#panes + 1] = { win = l.win, buf = l.buf, list = k }
             map_keys(mappings.focus_next, "n", l.buf, function()
                 step(1)
             end)
@@ -1577,13 +1601,23 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, opts)
     -- within a column, and across to the pane of the other column level with most of this
     -- one, so the list leads to the code beside it and the search pane to the notes. With
     -- focus in the preview, j/k and <C-d>/<C-u> scroll it natively. Arriving back in the
-    -- search pane types again if it was left typing (`inserting`), as it opened.
+    -- search pane types again if it was left typing (`inserting`), as it opened. Of several
+    -- lists, the one arrived in from another pane is the one holding the selection, which the
+    -- pane left was showing or acting on.
     if #panes > 1 then
         local function go(to)
+            -- First, as what was typed may rebuild the windows, `to`'s with them.
+            refilter()
             if not (to and api.nvim_win_is_valid(to.win)) then
                 return
             end
-            if api.nvim_get_current_win() == menu.search_win then
+            local cur = api.nvim_get_current_win()
+            if to.list and not vim.iter(lists):any(function(l)
+                return l.win == cur
+            end) then
+                to = lists[menu.at]
+            end
+            if cur == menu.search_win then
                 menu.inserting = vim.fn.mode() == "i"
             end
             vim.cmd.stopinsert()
@@ -1699,8 +1733,14 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, opts)
     elseif menu.focus_pane == "list" and sr then
         api.nvim_set_current_win(sel.win)
     end
-    if sr and menu.focus_pane == "search" and menu.inserting then
-        vim.cmd("startinsert!")
+    if sr and menu.focus_pane == "search" then
+        local c = menu.search_col
+        if c and c < #menu.query then
+            api.nvim_win_set_cursor(menu.search_win, { 1, c })
+        end
+        if menu.inserting then
+            vim.cmd(c and c < #menu.query and "startinsert" or "startinsert!")
+        end
     end
     return menu.id
 end
@@ -1721,11 +1761,9 @@ function M.menu_items(id, items)
         return true
     end
     menu.items = items
-    menu.query = table.concat(api.nvim_buf_get_lines(menu.search_buf, 0, -1, false), " ")
-    if #menu.lists > 1 then
-        -- Built again, as the lists' heights follow what they hold.
-        M.menu(nil)
-    end
+    -- Built again, as the lists' heights follow what they hold, and a fitted pane's what the
+    -- items give it.
+    M.menu(nil)
     menu.relist()
     return false
 end

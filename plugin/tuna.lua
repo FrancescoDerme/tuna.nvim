@@ -95,5 +95,5 @@ vim.api.nvim_create_autocmd({ "BufReadPost", "BufWritePost" }, {
             require("tuna.problem.tags").sync(ev.buf)
         end
     end,
-    desc = "Restore a Tuna submit verdict and copy a solution's tags into its sidecar",
+    desc = "Restore a Tuna submit verdict and copy a file's tags into its sidecar",
 })

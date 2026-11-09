@@ -81,10 +81,17 @@ submissions. The rules that hold everywhere are in the root `CLAUDE.md`.
   - `results = { [basename] = { passed, total, hash } }`, the local verdict (see
     `lua/tuna/run/CLAUDE.md`);
   - `tags = { [basename] = { tag, … } }`, the tags in the file's header, for `:Tuna find`
-    (`tags.lua`: `search.tags` matched over the first `search.tag_lines` lines, a comma list,
-    copied by `sync` from `plugin/tuna.lua`'s `BufReadPost`/`BufWritePost` when the file has
-    a sidecar beside it, and written only when they differ from what it holds, so a file with
-    none never writes).
+    (`tags.lua`: `search.tags` matched over the first `search.tag_lines` lines, a comma list
+    with a comment's closer left off, a broken pattern said once and reading none; copied by
+    `sync` from `plugin/tuna.lua`'s `BufReadPost`/`BufWritePost` for any file with a sidecar
+    beside it, a helper included, as a generator's tags are its problem's too (find takes a
+    folder's tagged helpers and headers for each of its problems, `tools.is_support`, and
+    another file only for the problem it is a solution of); nothing read
+    with tags off, and written only when they differ from what it holds, in one read of the
+    sidecar). The default pattern wants `tags:`, in any case, right after a line's opening
+    punctuation, a comment's: matched anywhere in a line it took code (`def f(my_tags: list)`)
+    for a tag line, and at a line's start too (`tags: list[str] = []`), at the cost of a bare
+    `tags:` line inside a block comment.
 
   Entries are keyed by **basename** because one folder can hold several problems or several
   attempts. Writers merge. `set_entry(…, nil)` removes an entry and deletes the file once it is

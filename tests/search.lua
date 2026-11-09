@@ -124,7 +124,7 @@ search.open(api.nvim_get_current_buf())
 t.eq("the picker is up when the command returns", { vim.bo.filetype, listed_rows() }, { "tuna", { "" } })
 api.nvim_buf_set_lines(0, 0, -1, false, { "bananas" })
 filled()
-t.eq("what is typed before the rows arrive narrows them", { listed_rows("contests"), listed_rows() }, { { "" }, { "B. Bananas  Round 7" } })
+t.eq("what is typed before the rows arrive narrows them", { listed_rows("contests"), listed_rows() }, { { "" }, { "B. Bananas" } })
 close_picker()
 
 -- Rows arrive for the opening that asked for them, not whatever is open by then.
@@ -146,42 +146,44 @@ t.eq(
     { pane("find") ~= nil, pane("go to"), pane("search"), api.nvim_win_get_position(pane("problems"))[1] < api.nvim_win_get_position(pane("contests"))[1] },
     { true, nil, nil, true }
 )
--- A contest's pane has no language, so it must not keep the colours of the source before it.
-local function pane_syntax()
-    for _, w in ipairs(api.nvim_list_wins()) do
-        local buf = api.nvim_win_get_buf(w)
-        local title = api.nvim_win_get_config(w).title
-        if type(title) == "table" and title[1][1]:find("/", 1, true) then
-            return vim.bo[buf].syntax
+---The window whose cursorline marks the selection.
+local function selected_list()
+    for _, title in ipairs({ "problems", "contests" }) do
+        local w = pane(title)
+        if w and vim.wo[w].cursorline then
+            return title, api.nvim_win_get_cursor(w)[1]
         end
     end
 end
--- From the first contest down past the last, round into the problems, and back up into the
--- contests.
-press("<Down><Down>")
-vim.wait(100, function()
-    return pane_syntax() == "cpp"
-end, 5)
-t.eq("a problem's source is coloured", pane_syntax(), "cpp")
+---The preview's panes, top to bottom: the files over the source.
+local function preview_panes()
+    local col = api.nvim_win_get_position(pane("find"))[2]
+    local found = {}
+    for _, w in ipairs(api.nvim_list_wins()) do
+        if api.nvim_win_get_config(w).relative ~= "" and api.nvim_win_get_position(w)[2] > col then
+            found[#found + 1] = w
+        end
+    end
+    table.sort(found, function(a, b)
+        return api.nvim_win_get_position(a)[1] < api.nvim_win_get_position(b)[1]
+    end)
+    return found
+end
+-- A recent contest ranks first, and still the selection starts on the problems.
+t.eq("nothing typed, the selection starts on the top list", { selected_list() }, { "problems", 1 })
+local panes_now = preview_panes()
+t.eq("a problem's files are listed over its source, which is coloured", {
+    #panes_now,
+    api.nvim_buf_get_lines(api.nvim_win_get_buf(panes_now[1]), 0, -1, false),
+    vim.bo[api.nvim_win_get_buf(panes_now[2])].syntax,
+}, { 2, { "A.cpp" }, "cpp" })
+-- From the first problem up past the top, round to the last problem.
 press("<Up>")
-vim.wait(100, function()
-    return pane_syntax() == ""
-end, 5)
-t.eq("and a contest's problems are not", pane_syntax(), "")
+t.eq("the list keys go round within the problems", { selected_list() }, { "problems", #listed[2] })
 close_picker()
-t.eq("every problem and contest and nothing else, what is recent first, then by path", listed, {
+t.eq("every problem, its attempts one row, and contest and nothing else, what is recent first, then by path", listed, {
     { "Round 8", "Round 7" },
-    {
-        "A. Cherries  Round 8",
-        "Grapes  Spread",
-        "Honey  Spread",
-        "A. Apples  Round 7",
-        "B. Bananas  Round 7",
-        "B. Dates  Round 8",
-        "Elderberries  Set",
-        "Figs  Figs group",
-        "Figs  Figs group",
-    },
+    { "A. Cherries", "Grapes", "Honey", "A. Apples", "B. Bananas", "B. Dates", "Elderberries", "Figs" },
 })
 
 local rows = {
@@ -206,9 +208,14 @@ local tagged_first = { by_tag[1], by_tag[2] }
 table.sort(tagged_first)
 t.eq("a row tagged with what is typed comes before names it scatters over", { tagged_first, by_tag[3], by_tag[4] }, { { 3, 4 }, 2, 1 })
 t.eq("whatever matches the name better", s.rank(tagged_rows, "greedy dp")[1], 4)
+t.eq("a word typed lifts a tag only where it starts a word of it", s.rank({
+    { text = "Sum 2263 math", tags = { "math" } },
+    { text = "A. Arrays 2263", tags = {} },
+}, "2263 a")[1], 2)
 
 -- A group naming its judge twice reads as the contest, and is still found by the judge.
 local round = "Codeforces - Codeforces Round 9"
+local cfg = require("tuna.config").get_buffer_config(api.nvim_get_current_buf())
 local named = s.catalogue({
     {
         dir = "/r9",
@@ -220,16 +227,122 @@ local named = s.catalogue({
             },
         }),
     },
-})
+}, cfg)
 t.eq(
-    "a row says the judge once, on a contest and on its problems",
+    "a problem's row is its name alone, its contest saying the judge once",
     vim.tbl_map(function(r)
-        return r.name
+        return { r.name, r.label }
     end, named),
-    { "Codeforces Round 9", "A. Ink  Codeforces Round 9", "B. Jam  Codeforces Round 9" }
+    { { "Codeforces Round 9" }, { "A. Ink", "Codeforces Round 9" }, { "B. Jam", "Codeforces Round 9" } }
 )
 t.eq("the contest is entered under that name", named[1].contest, "Codeforces Round 9")
 t.eq("a search still matches the whole group", #s.rank(named, "codeforces - codeforces"), 3)
+
+-- A problem is one row however many attempts it has, and its tags are those of every file of it.
+local subsets = { name = "Good Subsets", group = "Round 5", url = "https://x.test/5/G" }
+local shared = s.catalogue({
+    {
+        dir = "/p",
+        names = { ["main.cpp"] = true, ["main2.cpp"] = true, ["gen.py"] = true, ["brute.py"] = true },
+        content = vim.json.encode({
+            task = { ["main2.cpp"] = subsets, ["main.cpp"] = subsets, ["old.cpp"] = subsets },
+            tags = {
+                ["main.cpp"] = { "binary search" },
+                ["main2.cpp"] = { "binary search", "dp" },
+                ["gen.py"] = { "count subsets" },
+                ["gone.py"] = { "never" },
+            },
+        }),
+    },
+    {
+        dir = "/flat",
+        names = { ["A.cpp"] = true, ["B.cpp"] = true, ["C.cpp"] = true, ["gen.py"] = true },
+        content = vim.json.encode({
+            task = {
+                ["A.cpp"] = { name = "A. Ink", group = "Round 6", url = "https://x.test/6/A" },
+                ["B.cpp"] = { name = "B. Jam", group = "Round 6", url = "https://x.test/6/B" },
+            },
+            tags = { ["gen.py"] = { "random" }, ["C.cpp"] = { "dp" } },
+        }),
+    },
+    {
+        dir = "/named",
+        names = { ["main.cpp"] = true, ["main2.cpp"] = true },
+        content = vim.json.encode({
+            task = {
+                ["main.cpp"] = { url = "https://x.test/named" },
+                ["main2.cpp"] = { name = "Named Late", group = "Round 4", url = "https://x.test/named" },
+            },
+        }),
+    },
+    {
+        dir = "/left",
+        names = { ["gen.py"] = true },
+        content = vim.json.encode({
+            task = { ["main.cpp"] = { name = "Leftover", url = "https://x.test/left" } },
+            tags = { ["gen.py"] = { "trees" } },
+        }),
+    },
+}, cfg)
+local by_name = {}
+for _, r in ipairs(shared) do
+    by_name[r.name] = by_name[r.name] or {}
+    table.insert(by_name[r.name], r)
+end
+local good = (by_name["Good Subsets"] or {})[1] or {}
+t.eq("a problem's attempts are one row", #(by_name["Good Subsets"] or {}), 1)
+t.eq("listing its files there, solutions first, then the others tagged, each with its tags", good.files, {
+    { name = "main.cpp", tags = { "binary search" } },
+    { name = "main2.cpp", tags = { "binary search", "dp" } },
+    { name = "gen.py", tags = { "count subsets" } },
+})
+t.eq("found by each tag once", good.tags, { "binary search", "dp", "count subsets" })
+t.eq("and opening its conventional solution", good.path, "/p/main.cpp")
+t.eq("a helper tagged in a folder of several problems is each one's, a solution of none of them no one's", {
+    by_name["A. Ink"][1].tags,
+    by_name["B. Jam"][1].tags,
+    by_name["Round 6"] ~= nil,
+}, { { "random" }, { "random" }, true })
+t.eq("an attempt with no name or contest takes another's", {
+    (by_name["Named Late"] or {})[1] and by_name["Named Late"][1].label,
+    by_name["main.cpp"],
+}, { "Round 4", nil })
+t.eq("with `tag_lines` 0 no stored tag is found", s.catalogue(
+    { { dir = "/p", names = { ["main.cpp"] = true }, content = vim.json.encode({ task = { ["main.cpp"] = subsets }, tags = { ["main.cpp"] = { "dp" } } }) } },
+    vim.tbl_deep_extend("force", cfg, { search = { tag_lines = 0 } })
+)[1].tags, {})
+t.eq("a problem whose solution is gone is still found by another file, which picking it opens", {
+    (by_name["Leftover"] or {})[1] and by_name["Leftover"][1].path,
+}, { "/left/gen.py" })
+
+local shown = s.panes_of(good, { "dp" }, function()
+    return { "int main() {}" }
+end)
+local dimmed = vim.tbl_map(function(h)
+    return shown[1].lines[h.line + 1]:sub(h.col + 1, h.end_col)
+end, shown[1].highlights)
+t.eq("beside it, its files and their tags over the source, under its contest", {
+    shown[1].title,
+    shown[1].lines,
+    shown[2].title,
+    shown[2].lines,
+}, { "Round 5", { "main.cpp: binary search", "main2.cpp: binary search, dp", "gen.py: count subsets" }, "/p/main.cpp", { "int main() {}" } })
+t.eq("the tags the search matches drawn as text, the others dimmed", dimmed, { "binary search", "binary search", "count subsets" })
+local read = false
+t.eq("the files alone are given without reading the source", #s.panes_of(good, {}, function()
+    read = true
+    return {}
+end, 1), 1)
+t.eq("so nothing is read", read, false)
+local contest = by_name["Round 6"][1]
+t.eq("a contest's problems with their tags, over the solution entering it opens", {
+    s.panes_of(contest, {}, function()
+        return {}
+    end)[1].lines,
+    s.panes_of(contest, {}, function()
+        return {}
+    end)[2].title,
+}, { { "A. Ink: random", "B. Jam: random" }, "/flat/A.cpp" })
 
 -- Picking goes there, the directory moving with it.
 local function pick(query, expect)
@@ -252,9 +365,18 @@ file, cwd = pick("round 8", root .. "/flat/A.cpp")
 t.eq("picking a contest opens a problem in it", file, root .. "/flat/A.cpp")
 t.eq("and moves to the contest", cwd, root .. "/flat")
 
+-- `:Tuna go` takes no other word, and a word it does not know goes nowhere.
+local go_said, go_from = {}, api.nvim_buf_get_name(0)
+local go_quiet = vim.notify
+vim.notify = function(msg)
+    go_said[#go_said + 1] = msg
+end
+vim.cmd("Tuna go search")
+vim.notify = go_quiet
+t.eq("a word :Tuna go does not know is said and goes nowhere", { api.nvim_buf_get_name(0), table.concat(go_said, " "):find("unknown target 'search'", 1, true) ~= nil }, { go_from, true })
+
 -- Tags: written in the header, copied into the sidecar, found by a search.
 local tags = require("tuna.problem.tags")
-local cfg = require("tuna.config").get_buffer_config(api.nvim_get_current_buf())
 t.eq("a tags line is a comma list, in any comment, each tag once", tags.parse({
     "// contest: Round 7",
     "// tags: binary search,  greedy ",
@@ -268,6 +390,23 @@ for i = 1, cfg.search.tag_lines do
 end
 lines[#lines + 1] = "// tags: too late"
 t.eq("only the header's lines are read", tags.parse(lines, cfg), {})
+t.eq("in any case, after any comment's opening and before its end, and never in code", tags.parse({
+    "-- Tags: Segment Tree -}",
+    '"""tags: dp"""',
+    "(* tag: parity *)",
+    "def f(my_tags: list):",
+    "tags: list[str] = []",
+}, cfg), { "Segment Tree", "dp", "parity" })
+local warned = {}
+local quiet_notify = vim.notify
+vim.notify = function(msg)
+    warned[#warned + 1] = msg
+end
+local broken_cfg = vim.tbl_deep_extend("force", cfg, { search = { tags = "tags: [" } })
+local parsed = { pcall(tags.parse, { "// tags: dp" }, broken_cfg) }
+tags.parse({ "// tags: dp" }, broken_cfg)
+vim.notify = quiet_notify
+t.eq("a broken pattern reads no tags and says so once", { parsed, #warned }, { { true, {} }, 1 })
 t.eq("and none with the pattern off", tags.parse({ "// tags: dp" }, vim.tbl_deep_extend("force", cfg, { search = { tags = false } })), {})
 
 local tagged = root .. "/contests/r7/A/main.cpp"
@@ -283,7 +422,7 @@ t.eq("found by a search", (function()
     found = { listed_rows("contests"), listed_rows() }
     close_picker()
     return found
-end)(), { { "" }, { "A. Apples  Round 7" } })
+end)(), { { "" }, { "A. Apples" } })
 vim.cmd.edit(vim.fn.fnameescape(tagged))
 api.nvim_buf_set_lines(0, 0, 1, false, {})
 vim.cmd("silent write")
@@ -293,6 +432,36 @@ t.write(root .. "/contests/r7/B", "main.cpp", "// tag: two pointers\nint main() 
 vim.cmd.edit(vim.fn.fnameescape(root .. "/contests/r7/B/main.cpp"))
 t.eq("tags written elsewhere are copied when the file is read", sidecar.get_entry(root .. "/contests/r7/B/main.cpp", "tags"), { "two pointers" })
 vim.cmd("silent bwipeout!")
+t.write(root .. "/contests/r7/B", "gen.py", "# tags: count subsets\nprint(1)\n")
+vim.cmd.edit(vim.fn.fnameescape(root .. "/contests/r7/B/gen.py"))
+t.eq("any file beside a sidecar has its tags copied", sidecar.get_entry(root .. "/contests/r7/B/gen.py", "tags"), { "count subsets" })
+vim.cmd("silent bwipeout!")
+t.eq("its problem found by them, once", (function()
+    open_picker()
+    api.nvim_buf_set_lines(0, 0, -1, false, { "count subsets" })
+    press("<Down><Up>")
+    local found = listed_rows()
+    close_picker()
+    return found
+end)(), { "B. Bananas" })
+local setup_now = vim.deepcopy(require("tuna.config").current_setup)
+require("tuna").setup({
+    downloaded_problems_path = setup_now.downloaded_problems_path,
+    downloaded_contests_directory = setup_now.downloaded_contests_directory,
+    recent = setup_now.recent,
+    search = { tags = false },
+})
+local before_off = require("tuna.utils").read_file(root .. "/contests/r7/B/.tuna.json")
+t.write(root .. "/contests/r7/B", "gen.py", "# tags: other\nprint(1)\n")
+vim.cmd.edit(vim.fn.fnameescape(root .. "/contests/r7/B/gen.py"))
+vim.cmd("silent write")
+t.eq("with tags off nothing is copied", require("tuna.utils").read_file(root .. "/contests/r7/B/.tuna.json"), before_off)
+vim.cmd("silent bwipeout!")
+require("tuna").setup({
+    downloaded_problems_path = setup_now.downloaded_problems_path,
+    downloaded_contests_directory = setup_now.downloaded_contests_directory,
+    recent = setup_now.recent,
+})
 local loose = vim.fs.normalize(t.tempdir())
 t.write(loose, "main.cpp", "// tags: dp\nint main() {}\n")
 vim.cmd.edit(vim.fn.fnameescape(loose .. "/main.cpp"))

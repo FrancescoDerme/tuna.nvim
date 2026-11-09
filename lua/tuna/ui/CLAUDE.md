@@ -126,10 +126,13 @@ specific Vim error about a buffer the user never opened.
   held: the panes close, and the answer still lands, which `save` guards for.
 - `menu`: optional `on_close`; `preview` (fixed lines or cursor-following `content(idx)`, colour
   via `'syntax'` not `'filetype'`, list capped at `MENU_LIST_SHARE` of the height, read-only and
-  never left modified, `selectable` for one worth pasting from), or several `panes` stacked,
+  never left modified, `selectable` for one worth pasting from, byte-range `highlights` drawn in
+  `tuna_preview`, a missing title clearing the one before it, and set only then, as a float
+  without a border takes no title), or several `panes` stacked,
   `content` then answering one table each: a
   `fit` pane is as tall as the tallest content any item gives it, at most a third of the room,
-  and not drawn when none gives it any. `beside` puts them right of the search and the list, the
+  and not drawn when none gives it any. It asks every item, as `content(idx, pane)`, so a caller
+  whose other panes cost a read answers that pane alone. `beside` puts them right of the search and the list, the
   whole at a given size centred as the runner UI's grid, and there the pane keys move by
   position, up and down a column and across to the pane level with most of the one left, so the
   list leads to the code and the search pane to the notes. A `readout` pane (the library's
@@ -157,16 +160,27 @@ specific Vim error about a buffer the user never opened.
   its panes by hand closes the whole menu, as closing the list does. A resize keeps the search,
   the pane focused and whether it was typing. With a search `items` may start empty, for
   `menu_items(id, items)` to fill by the `id` `menu` returned (a later opening's list is left
-  alone), narrowed by what was typed meanwhile, and none closing it (it says whether it did); `beside.list_width` keeps
+  alone), narrowed by what was typed meanwhile, and none closing it (it says whether it did). It
+  builds the windows again, as list heights and `fit` panes follow the items, keeping where in
+  the search line the cursor was (`search_col`), or text typed mid-line would jump to its end. A
+  search's every change asks the preview again, the same item's too, for content that follows
+  the query, and refills only a pane whose content changed (`drawn`), so one scrolled stays
+  where it was. The pane keys catch the search up first (`refilter`), which may rebuild the
+  windows and close the one they were headed for. `beside.list_width` keeps
   the list's width from following rows that are not there yet. `search_title` names the search
   pane. `lists` puts the items in several lists stacked under one search (`find`'s problems over
   contests), each item in list `of(idx)`. A list's height follows the items it holds, not those
   shown, so none resizes as a search narrows it: they share the rows smallest first, and one
-  holding none is not drawn, so rows arriving through `menu_items` build the windows again. The
-  selection is in one list at a time (`at`), the only one with a cursorline, which `<CR>` picks
-  from and the preview shows: a search puts it in the list holding what it found first, the
-  list keys move through the lists as through one, focus going along from a list, and a list
-  entered by the pane keys or the mouse takes it.
+  holding none is not drawn. A list takes three rows at least, its borders and one item: a stack
+  too short for all of them leaves out the lowest first, the selection's last, and a search
+  finding first what a list left out, or a search emptied while the top list is out, builds
+  the windows again with it. The selection is in one list at a time (`at`), the only one with a
+  cursorline, which `<CR>` picks from and the preview shows: nothing typed puts it on the top
+  list, a search in the list holding what it found first, and a list entered from another list
+  by the pane keys, or by the mouse, takes it. The list keys move within the selection's list
+  and go round at its ends, as every list does (`move_cursor`): another list is reached with
+  the pane keys, as any other pane is. The pane keys arriving from the search pane or a preview
+  go to the list holding the selection, which that pane was acting on or showing.
 - `after_insert(fn)` runs `fn` once insert mode is left, on the tick after (`ModeChanged`
   `i*:*`), or now outside it: a typing float closed by code leaves insert mode only once the code
   returns, leaving it clears the command line after the event, and a notice given before is

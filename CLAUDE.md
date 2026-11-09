@@ -156,7 +156,7 @@ lua/tuna/
     download.lua        Competitive Companion listener and writer
     judges.lua          judge/contest names from a task
     submit.lua          submit providers, verdict watching, lualine component
-    tags.lua            a solution's header tags, copied into its sidecar for :Tuna find
+    tags.lua            a file's header tags, copied into its sidecar for :Tuna find
   workspace/          the files around problems
     scaffold.lua        starters for every role (solution and the helpers), the one template lookup
     scratch.lua         scratch solution, folded into a download by `download sync`

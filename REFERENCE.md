@@ -272,16 +272,12 @@ Bare `:Tuna go` means the problem.
 
 Finds any problem or contest by name and takes you there, with a preview of each solution.
 It looks under `downloaded_problems_path` and `downloaded_contests_directory`, and lists what tuna knows the name of, so a problem you downloaded or submitted.
-Problems are listed over contests, and what you type narrows both.
 
-A problem is also found by its tags, written in a comment among the first lines of its solution:
+A problem is also found by its tags, written in a comment among the first lines of any of its files:
 
 ```cpp
 // tags: binary search, greedy
 ```
-
-`tag:` works as well as `tags:`, and so does one line per tag.
-tuna reads the tags whenever you open or save the solution in Neovim, so tags added in another editor are found once you have opened the file.
 
 ## pin
 

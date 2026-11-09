@@ -908,8 +908,10 @@ M.subcommands = {
             require("tuna.problem.submit").open_problem(M.target_buffer())
         elseif args[1] == "contest" then
             recent.open_contest()
-        else
+        elseif args[1] == nil or args[1] == "problem" then
             recent.open_problem()
+        else
+            utils.notify("go: unknown target '" .. tostring(args[1]) .. "' (problem | contest | judge).")
         end
     end,
     -- Any problem or contest by name, where `go` is the one last worked on.

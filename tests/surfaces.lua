@@ -879,9 +879,9 @@ end
 
 -- Several lists under one search, stacked in the left column: a list as tall as its items up
 -- to its share, the last the rest, and one holding none not drawn. One search narrows them all,
--- the selection going to the list holding what it found first, and the list keys move through
--- them as through one list, focus along with them from a list. Only the list the selection is
--- in has a cursorline, and `<CR>` picks from it.
+-- the selection going to the list holding what it found first, and the list keys go round
+-- within the list holding it, as in any list, the pane keys leading to the others. Only the list
+-- the selection is in has a cursorline, and `<CR>` picks from it.
 do
     local items = { "alpha", "beta", "one", "two", "three" }
     local chosen
@@ -905,8 +905,12 @@ do
                         out[#out + 1] = i
                     end
                 end
-                -- What matches best first: a whole name.
+                -- What matches best first: a whole name, or with `tuna_second_first` the second
+                -- list.
                 table.sort(out, function(a, b)
+                    if _G.tuna_second_first then
+                        return of(a) > of(b) or (of(a) == of(b) and a < b)
+                    end
                     return (items[a] == q and 0 or a) < (items[b] == q and 0 or b)
                 end)
                 return out
@@ -974,8 +978,8 @@ do
     _G.tuna_probe = {}
     keys("<Cmd>lua tuna_open_lists()<CR><Down><Cmd>lua tuna_note()<CR><Down><Cmd>lua tuna_note()<CR><Up><Up><Up><Cmd>lua tuna_note()<CR><Esc>")
     ok(
-        "the list keys move on from one list into the next, and round from the first to the last",
-        vim.deep_equal(tuna_probe, { "first about beta", "second about one", "second about three" }),
+        "the list keys go round within the list holding the selection, never into the next",
+        vim.deep_equal(tuna_probe, { "first about beta", "first about alpha", "first about beta" }),
         vim.inspect(tuna_probe)
     )
     close_layer(80)
@@ -992,16 +996,16 @@ do
     ok("both lists narrowed", vim.deep_equal(narrowed, { { "beta" }, { "one", "three" } }), vim.inspect(narrowed))
     close_layer(80)
 
-    -- From a list, focus goes along into the next one, which takes the selection.
+    -- The pane keys lead from a list into the next one, which takes the selection.
     _G.tuna_probe = {}
     function _G.tuna_where()
         local t = api.nvim_win_get_config(0).title
         tuna_probe[#tuna_probe + 1] = t and vim.trim(t[1][1]) or "?"
     end
-    keys("<Cmd>lua tuna_open_lists()<CR><Esc><C-j><Cmd>lua tuna_where()<CR>jj<Cmd>lua tuna_where()<CR><Cmd>lua tuna_note()<CR><C-j><Cmd>lua tuna_where()<CR><Cmd>lua tuna_note()<CR>")
+    keys("<Cmd>lua tuna_open_lists()<CR><Esc><C-j><Cmd>lua tuna_where()<CR>jjj<Cmd>lua tuna_where()<CR><Cmd>lua tuna_note()<CR><C-j><Cmd>lua tuna_where()<CR><Cmd>lua tuna_note()<CR>")
     ok(
-        "a list's keys carry focus into the next list, and a list entered takes the selection",
-        vim.deep_equal(tuna_probe, { "first", "second", "second about one", "second", "second about one" }),
+        "a list's keys keep focus in it, and a list the pane keys enter takes the selection",
+        vim.deep_equal(tuna_probe, { "first", "first", "first about beta", "second", "second about one" }),
         vim.inspect(tuna_probe)
     )
     keys("<C-k>")
@@ -1021,6 +1025,101 @@ do
     close_layer(80)
     keys("<Cmd>lua tuna_open_lists(false, true)<CR><Esc>")
     ok("a list holding no item is not drawn", win_of("first") == nil and win_of("second") ~= nil and #rows_of("second") == 5)
+    close_layer(80)
+
+    -- With nothing typed the selection is on the top list, whatever the search ranks first.
+    _G.tuna_second_first = true
+    keys("<Cmd>lua tuna_open_lists()<CR><Esc>")
+    _G.tuna_second_first = nil
+    ok("nothing typed, the selection starts on the top list", selection() == "first about alpha", selection())
+    close_layer(80)
+
+    -- The pane keys from the search pane go into the list holding the selection.
+    _G.tuna_probe = {}
+    keys("<Cmd>lua tuna_open_lists()<CR>two<C-j><Cmd>lua tuna_where()<CR><Cmd>lua tuna_note()<CR><Esc>")
+    ok(
+        "the pane keys from the search go into the list holding the selection",
+        vim.deep_equal(tuna_probe, { "second", "second about two" }),
+        vim.inspect(tuna_probe)
+    )
+    close_layer(80)
+
+    -- A rebuild keeps where in the search the cursor was.
+    local typed
+    function _G.tuna_typed()
+        typed = api.nvim_buf_get_lines(api.nvim_win_get_buf(win_of("find")), 0, -1, false)[1]
+    end
+    keys("<Cmd>lua tuna_open_lists()<CR>tw<Left><Cmd>lua require('tuna.ui.widgets').menu(nil)<CR>h<Cmd>lua tuna_typed()<CR><Esc>")
+    ok("a rebuild keeps the search's cursor where it was in the line", typed == "thw", typed)
+    close_layer(80)
+
+    -- An editor too short for every list draws the one holding the selection, inside the editor.
+    local lines = vim.o.lines
+    vim.o.lines = 10
+    keys("<Cmd>lua tuna_open_lists()<CR>two<Down><Esc>")
+    local inside = true
+    for _, f in ipairs(floats()) do
+        if api.nvim_win_get_position(f.win)[1] + api.nvim_win_get_height(f.win) + 1 >= vim.o.lines then
+            inside = false
+        end
+    end
+    ok("a short editor leaves out the lists with no room, the selection's kept", inside and win_of("second") ~= nil and win_of("first") == nil, vim.inspect({ inside, win_of("first"), win_of("second") }))
+    close_layer(80)
+    keys("<Cmd>lua tuna_open_lists()<CR>two<Down><C-u><Down><Esc>")
+    ok("and the search emptied brings the top list back", win_of("first") ~= nil and win_of("second") == nil, vim.inspect({ win_of("first"), win_of("second") }))
+    close_layer(80)
+    -- The pane keys catch the search up first, which may build the windows again.
+    vim.v.errmsg = ""
+    local walked = pcall(keys, "<Cmd>lua tuna_open_lists()<CR>two<C-l><Esc>")
+    ok("a pane key typed with the search behind it moves nowhere that is gone", walked and vim.v.errmsg == "" and win_of("second") ~= nil, vim.v.errmsg)
+    close_layer(80)
+    vim.o.lines = lines
+
+    -- A preview asked again as the search changes leaves a pane showing the same as it was.
+    local long = {}
+    for i = 1, 200 do
+        long[i] = "line " .. i
+    end
+    function _G.tuna_open_scroll()
+        widgets.menu({ "alpha", "beta" }, nil, function() end, nil, nil, {
+            beside = { width = 62, height = 20 },
+            content = function(i)
+                return { title = "about " .. i, lines = long }
+            end,
+        }, {
+            search = function(q)
+                return q:find("b") and { 2 } or { 1 }
+            end,
+        })
+    end
+    local top
+    function _G.tuna_scroll()
+        api.nvim_win_call(win_of("about 1"), function()
+            vim.fn.winrestview({ topline = 50, lnum = 50 })
+        end)
+    end
+    function _G.tuna_top()
+        api.nvim_exec_autocmds("TextChangedI", { buffer = api.nvim_get_current_buf() })
+        top = api.nvim_win_call(win_of("about 1"), vim.fn.winsaveview).topline
+    end
+    keys("<Cmd>lua tuna_open_scroll()<CR>a<Cmd>lua tuna_scroll()<CR>l<Cmd>lua tuna_top()<CR><Esc>")
+    ok("a preview showing the same as the search changes stays scrolled where it was", top == 50, top)
+    close_layer(80)
+
+    -- A pane's content with no title clears the one before it.
+    widgets.menu({ "titled", "untitled" }, "titles", function() end, nil, nil, {
+        content = function(i)
+            return { title = i == 1 and "a title" or nil, lines = { "x" } }
+        end,
+    })
+    settle()
+    keys("j")
+    local titled = false
+    for _, f in ipairs(floats()) do
+        local t = api.nvim_win_get_config(f.win).title
+        titled = titled or (t ~= nil and t[1][1]:find("a title", 1, true) ~= nil)
+    end
+    ok("a pane's content with no title clears the one before it", not titled)
     close_layer(80)
 end
 
