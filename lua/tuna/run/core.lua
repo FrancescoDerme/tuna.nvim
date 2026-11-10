@@ -164,7 +164,7 @@ end
 ---process, a testcase, a session or a stress helper alike. `vim.system` marks its own timeout
 ---kill with code 124 and SIGTERM, which reads as a timeout too. One stopped for printing past
 ---`maximum_output` (`over`, its limit) reads `ole`, as a judge says output limit exceeded.
----@param how { code: integer?, signal: integer?, timed_out: boolean?, killed: boolean?, over: integer? }
+---@param how tuna.SystemResult|{ timed_out: boolean?, killed: boolean? }
 ---@param timeout integer? the budget it had, in milliseconds, for the words
 ---@return string? status, string? hlgroup, string? words
 function M.ending(how, timeout)
@@ -780,7 +780,7 @@ end
 ---@param tc table
 ---@param run_id integer the spawn token captured by `execute_process`
 ---@param timer uv.uv_timer_t? that spawn's timeout timer
----@param res vim.SystemCompleted
+---@param res tuna.SystemResult
 ---@param opts table
 ---@param on_done fun()?
 function RunnerCore:finish_process(tc, run_id, timer, res, opts, on_done)
@@ -833,8 +833,10 @@ function RunnerCore:finish_process(tc, run_id, timer, res, opts, on_done)
         local chk = opts.checker or self.checker
         checker.judge(tc, chk, self:effective_compare(), function(correct, message)
             -- An external checker takes real time, and the row can be reset or
-            -- re-spawned while it judges — the same window the token guards above.
-            if tc.run_id ~= run_id then
+            -- re-spawned while it judges, or the rows rebuilt by a new run: the same
+            -- window the token and `owns_row` guard above, where its `on_done` would
+            -- start a lane the new run never asked for.
+            if tc.run_id ~= run_id or not self:owns_row(tc) then
                 return
             end
             tc.judging = false
@@ -929,12 +931,12 @@ function RunnerCore:rows_for(tcnum)
 end
 
 ---The row of testcase `tcnum` the board puts the user on when it adds or restores it, from
----`beside`, the row they are on. Run-all, which shows a testcase once per solution, picks the
+---`_beside`, the row they are on. Run-all, which shows a testcase once per solution, picks the
 ---one under the same solution.
 ---@param tcnum integer
----@param beside table?
+---@param _beside table?
 ---@return integer?
-function RunnerCore:row_for(tcnum, beside)
+function RunnerCore:row_for(tcnum, _beside)
     return self:rows_for(tcnum)[1]
 end
 

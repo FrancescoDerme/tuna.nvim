@@ -72,6 +72,7 @@ The rules that hold everywhere are in the root `CLAUDE.md`.
   `create_missing`'s `instead`), so a half-written generator does not turn every `:Tuna run`
   into a search. `stress_helpers` hands back the generator even then. Every run looks the
   bruteforce up again, and one found makes the board a stress run again (`hunt` follows it).
+  A stop marks the testcases the re-run lane had not reached `not run`, as in every mode.
   The Run pane's `brute` row, on every stress board so the rows stay put, says `none`, and the
   legend says what is kept instead.
 - `idle()` means the search has stopped, so every path that ends a run has to `finish()`,
@@ -80,7 +81,9 @@ The rules that hold everywhere are in the root `CLAUDE.md`.
 **Interactive (`interactive.lua`)**: one session at a time; the source is remembered per file.
 - **feed**: the testcase input is sent a line at a time. It keeps the configured grid with the
   canonical Input/Expected Output panes and is the only editable source (`editable_testcases`
-  set per instance). Its no-testcase row is `bare`. `run_single` claims the runner, and every
+  set per instance). Its no-testcase row is `bare`. A session that ended cleanly is judged
+  as a testcase is in every mode (`checker.judge`), answer or not: a comparison has nothing
+  to say without one, and a checker of its own still reads the output. `run_single` claims the runner, and every
   path where nothing will run settles it: a build that failed through `on_build_failed`, the
   rest by setting `completed = true`.
 - **live** and **interactor** are a **conversation**. `layout()` returns the grid
@@ -160,7 +163,9 @@ The rules that hold everywhere are in the root `CLAUDE.md`.
 - All solutions compile first, then everything runs in one shared pool of `multiple_testing`.
   A compile failure is a `ce` row.
 - The pool, `run_single` and `rerun_solution` all settle through `settle`, once nothing runs
-  and nothing is queued; a stop empties the queue (`qpos`), so a stopped matrix settles as soon
+  and nothing is queued, which it reads off the rows too (`running`, `judging`) and off
+  `rerunning`, a solution's re-run from its build to its last case: several re-runs can be
+  in flight at once, and the first to end must not settle the board under the others; a stop empties the queue (`qpos`), so a stopped matrix settles as soon
   as its killed cases are in. A header's `correct/total` counts judged rows only
   (`core.judged`), so a row with no answer, stopped or never run is not a failure. A board
   launched from a buffer that is not a solution reads its testcases through

@@ -511,7 +511,7 @@ end
 ---@param i integer the iteration
 ---@param cmd string[]
 ---@param opts table `vim.system` options besides `cwd`
----@param cb fun(res: vim.SystemCompleted)
+---@param cb fun(res: tuna.SystemResult)
 function StressRunner:spawn(label, i, cmd, opts, cb)
     opts.cwd, opts.env = self.rundir, tools.RUN_ENV
     local ok, err = pcall(tools.system, cmd, opts, tools.output_limit(self.config), function(res)
@@ -569,6 +569,9 @@ function StressRunner:kill_all_processes()
             pcall(function()
                 tc.handle:kill("sigkill")
             end)
+        elseif tc.status == "" then
+            -- A testcase the re-runs had not reached says it never ran, as in every mode.
+            tc.status, tc.hlgroup = "not run", "TunaDone"
         end
     end
     -- A board that was only listed had nothing running to stop.
@@ -660,7 +663,8 @@ end
 ---Run stress testing for a buffer's solution.
 ---@param bufnr integer? defaults to the current buffer
 ---@param count_override integer? overrides `stress.count`
----@param opts { show_only: boolean? }? open the UI with the rows listed and nothing run
+---@param opts { show_only: boolean?, hunt: boolean? }? `show_only` opens the UI with the rows
+---  listed and nothing run, `hunt` searches with no bruteforce when there is none
 function M.run(bufnr, count_override, opts)
     opts = opts or {}
     bufnr = bufnr or vim.api.nvim_get_current_buf()

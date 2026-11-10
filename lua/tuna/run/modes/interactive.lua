@@ -83,7 +83,7 @@ end
 -- The conversation (live and interactor)
 --------------------------------------------------------------------------------
 
--- The columns a conversation is laid out in, left to right beside the selector.
+-- The panes a conversation's columns are drawn in.
 local CONVERSATION_PANES = { "se", "so", "si" }
 
 -- How many rows of a conversation its columns show, the latest ones, and so how many its log
@@ -887,20 +887,17 @@ function InteractiveRunner:run_feed(idx, on_done)
                 tc.status, tc.hlgroup = ended, hl
                 self:update_ui(true)
                 return on_done()
-            elseif tc.expected ~= nil then
-                tc.judging = true
-                checker.judge(tc, self.checker, self:effective_compare(), function(correct, message)
-                    tc.judging = false
-                    tc.checker_message = message
-                    tc.status, tc.hlgroup = core.verdict(correct)
-                    self:update_ui(true)
-                    on_done()
-                end)
-            else
-                tc.status, tc.hlgroup = core.verdict(nil)
+            end
+            -- Judged as a testcase is in every mode: with no answer a comparison has nothing
+            -- to say (`done`), and a checker of its own still reads the output.
+            tc.judging = true
+            checker.judge(tc, self.checker, self:effective_compare(), function(correct, message)
+                tc.judging = false
+                tc.checker_message = message
+                tc.status, tc.hlgroup = core.verdict(correct)
                 self:update_ui(true)
                 on_done()
-            end
+            end)
         end,
     })
     -- Prime: many interactive solutions read a line before printing anything.

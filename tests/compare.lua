@@ -66,6 +66,31 @@ t.eq("a method of your own decides for itself", compare.compare_output("anything
     end,
 }), true)
 
+-- What it answers is read as Lua reads any value, so an answer that is not a boolean is no
+-- "nothing to judge": that is nil's meaning, kept for a testcase with no answer.
+t.eq("an answer that is not a boolean is still an answer", {
+    compare.compare_output("a", "b", { "truthy", fn = function()
+        return 1
+    end }),
+    compare.compare_output("a", "b", { "silent", fn = function() end }),
+}, { true, false })
+
+-- One that raises judges nothing and says so once: an error let through would leave the
+-- row judging, and its run never over.
+do
+    local quiet = vim.notify
+    local said = t.capture_notifications()
+    local raising = { "raising", fn = function()
+        error("boom")
+    end }
+    for _ = 1, 3 do
+        t.eq("a method that raises judges nothing", { pcall(compare.compare_output, "1", "1", raising) }, { true })
+    end
+    t.drain()
+    vim.notify = quiet
+    t.ok("and is said once, with what it raised", #said == 1 and said[1]:find("raising", 1, true) and said[1]:find("boom", 1, true), said)
+end
+
 --------------------------------------------------------------------------------
 -- how the method is named in the "Run" pane
 --------------------------------------------------------------------------------
@@ -137,6 +162,39 @@ do
     vim.notify = quiet
     t.eq("a checker that did not build gives no verdict, and says why", got, { nil, "checker did not compile" })
     t.eq("without a notification", said, {})
+end
+
+-- A verdict that lands after the rows were built anew belongs to a run that is gone: it
+-- reaches no row and starts no lane, or the new run would go past `multiple_testing`.
+do
+    local dir = t.tempdir()
+    t.write(dir, "main.py", "print(1)\n")
+    vim.cmd.edit(dir .. "/main.py")
+    vim.bo.filetype = "python"
+    local runner = require("tuna.run").new(vim.api.nvim_get_current_buf())
+    local checker = require("tuna.run.checker")
+    local real_judge, verdict = checker.judge, nil
+    checker.judge = function(_, _, _, callback)
+        verdict = callback
+    end
+    runner:build_rows({ [0] = { input = "", output = "1\n" } })
+    local row, lanes = runner.tcdata[1], 0
+    row.run_id, row.start_time = 1, vim.uv.now()
+    local function finish()
+        runner:finish_process(row, 1, nil, { code = 0, signal = 0, stdout = "1\n", stderr = "" }, {}, function()
+            lanes = lanes + 1
+        end)
+    end
+    finish()
+    verdict(true)
+    t.eq("a verdict on a row the runner still has lands, and its lane goes on", { row.status, lanes }, { "correct", 1 })
+    finish()
+    runner:build_rows({ [0] = { input = "", output = "1\n" } })
+    verdict(false)
+    t.eq("one for rows since built anew starts no lane", lanes, 1)
+    t.eq("and reaches no row", { row.status, runner.tcdata[1].status }, { "correct", nil })
+    checker.judge = real_judge
+    vim.cmd("bwipeout!")
 end
 
 t.report()

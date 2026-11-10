@@ -45,7 +45,11 @@ local warned = {}
 ---@param s string
 ---@return string[]
 local function tokens(s)
-    return vim.split(s, "%s+", { trimempty = true })
+    local out = {}
+    for token in s:gmatch("%S+") do
+        out[#out + 1] = token
+    end
+    return out
 end
 
 ---Builtin comparison methods. Each takes `(output, expected, opts)`; `opts` is the
@@ -144,7 +148,21 @@ function M.compare_output(output, expected, method)
     end
 
     if type(method) == "table" and type(method.fn) == "function" then
-        return method.fn(output, expected)
+        -- A method of the user's own: what it answers is read as true or false, as Lua
+        -- reads any value, and one that raises judges nothing, said once, since an error
+        -- let through here would leave the row judging and its run never over.
+        local ok, same = pcall(method.fn, output, expected)
+        if ok then
+            return same and true or false
+        end
+        local name = tostring(method[1])
+        if not warned[name] then
+            warned[name] = true
+            vim.schedule(function()
+                utils.notify(("compare: your method %s failed, so outputs are not judged.\n%s"):format(name, tostring(same)))
+            end)
+        end
+        return nil
     elseif type(method) == "string" and M.methods[method] then
         return M.methods[method](output, expected)
     elseif type(method) == "table" and M.methods[method[1]] then

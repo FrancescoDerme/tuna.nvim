@@ -1629,11 +1629,11 @@ do
     halted:kill_all_processes()
     held({ stdout = "5\n" })
     drain(halted.ui)
-    t.eq("a stop ends the re-runs where they are", {
+    t.eq("a stop ends the re-runs where they are, the ones not reached saying so", {
         halted.tcdata[2].status,
         halted.tcdata[3].status,
         halted.tcdata[4].status,
-    }, { "killed", "", "" })
+    }, { "killed", "not run", "not run" })
     t.ok("and leaves nothing running", halted:idle(), halted.rerunning)
     halted.ui:delete()
 
@@ -3445,6 +3445,27 @@ for _, board in ipairs(boards) do
         if board.name == "run-all" then
             local header = r.tcdata[1]
             t.eq("run-all: its header counts no stopped row as a failure", { header.status, header.hlgroup }, { "0/0", "TunaDone" })
+
+            -- Two rows run again at once: the board is busy until the last of them is in, the
+            -- first to end not settling it under the other.
+            local cases = {}
+            for i, tc in ipairs(r.tcdata) do
+                if tc.kind == "case" then
+                    cases[#cases + 1] = i
+                end
+            end
+            r:run_single(cases[1])
+            r:run_single(cases[2])
+            r:kill_process(cases[1])
+            drain(r.ui)
+            t.eq("run-all: one of two rows run again ending leaves the board busy", {
+                r.tcdata[cases[1]].status,
+                r.tcdata[cases[2]].running,
+                r:idle(),
+            }, { "killed", true, false })
+            r:kill_process(cases[2])
+            drain(r.ui)
+            t.eq("run-all: and the last of them settles it", r:idle(), true)
         end
         r:delete_ui()
         vim.system = real_system

@@ -331,13 +331,24 @@ local function eval_helper_arg(solution, arg)
     return out and (out:gsub("\1(%u+)\2", "$(%1)")) or nil
 end
 
+---Where a helper tuna does not build runs: the solution's `running_directory`, as the
+---solution does. A helper built from a file runs where its own build put it (`program`),
+---which is the same place for one found beside the solution.
+---@param solution_dir string
+---@param cfg table
+---@return string
+local function run_directory(solution_dir, cfg)
+    return utils.normalize_path(cfg.running_directory or ".", solution_dir)
+end
+
 ---A runnable spec for a helper file: compiled and run with its language's commands, or run
 ---as it is when tuna knows no command for its language (a prebuilt binary).
 ---@param role string
 ---@param path string
 ---@param cfg table
+---@param solution_dir string
 ---@return tuna.HelperSpec
-local function spec_for_file(role, path, cfg)
+local function spec_for_file(role, path, cfg, solution_dir)
     local spec, err = program(path, cfg)
     if not spec then
         -- An unknown language is the normal shape of a prebuilt binary. Any other failure
@@ -349,7 +360,7 @@ local function spec_for_file(role, path, cfg)
                 "WARN"
             )
         end
-        spec = { exec = path, args = {}, cwd = vim.fn.fnamemodify(path, ":p:h") }
+        spec = { exec = path, args = {}, cwd = run_directory(solution_dir, cfg) }
     end
     spec.args = vim.list_extend(spec.args, vim.deepcopy(ROLE_ARGS[role] or {}))
     ---@cast spec tuna.HelperSpec
@@ -396,6 +407,16 @@ function M.output_limit(cfg)
     return (limit and limit > 0) and limit or nil
 end
 
+---How a process `system` ran ended: `vim.system`'s result, with `over` set to the limit when
+---it was stopped for printing past it. Every reading of an ending takes one, or the fields
+---of one a caller put together (`clean_exit`, `core.ending`).
+---@class tuna.SystemResult
+---@field code integer?
+---@field signal integer?
+---@field stdout string?
+---@field stderr string?
+---@field over integer? the output limit the process was stopped at
+
 ---`vim.system` with a ceiling on what the process may print: past `limit` bytes of stdout
 ---and stderr together it is killed at once, and `res.over` is that limit, the output kept up to
 ---it. Left to `vim.system`, every byte is kept until the process exits, so a program printing
@@ -403,7 +424,7 @@ end
 ---@param argv string[]
 ---@param opts table `vim.system` options, its own `stdout`/`stderr` aside
 ---@param limit integer? bytes, nil for none (`output_limit`)
----@param on_exit fun(res: vim.SystemCompleted|{ over: integer? })
+---@param on_exit fun(res: tuna.SystemResult)
 ---@return vim.SystemObj
 function M.system(argv, opts, limit, on_exit)
     local proc ---@type vim.SystemObj?
@@ -430,6 +451,7 @@ function M.system(argv, opts, limit, on_exit)
     local text = opts.text
     opts = vim.tbl_extend("force", opts, { stdout = sink(out), stderr = sink(err), text = false })
     proc = vim.system(argv, opts, function(res)
+        ---@cast res tuna.SystemResult
         res.stdout, res.stderr = table.concat(out), table.concat(err)
         if text then
             res.stdout, res.stderr = res.stdout:gsub("\r\n", "\n"), (res.stderr:gsub("\r\n", "\n"))
@@ -455,7 +477,7 @@ end
 ---Whether a process ended on its own with nothing to report: exit code 0, no signal, nothing
 ---cut off. A process killed by a signal, the one `system` stops at the limit among them, exits
 ---with code 0 and the signal beside it, so the code alone takes it for a success.
----@param res { code: integer?, signal: integer?, over: integer? }
+---@param res tuna.SystemResult
 ---@return boolean
 function M.clean_exit(res)
     return res.code == 0 and (res.signal or 0) == 0 and not res.over
@@ -484,7 +506,7 @@ local function find_helper(role, solution, cfg)
         if not (path and utils.file_exists(path)) then
             return nil, ("the configured %s '%s' does not exist"):format(role, set)
         end
-        return spec_for_file(role, path, cfg)
+        return spec_for_file(role, path, cfg, dir)
     elseif type(set) == "table" and set.exec then
         local exec = utils.eval_string(solution, set.exec)
         if not exec or vim.fn.executable(exec) ~= 1 then
@@ -500,14 +522,13 @@ local function find_helper(role, solution, cfg)
         if #args == 0 then
             args = vim.deepcopy(ROLE_ARGS[role] or {})
         end
-        return { exec = exec, args = args, cwd = dir, role = role }
+        return { exec = exec, args = args, cwd = run_directory(dir, cfg), role = role }
     elseif set ~= nil then
         return nil, ("the configured %s is neither a path nor an { exec, args } command"):format(role)
     end
     local path = M.find(dir, role, cfg)
-    return path and spec_for_file(role, path, cfg) or nil
+    return path and spec_for_file(role, path, cfg, dir) or nil
 end
-
 
 ---The helper filling `role` for a solution (`find_helper`), with the limit on what it may print
 ---taken from the same config, so a `.tuna.lua`'s `maximum_output` holds for it as for the
@@ -567,12 +588,10 @@ local function build_inputs(source, dirs)
             return
         end
         seen[path] = true
-        local f = io.open(path, "r")
-        if not f then
+        local text = utils.read_file(path, true)
+        if not text then
             return
         end
-        local text = f:read("*a") or ""
-        f:close()
         found[#found + 1] = path .. "\0" .. vim.fn.sha256(text)
         local here = vim.fs.dirname(path)
         for name in ("\n" .. text):gmatch('\n[ \t]*#[ \t]*include[ \t]*["<]([^">\n]+)[">]') do

@@ -18,7 +18,8 @@ hold everywhere are in the root `CLAUDE.md`.
   command given no `args` included, so no caller keeps a default of its own;
   `expand_args(args, files)` fills them per spawn. A compiled helper runs, and its program
   is looked for, in `running_directory` (`program`'s `cwd`), as the solution's is, in every
-  mode. The roles are `ROLES` (and, with the solution, `SCAFFOLDS`); their file names live
+  mode, and so does one tuna does not build, a configured command or a prebuilt binary
+  (`run_directory`), wherever the binary is kept. The roles are `ROLES` (and, with the solution, `SCAFFOLDS`); their file names live
   only in the config's `tool_names`.
 - The run settings, mode, interactive source and checker, are each **automatic until
   forced** (`get_mode`/`set_mode`, `get_source`/`set_source`, `checker_setting`/
@@ -119,7 +120,9 @@ hold everywhere are in the root `CLAUDE.md`.
 - **Stale results are dropped**: `run_id` is bumped per spawn *and* in `reset_row`.
   `finish_process` gets the row object plus the token and bails if either the token changed or
   the row is no longer in `tcdata` (`owns_row`), closing its timer first (the timer is a closure
-  local). The judge callback re-checks the token.
+  local). The judge callback re-checks both: an external checker takes real time, and a
+  verdict landing on rows a new run has built anew would start a lane of its own through
+  `on_done`, past `multiple_testing`.
 - **UI seams** keep `tuna.runner_ui` mode-agnostic:
   - `pane_content(tc, name)` returns text, or `core.SKIP` to leave a pane alone;
   - `row_label(tc, unsaved)`, `status_settings()` (rows with the mode and judge) and `status_tail()`
@@ -270,7 +273,11 @@ builds the checker with its generator and bruteforce (`search_helpers`) and stop
 the checker gives no verdict on, since searching on would end in "no counterexample found".
 
 **Compare / diff**
-- `compare_output` returns `true`, `false`, or `nil` when there is no answer. `float` is
+- `compare_output` returns `true`, `false`, or `nil` when there is no answer. A method of
+  the user's own is called under `pcall` and its answer read as Lua reads any value: `nil`
+  is kept for "nothing to judge", so a truthy answer that is not `true` must not read
+  `done`, and one that raises judges nothing, said once, since an error let through leaves
+  the row judging and its run never over. `float` is
   `{ "float", tol }`, token-wise, absolute or relative tolerance (`float_equal`, which the
   diff uses too). An unknown method judges nothing and is reported once per session.
 - `diff.compute` is **positional**: line *i* against line *i*, token against token, never

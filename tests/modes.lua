@@ -74,6 +74,16 @@ local plain = tools.helper("checker", bare, with({ checker = { exec = "python3" 
 t.eq("a configured checker command with no arguments gets the testlib ones", plain and plain.args, { "$(INPUT)", "$(OUTPUT)", "$(ANSWER)" })
 local plain_gen = tools.helper("generator", bare, with({ stress = { generator = { exec = "python3" } } }))
 t.eq("and a role that takes none gets none", plain_gen and plain_gen.args, {})
+-- A helper tuna does not build runs where the solution runs, `running_directory`, whether it
+-- is a configured command or a prebuilt binary kept somewhere else.
+do
+    local out = with({ running_directory = "out", checker = { exec = "python3" } })
+    local run_dir = vim.fs.normalize(vim.fn.fnamemodify(bare, ":p:h") .. "/out")
+    t.eq("a configured command runs in the running directory", vim.fs.normalize(tools.helper("checker", bare, out).cwd), run_dir)
+    t.write(own, "wcmp", "#!/bin/sh\n")
+    local binary = tools.helper("checker", bare, with({ running_directory = "out", checker = own .. "/wcmp" }))
+    t.eq("and so does a prebuilt binary, wherever it is kept", { binary.exec, vim.fs.normalize(binary.cwd) }, { own .. "/wcmp", run_dir })
+end
 local _, cannot = tools.helper("generator", bare, with({ stress = { generator = { exec = "no-such-program-tuna" } } }))
 t.ok("a configured command that can't run says so", cannot ~= nil and cannot:find("can't be run") ~= nil, cannot)
 

@@ -408,8 +408,12 @@ function MultiRunner:rerun_solution(sol)
     -- structural edits that wait on it do (see `settle`).
     self.completed = false
     self.stopped = false
+    -- Counted from its build to its last case: between the two no row of it runs, and a
+    -- row re-run beside it must not settle the board meanwhile.
+    self.rerunning = (self.rerunning or 0) + 1
     self:compile_solution(sol, function(ok)
         if not ok then
+            self.rerunning = self.rerunning - 1
             self:settle()
             return
         end
@@ -417,6 +421,7 @@ function MultiRunner:rerun_solution(sol)
         local function step()
             ci = ci + 1
             if ci > #sol.case_idxs or self.stopped then
+                self.rerunning = self.rerunning - 1
                 self:recompute_header(sol)
                 self:settle()
                 self:update_ui(true)
@@ -436,10 +441,22 @@ end
 
 ---@private
 ---Mark the run finished once nothing is running or queued: the shared pool, a single
----row's re-run and a solution's all end here, and a stop drains the queue first.
+---row's re-run and a solution's all end here, and a stop drains the queue first. Several
+---re-runs can be in flight at once, so the rows are asked too: the first to end must not
+---settle the board under the others.
 function MultiRunner:settle()
-    if self.completed or (self.running_cases or 0) > 0 or (self.qpos or 0) < #(self.queue or {}) then
+    if
+        self.completed
+        or (self.running_cases or 0) > 0
+        or (self.rerunning or 0) > 0
+        or (self.qpos or 0) < #(self.queue or {})
+    then
         return
+    end
+    for _, tc in ipairs(self.tcdata) do
+        if tc.running or tc.judging then
+            return
+        end
     end
     self.completed = true
     self:save_local_verdicts()

@@ -95,7 +95,8 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     defined), a sidecar written dropping a deleted file's entries but keeping one not yet
     written, and the menu's Checker entry switching and Compare entry cycling back to the
     configured method, old or nonsense sidecar values reading as automatic, a configured
-    command with no arguments getting its role's, stress/interactor reruns offering the starter
+    command with no arguments getting its role's, a configured command and a prebuilt binary
+    running in `running_directory`, stress/interactor reruns offering the starter
     of a helper gone (Stop writing nothing, Create putting the board away and opening it in the
     editor, and a stress rerun with its bruteforce gone searching for crashes without it when
     that is chosen), and a folder's solutions found whatever its name holds (a comma);
@@ -156,7 +157,9 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     other file loading only what deciding whether it is a problem takes, and `setup()` adding
     only the keymaps;
   - `testcases.lua`, `compare.lua`, `judges.lua`, `clean.lua`, `submit.lua`: unit tests of pure
-    rules (`compare.lua` also: an unknown method reported once, diff marks following the verdict
+    rules (`compare.lua` also: an unknown method reported once, a method of the user's
+    own answering something that is not a boolean, or raising, said once, a verdict landing
+    after the rows were built anew starting no lane, diff marks following the verdict
     and marking a token or character missing where it is missing, a checker that did not build
     giving no verdict and no notification; `submit.lua` also: a credential blanked by its name in every shape a pair is
     written in, an edit while a new submission is watched leaving the watch alone, a verdict
@@ -200,7 +203,8 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     that did not build or gives no verdict stopping it and a restart judging with the checker as
     it is now, a failed build finishing it and spawning nothing behind it, in every mode that
     builds a solution of its own), a stop in every mode (nothing started after it, the rows it
-    had not reached `not run`, a stopped session `killed`, the board idle), `<C-r>` building the
+    had not reached `not run`, stress's re-runs included, a stopped session `killed`, the board
+    idle, and run-all busy until the last of several rows run again is in), `<C-r>` building the
     solution again and running after a stop, reusing a build (the files its stamp reads: headers
     beside it and through `-I` and `-Idir`, none of the compiler's own, an include cycle; a flag
     changing it; a file touched or an edit undone being no change; a reused row reading `cached`
