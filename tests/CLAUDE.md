@@ -222,7 +222,8 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     likewise with its note last, its columns and log bounded, while one that prints and exits
     keeps every byte), using real UI windows,
     in both interfaces where the grid changes (focus, the selector's row and line numbers,
-    titles and a bad grid said once as the board re-tiles, the pane keys moving from the cursor,
+    titles and a bad grid said once as the board re-tiles, a split board in an editor too small
+    for splits drawn as floats, said once, with `equalalways` left as it was, the pane keys moving from the cursor,
     from a zoom as from its pane and, from insert mode, typing on into an editable pane and
     stopping in a read-only one, the selector's cursorline always and a pane's or the zoom's
     only while focused, a row reading `edited` for what is typed and not for a pane's own

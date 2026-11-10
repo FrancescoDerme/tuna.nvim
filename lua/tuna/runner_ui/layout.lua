@@ -45,6 +45,22 @@ local MISSING = {
     build = "no 'build' cell, the build step would have nowhere to show what its compilers said",
 }
 
+---The options every pane's window takes when an interface opens it. The selector and the
+---detail panes have line-number options of their own, set by a branch: an `and`/`or` would
+---let a selector option set to `false` fall through to the detail panes' value.
+---@param winid integer
+---@param name string the pane
+---@param config table
+function M.window_options(winid, name, config)
+    local ui = config.runner_ui
+    if name == "tc" then
+        vim.wo[winid].number, vim.wo[winid].relativenumber = ui.selector_show_nu, ui.selector_show_rnu
+    else
+        vim.wo[winid].number, vim.wo[winid].relativenumber = ui.show_nu, ui.show_rnu
+    end
+    vim.wo[winid].spell = false
+end
+
 ---@private
 ---Collect a layout's leaf names in order, or report the first structural problem.
 ---@param layout any

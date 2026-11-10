@@ -13,6 +13,10 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
   windows onto them, `relayout(windows, config, init_winid, status_rows, grid)` being its whole
   API: `popup.lua` tiles floats, moving the windows that stay, `split.lua` opens native splits
   anew, both from one recursive `{ ratio, child }` grid, levels alternating columns and rows.
+  Splits need room Vim may refuse (`E36`), where floats tile any size: `split.relayout` then
+  closes what it opened, puts `equalalways` back and raises, and `lay_out` draws the board as
+  floats from there on, said once. Both give a window its options through
+  `layout.window_options`.
 - **Six pane buffers, never more**: a buffer nothing shows is a cost with nothing bought. The
   build step, which has no input, answer or output, borrows the four detail buffers for its
   sources (`BUILD_PANES`), keeping their names out of all a user reads or writes there.
@@ -214,7 +218,7 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
 
 **Look**
 - The selector and the detail panes have their own line-number options
-  (`selector_show_nu`/`_rnu`, `show_nu`/`_rnu`), set by a branch in both interfaces: an
+  (`selector_show_nu`/`_rnu`, `show_nu`/`_rnu`), set by a branch (`layout.window_options`): an
   `and`/`or` would let the selector's `false` fall through to the panes' value.
 - Writable panes wear `runner_ui.editable_border_highlight` (default `TunaEditable`, bold
   magenta, the one hue not used for verdicts) on border and title, the title in the derived

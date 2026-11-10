@@ -35,13 +35,33 @@ end
 
 ---Place a window for every pane `layout` names over its buffer, splitting off the window the
 ---runner was launched in. Windows are opened anew each time: a split's size and place are
----fixed by the splits around it.
+---fixed by the splits around it. An editor too small to hold them makes Vim refuse a split
+---(`E36`): the windows opened so far are closed and the error raised again, for the UI to
+---draw the board another way, and `equalalways`, switched off while the frame is divided, is
+---put back either way.
 ---@param windows table<string, { bufnr: integer, winid: integer?, title: string }>
 ---@param config table
 ---@param init_winid integer the window the runner was launched from
 ---@param status_rows integer rows of the "Run" pane
 ---@param layout table the validated grid
 function M.relayout(windows, config, init_winid, status_rows, layout)
+    local equalalways = vim.o.equalalways
+    local ok, err = pcall(M.place, windows, config, init_winid, status_rows, layout)
+    vim.o.equalalways = equalalways
+    if not ok then
+        for _, w in pairs(windows) do
+            if w.winid and api.nvim_win_is_valid(w.winid) then
+                pcall(api.nvim_win_close, w.winid, true)
+            end
+            w.winid = nil
+        end
+        error(err, 0)
+    end
+end
+
+---@private
+---`relayout`'s work, which may raise partway.
+function M.place(windows, config, init_winid, status_rows, layout)
     for _, w in pairs(windows) do
         if w.winid and api.nvim_win_is_valid(w.winid) then
             api.nvim_win_close(w.winid, true)
@@ -123,8 +143,7 @@ function M.relayout(windows, config, init_winid, status_rows, layout)
     -- The outer frame is the grid's first window.
     windows[fw].winid = outer
 
-    -- Disable equalisation while we subdivide, then restore it.
-    local old_equalalways = vim.o.equalalways
+    -- No equalisation while the frame is divided: `relayout` puts the option back.
     vim.o.equalalways = false
     create_layout(layout, outer, vertical)
 
@@ -135,21 +154,11 @@ function M.relayout(windows, config, init_winid, status_rows, layout)
         api.nvim_win_set_height(st, status_rows)
         vim.wo[st].winfixheight = true
     end
-    vim.o.equalalways = old_equalalways
 
     -- Apply selector/detail window options.
     for name, w in pairs(windows) do
         if w.winid and api.nvim_win_is_valid(w.winid) then
-            local selector = name == "tc"
-            local ui = config.runner_ui
-            -- Spelled out rather than with `and`/`or`: a selector option set to `false`
-            -- would fall through to the detail panes' value.
-            if selector then
-                vim.wo[w.winid].number, vim.wo[w.winid].relativenumber = ui.selector_show_nu, ui.selector_show_rnu
-            else
-                vim.wo[w.winid].number, vim.wo[w.winid].relativenumber = ui.show_nu, ui.show_rnu
-            end
-            vim.wo[w.winid].spell = false
+            require("tuna.runner_ui.layout").window_options(w.winid, name, config)
             vim.wo[w.winid].winfixbuf = true
         end
     end

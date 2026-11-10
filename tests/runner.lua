@@ -472,6 +472,29 @@ local function board(interface, bad_layout)
     end
 end
 
+-- An editor too small for the splits draws the board as floats instead of raising Vim's
+-- `E36`, says so once, and leaves `equalalways`, switched off while splits are made, as it was.
+do
+    local columns, lines, equalalways = vim.o.columns, vim.o.lines, vim.o.equalalways
+    vim.o.columns, vim.o.lines, vim.o.equalalways = 40, 12, true
+    local ok, br, ui, _, _, done = pcall(board, "split")
+    t.ok("a board asked for as splits opens in an editor too small for them", ok, br)
+    if ok then
+        local said = done()
+        local floats = 0
+        for _, w in pairs(ui.windows) do
+            if w.winid and vim.api.nvim_win_is_valid(w.winid) and vim.api.nvim_win_get_config(w.winid).relative ~= "" then
+                floats = floats + 1
+            end
+        end
+        t.ok("as floats", ui.kind == "popup" and floats >= 2, { ui.kind, floats })
+        t.ok("said once", #said == 1 and said[1]:find("not enough room", 1, true) ~= nil, said)
+        br:delete_ui()
+    end
+    t.eq("with equalalways as it was", vim.o.equalalways, true)
+    vim.o.columns, vim.o.lines, vim.o.equalalways = columns, lines, equalalways
+end
+
 t.write(dir, "checker.cpp", "int main() {}\n")
 -- Text to be read wraps, at word boundaries and keeping its indent: the Errors pane on a
 -- testcase row and every pane on the build step, which holds compiler output. The Output,

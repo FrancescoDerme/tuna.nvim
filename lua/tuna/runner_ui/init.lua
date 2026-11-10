@@ -115,7 +115,7 @@ end
 ---@param n integer
 ---@return string
 local function first_lines(text, n)
-    local at = 0
+    local at = 0 ---@type integer?
     for _ = 1, n do
         at = text:find("\n", at + 1, true)
         if not at then
@@ -1668,7 +1668,20 @@ function RunnerUI:lay_out(idx)
     -- the user closing the UI, and the cursor events they raise are not a move by hand. The
     -- flag outlives the call by a tick, which is when those events are delivered.
     self.relayouting = true
-    self.interface.relayout(self.windows, self.config, self.restore_winid, math.max(1, #self:status_lines()), grid)
+    local status_rows = math.max(1, #self:status_lines())
+    local placed, why = pcall(self.interface.relayout, self.windows, self.config, self.restore_winid, status_rows, grid)
+    if not placed then
+        -- Splits need room Vim will not make (`E36`), where floats tile any size: the board
+        -- is drawn as floats from here on, said once, with the floats' own grid.
+        if self.kind ~= "split" then
+            error(why, 0)
+        end
+        utils.notify("not enough room for the split runner ui, showing it as floats.", "WARN")
+        self.kind, self.interface = "popup", require("tuna.runner_ui.popup")
+        grid = self:grid(row)
+        self.drawn_layout = grid
+        self.interface.relayout(self.windows, self.config, self.restore_winid, status_rows, grid)
+    end
     local text = self:text_panes(row)
     for name, w in pairs(self.windows) do
         if w.winid and api.nvim_win_is_valid(w.winid) then
@@ -1725,7 +1738,9 @@ function RunnerUI:redraw_grid()
     if self.zoom_winid then
         local was = self.zoomed
         self:unzoom()
-        self:zoom(was)
+        if was then
+            self:zoom(was)
+        end
     end
     self.update_windows = true
     self:update_ui()

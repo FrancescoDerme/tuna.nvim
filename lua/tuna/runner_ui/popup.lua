@@ -100,16 +100,7 @@ local function draw_pane(w, name, config, s, p)
         border_highlight = config.floating_border_highlight,
         title = w.title,
     })
-    local selector = name == "tc"
-    local ui = config.runner_ui
-    -- Spelled out rather than with `and`/`or`: a selector option set to `false` would
-    -- fall through to the detail panes' value.
-    if selector then
-        vim.wo[w.winid].number, vim.wo[w.winid].relativenumber = ui.selector_show_nu, ui.selector_show_rnu
-    else
-        vim.wo[w.winid].number, vim.wo[w.winid].relativenumber = ui.show_nu, ui.show_rnu
-    end
-    vim.wo[w.winid].spell = false
+    require("tuna.runner_ui.layout").window_options(w.winid, name, config)
 end
 
 ---@param config table
