@@ -427,6 +427,11 @@ t.eq("a resize keeps the stack", resized.Problems.row, resized.Contests.row + re
 t.eq("and the selection", api.nvim_win_get_cursor(resized.Problems.win)[1], 40)
 press("<Esc>")
 
+-- A column is as wide as its title takes on screen, in cells and not bytes.
+widgets.panels({ { title = string.rep("é", 20), items = { "1" } } })
+t.eq("a title of two-byte letters is measured in cells", board()[string.rep("é", 20)].width, 20 + 4 + 2)
+press("<Esc>")
+
 --------------------------------------------------------------------------------
 -- The menu itself: a free-standing banner over its lists
 --------------------------------------------------------------------------------

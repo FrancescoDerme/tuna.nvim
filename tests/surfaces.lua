@@ -1216,6 +1216,52 @@ do
     vim.o.columns, vim.o.lines = columns, lines
 end
 
+--------------------------------------------------------------------------------
+-- A widget opened over an open one of its kind dismisses it: the first one's caller
+-- hears `on_close`, as for any other dismissal, and no window of it is left behind.
+--------------------------------------------------------------------------------
+do
+    local heard = {}
+    local function hear(what)
+        return function()
+            heard[#heard + 1] = what
+        end
+    end
+    local openers = {
+        menu = function(tag)
+            widgets.menu({ "a", "b" }, tag, nil, nil, hear(tag))
+        end,
+        input = function(tag)
+            widgets.input(tag, "", nil, hear(tag))
+        end,
+        form = function(tag)
+            widgets.form({ { title = tag, items = { "1", "2" } } }, nil, nil, hear(tag))
+        end,
+        panels = function(tag)
+            widgets.panels({ { title = tag, items = { "1" } } }, nil, nil, hear(tag))
+        end,
+    }
+    for kind, open in pairs(openers) do
+        heard = {}
+        open("first")
+        open("second")
+        ok(kind .. ": the one replaced hears on_close, once", vim.deep_equal(heard, { "first" }), vim.inspect(heard))
+        ok(kind .. ": and its window is gone", #floats() == 1, #floats())
+        close_layer(80)
+        ok(kind .. ": the second is dismissed as usual", vim.deep_equal(heard, { "first", "second" }), vim.inspect(heard))
+    end
+
+    -- An `on_close` that asks again must not leave its question orphaned under the new one.
+    heard = {}
+    widgets.menu({ "a" }, "first", nil, nil, function()
+        widgets.menu({ "b" }, "asked again", nil, nil, hear("asked again"))
+    end)
+    widgets.menu({ "c" }, "second", nil, nil, hear("second"))
+    ok("a menu its on_close opened gives way to the new one", #floats() == 1, #floats())
+    close_layer(80)
+    ok("and only the new one is left to dismiss", vim.deep_equal(heard, { "second" }), vim.inspect(heard))
+end
+
 vim.fn.delete(dir, "rf")
 print(string.format("\n%d checks, %d failures", checks, failures))
 if failures > 0 then

@@ -77,10 +77,10 @@ local function open_float(bufnr, enter, opts)
         api.nvim_set_option_value("cursorline", opts.cursorline, { scope = "local", win = winid })
     end
     -- Wiped when its window closes: every widget creates fresh buffers on every open
-    -- and closes only its windows, so without this each prompt of a long session left
-    -- a hidden `tuna://widget` buffer (and its buffer-local autocmds) behind for good
-    -- — a `:Tuna clean` pass over thirty files leaked sixty of them. Nothing reads a
-    -- widget buffer after its window is gone, so there is nothing to keep.
+    -- and closes only its windows, so without this each prompt of a long session would
+    -- leave a hidden `tuna://widget` buffer (and its buffer-local autocmds) behind for
+    -- good. Nothing reads a widget buffer after its window is gone, so there is nothing
+    -- to keep.
     vim.bo[bufnr].bufhidden = "wipe"
     -- A list is read by moving through it, never edited, so the keys that would try are
     -- made inert here rather than left to raise `E21` a keystroke later. Run before the
@@ -97,6 +97,27 @@ end
 local function close_win(winid)
     if winid and api.nvim_win_is_valid(winid) then
         api.nvim_win_close(winid, true)
+    end
+end
+
+---Dismiss the open instance of a widget that another is about to take the place of. Each
+---widget is one singleton, so the state the new one writes is the state the open one's
+---windows are known by: they are closed first, and the open one's `on_close` runs, as for
+---any other dismissal, so a caller that must continue (download's queue) is not left
+---waiting on a question that is gone. A widget `on_close` opened in its turn gives way too.
+---@param widget { ui_visible: boolean, on_close: fun()? }
+---@param take_down fun() closes the widget's windows without it counting as a dismissal
+local function replace(widget, take_down)
+    take_down()
+    widget.ui_visible = false
+    local on_close = widget.on_close
+    widget.on_close = nil
+    if on_close then
+        on_close()
+    end
+    if widget.ui_visible then
+        take_down()
+        widget.ui_visible = false
     end
 end
 
@@ -159,8 +180,8 @@ end
 --     from insert mode says so once (`cancel_keys.insert = { "<Esc>" }`) and every
 --     widget follows. Nothing is filtered out behind their back; the two-press default
 --     is a default, not a rule.
---   * A widget adds keys of its own on top (`q`/`Q` on the choosers, `<C-q>` while
---     editing a testcase) — its own list extends the shared one rather than replacing
+--   * A widget adds keys of its own on top (`q`/`Q` on the choosers and the
+--     testcase editor) — its own list extends the shared one rather than replacing
 --     it, which is what keeps the widgets consistent with each other.
 --
 -- Worth knowing when configuring: `<C-c>` cancels from normal mode, but listing it
@@ -310,12 +331,11 @@ function M.input(title, default_text, on_submit, on_close)
         close_win(input.winid)
     else
         if input.ui_visible then
-            -- Opened over an open prompt: repointing the singleton would orphan the
-            -- old window (see the menu).
-            input.ui_visible = false
-            input.skip_on_close = true
-            close_win(input.winid)
-            input.skip_on_close = false
+            replace(input, function()
+                input.skip_on_close = true
+                close_win(input.winid)
+                input.skip_on_close = false
+            end)
         end
         input.title = title
         input.default_text = default_text or ""
@@ -470,8 +490,8 @@ function M.editor(bufnr, tcnum, input_content, output_content, callback, restore
         editor.skip_close = false
     else
         if editor.ui_visible then
-            -- Opened over an open editor: repointing the singleton would orphan the
-            -- old windows (see the menu).
+            -- Opened over an open editor: the singleton is about to be repointed, and
+            -- the windows it points at now would be left open with nothing knowing them.
             editor.ui_visible = false
             close_win(editor.input_win)
             close_win(editor.output_win)
@@ -590,7 +610,7 @@ function M.editor(bufnr, tcnum, input_content, output_content, callback, restore
     -- move between any other panes: left to Input, right to Output, in normal and insert
     -- mode alike. Up and down have no pane to go to.
     local sw = cfg.switch_window_keys or {}
-    local function focus(win)
+    local function go_to(win)
         return function()
             if api.nvim_win_is_valid(win) then
                 api.nvim_set_current_win(win)
@@ -598,8 +618,8 @@ function M.editor(bufnr, tcnum, input_content, output_content, callback, restore
         end
     end
     for _, b in ipairs({ editor.input_buf, editor.output_buf }) do
-        map_keys(sw[1], { "n", "i" }, b, focus(editor.input_win))
-        map_keys(sw[4], { "n", "i" }, b, focus(editor.output_win))
+        map_keys(sw[1], { "n", "i" }, b, go_to(editor.input_win))
+        map_keys(sw[4], { "n", "i" }, b, go_to(editor.output_win))
     end
 
     ---Close, asking first when the panes hold text not saved, as the runner UI does: the
@@ -875,10 +895,7 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, opts)
             return
         end
         if menu.ui_visible then
-            -- A menu opened over a menu: the singleton state is about to be
-            -- repointed, and the windows it points at now would be left open with
-            -- nothing left knowing about them.
-            take_down()
+            replace(menu, take_down)
         end
         menu.id = menu.id + 1
         menu.items = items
@@ -1154,7 +1171,7 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, opts)
     else
         -- Display width, not byte length: a multibyte title (a problem name in a
         -- `already exists` prompt) is fewer cells than bytes, and sizing by bytes
-        -- made such floats visibly too wide.
+        -- would make such floats visibly too wide.
         width = widest_item()
         for _, d in ipairs(shown) do
             width = math.max(width, api.nvim_strwidth(d.title or "") + 4)
@@ -1271,8 +1288,8 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, opts)
             local total = (nt and (nt_h + PANE_STEP) or 0) + (sr and (1 + PANE_STEP) or 0) + used + stacked
             -- A bordered float's `row` is the top of its *footprint* — the border is drawn
             -- there, content one row below — so a stack of `total` rows starting at `first`
-            -- ends exactly at `first + total - 1`, and no offset is wanted. (Adding one
-            -- pushed the bottom border onto the statusline.)
+            -- ends exactly at `first + total - 1`, and no offset is wanted: one more
+            -- would push the bottom border onto the statusline.
             local top = band_row + math.max(0, math.floor((band_h - total) / 2))
             nt_row = nt and top or nil
             sr_row = sr and (top + (nt and (nt_h + PANE_STEP) or 0)) or nil
@@ -1924,12 +1941,13 @@ function M.form(sections, on_submit, restore_winid, on_close)
             return
         end
         if form.ui_visible then
-            -- Opened over an open form: repointing the singleton would orphan the
-            -- old windows (see the menu).
-            form.skip_close = true
-            for _, w in ipairs(form.wins or {}) do
-                close_win(w)
-            end
+            replace(form, function()
+                form.skip_close = true
+                for _, w in ipairs(form.wins or {}) do
+                    close_win(w)
+                end
+                form.skip_close = false
+            end)
         end
         form.sections = {}
         for _, s in ipairs(sections) do
@@ -2219,7 +2237,7 @@ end
 
 ---@class tuna.PanelsWidget
 ---@field ui_visible boolean
----@field sections { title: string, items: string[], highlights: table[]?, format: function?, column: integer, sel: integer }[]
+---@field sections { title: string, items: string[], highlights: table[]?, format: function?, hint: boolean?, column: integer, sel: integer }[]
 ---@field place { column: integer, top: integer }[] where each list was drawn, for moving focus
 ---@field wins integer[]
 ---@field bufs integer[]
@@ -2263,13 +2281,14 @@ function M.panels(sections, on_choice, restore_winid, on_close, header, keys)
             return
         end
         if panels.ui_visible then
-            -- Opened over an open board: repointing the singleton would orphan the
-            -- old windows (see the menu).
-            panels.skip_close = true
-            close_win(panels.header_win)
-            for _, w in ipairs(panels.wins or {}) do
-                close_win(w)
-            end
+            replace(panels, function()
+                panels.skip_close = true
+                close_win(panels.header_win)
+                for _, w in ipairs(panels.wins or {}) do
+                    close_win(w)
+                end
+                panels.skip_close = false
+            end)
         end
         panels.sections = {}
         for _, sec in ipairs(sections) do
@@ -2326,7 +2345,7 @@ function M.panels(sections, on_choice, restore_winid, on_close, header, keys)
             local sec = panels.sections[i]
             lay_out(sec, nil)
             fits[c] = fits[c] and sec.format ~= nil
-            w = math.max(w, #(sec.title or "") + 4)
+            w = math.max(w, api.nvim_strwidth(sec.title or "") + 4)
             for _, it in ipairs(sec.items) do
                 w = math.max(w, api.nvim_strwidth(it))
             end

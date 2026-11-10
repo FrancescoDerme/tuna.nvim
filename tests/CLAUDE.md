@@ -42,7 +42,9 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     closing one pane, or a notice, closing the menu, a readout pane passed over up, down and
     across and left by the pane keys, the user's cursorline on the list always and on a pane
     only while it is read), and the editor rebuilt by a resize in the pane, cursor and insert
-    mode it was in, and saving with `:w`/`:wq` and asking before an unsaved edit is closed away;
+    mode it was in, and saving with `:w`/`:wq` and asking before an unsaved edit is closed away,
+    and a widget opened over an open one of its kind dismissing it, `on_close` heard once and
+    no window left, one its `on_close` opened included;
   - `menu.lua`: the contest summary over both layouts, counting current judge verdicts only, a
     problem counted once by the best of its versions whichever was opened last, a
     problem's judge verdict beating its local one and either lapsing with an edit, which rows a

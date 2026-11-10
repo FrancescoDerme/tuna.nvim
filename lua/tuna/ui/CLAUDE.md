@@ -216,8 +216,9 @@ specific Vim error about a buffer the user never opened.
   and seven tenths of the editor), or it would resize at every step. `input` is half the
   editor, room for a path, whatever its title.
 - Widgets are module singletons: `resize_widgets()` rebuilds them (with a `skip_close` guard),
-  opening one over an existing instance closes the old windows, and buffers use
-  `bufhidden = wipe`.
+  opening one over an open instance dismisses that one (`replace`: its windows closed and
+  its `on_close` run, so a caller that must continue is never left waiting; the editor has
+  no `on_close`, its windows are closed), and buffers use `bufhidden = wipe`.
 - `open_float` sets what every widget float needs: `cursorline` with local scope (so the global
   value never leaks), `wrap`, `keep_scrolloff`. `step_keys` turns `switch_window_keys` into the
   next/previous keys of stacked panes (the form's sections; a menu's stacked panes walk the same

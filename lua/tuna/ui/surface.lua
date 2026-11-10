@@ -434,6 +434,7 @@ end
 ---second window would trigger the handler that is closing it.
 ---@param wins integer[] the windows that belong together
 ---@param on_close fun()? what to do instead of just closing the rest
+---@return fun() close_all closes them, or runs `on_close`, once
 function M.group(wins, on_close)
     local closing = false
     local function close_all()
