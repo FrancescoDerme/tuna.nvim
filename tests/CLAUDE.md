@@ -148,7 +148,8 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     connected, and what is stored (an empty answer kept, no file refused, a typed `~` path,
     the solution's template filled in, the problem recorded as the file's own, tuna's starter
     with none configured, a scratch folded in under the header of the template used, `sync` storing one task as a
-    problem and several as a contest);
+    problem and several as a contest and letting its scratch go when dismissed, and a
+    question of the download's replaced by another menu releasing the queue);
   - `startup.lua`: what a session that never uses tuna pays and that it works without `setup()`:
     `tuna` alone loaded at startup with `:Tuna` and the highlight groups defined, a verdict
     restored for the first file read (before anything loads `config`), entering or writing any
@@ -157,7 +158,9 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
   - `testcases.lua`, `compare.lua`, `judges.lua`, `clean.lua`, `submit.lua`: unit tests of pure
     rules (`compare.lua` also: an unknown method reported once, diff marks following the verdict
     and marking a token or character missing where it is missing, a checker that did not build
-    giving no verdict and no notification; `submit.lua` also: an edit hiding a shown verdict and
+    giving no verdict and no notification; `submit.lua` also: a credential blanked by its name in every shape a pair is
+    written in, an edit while a new submission is watched leaving the watch alone, a verdict
+    read after pages of redrawn frames with the URL printed before them, an edit hiding a shown verdict and
     keeping it stored, a write of the source submitted bringing it back, and the problem a
     file is a solution of: its own URL and mirror, a second attempt's the folder's, none in a
     folder of several, outliving its file, and recorded as the file's own by a submit, and

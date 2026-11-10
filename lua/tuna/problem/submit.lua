@@ -721,6 +721,14 @@ local function arm_invalidation(bufnr)
     })
 end
 
+---Take back what `arm_invalidation` armed: a submission started now replaces the verdict it
+---was armed for, and its edit must not be taken for that verdict going stale, which would
+---stop the watch (`M.clear`) of a submission already made.
+---@param bufnr integer
+local function disarm_invalidation(bufnr)
+    pcall(vim.api.nvim_del_augroup_by_name, "TunaSubmitInvalidate_" .. bufnr)
+end
+
 ---Whether the current (or given) buffer has a submit status to show (lualine `cond`).
 ---@param bufnr integer?
 ---@return boolean
@@ -855,24 +863,32 @@ local function strip_ansi(s)
     return s
 end
 
--- Query parameters whose *value* must never reach a notification. The Codeforces
--- API signs every request, so a submit tool that crashes mid-call dumps the URL it
--- was calling — the user's `apiKey` and `apiSig` with it — into its panic message,
--- and from there into a message the user may well be screen-sharing. Redacted by
--- parameter *name* rather than by the shape of the value: a credential is whatever
--- the query calls one, and guessing from entropy would miss as often as it fired.
-local SECRET_PARAMS = {
-    apikey = true,
-    apisig = true,
-    auth = true,
-    cookie = true,
-    password = true,
-    passwd = true,
-    secret = true,
-    session = true,
-    sessionid = true,
-    token = true,
-}
+-- Names whose *value* must never reach a notification. The Codeforces API signs every
+-- request, so a submit tool that crashes mid-call dumps the URL it was calling — the
+-- user's `apiKey` and `apiSig` with it — into its panic message, and from there into a
+-- message the user may well be screen-sharing. Redacted by *name* rather than by the shape
+-- of the value: a credential is whatever its name calls one, and guessing from entropy
+-- would miss as often as it fired. A name counts when it holds one of these words, so
+-- `access_token`, `api_key` and `JSESSIONID` are caught with `token`: blanking a value
+-- that was no secret costs a word of an error message, and showing one that was cannot
+-- be taken back.
+local SECRET_WORDS = { "auth", "bearer", "cookie", "credential", "csrf", "key", "pass", "secret", "session", "sha1", "sig", "token" }
+
+-- What an `Authorization` header says before its credential.
+local AUTH_SCHEMES = { basic = true, bearer = true, digest = true, token = true }
+
+---Whether `name` names a credential.
+---@param name string
+---@return boolean
+local function names_secret(name)
+    name = name:lower()
+    for _, word in ipairs(SECRET_WORDS) do
+        if name:find(word, 1, true) then
+            return true
+        end
+    end
+    return false
+end
 
 -- The tool could not reach the judge. Matched on the transport's own words —
 -- these are what a Rust/Go/Python HTTP client says with the network down — since
@@ -899,20 +915,54 @@ local CRASH_HINTS = { "panicked at", "traceback (most recent call last)", "fatal
 -- this length what is being shown is a dump. `submit.log_file` keeps the whole thing.
 local MAX_TAIL = 160
 
----Blank out the value of any credential-bearing query parameter in `s`.
+---Blank out the value of everything in `s` whose name names a credential
+---(`names_secret`), in each shape a tool's output writes a pair in:
 ---
----By parameter *name*, not by the shape of the value: a credential is whatever the
----query calls one. A value stops at `?` as well as `&`, since a `?` begins a query —
----without that the greedy value of an outer parameter (`url=https://x?apiKey=…`)
----swallowed the credential that followed it, leaving it in the message.
+---  * a quoted value, `"password": "…"` or `password = '…'`, as JSON and a debug dump do;
+---  * a header, `Cookie: …` to the end of its line, since every pair in it is a
+---    credential whatever it is called, and `Authorization: Bearer …` or `password: …`
+---    by the word, so the rest of a sentence such as `invalid token: log in again` stays;
+---  * a parameter, `apiKey=…`. Its value stops at `?` as well as `&`, since a `?` begins
+---    a query: the greedy value of an outer parameter (`url=https://x?apiKey=…`) would
+---    otherwise swallow the credential that follows it and leave it in the message.
 ---@param s string
 ---@return string
 local function redact(s)
-    return (s:gsub("([%w_%-]+)=([^&%s\"'}?]+)", function(key, _)
-        if SECRET_PARAMS[key:lower()] then
-            return key .. "=<redacted>"
+    local function blank(keep)
+        return function(name, ...)
+            if names_secret(name) then
+                return keep(name, ...)
+            end
+        end
+    end
+    -- "name": "value", then name: "value".
+    s = s:gsub("([\"'])([%w_%-]+)%1(%s*[:=]%s*)([\"']).-%4", function(q, name, sep, vq)
+        if names_secret(name) then
+            return q .. name .. q .. sep .. vq .. "<redacted>" .. vq
+        end
+    end)
+    s = s:gsub("([%w_%-]+)(%s*[:=]%s*)([\"']).-%3", blank(function(name, sep, vq)
+        return name .. sep .. vq .. "<redacted>" .. vq
+    end))
+    -- A cookie header, whole.
+    s = s:gsub("([%w_%-]*[Cc][Oo][Oo][Kk][Ii][Ee][%w_%-]*)(:[ \t]*)[^\r\n]+", function(name, sep)
+        return name .. sep .. "<redacted>"
+    end)
+    -- name: scheme value, then name: value.
+    s = s:gsub("([%w_%-]+)(:[ \t]*)(%a+)([ \t]+)(%S+)", blank(function(name, sep, scheme, gap)
+        if AUTH_SCHEMES[scheme:lower()] then
+            return name .. sep .. scheme .. gap .. "<redacted>"
         end
     end))
+    s = s:gsub("([%w_%-]+)(:[ \t]*)([^%s\"'<]%S*)", blank(function(name, sep, value)
+        if not AUTH_SCHEMES[value:lower()] then
+            return name .. sep .. "<redacted>"
+        end
+    end))
+    -- name=value.
+    return (s:gsub("([%w_%-]+)=([^&%s\"'};,?<]+)", blank(function(name)
+        return name .. "=<redacted>"
+    end)))
 end
 
 ---Clamp `s` to `MAX_TAIL` characters (not bytes, so a multi-byte character is never
@@ -1148,6 +1198,10 @@ local function run_watch(ctx, cmd)
             previous:kill("sigterm")
         end)
     end
+    -- The verdict being replaced no longer has anything to go stale: an edit made while
+    -- this submission is watched leaves the watch alone, and its verdict is recorded
+    -- against the source submitted whatever the buffer holds by then.
+    disarm_invalidation(ctx.bufnr)
 
     -- The file was just saved by M.context, so this hash identifies the exact source the
     -- verdict belongs to; persist it so a later edit invalidates it.

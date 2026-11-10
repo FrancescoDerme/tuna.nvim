@@ -19,6 +19,29 @@ t.has("even behind an outer parameter", s.redact("url=https://x?apiKey=abc123&y=
 t.ok("with the secret gone", not s.redact("url=https://x?apiKey=abc123"):find("abc123"))
 t.has("apiSig too", s.redact("apiSig=deadbeef"), "apiSig=<redacted>")
 t.has("and a token", s.redact("token=hunter2"), "token=<redacted>")
+-- A name holding a credential's word names one, in every shape a tool writes a pair in.
+for _, leak in ipairs({
+    "GET /api?access_token=SECRET&x=1",
+    "csrf_token=SECRET",
+    "api_key=SECRET",
+    "REVEL_SESSION=SECRET",
+    "X-User-Sha1=SECRET",
+    "Cookie: JSESSIONID=SECRET; 39ce7=SECRET",
+    "Set-Cookie: 39ce7=SECRET; Path=/",
+    "Authorization: Bearer SECRET",
+    "authorization: basic SECRET",
+    "password: SECRET",
+    '{"password":"SECRET","handle":"me"}',
+    "password = 'SECRET SECRET'",
+    'headers: {"cookie": "a=SECRET; b=SECRET"}',
+}) do
+    t.ok("no credential is left in: " .. leak:gsub("SECRET", "…"), not s.redact(leak):find("SECRET"), s.redact(leak))
+end
+t.eq("a header's scheme is kept", s.redact("Authorization: Bearer abc"), "Authorization: Bearer <redacted>")
+t.eq("a cookie header goes whole, and only its line", s.redact("Cookie: a=b; c=d\nnext"), "Cookie: <redacted>\nnext")
+t.eq("a pair beside a credential keeps its value", s.redact('{"password":"x","handle":"me"}'), '{"password":"<redacted>","handle":"me"}')
+t.eq("a sentence after a name loses a word, not its sense", s.redact("invalid token: please log in again"), "invalid token: <redacted> log in again")
+t.eq("a URL is no header", s.redact("https://codeforces.com/contest/1/problem/A failed: limit"), "https://codeforces.com/contest/1/problem/A failed: limit")
 t.has("the name is matched case-insensitively", s.redact("APIKEY=abc"), "<redacted>")
 t.has("an ordinary parameter is left alone", s.redact("contestId=2248"), "contestId=2248")
 t.ok("the secret itself is gone", not s.redact("apiKey=s3cret&handle=me"):find("s3cret"))
@@ -373,6 +396,34 @@ do
     t.eq("a NUL stored in one is no failure", submit.verdict_for(path).text, "accepted x")
     t.write(dir, ".tuna.json", vim.json.encode({ submit = { ["Main.cpp"] = { state = "rejected", text = "Wrong Answer", hash = hash } } }))
     t.eq("as it does read from the path alone", submit.verdict_for(path).text, "wrong answer")
+    -- An edit made while a submission is watched leaves the watch alone, though an earlier
+    -- verdict armed the buffer to drop its own on the first edit.
+    submit.clear(buf)
+    submit.restore(buf)
+    t.has("a stored verdict is shown, armed to go with an edit", submit.status(buf), "wrong answer")
+    s.run_watch({ filepath = path, bufnr = buf, cfg = cfg, scfg = cfg.submit }, "sleep 0.3; printf 'Accepted'")
+    vim.api.nvim_exec_autocmds("TextChanged", { buffer = buf })
+    t.has("an edit while a new submission is watched does not stop the watch", submit.status(buf), "submitting")
+    vim.wait(3000, function()
+        return (submit.state[path] or {}).state == "accepted"
+    end, 10)
+    t.eq("whose verdict still arrives", (submit.state[path] or {}).state, "accepted")
+    vim.api.nvim_exec_autocmds("TextChanged", { buffer = buf })
+    t.eq("and goes with the next edit", submit.status(buf), "")
+
+    -- A tool redrawing its status for a long time is read by its latest output alone: the
+    -- submission's URL, printed first, is kept, and the verdict at the end is found.
+    s.run_watch(
+        { filepath = path, bufnr = buf, cfg = cfg, scfg = cfg.submit },
+        "printf 'Submission url: https://judge.example/1\\n'; i=0; while [ $i -lt 400 ]; do printf 'Running on test %d                              \\t' $i; i=$((i+1)); done; sleep 0.1; printf 'Wrong answer on test 7'"
+    )
+    vim.wait(5000, function()
+        return (submit.state[path] or {}).state == "rejected"
+    end, 10)
+    t.eq("a verdict after pages of frames is read", { (submit.state[path] or {}).state, (submit.state[path] or {}).text }, { "rejected", "wrong answer on test 7" })
+    t.eq("with the URL from before them", (submit.state[path] or {}).url, "https://judge.example/1")
+    submit.clear(buf)
+
     -- The sidecar travels with the folder and may be edited by hand.
     for _, text in ipairs({ "null", "3" }) do
         t.write(dir, ".tuna.json", ('{"submit":{"Main.cpp":{"state":"accepted","text":%s,"hash":"%s"}}}'):format(text, hash))

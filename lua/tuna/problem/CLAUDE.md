@@ -143,6 +143,11 @@ submissions. The rules that hold everywhere are in the root `CLAUDE.md`.
   task), and `store_downloaded_task` returns which one, for `scratch.absorb`. No warning when
   a configured template is missing: what is written then is tuna's starter, whose header
   says where templates are set. `eval_path` expands `~` on evaluated paths.
+- Mode `sync` (`:Tuna download sync`) is one download stored as what arrived, one task a
+  problem and several a contest. The scratch it armed (`scratch.pending`) belongs to that
+  download alone: `disarm_scratch` lets it go when the sync is stopped before anything
+  arrives and when its batch is finished, however it ended, or a later download would be
+  overwritten with it.
 - After writing, `cd_downloaded_problems`/`cd_downloaded_contests` (independent of
   `open_downloaded_*`) change directory via `recent.change_dir`. What was written is recorded in
   `recent`.
@@ -198,12 +203,22 @@ submissions. The rules that hold everywhere are in the root `CLAUDE.md`.
   - Exit with no verdict: `watch_outcome` decides on the exit code alone. Exit 0 clears the
     indicator; it never reports a failure. `expects_verdict = false` only disables parsing.
   - Failures: `failure_reason` checks `OFFLINE_HINTS` first, then `CRASH_HINTS`, then the
-    redacted, clamped `meaningful_tail`. A tool that printed its submission URL had submitted,
+    redacted, clamped `meaningful_tail`. `redact` goes by name (`names_secret`: a name
+    holding a word of `SECRET_WORDS`), over-blanking on purpose, in the three shapes a pair is
+    written in: `name=value`, a header (`Cookie:` whole, `Authorization: Bearer …` and
+    `password: …` by the word, so a sentence after `token:` keeps its sense) and a quoted
+    value. A tool that printed its submission URL had submitted,
     so a failure after that is a verdict lost, not a submission. Before that the two can't be
     told apart: a tool like `submitter` on Codeforces waits on a browser submission tuna can't
     see.
   - Jobs: one per file in `jobs[path]`. A new submit supersedes the old job, and callbacks check
-    they still own the slot. `watch_timeout` stops a hung poll; `M.clear` cancels.
+    they still own the slot. `watch_timeout` stops a hung poll; `M.clear` cancels. A new
+    submit also takes back the invalidation an earlier verdict armed (`disarm_invalidation`):
+    its edit calls `M.clear`, which would stop the watch of a submission already made.
+  - Each chunk is read with the last `SCAN_OVERLAP` bytes before it, never the whole output:
+    a tool redrawing its status prints for as long as the judge takes, and reading it all
+    again per frame grows with every frame. A final verdict earlier than that ended the
+    reading when it arrived, and the submission's URL is kept once seen.
 - Verdict state is per file (`M.state[path]`) and drives `status`/`status_hl`/`is_submitting`.
   Final verdicts persist in the sidecar with the SHA-256 of the submitted source, not its mtime,
   because a write that changes nothing (a `:w`, the save before a run) must not drop one.

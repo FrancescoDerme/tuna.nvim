@@ -65,8 +65,9 @@ library, contest navigation, a scratch file, an unused-file cleaner, a menu and
 - Async results land by **row identity and a token**, never by index: rows get rebuilt,
   renumbered and removed while children run.
 - A submit failure message must never carry credentials: it goes through `submit.redact`
-  (blanks `apiKey`, `apiSig`, `token`, `password`, `cookie`, `session`… by parameter name) and
-  is clamped to 160 characters.
+  (blanks the value of whatever is named as one, a name holding `key`, `sig`, `token`,
+  `pass`, `cookie`, `session`…, written as `name=value`, a `name: value` header or a quoted
+  pair) and is clamped to 160 characters.
 
 **Docs**
 - Three user docs are kept in step: `README.md` (what a beginner needs: install, quick start,
