@@ -170,8 +170,7 @@ end
 ---The effective `submit` config for a URL: `submit.judges[<judge>]` (a partial
 ---override table) shallow-merged over the base `submit`, so any field
 ---(`command`/`verdicts`/`languages`/`watch`/…) can be set per judge with the base as
----fallback. No matching override → the base config unchanged (so the default,
----single-tool setup behaves exactly as before).
+---fallback. No matching override → the base config unchanged.
 ---@param scfg table base `submit` config
 ---@param url string?
 ---@return table
@@ -1122,6 +1121,10 @@ local function scan_verdict(blob, scfg)
     return state, vim.fn.strcharpart(snippet, 0, 60)
 end
 
+-- How much of what a watched tool printed before a chunk is read again with it, so a word or
+-- an escape sequence cut between two chunks is still read whole.
+local SCAN_OVERLAP = 4096
+
 ---Run the submit command as a tracked async job, parsing stdout for the judge
 ---verdict and driving the per-buffer state. No terminal. On a run that never
 ---reaches a final verdict (login expired, crash, non-reporting tool) it lands in
@@ -1166,11 +1169,16 @@ local function run_watch(ctx, cmd)
             return -- terminal verdict already, or superseded/cleared by a newer submit
         end
         out_acc = out_acc .. data
-        url = strip_ansi(out_acc):match("[Ss]ubmission url:%s*(%S+)") or url
+        -- Only the end of the output is read: a tool redrawing its status prints for as long
+        -- as the judge takes, and reading all of it again for every frame would cost more
+        -- with each one. Nothing earlier can matter: a final verdict there ended the
+        -- reading when it arrived, and of pending ones the latest is shown.
+        local recent = out_acc:sub(-(#data + SCAN_OVERLAP))
+        url = strip_ansi(recent):match("[Ss]ubmission url:%s*(%S+)") or url
         if scfg.expects_verdict == false then
             return -- fire-and-forget tool: keep the "submitting …" flash, don't parse verdicts
         end
-        local state, seg = scan_verdict(out_acc, scfg)
+        local state, seg = scan_verdict(recent, scfg)
         -- Only push a state when it actually changed, so live redraw frames don't
         -- churn lualine (and the initial "submitting…" isn't overwritten by itself).
         local cur = M.state[path]
@@ -1355,14 +1363,13 @@ M.providers.command = function(ctx)
     if not cmd then
         return -- a malformed modifier; format_modifiers already said which
     end
-    local name = display_name(ctx) -- header/sidecar problem name if known, else the basename
-
     if scfg.watch then
         run_watch(ctx, cmd)
         return
     end
 
     M.run_terminal(cmd, scfg)
+    local name = display_name(ctx) -- header/sidecar problem name if known, else the basename
     -- Terminal path can't learn the verdict, so flash a pending state that clears.
     -- (No `vim.notify` here — like the watch path, the lualine indicator is enough.)
     set_state(ctx.filepath, "pending", "submitting " .. name, nil, scfg.status_time)

@@ -352,8 +352,45 @@ do
     t.has("several are said to be a contest", said[#said], "contest downloaded, 2 problems")
     t.eq("and stored as one", { vim.fn.filereadable(dir .. "/contest/A.cpp"), vim.fn.filereadable(dir .. "/contest/B.cpp") }, { 1, 1 })
     t.eq("with nothing written as a single problem", vim.fn.readdir(dir .. "/single"), { "One.cpp" })
+
+    -- The scratch a sync armed goes into that sync's download and no other: dismissed at
+    -- its prompt, or stopped before anything arrives, it is let go, so a later download is
+    -- not overwritten with it.
+    local scratch = require("tuna.workspace.scratch")
+    scratch.pending = { lines = { "scratch body" }, row = 1, bufnr = vim.api.nvim_create_buf(false, true) }
+    widgets.input = function(_, _, _, on_close)
+        on_close()
+    end
+    require("tuna.config").current_setup.downloaded_problems_prompt_path = true
+    d.make_handler("sync", false, nil, require("tuna.config").current_setup)({ task("Dismissed", 1) }, function() end)
+    t.eq("a sync dismissed at its prompt lets its scratch go", scratch.pending, nil)
     require("tuna").setup({})
 end
 widgets.menu, widgets.input = real_menu, real_input
+
+-- A question of the download's replaced by another menu is a dismissal: the queue is
+-- released, so later downloads are not left waiting on a float that is gone.
+do
+    local dir = t.tempdir()
+    t.write(dir, "Held.cpp", "old\n")
+    require("tuna").setup({
+        downloaded_problems_path = dir .. "/$(PROBLEM).$(FEXT)",
+        downloaded_problems_prompt_path = false,
+    })
+    local released = false
+    d.store_single_problem(
+        { name = "Held", group = "", url = "", tests = {}, languages = {}, batch = { id = "h", size = 1 } },
+        require("tuna.config").current_setup,
+        function()
+            released = true
+        end
+    )
+    t.eq("an existing problem is asked about, the queue held meanwhile", released, false)
+    widgets.menu({ "something else" }, "another question")
+    t.eq("another menu taking its place releases the queue", released, true)
+    t.eq("and writes nothing", vim.fn.readfile(dir .. "/Held.cpp"), { "old" })
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "x", false)
+    require("tuna").setup({})
+end
 
 t.report()

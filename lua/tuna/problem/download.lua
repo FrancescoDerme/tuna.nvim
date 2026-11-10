@@ -791,6 +791,7 @@ end
 ---@field port integer
 ---@field listener tuna.Listener
 ---@field processor tuna.BatchesSerialProcessor
+---@field received boolean? a one-download mode's download has arrived
 
 ---Current download state, or `nil` when not downloading.
 ---@type tuna.DownloadStatus?
@@ -832,11 +833,25 @@ function M.show_status()
     end
 end
 
+---Let go of the scratch `:Tuna download sync` armed, if it is still waiting: it goes into
+---that sync's download and no other, so one stopped, dismissed or stored without opening
+---anything leaves no scratch for a later download to be overwritten with.
+local function disarm_scratch()
+    local scratch = package.loaded["tuna.workspace.scratch"]
+    if scratch then
+        scratch.pending = nil
+    end
+end
+
 ---Stop downloading and close the listener.
 function M.stop_downloading()
     if rs then
         rs.listener:close()
         rs.processor:stop()
+        -- A sync stopped before anything arrived has nothing to fold its scratch into.
+        if rs.mode == "sync" and not rs.received then
+            disarm_scratch()
+        end
         rs = nil
     end
 end
@@ -860,7 +875,17 @@ local function make_handler(mode, notify_on_download, bufnr, cfg)
         -- One download and done. `sync` stores what the page pressed on sent: a problem's
         -- page sends that problem, a contest's every problem of it.
         return function(tasks, finished)
+            if rs then
+                rs.received = true
+            end
             M.stop_downloading()
+            if mode == "sync" then
+                local done = finished
+                finished = function()
+                    disarm_scratch()
+                    done()
+                end
+            end
             local contest = mode == "contest" or (mode == "sync" and #tasks > 1)
             if notify_on_download then
                 utils.notify(contest and ("contest downloaded, " .. #tasks .. " problems.") or "problem downloaded.", "INFO")
