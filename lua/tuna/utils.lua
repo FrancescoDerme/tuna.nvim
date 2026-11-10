@@ -26,6 +26,7 @@ end
 ---The derived group is (re)computed each call so it tracks colourscheme changes.
 ---@param winid integer
 ---@param hl string? highlight group whose foreground is used for the border
+---@param group string? the derived group's name, `TunaFloatBorder` unless given
 function M.set_border_highlight(winid, hl, group)
     hl = hl or "FloatBorder"
     -- One derived group per source highlight, so a window using an accent (the runner
@@ -180,15 +181,6 @@ function M.eval_string(filepath, str, tcnum)
     return M.format_modifiers(str, modifiers, filepath)
 end
 
----Like `eval_string`, but resolves the file path from a buffer.
----@param bufnr integer buffer number
----@param str string string to evaluate
----@param tcnum? integer|string testcase number for `$(TCNUM)`
----@return string? # evaluated string, or `nil` on failure
-function M.buf_eval_string(bufnr, str, tcnum)
-    return M.eval_string(vim.api.nvim_buf_get_name(bufnr), str, tcnum)
-end
-
 ---A command with the file modifiers in its exec and every arg expanded against `filepath`, or
 ---nil when one of them cannot be.
 ---@param filepath string
@@ -261,8 +253,9 @@ function M.ensure_directory(path)
     if M.directory_exists(path) then
         return true
     end
-    -- `mkdir(path, "p")` is the idiomatic "mkdir -p": create parents as needed.
-    vim.fn.mkdir(path, "p")
+    -- `mkdir(path, "p")` creates the parents as needed, and raises where it cannot (a
+    -- read-only parent, a file in the way), which is this function's `false`.
+    pcall(vim.fn.mkdir, path, "p")
     return M.directory_exists(path)
 end
 
@@ -295,8 +288,11 @@ function M.write_file(path, content)
     if not fd then
         return false, open_err
     end
-    vim.uv.fs_write(fd, content, 0)
+    local written, write_err = vim.uv.fs_write(fd, content, 0)
     vim.uv.fs_close(fd)
+    if written ~= #content then
+        return false, write_err or "short write"
+    end
     return true
 end
 

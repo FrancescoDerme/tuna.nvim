@@ -1,3 +1,5 @@
+-- tests/surfaces.lua
+--
 -- Conformance test for tuna's floating **surfaces** — every buffer/window the plugin
 -- puts in front of the user (the runner UI's panes, its zoom, message float and key
 -- legend, and every widget: menu, input, form, panels, testcase editor).
@@ -11,7 +13,7 @@
 --   * `modified` false         — an `acwrite` buffer left modified is an unsaved *file*:
 --     `:q` answers `E37`, quitting answers `E162`, naming a scratch buffer
 --   * writes handled           — a `nofile` buffer answers `:w` with `E382`, and its
---     `BufWriteCmd` never fires (verified), so a surface that wants `:w` must be
+--     `BufWriteCmd` never fires, so a surface that wants `:w` must be
 --     `acwrite`
 --   * read-only ⇒ inert        — a key that begins a change on an unmodifiable buffer
 --     ends in `E21` a keystroke later, from a mode the user never meant to enter

@@ -87,15 +87,14 @@ function M.configured_paths(cfg)
     return out
 end
 
----The modifiers a scaffold of `role` written at `target` fills: the file set, `$(ROLE)`,
+---The modifiers a scaffold of `role` fills: the file set, `$(ROLE)`,
 ---`$(FEXT)` (the language written, none when it is nil) and a problem's when one is known.
 ---@param role string
 ---@param ext string?
 ---@param cfg table
----@param target string
 ---@param task tuna.CCTask?
 ---@return tuna.Modifiers
-local function modifiers(role, ext, cfg, target, task)
+local function modifiers(role, ext, cfg, task)
     local mods = vim.tbl_extend("force", utils.file_format_modifiers, { ROLE = role })
     if task then
         mods = vim.tbl_extend("force", mods, require("tuna.problem.download").task_modifiers(task, ext, cfg))
@@ -174,7 +173,7 @@ local function find(role, cfg, target, ext, task, wild, cache)
         end
         return cache[pattern]
     end
-    local mods = modifiers(role, ext, cfg, target, task)
+    local mods = modifiers(role, ext, cfg, task)
     local out, seen, langs = {}, {}, {}
     local function add(path)
         if not seen[path] and for_language(path, ext) then
@@ -239,7 +238,7 @@ end
 ---@param task tuna.CCTask?
 ---@return string
 function M.render(template, role, ext, cfg, target, task)
-    local mods = modifiers(role, ext, cfg, target, task)
+    local mods = modifiers(role, ext, cfg, task)
     local text = utils.read_file(template) or ""
     if not task then
         local lines = vim.split(text, "\n", { plain = true })

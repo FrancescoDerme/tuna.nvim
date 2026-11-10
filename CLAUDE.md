@@ -203,7 +203,7 @@ tuna.nvim.json        package metadata
 
 **Modifiers.** There are two sets. The *file* set (`$(FNAME)`, `$(FNOEXT)`, `$(FEXT)`,
 `$(FABSPATH)`, `$(ABSDIR)`, `$(DIRNAME)`, `$(HOME)`, `$(CWD)`) resolves from a path via
-`utils.eval_string`/`buf_eval_string`, and a whole command through `utils.eval_command`. The
+`utils.eval_string`, and a whole command through `utils.eval_command`. The
 *download* set (`$(JUDGE)`, `$(CONTEST)`, `$(PROBLEM)`, `$(URL)`…) exists only for a
 downloaded task (`download.task_modifiers`).
 Template paths and text also take `$(ROLE)` (`scaffold.lua`). A template's *text* is filled by

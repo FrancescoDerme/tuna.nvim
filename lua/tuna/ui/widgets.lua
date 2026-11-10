@@ -1118,7 +1118,7 @@ function M.menu(items, title, on_choice, restore_winid, on_close, preview, opts)
     ---the last takes the rest. A list given fewer rows than items scrolls, and one left no row is
     ---not drawn, the lowest first and the selection's last.
     ---@param footprint integer
-    ---@return integer[] heights, 0 for a list not drawn
+    ---@return integer[] heights # 0 for a list not drawn
     local function list_heights(footprint)
         local heights = {}
         for k = 1, #lists do
@@ -2293,7 +2293,6 @@ function M.panels(sections, on_choice, restore_winid, on_close, header, keys)
 
     local cfg = config.get_buffer_config(api.nvim_get_current_buf())
     local vim_width = utils.get_ui_size()
-    local n = #panels.sections
 
     -- Columns left to right, each a stack of lists top to bottom.
     local col_ids, stacks = {}, {}

@@ -18,7 +18,6 @@
 
 local config = require("tuna.config")
 local utils = require("tuna.utils")
-local checker = require("tuna.run.checker")
 local testcases = require("tuna.problem.testcases")
 local tools = require("tuna.run.tools")
 local core = require("tuna.run.core")

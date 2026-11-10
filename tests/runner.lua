@@ -3,9 +3,9 @@
 -- A testcase may carry only an input or only an answer, and what a *row* holds has to
 -- survive that. Two rules, both invisible until they are wrong:
 --
---   * a missing input becomes an empty stdin, never `nil` — competitest crashed here,
---     the absent input going straight to the child and dying with "data must be string
---     or table of strings, got nil", so this checks the value at the point it is handed
+--   * a missing input becomes an empty stdin, never `nil`: an absent input
+--     handed straight to the child dies with "data must be string or table of
+--     strings, got nil", so this checks the value at the point it is handed
 --     to the process, not just at the point it is loaded;
 --   * an empty answer is `nil`, so a testcase with nothing to be wrong about is not
 --     judged against `""` and reported wrong.
@@ -1227,8 +1227,7 @@ t.eq("at the end of the line being composed", vim.api.nvim_win_get_cursor(live_p
     composing_line,
     #(vim.api.nvim_buf_get_lines(live_pane.bufnr, composing_line - 1, composing_line, false)[1] or ""),
 })
--- Insert mode itself needs a UI to enter, so that part is verified against a real session
--- rather than here.
+-- Insert mode itself needs a UI to enter, so that part is not checked here.
 vim.cmd("stopinsert")
 lr.sol_in = nil
 lr:kill_all_processes()

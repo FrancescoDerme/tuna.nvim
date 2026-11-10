@@ -139,7 +139,7 @@ local function expand_preset(prefix, scope, user)
     local out, groups = {}, {}
     for action, suffix in pairs(M.preset[scope]) do
         out[action] = prefix .. suffix
-        -- A two-character suffix is a group plus a key within it (`ta`, `dp`, `gc`);
+        -- A two-character suffix is a group plus a key within it (`dp`, `gc`);
         -- a one-character one sits directly under the prefix and has no group.
         if #suffix > 1 then
             groups[action] = prefix .. suffix:sub(1, 1)
@@ -187,7 +187,9 @@ end
 ---@param labels table<string, string>? short labels for keys whose which-key group
 ---  already names the subject (see `M.preset_labels`); the derived name is used for
 ---  anything not listed
+---@return string[] # the keys mapped
 local function set_maps(mapping_tbl, base_opts, labels)
+    local mapped = {}
     for action, lhs in pairs(mapping_tbl) do
         local rhs = M.actions[action]
         if rhs and lhs then
@@ -203,9 +205,11 @@ local function set_maps(mapping_tbl, base_opts, labels)
                     desc = label,
                 })
                 vim.keymap.set("n", key, "<cmd>" .. rhs .. "<cr>", opts)
+                mapped[#mapped + 1] = key
             end
         end
     end
+    return mapped
 end
 
 ---Warn once for any action name in `mapping_tbl` this module doesn't know.
@@ -265,14 +269,7 @@ function M.setup()
     -- Always-available maps: set immediately.
     if not vim.tbl_isempty(global) then
         warn_unknown(global, "global")
-        set_maps(global, {}, glabels)
-        for action, lhs in pairs(global) do
-            if M.actions[action] and lhs then
-                for _, key in ipairs(keys_of(lhs)) do
-                    applied_global[#applied_global + 1] = key
-                end
-            end
-        end
+        applied_global = set_maps(global, {}, glabels)
     end
 
     -- Buffer-local maps: applied per solution buffer via FileType.

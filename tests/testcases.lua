@@ -107,7 +107,7 @@ t.eq(
     tc.tc_directory("/home/someone/cp/a", src, { testcases_directory = "tests" }),
     "/home/someone/cp/a/tests/"
 )
--- competitest joined unconditionally, so an absolute path was unreachable.
+-- Joined unconditionally, an absolute path would be unreachable.
 t.eq(
     "an absolute path is used as-is",
     tc.tc_directory("/home/someone/cp/a", src, { testcases_directory = "/var/tc/$(DIRNAME)" }),
@@ -687,6 +687,22 @@ do
     press(":wq<CR>")
     t.eq("and a typed :wq closes at once", output_win(), nil)
     widgets.menu = real_menu
+end
+
+-- A file that cannot be written is the caller's to report, so the helpers answer `false`
+-- where the filesystem refuses: a file standing where a directory is wanted, a device with
+-- no room.
+do
+    local utils = require("tuna.utils")
+    local blocked = t.tempdir() .. "/afile"
+    utils.write_file(blocked, "x")
+    local ok_dir, made = pcall(utils.ensure_directory, blocked .. "/sub")
+    t.eq("a directory that cannot be made is false, not an error", { ok_dir, made }, { true, false })
+    local ok_write, wrote = pcall(utils.write_file, blocked .. "/sub/x.txt", "hi")
+    t.eq("and so is a file written under it", { ok_write, wrote }, { true, false })
+    if vim.uv.fs_stat("/dev/full") then
+        t.eq("a write the device refuses is not reported as done", (utils.write_file("/dev/full", "hi")), false)
+    end
 end
 
 t.report()

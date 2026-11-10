@@ -532,10 +532,11 @@ M.defaults = {
     --
     -- `preset` takes the whole ready-made set under a prefix of your choosing:
     --   keymaps = { preset = "<leader>t" }
-    -- giving <leader>tr run, <leader>tu show ui, <leader>tt{a,e,d} testcases,
-    -- <leader>ts submit, <leader>tn/tp next/previous problem, <leader>tm menu,
-    -- <leader>tw scratch + <leader>tds sync, and <leader>td{t,p,c} download
-    -- testcases/problem/contest (see keymaps.lua `M.preset`).
+    -- giving <leader>tr run, <leader>tu show ui, <leader>ts submit, <leader>tn/tp
+    -- next/previous problem, <leader>tb pin, <leader>tl library, <leader>tm menu,
+    -- <leader>tf find, <leader>tw scratch, <leader>td{t,p,c,s} download
+    -- testcases/problem/contest/sync and <leader>tg{p,c,j} go to the last problem, the
+    -- last contest, the judge (see keymaps.lua `M.preset`).
     --
     -- `mappings`/`global` map individual actions to a left-hand side (a string or a
     -- list of them). They work on their own, and layer over `preset` when both are
@@ -548,7 +549,7 @@ M.defaults = {
     -- Example:
     --   keymaps = {
     --     preset   = "<leader>t",
-    --     mappings = { run = "<leader><leader>", delete_testcase = false },
+    --     mappings = { run = "<leader><leader>", pin = false },
     --   }
     keymaps = {
         preset = false, -- false | prefix string, e.g. "<leader>t"
