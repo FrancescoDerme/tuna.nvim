@@ -537,16 +537,27 @@ function M.files.path_write(filepath, cfg, tctbl)
 end
 
 -- single_file
+
+---The store's path, or nil when `testcases_single_file_format` cannot be evaluated, which
+---the modifier engine has said: nothing is then read or written, as with the other backends.
+---@param filepath string
+---@param cfg table
+---@return string?
 local function single_file_path(filepath, cfg)
-    return path_tc_directory(filepath, cfg) .. utils.eval_string(filepath, cfg.testcases_single_file_format)
+    local name = utils.eval_string(filepath, cfg.testcases_single_file_format)
+    return name and (path_tc_directory(filepath, cfg) .. name)
 end
 
 function M.single_file.path_load(filepath, cfg)
-    return M.single_file.load(single_file_path(filepath, cfg))
+    local path = single_file_path(filepath, cfg)
+    return path and M.single_file.load(path) or {}
 end
 
 function M.single_file.path_write(filepath, cfg, tctbl)
-    M.single_file.write(single_file_path(filepath, cfg), tctbl)
+    local path = single_file_path(filepath, cfg)
+    if path then
+        M.single_file.write(path, tctbl)
+    end
 end
 
 -- directory
@@ -657,20 +668,40 @@ end
 ---@param cfg table resolved config
 ---@return table<integer, tuna.StoredTestcase>
 function M.get_testcases(filepath, cfg)
+    local _, tctbl = M.holder(filepath, cfg)
+    return tctbl
+end
+
+---The backend holding the testcases of the solution at `filepath`, and what it holds: the
+---configured one, or, when that holds none and auto-detection is on, the first of the others
+---that holds some. A testcase is saved and deleted where the others are, so one written
+---joins the set that is read: saved through the configured backend beside a set detected in
+---another, it would be the only one the next load finds.
+---@param filepath string
+---@param cfg table resolved config
+---@return tuna.TestcaseBackend backend, table<integer, tuna.StoredTestcase> tctbl
+function M.holder(filepath, cfg)
     local primary = M.backend(cfg.testcases_storage)
     local tctbl = primary.path_load(filepath, cfg)
     if next(tctbl) == nil and cfg.testcases_auto_detect_storage then
         for _, name in ipairs(M.BACKEND_ORDER) do
             local backend = M.backends[name]
             if backend ~= primary then
-                tctbl = backend.path_load(filepath, cfg)
-                if next(tctbl) ~= nil then
-                    break
+                local found = backend.path_load(filepath, cfg)
+                if next(found) ~= nil then
+                    return backend, found
                 end
             end
         end
     end
-    return tctbl
+    return primary, tctbl
+end
+
+---`holder` for a buffer's file.
+---@param bufnr integer
+---@return tuna.TestcaseBackend backend, table<integer, tuna.StoredTestcase> tctbl
+local function buf_holder(bufnr)
+    return M.holder(vim.api.nvim_buf_get_name(bufnr), config.get_buffer_config(bufnr))
 end
 
 ---Mark testcases read from a store to be written back exactly as they are. A write that
@@ -716,19 +747,18 @@ function M.buf_write_testcases(bufnr, tctbl, storage)
 end
 
 ---Write a full testcase table for the solution at `filepath`, with no buffer needed (a
----problem being downloaded), through the backend `cfg` stores testcases with.
+---problem being downloaded), through the backend holding its testcases.
 ---@param filepath string
 ---@param cfg table resolved config for the solution's directory
 ---@param tctbl table<integer, tuna.StoredTestcase>
 function M.write_testcases(filepath, cfg, tctbl)
-    M.backend(cfg.testcases_storage).path_write(filepath, cfg, tctbl)
+    M.holder(filepath, cfg).path_write(filepath, cfg, tctbl)
 end
 
----Remove every testcase a buffer stores, using its configured backend.
+---Remove every testcase a buffer stores, from the backend holding them.
 ---@param bufnr integer
 function M.buf_clear(bufnr)
-    local cfg = config.get_buffer_config(bufnr)
-    M.backend(cfg.testcases_storage).buf_clear(bufnr)
+    buf_holder(bufnr).buf_clear(bufnr)
 end
 
 ---Create or replace a single testcase for a buffer. Saving a testcase **stores** it,
@@ -748,19 +778,19 @@ end
 ---@param expect_empty_output boolean? store an empty answer as an empty *file*, so the
 ---testcase is judged and the solution must print nothing
 function M.buf_save_testcase(bufnr, tcnum, input, output, expect_empty_output)
-    local cfg = config.get_buffer_config(bufnr)
     local entry = {
         input = input,
         output = output,
         keep_empty = { input = true, output = expect_empty_output or nil },
     }
-    if cfg.testcases_storage == "single_file" then
+    local backend, tctbl = buf_holder(bufnr)
+    if backend == M.single_file then
         -- single file holds everything, so edit the whole table and rewrite
-        local tctbl = keep_stored(M.single_file.buf_load(bufnr))
+        tctbl = keep_stored(tctbl)
         tctbl[tcnum] = entry
-        M.single_file.buf_write(bufnr, tctbl)
+        backend.buf_write(bufnr, tctbl)
     else
-        M.backend(cfg.testcases_storage).buf_write(bufnr, { [tcnum] = entry })
+        backend.buf_write(bufnr, { [tcnum] = entry })
     end
 end
 
@@ -779,13 +809,13 @@ end
 ---@param bufnr integer
 ---@param tcnum integer
 function M.buf_delete_testcase(bufnr, tcnum)
-    local cfg = config.get_buffer_config(bufnr)
-    if cfg.testcases_storage == "single_file" then
-        local tctbl = keep_stored(M.single_file.buf_load(bufnr))
+    local backend, tctbl = buf_holder(bufnr)
+    if backend == M.single_file then
+        tctbl = keep_stored(tctbl)
         tctbl[tcnum] = nil
-        M.single_file.buf_write(bufnr, tctbl)
+        backend.buf_write(bufnr, tctbl)
     else
-        M.backend(cfg.testcases_storage).buf_write(bufnr, { [tcnum] = {} })
+        backend.buf_write(bufnr, { [tcnum] = {} })
     end
 end
 
@@ -1031,6 +1061,10 @@ end
 ---the pane. The split writes every case, `tcnum` included, so that edit is committed
 ---by the split itself rather than by a save that would first run the marked-up input
 ---as if it were a testcase.
+---
+---A testcase whose answer is stored empty, the instruction to print nothing, and is split
+---with none given, gives it to every testcase written: each case of an input that must
+---print nothing must print nothing.
 ---@param bufnr integer
 ---@param tcnum integer
 ---@param char string marker character
@@ -1047,10 +1081,12 @@ function M.buf_split_testcase(bufnr, tcnum, char, input, expected)
     end
     tc = tc or {}
 
-    local split, err = M.split_testcase(input or tc.input, expected or tc.output, char)
+    local answer = expected or tc.output
+    local split, err = M.split_testcase(input or tc.input, answer, char)
     if not split then
         return nil, err
     end
+    local print_nothing = tc.output == "" and vim.trim(answer) == ""
 
     local kept_rest = split.rest.input ~= "" or split.rest.output ~= ""
     ---@type { input: string, output: string }[]
@@ -1071,7 +1107,7 @@ function M.buf_split_testcase(bufnr, tcnum, char, input, expected)
         numbers[i] = n
     end
     for i, case in ipairs(write) do
-        M.buf_save_testcase(bufnr, numbers[i], case.input, case.output)
+        M.buf_save_testcase(bufnr, numbers[i], case.input, case.output, print_nothing)
     end
 
     local lifted = table.concat({ unpack(numbers, kept_rest and 2 or 1) }, ", ")
@@ -1109,7 +1145,8 @@ function M.leading_case_count(text)
 end
 
 ---Make the counts agree again after a split: the kept testcase's first line becomes
----`remaining`, and each lifted case gets a `1` of its own on top.
+---`remaining`, and each lifted case gets a `1` of its own on top. An answer stored empty
+---stays one.
 ---@param bufnr integer
 ---@param numbers integer[] as returned by `buf_split_testcase`, the kept testcase first
 ---@param remaining integer
@@ -1119,12 +1156,12 @@ function M.apply_case_counts(bufnr, numbers, remaining)
     if kept then
         local lines = vim.split(kept.input or "", "\n", { plain = true })
         lines[1] = tostring(remaining)
-        M.buf_save_testcase(bufnr, numbers[1], table.concat(lines, "\n"), kept.output)
+        M.buf_save_testcase(bufnr, numbers[1], table.concat(lines, "\n"), kept.output, kept.output == "")
     end
     for i = 2, #numbers do
         local case = tctbl[numbers[i]]
         if case then
-            M.buf_save_testcase(bufnr, numbers[i], "1\n" .. (case.input or ""), case.output)
+            M.buf_save_testcase(bufnr, numbers[i], "1\n" .. (case.input or ""), case.output, case.output == "")
         end
     end
 end

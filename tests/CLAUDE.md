@@ -66,7 +66,8 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     contest or on entering it, while a directory merely sharing its name as a prefix is, and
     what was remembered there before forgotten by `:Tuna go problem`, `go contest` and the
     menu each) and the pins (most recent first, uncapped, toggling, a deleted solution
-    unpinned, `:Tuna pin` refusing a non-solution and pinning a helper's solution);
+    unpinned, `:Tuna pin` refusing a non-solution and pinning a helper's solution, and the
+    scratch refused, saying how it becomes a problem, with no pin row in the menu);
   - `library.lua`: the files listed for a language (no dotfiles at any depth, `~` in
     `library.path`), guarded snippets, what the picker lists and how a search orders it (names
     and files fuzzily in either case and word order, then code however it is spaced), an
@@ -110,10 +111,12 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     asked for by name over it, the languages offered when one has no starter, an existing file
     asked about, a run that needs helpers offering their starters (Create writing and opening
     them, Stop writing nothing, a broken configured helper only reported), `clean` recognising
-    an untouched scaffold, and completion of roles and languages;
+    an untouched scaffold, completion of roles and languages, and the shipped solution
+    starters' empty tags line naming no tag until filled in;
   - `scratch.lua`: the templates a scratch can start from, when a scratch is resumed, the
-    resume/restart and template menus (the latter as wide as the templates it names), and
-    absorbing keeping the header of the template actually used;
+    resume/restart and template menus (the latter as wide as the templates it names), 
+    absorbing keeping the header of the template actually used, and `download sync` saying
+    it is ready to sync and which page downloads a problem and which a contest;
   - `navigate.lua`: the next and previous problem opened, Neovim's directory moving along only
     from the problem left or a folder inside it (by real path), staying in the contest's folder
     and with `cd_command = false`, from a runner UI pane the window under it opening the
@@ -144,7 +147,8 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
   - `download.lua`: the listener's boundary, a request handled while its sender is still
     connected, and what is stored (an empty answer kept, no file refused, a typed `~` path,
     the solution's template filled in, the problem recorded as the file's own, tuna's starter
-    with none configured, a scratch folded in under the header of the template used);
+    with none configured, a scratch folded in under the header of the template used, `sync` storing one task as a
+    problem and several as a contest);
   - `startup.lua`: what a session that never uses tuna pays and that it works without `setup()`:
     `tuna` alone loaded at startup with `:Tuna` and the highlight groups defined, a verdict
     restored for the first file read (before anything loads `config`), entering or writing any
@@ -256,7 +260,10 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     when exactly one other has some, never for several sets, a format or `testcases_directory`
     carrying the file's name, or a name without a number; renamed as they were, an empty answer
     kept; the question asked once a session, naming every rename, and the run going ahead after
-    every answer).
+    every answer), and a testcase saved, deleted or cleared where auto-detection found the set,
+    not in the configured backend, a split of a testcase that must print nothing writing ones
+    that must print nothing, through a count fix too, and a `testcases_single_file_format`
+    that cannot be evaluated reading and writing nothing.
 - Modules expose file-local helpers to tests through `M._test` (`download`, `submit`, `clean`,
   `interactive`, `scratch`, `menu`, `runner_ui`, `navigate`), and `tools` a way to forget the
   session's builds, for a test whose stubbed compiler answers differently for a source that has

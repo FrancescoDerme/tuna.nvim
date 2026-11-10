@@ -183,6 +183,30 @@ do
     t.eq("`:Tuna pin` in a helper pins its solution", { recent.is_pinned(pdir .. "/main.cpp"), recent.is_pinned(pdir .. "/gen.cpp") }, { true, false })
     commands.execute({ "pin" })
     t.eq("and again unpins it", recent.is_pinned(pdir .. "/main.cpp"), false)
+
+    -- The scratch is no problem yet: it is refused, with the way to make it one.
+    local scratch_file = pdir .. "/scratch/tuna_scratch.cpp"
+    vim.fn.mkdir(pdir .. "/scratch")
+    t.write(pdir .. "/scratch", "tuna_scratch.cpp", "int main() {}\n")
+    local setup_before = require("tuna.config").current_setup
+    require("tuna.config").current_setup = vim.tbl_extend("force", setup_before, { scratch = { file = pdir .. "/scratch/tuna_scratch.$(FEXT)", extension = "cpp" } })
+    require("tuna.config").buffer_configs = {}
+    vim.cmd("edit " .. scratch_file)
+    vim.bo.filetype = "cpp"
+    commands.execute({ "pin" })
+    t.eq("the scratch is not pinned", recent.is_pinned(scratch_file), false)
+    t.has("and it says how to make it a problem", said[#said], "download sync")
+    require("tuna.menu").open()
+    local rows = {}
+    for _, win in ipairs(vim.api.nvim_list_wins()) do
+        if vim.api.nvim_win_get_config(win).relative ~= "" then
+            vim.list_extend(rows, vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(win), 0, -1, false))
+        end
+    end
+    t.ok("nor does the menu offer to pin it", vim.tbl_contains(rows, "submit") and not vim.tbl_contains(rows, "pin this problem"), rows)
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "x", false)
+    require("tuna.config").current_setup = setup_before
+    require("tuna.config").buffer_configs = {}
     vim.notify = quiet
 end
 

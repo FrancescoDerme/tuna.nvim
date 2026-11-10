@@ -782,7 +782,9 @@ end
 -- Public download control
 --------------------------------------------------------------------------------
 
----@alias tuna.DownloadMode "testcases" | "problem" | "contest" | "persistently"
+---`sync` is `:Tuna download sync`'s: one download, stored as what the page pressed on sent,
+---a problem or a contest.
+---@alias tuna.DownloadMode "testcases" | "problem" | "contest" | "sync" | "persistently"
 
 ---@class tuna.DownloadStatus
 ---@field mode tuna.DownloadMode
@@ -806,13 +808,19 @@ function M.mode()
     return rs and rs.mode or nil
 end
 
+---What the listener is waiting for, in words.
+---@return string
+local function awaited()
+    return rs.mode == "sync" and "problem or contest" or rs.mode
+end
+
 ---A short status string for a lualine component. Empty when not downloading.
 ---@return string
 function M.status()
     if not rs then
         return ""
     end
-    return "🐟 downloading " .. rs.mode
+    return "🐟 downloading " .. awaited()
 end
 
 ---Show the current download status via a notification.
@@ -820,7 +828,7 @@ function M.show_status()
     if not rs then
         utils.notify("not downloading.", "INFO")
     else
-        utils.notify("downloading " .. rs.mode .. " on port " .. rs.port .. ".", "INFO")
+        utils.notify("downloading " .. awaited() .. " on port " .. rs.port .. ".", "INFO")
     end
 end
 
@@ -848,21 +856,20 @@ local function make_handler(mode, notify_on_download, bufnr, cfg)
             end
             store_testcases_into_buffer(bufnr --[[@as integer]], tasks[1].tests, cfg.replace_downloaded_testcases, finished)
         end
-    elseif mode == "problem" then
+    elseif mode ~= "persistently" then
+        -- One download and done. `sync` stores what the page pressed on sent: a problem's
+        -- page sends that problem, a contest's every problem of it.
         return function(tasks, finished)
             M.stop_downloading()
+            local contest = mode == "contest" or (mode == "sync" and #tasks > 1)
             if notify_on_download then
-                utils.notify("problem downloaded.", "INFO")
+                utils.notify(contest and ("contest downloaded, " .. #tasks .. " problems.") or "problem downloaded.", "INFO")
             end
-            store_single_problem(tasks[1], cfg, finished)
-        end
-    elseif mode == "contest" then
-        return function(tasks, finished)
-            M.stop_downloading()
-            if notify_on_download then
-                utils.notify("contest downloaded, " .. #tasks .. " problems.", "INFO")
+            if contest then
+                store_contest(tasks, cfg, finished)
+            else
+                store_single_problem(tasks[1], cfg, finished)
             end
-            store_contest(tasks, cfg, finished)
         end
     else -- persistently: keep listening, decide per batch what to store
         return function(tasks, finished)
@@ -945,6 +952,7 @@ M._test = {
     request_body = request_body,
     store_testcases_into_buffer = store_testcases_into_buffer,
     store_single_problem = store_single_problem,
+    make_handler = make_handler,
     validate_task = validate_task,
     canonicalize_task = canonicalize_task,
     eval_download_modifiers = eval_download_modifiers,

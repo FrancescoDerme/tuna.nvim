@@ -208,7 +208,7 @@ Press the green plus in your browser and tuna does the rest.
 - `problem` writes a solution file from your template and its testcases.
 - `contest` does the same for every problem of a contest, each in its own place.
 - `testcases` adds only the testcases, to the solution you are in.
-- `sync` downloads like `contest`, or like `problem` when `scratch.download` says so, and folds your [`:Tuna scratch`](#scratch) file into the first problem it writes.
+- `sync` downloads a problem when you press the plus on a problem's page and a contest when you press it on a contest's page, and folds your [`:Tuna scratch`](#scratch) file into the first problem it writes.
 - `persistently` keeps the listener open for the whole session.
 - `status` says whether the listener is open, and `stop` closes it.
 

@@ -120,7 +120,11 @@ problems and remembering them. The rules that hold everywhere are in the root `C
   the one a solution with no problem known gets): the configured order puts a judge's ahead of
   it for downloads, which know the judge, and a scratch does not. Then an empty file.
   Dismissing creates nothing, and with no template at all the scratch opens empty. `download
-  sync` sets `M.pending`; `M.absorb(filepath, cfg, template)` keeps as many header lines as
+  sync` sets `M.pending` and starts a download of mode `sync`, which stores what the page
+  the button is pressed on sends, one task as a problem and several as a contest, and says
+  so in its own start message: there is no option for which, since the page decides.
+  `is_scratch(path, cfg)` is how `:Tuna pin` and the menu know the scratch, which is no
+  problem yet and is never pinned; `M.absorb(filepath, cfg, template)` keeps as many header lines as
   the template the problem was written from (returned by `store_downloaded_task`), replaces
   the body with the scratch *buffer* lines, saves, moves the cursor, and deletes the scratch.
 - **`recent.lua`**: `stdpath("state")/tuna/recent.json`, written with a debounce and flushed on
@@ -129,7 +133,8 @@ problems and remembering them. The rules that hold everywhere are in the root `C
   recording). `push_front` moves a recorded entry to the top and drops entries whose directory
   is gone. `open_problem(i)`/`open_contest(i)` open any of them, 1 by default.
   - **Pinned** problems (`pinned`, `:Tuna pin` through `commands.toggle_pin`, which pins a
-    helper's solution and refuses a buffer that is not a runnable solution on disk) are
+    helper's solution and refuses a buffer that is not a runnable solution on disk, and the
+    scratch, pointing at `:Tuna download sync`) are
     kept in the same file, most recently pinned first, with **no cap**: a pin is put aside
     on purpose, and the menu scrolls a long list, so there is no `recent` option for it.
     One whose solution is gone is dropped by `snapshot` (`prune_pinned`), and `is_pinned`

@@ -735,6 +735,10 @@ function M.toggle_pin(bufnr)
         utils.notify("pin: this is not a solution file tuna can run, so there is no problem to pin.", "WARN")
         return
     end
+    if require("tuna.workspace.scratch").is_scratch(path, cfg) then
+        utils.notify("pin: the scratch is not a problem yet, fold it into one with ':Tuna download sync' first.", "WARN")
+        return
+    end
     local name = vim.fn.fnamemodify(path, ":~:.")
     if require("tuna.workspace.recent").toggle_pin(path) then
         utils.notify("pinned " .. name .. ", it waits in the menu.", "INFO")

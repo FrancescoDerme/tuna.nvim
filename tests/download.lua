@@ -323,6 +323,37 @@ do
     t.eq("and a solution configured false starts empty", download_into(dir, "C/main.cpp"), {})
     require("tuna").setup({})
 end
+-- `:Tuna download sync` stores what the page pressed on sent: one task is a problem, written
+-- where problems go, and several are a contest, each written in the contest's folder.
+do
+    local dir = t.tempdir()
+    require("tuna").setup({
+        scaffold = { templates = { solution = false } },
+        downloaded_problems_path = dir .. "/single/$(PROBLEM).$(FEXT)",
+        downloaded_problems_prompt_path = false,
+        downloaded_contests_directory = dir .. "/contest",
+        downloaded_contests_prompt_directory = false,
+        downloaded_contests_prompt_extension = false,
+        open_downloaded_problems = false,
+        open_downloaded_contests = false,
+        cd_downloaded_problems = false,
+        cd_downloaded_contests = false,
+    })
+    local cfg = require("tuna.config").current_setup
+    local said = t.capture_notifications()
+    local function task(name, size)
+        return { name = name, group = "", url = "", tests = {}, languages = {}, batch = { id = "s" .. size, size = size } }
+    end
+    local sync = d.make_handler("sync", true, nil, cfg)
+    sync({ task("One", 1) }, function() end)
+    t.has("one task is said to be a problem", said[#said], "problem downloaded")
+    t.eq("and stored as one", vim.fn.filereadable(dir .. "/single/One.cpp"), 1)
+    sync({ task("A", 2), task("B", 2) }, function() end)
+    t.has("several are said to be a contest", said[#said], "contest downloaded, 2 problems")
+    t.eq("and stored as one", { vim.fn.filereadable(dir .. "/contest/A.cpp"), vim.fn.filereadable(dir .. "/contest/B.cpp") }, { 1, 1 })
+    t.eq("with nothing written as a single problem", vim.fn.readdir(dir .. "/single"), { "One.cpp" })
+    require("tuna").setup({})
+end
 widgets.menu, widgets.input = real_menu, real_input
 
 t.report()

@@ -279,11 +279,12 @@ M.defaults = {
     -- (typing during the countdown, then folding the code into the real file with
     -- `:Tuna download sync` once the contest is downloaded). The scratch is the
     -- template minus its modifier header, since that header can only be filled in by
-    -- a real problem. `file` is where it lives; `download` is what `sync` fetches.
+    -- a real problem. `file` is where it lives. `sync` downloads what the page the
+    -- Competitive Companion button is pressed on sends: a problem's page that problem,
+    -- a contest's page the whole contest, and the scratch goes into the first.
     scratch = {
         file = vim.fn.stdpath("cache") .. "/tuna_scratch.$(FEXT)",
         extension = "cpp", -- language of the scratch when no solution buffer says otherwise
-        download = "contest", -- "contest" | "problem"
     },
 
     -- menu (bare `:Tuna`)

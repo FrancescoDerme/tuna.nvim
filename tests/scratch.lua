@@ -164,6 +164,32 @@ t.eq("absorbing keeps the header of the template actually used", lines_of(pdir .
 })
 t.eq("and removes the scratch", vim.uv.fs_stat(scratch_file), nil)
 
+-- `:Tuna download sync` says it is ready to sync, and that the page the button is pressed on
+-- decides what is downloaded, a problem or a contest.
+do
+    t.write(sdir, "scratch.cpp", "solve();\n")
+    vim.cmd("edit " .. scratch_file)
+    local download = require("tuna.problem.download")
+    local start, notify = download.start_downloading, vim.notify
+    local started, said = nil, {}
+    download.start_downloading = function(mode, _, notify_on_start)
+        started = { mode, notify_on_start }
+    end
+    vim.notify = function(msg)
+        said[#said + 1] = msg
+    end
+    scratch.sync()
+    download.start_downloading, vim.notify = start, notify
+    t.eq("sync starts a download of its own kind, which says nothing of its own", started, { "sync", false })
+    t.ok(
+        "and says which page downloads a problem and which a contest",
+        vim.deep_equal(said, { "tuna: ready to sync a problem or a contest, press the green plus on its page." }),
+        said
+    )
+    scratch.pending = nil
+    vim.cmd("bwipeout!")
+end
+
 vim.fn.delete(tdir, "rf")
 vim.fn.delete(sdir, "rf")
 vim.fn.delete(pdir, "rf")

@@ -345,4 +345,15 @@ vim.cmd("edit " .. dir .. "/main.cpp")
 t.eq("then the languages there are for one", complete("", "Tuna scaffold generator ", 24), { "cpp", "py", "rs" })
 t.eq("named by its tool_names too", complete("", "Tuna scaffold gen ", 18), { "cpp", "py", "rs" })
 
+-- The shipped solution starters carry a tags line to fill in, which names no tag as it is.
+for _, ext in ipairs({ "cpp", "py" }) do
+    local lines = vim.fn.readfile("scaffolds/solution." .. ext)
+    t.ok("the " .. ext .. " starter has a tags line", vim.iter(lines):any(function(l)
+        return l:find("^%p+ tags:$") ~= nil
+    end), lines)
+    t.eq("and it names none until filled in", require("tuna.problem.tags").parse(lines, require("tuna.config").defaults), {})
+    lines[3] = lines[3] .. " greedy, binary search"
+    t.eq("and those written on it once it is", require("tuna.problem.tags").parse(lines, require("tuna.config").defaults), { "greedy", "binary search" })
+end
+
 t.report()

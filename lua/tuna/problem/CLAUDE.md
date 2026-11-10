@@ -7,7 +7,9 @@ submissions. The rules that hold everywhere are in the root `CLAUDE.md`.
 
 - One 0-based table shape, `{ [n] = { input, output } }`, shared by three backends: `files`,
   `single_file` and `directory`. The `buf_*` functions dispatch to the configured backend and
-  fall back to auto-detection. Every backend reads and writes by the solution's path and
+  fall back to auto-detection (`holder`), writes as well as reads: a testcase is saved,
+  deleted and cleared in the backend holding the set, or one saved beside a detected set
+  would be the only one the next load finds. Every backend reads and writes by the solution's path and
   config (`path_load`/`path_write`), and its `buf_*` forms are those for a buffer's file:
   `get_testcases(filepath, cfg)` and `write_testcases(filepath, cfg, tctbl)` are for a
   solution with no buffer (run-all started elsewhere, a problem being downloaded).

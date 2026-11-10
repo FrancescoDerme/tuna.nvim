@@ -689,6 +689,90 @@ do
     widgets.menu = real_menu
 end
 
+-- Testcases found by auto-detection, in a backend that is not the configured one, are saved
+-- and deleted where they are: written through the configured backend, one saved would be the
+-- only one the next load finds, and one deleted would still be there.
+do
+    local d = t.tempdir()
+    t.write(d, "main.cpp", "int main(){}\n")
+    for n = 0, 2 do
+        vim.fn.mkdir(d .. "/tests/" .. n, "p")
+        t.write(d .. "/tests/" .. n, "input.txt", "in" .. n .. "\n")
+        t.write(d .. "/tests/" .. n, "output.txt", "out" .. n .. "\n")
+    end
+    vim.cmd.edit(d .. "/main.cpp")
+    local buf = vim.api.nvim_get_current_buf()
+    local function numbers()
+        local keys = vim.tbl_keys(tc.buf_get_testcases(buf))
+        table.sort(keys)
+        return keys
+    end
+    t.eq("the configured backend is another", require("tuna.config").get_buffer_config(buf).testcases_storage, "files")
+    t.eq("a set stored by directory is detected", numbers(), { 0, 1, 2 })
+    tc.buf_delete_testcase(buf, 2)
+    t.eq("a testcase deleted there is gone", numbers(), { 0, 1 })
+    tc.buf_save_testcase(buf, 1, "edited\n", "out1\n")
+    t.eq("one saved joins the set, hiding none of it", numbers(), { 0, 1 })
+    t.eq("in the files it was read from", require("tuna.utils").read_file(d .. "/tests/1/input.txt"), "edited\n")
+    tc.buf_save_testcase(buf, 5, "new\n")
+    t.eq("and a new one too", numbers(), { 0, 1, 5 })
+    tc.buf_clear(buf)
+    t.eq("clearing takes the detected set", numbers(), {})
+    vim.cmd("bwipeout!")
+end
+
+-- A testcase that must print nothing, split with no answer given, makes testcases that
+-- must print nothing, and fixing the case counts up afterwards keeps them so. One with no
+-- answer goes on having none.
+do
+    local d = t.tempdir()
+    t.write(d, "main.cpp", "int main(){}\n")
+    vim.cmd.edit(d .. "/main.cpp")
+    local buf = vim.api.nvim_get_current_buf()
+    local function answers()
+        local out = {}
+        for n, case in pairs(tc.buf_get_testcases(buf)) do
+            out[n] = case.output == nil and "none" or case.output
+        end
+        return out
+    end
+    tc.buf_save_testcase(buf, 0, "2\n-\nA\n-\nB\n", "", true)
+    local numbers = tc.buf_split_testcase(buf, 0, "-")
+    t.eq("a split of a testcase that must print nothing", numbers, { 0, 1 })
+    t.eq("leaves every testcase it writes printing nothing", answers(), { [0] = "", [1] = "" })
+    tc.apply_case_counts(buf, numbers, 1)
+    t.eq("and the counts fixed up keep them so", answers(), { [0] = "", [1] = "" })
+    t.eq("with the counts written", tc.buf_get_testcases(buf)[1].input, "1\nA\n")
+
+    tc.buf_save_testcase(buf, 7, "-\nC\n-\nD\n", "", true)
+    tc.buf_split_testcase(buf, 7, "-", "-\nC\n-\nD\n", "")
+    t.eq("as does one split from a pane left blank", answers()[7], "")
+
+    tc.buf_save_testcase(buf, 9, "h\n-\nE\n-\n")
+    numbers = tc.buf_split_testcase(buf, 9, "-")
+    t.eq("a testcase with no answer splits into ones with none", { answers()[9], answers()[numbers[2]] }, { "none", "none" })
+    vim.cmd("bwipeout!")
+end
+
+-- A `testcases_single_file_format` the modifier engine cannot evaluate is said by it, and
+-- nothing is read or written.
+do
+    local d = t.tempdir()
+    t.write(d, "main.cpp", "int main(){}\n")
+    local cfg = vim.tbl_extend("force", require("tuna.config").current_setup, { testcases_single_file_format = "$(NOPE).tc" })
+    local said = {}
+    local notify = vim.notify
+    vim.notify = function(msg)
+        said[#said + 1] = msg
+    end
+    local ok_load, loaded_sf = pcall(tc.single_file.path_load, d .. "/main.cpp", cfg)
+    local ok_write = pcall(tc.single_file.path_write, d .. "/main.cpp", cfg, { [0] = { input = "1\n" } })
+    vim.notify = notify
+    t.eq("a format that cannot be evaluated reads nothing and writes nothing", { ok_load, loaded_sf, ok_write }, { true, {}, true })
+    t.ok("and says which modifier", #said == 2 and said[1]:find("NOPE", 1, true) ~= nil, said)
+    t.eq("leaving no file", vim.fn.readdir(d), { "main.cpp" })
+end
+
 -- A file that cannot be written is the caller's to report, so the helpers answer `false`
 -- where the filesystem refuses: a file standing where a directory is wanted, a device with
 -- no room.

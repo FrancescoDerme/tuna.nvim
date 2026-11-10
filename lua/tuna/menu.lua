@@ -377,9 +377,12 @@ local function command_entries(sol, cur)
                 end, tools.SCAFFOLDS)
             )
         )
-        add(require("tuna.workspace.recent").is_pinned(path) and "unpin this problem" or "pin this problem", function()
-            commands.toggle_pin(sol)
-        end)
+        -- The scratch is no problem yet, so there is nothing of it to pin.
+        if not require("tuna.workspace.scratch").is_scratch(path, config.get_buffer_config(sol)) then
+            add(require("tuna.workspace.recent").is_pinned(path) and "unpin this problem" or "pin this problem", function()
+                commands.toggle_pin(sol)
+            end)
+        end
     end
 
     -- Always available: nothing here needs a solution to act on.

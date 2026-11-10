@@ -106,6 +106,14 @@ local function scratch_path(ext, cfg)
     return utils.expand_home((spec:gsub("%$%(FEXT%)", ext)))
 end
 
+---Whether `path` is the scratch file of its language: no problem yet, so nothing to pin.
+---@param path string
+---@param cfg table
+---@return boolean
+function M.is_scratch(path, cfg)
+    return path ~= "" and vim.fs.normalize(path) == vim.fs.normalize(scratch_path(vim.fn.fnamemodify(path, ":e"), cfg))
+end
+
 ---The language the scratch should be written in: the current buffer's, when it is a
 ---solution file, else the configured default.
 ---@param bufnr integer
@@ -283,9 +291,7 @@ function M.sync(bufnr)
     config.load_buffer_config(bufnr)
     local cfg = config.get_buffer_config(bufnr)
 
-    local name = vim.fs.normalize(vim.api.nvim_buf_get_name(bufnr))
-    local ext = name ~= "" and vim.fn.fnamemodify(name, ":e") or ""
-    if name == "" or name ~= vim.fs.normalize(scratch_path(ext, cfg)) then
+    if not M.is_scratch(vim.api.nvim_buf_get_name(bufnr), cfg) then
         utils.notify("scratch: run ':Tuna download sync' from the scratch buffer (':Tuna scratch' opens it).", "WARN")
         return
     end
@@ -297,11 +303,12 @@ function M.sync(bufnr)
         bufnr = bufnr,
     }
 
-    local mode = (cfg.scratch or {}).download or "contest"
+    -- The start is said here, not by the download: the page the button is pressed on
+    -- decides what is downloaded, so the message says which page gives what.
     local err = require("tuna.problem.download").start_downloading(
-        mode,
+        "sync",
         cfg.companion_port,
-        cfg.download_print_message,
+        false,
         cfg.download_print_message,
         bufnr,
         cfg
@@ -309,6 +316,8 @@ function M.sync(bufnr)
     if err then
         M.pending = nil
         utils.notify("scratch: " .. err, "WARN")
+    elseif cfg.download_print_message then
+        utils.notify("ready to sync a problem or a contest, press the green plus on its page.", "INFO")
     end
 end
 
