@@ -143,7 +143,7 @@ local function check_submit(cfg)
             end
         else
             -- The default `command` provider with no command set. Only a problem
-            -- if no judge routes elsewhere (e.g. a browser-only AtCoder setup).
+            -- if no judge routes elsewhere (every judge set to the browser provider).
             local only_browser = providers.browser and vim.tbl_count(providers) == 1
             if not only_browser then
                 health.info(

@@ -552,6 +552,7 @@ verdicts = {
 ```
 
 `pending` keeps watching, while `accepted`, `rejected` and `partial` are final and stop watching.
+A rule may have a third field, the text to show in place of the output it matched, for a tool that prints codes rather than words.
 
 If your tool prints nothing tuna recognises then nothing is claimed: a clean exit clears the indicator, and a non-zero exit is reported as a failure with the tool's own error line and its credentials blanked out.
 
@@ -571,7 +572,7 @@ submit = {
     command = 'cf submit "$(URL)" "$(LANG)" "$(FABSPATH)"',
     judges = {
         kattis  = { command = "kattis $(FNAME)", watch = false },
-        atcoder = { provider = "browser" },
+        cses    = { provider = "browser" },
     },
 },
 ```

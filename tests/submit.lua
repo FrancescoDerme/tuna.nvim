@@ -149,6 +149,7 @@ t.eq("a rule's capitals in another alphabet still match", (s.scan_verdict("Пр�
 t.eq("while a rule stays a pattern", (s.scan_verdict("x1", { verdicts = { { "x%S", "accepted" } } })), "accepted")
 t.eq("its classes keeping their meaning", (s.scan_verdict("x ", { verdicts = { { "x%S", "accepted" } } })), nil)
 t.eq("the snippet is capped in characters, none cut in half", select(2, s.scan_verdict("ок " .. ("я"):rep(80), { verdicts = { { "ок", "accepted" } } })), "ок " .. ("я"):rep(57))
+t.eq("a rule naming its text shows that text, not the snippet", { s.scan_verdict("verdict: OK (12 ms)", { verdicts = { { "ok", "accepted", "accepted" } } }) }, { "accepted", "accepted" })
 
 -- Terminal control has to go, or a redrawing submitter leaks ^H and escape junk into
 -- lualine.
@@ -171,6 +172,36 @@ t.eq("codeforces is routed to itself", s.judge_of("https://codeforces.com/contes
 t.eq("a mirror routes to codeforces too", s.judge_of("https://m1.codeforces.com/contest/1/submit"), "codeforces")
 t.eq("atcoder is its own judge", s.judge_of("https://atcoder.jp/contests/abc400/tasks/abc400_a"), "atcoder")
 t.eq("www is not part of the name", s.judge_of("https://www.codechef.com/x"), "codechef")
+
+--------------------------------------------------------------------------------
+-- a judge whose verdicts are codes
+--------------------------------------------------------------------------------
+
+local ATCODER = "https://atcoder.jp/contests/abc388/tasks/abc388_a"
+local base = require("tuna.config").defaults.submit
+local base_rules = #base.verdicts
+local atc = s.judge_scfg(base, ATCODER)
+-- What the submitter prints for an AtCoder submission: the URL naming the judge, then each
+-- status redrawn in place over the last.
+local function atcoder_output(...)
+    local out = "Submission url: https://atcoder.jp/contests/abc388/submissions/1\n"
+    for _, x in ipairs({ ... }) do
+        out = out .. "\27[33m" .. x .. "\27[0m" .. ("\8"):rep(#x) .. (" "):rep(#x) .. ("\8"):rep(#x)
+    end
+    return out
+end
+t.eq("atcoder's codes are read for its urls, as words", { s.scan_verdict(atcoder_output("WJ", "Testing 3/20", "AC (100)"), atc) }, { "accepted", "accepted" })
+t.eq("a rejection code is final, and reads as the words codeforces prints", { s.scan_verdict(atcoder_output("WJ", "TLE (50pts)"), atc) }, { "rejected", "time limit exceeded" })
+t.eq("its waiting code is pending", { s.scan_verdict(atcoder_output("WJ"), atc) }, { "pending", "in queue" })
+t.eq("the default words still read its progress", { s.scan_verdict(atcoder_output("WJ", "Testing 3/20"), atc) }, { "pending", "testing 3/20" })
+t.eq("a code at the very start of the output is read", (s.scan_verdict("AC\n", atc)), "accepted")
+t.eq("a code stands alone, never part of the url or of a word", s.scan_verdict("Submission url: https://atcoder.jp/x\nAlready logged in, you're i.e. accepting", s.judge_scfg({ verdicts = {} }, ATCODER)), nil)
+t.eq("other judges never read codes", s.scan_verdict("AC", s.judge_scfg(base, "https://codeforces.com/contest/1/problem/A")), nil)
+t.eq("the user's own rules still reach atcoder", (s.scan_verdict("ok", s.judge_scfg({ verdicts = { { "ok", "accepted" } } }, ATCODER))), "accepted")
+local own = s.judge_scfg({ verdicts = {}, judges = { atcoder = { verdicts = { { "yes", "accepted" } } } } }, ATCODER)
+t.eq("a judge given verdicts of its own reads only those", { (s.scan_verdict("AC", own)), (s.scan_verdict("yes", own)) }, { nil, "accepted" })
+t.eq("a judge's other settings leave its codes in", (s.scan_verdict("AC", s.judge_scfg({ verdicts = {}, judges = { atcoder = { watch = true } } }, ATCODER))), "accepted")
+t.eq("the base config's rules are left as they were", #base.verdicts, base_rules)
 
 --------------------------------------------------------------------------------
 -- The verdict a problem carries, read without opening it

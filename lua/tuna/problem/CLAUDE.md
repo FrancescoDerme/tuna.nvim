@@ -186,14 +186,20 @@ submissions. The rules that hold everywhere are in the root `CLAUDE.md`.
     contest-wide `…/submit/`, the only page a mirror serves.
   - The `browser` provider derives real pages instead (`browser_submit_url`).
 - Per-judge config: `judge_of(url)` → `judge_scfg` shallow-merges `submit.judges[judge]` over
-  `submit`.
+  `submit`. A judge whose verdicts are codes (AtCoder) has `M.builtin_verdicts`, joined to
+  the base `verdicts` so the user's rules still reach it, and dropped when the judge is given
+  `verdicts` of its own. They are not in the global defaults: a lone `re` or `ie` in another
+  tool's output is a word, not a verdict. A code matches only between whitespace or the
+  text's ends (`code_rule`): a word boundary would find `re` in "you're". Each names its
+  text (a rule's third field), the words Codeforces prints, so a verdict reads the same
+  whichever judge gave it.
 - Providers:
   - `command` expands `submit.command` (string or function) and either watches it
     (`submit.watch`, default true, `run_watch` via `vim.system`) or runs it in a terminal
     (`M.run_terminal` seam; toggleterm if present, else a terminal job through
     `open_terminal`: `jobstart` with `term` on 0.11, `termopen` on 0.10).
-  - `browser` opens the submit page and copies the source to `+`; it exists for judges gated
-    behind a Turnstile challenge, such as AtCoder.
+  - `browser` opens the submit page and copies the source to `+`, for a judge the user has
+    no tool for.
 - **Watching**
   - Output: strip terminal control sequences, then `scan_verdict` over `submit.verdicts`,
     **preferring the rightmost final verdict over pending** (in-place redraws collapse onto one

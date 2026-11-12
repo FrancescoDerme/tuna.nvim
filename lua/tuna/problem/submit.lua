@@ -7,8 +7,8 @@
 --     (`$(URL)`, `$(PROBLEM_URL)` and `$(LANG)` beside the usual file set), then either
 --     watches it as a job whose output is scanned for the verdict (`submit.watch`, the
 --     default) or runs it in a terminal (toggleterm when installed, else `:terminal`);
---   * `browser` opens the submit page and copies the source, for judges no headless client
---     can submit to.
+--   * `browser` opens the submit page and copies the source, for a judge the user has no
+--     tool for.
 --
 -- The problem URL comes from a `submit.url` function, else a header marker (`submit at:
 -- <url>`, written by a template at download time), else the problem's sidecar. A final
@@ -167,19 +167,59 @@ local function judge_of(url)
     return name:lower()
 end
 
+---A verdict rule for a code, matched only with whitespace, or the text's ends, on both sides,
+---so `ac` is not found in "atcoder.jp/…" or "accepted", nor `re` in "you're".
+---It shows as `text`, the words another judge prints, so a verdict reads the same whichever
+---judge gave it.
+---@param c string the code, lowercase
+---@param state string
+---@param text string
+---@return table
+local function code_rule(c, state, text)
+    -- A frontier sees `\0` before the text and after it, hence `%z` in both sets.
+    return { "%f[^%s%z]" .. c .. "%f[%s%z]", state, text }
+end
+
+---Verdict rules for a judge whose verdicts are codes rather than words, read for its URLs
+---besides `submit.verdicts`, which is written for words. They are kept to their judge,
+---since only there does a lone `ac`, `re` or `ce` in a tool's output mean a verdict.
+M.builtin_verdicts = {
+    atcoder = {
+        code_rule("wj", "pending", "in queue"),
+        code_rule("wr", "pending", "in queue"),
+        code_rule("ac", "accepted", "accepted"),
+        code_rule("wa", "rejected", "wrong answer"),
+        code_rule("tle", "rejected", "time limit exceeded"),
+        code_rule("mle", "rejected", "memory limit exceeded"),
+        code_rule("ole", "rejected", "output limit exceeded"),
+        code_rule("qle", "rejected", "query limit exceeded"),
+        code_rule("re", "rejected", "runtime error"),
+        code_rule("ce", "rejected", "compilation error"),
+        code_rule("ie", "rejected", "internal error"),
+    },
+}
+
 ---The effective `submit` config for a URL: `submit.judges[<judge>]` (a partial
 ---override table) shallow-merged over the base `submit`, so any field
 ---(`command`/`verdicts`/`languages`/`watch`/…) can be set per judge with the base as
----fallback. No matching override → the base config unchanged.
+---fallback. A judge's `builtin_verdicts` join the base `verdicts`, so the user's rules
+---still reach it, unless the judge is given `verdicts` of its own, which then are all it has.
 ---@param scfg table base `submit` config
 ---@param url string?
 ---@return table
 local function judge_scfg(scfg, url)
-    local over = type(scfg.judges) == "table" and scfg.judges[judge_of(url)]
-    if type(over) ~= "table" then
+    local judge = judge_of(url)
+    local over = type(scfg.judges) == "table" and scfg.judges[judge]
+    over = type(over) == "table" and over or nil
+    local codes = M.builtin_verdicts[judge]
+    if not over and not codes then
         return scfg
     end
-    return vim.tbl_extend("force", scfg, over)
+    local eff = vim.tbl_extend("force", scfg, over or {})
+    if codes and not (over and over.verdicts ~= nil) then
+        eff.verdicts = vim.list_extend(vim.list_extend({}, codes), scfg.verdicts or {})
+    end
+    return eff
 end
 
 ---Resolve the submit command from an effective config: a string, or a
@@ -1134,7 +1174,9 @@ end
 ---verdict is present do we surface the latest pending frame. The display text is a tidy
 ---lowercase snippet from the matched keyword up to the next frame boundary (tab / newline),
 ---bounded — so lualine shows `accepted` / `failed on test 6` / `running (on test 6)`,
----not the whole concatenated blob.
+---not the whole concatenated blob. A rule naming its text (a third field) shows that
+---instead, which is how a judge's code (`TLE (50pts)`) reads as the words another judge
+---prints (`time limit exceeded`).
 ---@param blob string
 ---@param scfg table
 ---@return string? state, string? snippet
@@ -1144,26 +1186,30 @@ local function scan_verdict(blob, scfg)
 
     -- Rightmost match among the rules of a given finality (final first, then pending).
     local function pick(want_final)
-        local pos, state
+        local pos, match
         for _, rule in ipairs(scfg.verdicts or {}) do
             if (FINAL[rule[2]] == true) == want_final then
                 -- A rule is a Lua pattern, so only what the text's folding reaches is folded:
                 -- `%S` lowered would mean its opposite.
                 local p = last_match(lower, (rule[1]:gsub("[\194-\244][\128-\191]*", vim.fn.tolower)))
                 if p and (not pos or p >= pos) then
-                    pos, state = p, rule[2]
+                    pos, match = p, rule
                 end
             end
         end
-        return pos, state
+        return pos, match
     end
 
-    local pos, state = pick(true)
+    local pos, rule = pick(true)
     if not pos then
-        pos, state = pick(false)
+        pos, rule = pick(false)
     end
     if not pos then
         return nil
+    end
+    local state = rule[2]
+    if type(rule[3]) == "string" and rule[3] ~= "" then
+        return state, rule[3]
     end
 
     -- Clean snippet: from the keyword to the next frame boundary, trimmed and capped.
@@ -1340,9 +1386,8 @@ end
 --------------------------------------------------------------------------------
 
 ---Turn a problem URL into the page to open for a manual browser submission.
----AtCoder gates submission behind a Cloudflare Turnstile challenge that no headless
----client can solve, so `:Tuna submit` there opens the submit page (task preselected)
----for the user to paste into. For other hosts we just open the given URL.
+---AtCoder's is its submit page with the task preselected, for the user to paste into.
+---For other hosts we just open the given URL.
 ---
 ---A **Codeforces mirror** (`m1`/`m2`/`m3`, which carry a live round) gets its
 ---contest-wide submit page: the per-problem `…/submit/<index>` that works on the main
@@ -1429,9 +1474,9 @@ M.providers.command = function(ctx)
     set_state(ctx.filepath, "pending", "submitting " .. name, nil, scfg.status_time)
 end
 
--- Browser-handoff provider: for judges that can't be submitted to from a headless
--- client (AtCoder's Cloudflare Turnstile), open the submit page in the browser and
--- copy the source to the system clipboard so the user just pastes and submits.
+-- Browser-handoff provider: for a judge the user has no tool for, open the submit page
+-- in the browser and copy the source to the system clipboard so the user just pastes
+-- and submits.
 M.providers.browser = function(ctx)
     local scfg = ctx.scfg
     local name = display_name(ctx)
@@ -1507,6 +1552,7 @@ M._test = {
     scan_verdict = scan_verdict,
     is_valid_url = is_valid_url,
     judge_of = judge_of,
+    judge_scfg = judge_scfg,
     watch_outcome = watch_outcome,
     run_watch = run_watch,
 }

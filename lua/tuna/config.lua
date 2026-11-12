@@ -470,10 +470,16 @@ M.defaults = {
         -- stdout/stderr (control codes intact) and the parsed verdict there, so a
         -- misbehaving judge's exact output can be inspected. nil disables.
         log_file = nil,
-        -- Verdict classifier for watch mode: ordered { lua_pattern, state } rules
-        -- matched (first wins) against each lowercased stdout status line. States
-        -- `accepted`/`rejected`/`partial` are final; `pending` keeps watching.
+        -- Verdict classifier for watch mode: { lua_pattern, state } rules matched
+        -- against the lowercased stdout, where the latest match wins and a final
+        -- verdict beats a pending one. States `accepted`/`rejected`/`partial` are
+        -- final; `pending` keeps watching.
         -- Unmatched lines are ignored (so "Submission url: …" etc. don't show).
+        -- lualine shows the text from the match on, unless a rule names its own as a
+        -- third field: { "%f[%a]ok%f[%A]", "accepted", "accepted" }.
+        -- For AtCoder, whose verdicts are codes (AC, WA, TLE…), tuna reads those
+        -- besides these rules, as the words above, unless `judges.atcoder` sets
+        -- `verdicts` of its own.
         verdicts = {
             { "queued", "pending" },
             { "in queue", "pending" },
@@ -519,11 +525,10 @@ M.defaults = {
         -- a judge at a different tool (and its own verdict/language/watch settings) or
         -- a different `provider`, while everything else falls back to the defaults.
         -- The built-in `browser` provider opens the judge's submit page in the browser
-        -- and copies the source to the clipboard — the only way to submit to judges
-        -- that gate submission behind a challenge no CLI can solve (AtCoder's
-        -- Cloudflare Turnstile). Example:
+        -- and copies the source to the clipboard, for a judge you have no tool for.
+        -- Example:
         --   judges = {
-        --     atcoder = { provider = "browser" },
+        --     cses = { provider = "browser" },
         --   }
         -- `command` may also be a `function(ctx) -> string` for fully custom dispatch.
         judges = {},
