@@ -347,7 +347,11 @@ local function write(role, ext, path, cfg, task, opts)
     end
     local function create()
         local template = M.template(role, ext, cfg, path, task)
-        utils.write_file(path, template and M.render(template, role, ext, cfg, path, task) or "")
+        local ok, err = utils.write_file(path, template and M.render(template, role, ext, cfg, path, task) or "")
+        if not ok then
+            utils.notify(("scaffold: could not write %s, %s."):format(fname, tostring(err)))
+            return done(nil)
+        end
         -- A file written anew starts with nothing stored about it, whatever one of its name left.
         require("tuna.problem.sidecar").forget(path, cfg)
         require("tuna.run.tools").forget(path)
@@ -446,7 +450,12 @@ function M.create(role, bufnr, ext, opts)
             if vim.trim(name) == "" then
                 return nothing()
             end
-            write(role, ext, utils.normalize_path(utils.expand_home(vim.trim(name)), dir), cfg, task, opts)
+            local path = utils.normalize_path(utils.expand_home(vim.trim(name)), dir)
+            -- The name typed says the language: a template is for the language its extension
+            -- names, so one offered as `main2.cpp` and typed as `main2.py` starts from the
+            -- Python template, never the C++ one.
+            local typed = vim.fn.fnamemodify(path, ":e")
+            write(role, typed ~= "" and typed or ext, path, cfg, task, opts)
         end, nothing)
         return
     end

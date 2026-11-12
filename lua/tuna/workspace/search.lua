@@ -412,6 +412,7 @@ end
 ---from the menu.
 ---@param bufnr integer
 function M.open(bufnr)
+    config.load_buffer_config(bufnr) -- refresh: a local config may have changed
     local cfg = config.get_buffer_config(bufnr)
     local roots = { root_of(cfg.downloaded_problems_path), root_of(cfg.downloaded_contests_directory .. "/") }
     local cols, height = utils.get_ui_size()
@@ -419,7 +420,7 @@ function M.open(bufnr)
     local rows, words, sources = {}, {}, {}
     ---A file's lines, read once for the picker.
     local function source(path)
-        sources[path] = sources[path] or vim.split(utils.read_file(path) or "", "\n")
+        sources[path] = sources[path] or vim.split(utils.read_file(path) or "", "\n", { plain = true })
         return sources[path]
     end
     local recent = require("tuna.workspace.recent")

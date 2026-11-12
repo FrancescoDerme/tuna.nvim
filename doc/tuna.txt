@@ -677,6 +677,14 @@ An example of a complete configuration is in
 https://github.com/FrancescoDerme/dotfiles, in
 `nvim/.config/nvim/lua/plugins/tuna.lua`.
 
+Settings can also live in a `.tuna.lua` in any folder above the file you are
+editing. This way a contest can set its own time limit, template or testcase
+layout without touching your config.
+
+More on customizing your configuration is in |tuna-config-layers| and the
+sections after it, and every option is commented in tuna's
+`lua/tuna/config.lua`.
+
 ------------------------------------------------------------------------------
 WHERE SETTINGS COME FROM                                  *tuna-config-layers*
 

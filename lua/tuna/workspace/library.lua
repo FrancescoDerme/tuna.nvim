@@ -132,6 +132,9 @@ end
 ---@param marker string
 ---@return tuna.Snippet[] snippets, string? warning
 function M.parse(lines, marker)
+    -- The marker is a word of the user's, matched as written: one holding a character a
+    -- pattern reads (`MY-LIB`) would otherwise match nothing, or more than itself.
+    marker = vim.pesc(marker)
     local open_pat = "^(.-)" .. marker .. ":%s*(.-)%s+start%s*$"
     local close_pat = marker .. ":%s*(.-)%s+end%s*$"
     local out, current, unclosed = {}, nil, nil
@@ -172,13 +175,11 @@ end
 ---every file once, when it opens, so the warning comes once however often it is searched.
 ---@param file { path: string, rel: string }
 ---@param cfg table
----@return tuna.Snippet[]
+---@return tuna.Snippet[] snippets
+---@return string[] lines the file's own, for one listed whole
 local function snippets_of(file, cfg)
-    local content = utils.read_file(file.path)
-    if not content then
-        return {}
-    end
-    local snips, warning = M.parse(vim.split(content, "\n", { plain = true }), (cfg.library or {}).marker or "TUNALIB")
+    local lines = vim.split(utils.read_file(file.path) or "", "\n", { plain = true })
+    local snips, warning = M.parse(lines, (cfg.library or {}).marker or "TUNALIB")
     if warning then
         utils.notify(("library: %s in %s."):format(warning, file.rel), "WARN")
     end
@@ -186,7 +187,7 @@ local function snippets_of(file, cfg)
         s.file = file.rel
         s.path = file.path
     end
-    return snips
+    return snips, lines
 end
 
 --------------------------------------------------------------------------------
@@ -388,7 +389,7 @@ end
 local function catalogue(cfg, ext)
     local all = {}
     for _, f in ipairs(M.files(cfg, ext)) do
-        local snips = snippets_of(f, cfg)
+        local snips, lines = snippets_of(f, cfg)
         if #snips > 0 then
             vim.list_extend(all, snips)
         else
@@ -400,7 +401,7 @@ local function catalogue(cfg, ext)
                 whole = true,
                 notes = {},
                 complexity = {},
-                lines = vim.split(utils.read_file(f.path) or "", "\n", { plain = true }),
+                lines = lines,
             }
         end
     end

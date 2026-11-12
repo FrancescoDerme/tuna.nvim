@@ -153,5 +153,19 @@ vim.cmd.edit(vim.fn.fnameescape(b .. "/sol.cpp"))
 require("tuna.utils").place_cursor(require("tuna.config").get_buffer_config(0))
 t.eq("the cursor is placed before the file is drawn", vim.api.nvim_win_get_cursor(0)[1], 4)
 
+-- A problem stepped onto is read by its own config: a `.tuna.lua` of its folder says where the
+-- cursor goes there, not the one of the problem left.
+t.write(b, ".tuna.lua", "return { template_cursor = 2 }\n")
+os.remove(b .. "/sol.cpp")
+vim.cmd("silent! bwipeout! " .. vim.fn.bufnr(b .. "/main.cpp"))
+t.write(b, "main.cpp", "#include <bits/stdc++.h>\n\nint main() {}\n")
+vim.cmd.edit(vim.fn.fnameescape(a .. "/main.cpp"))
+commands.execute({ "next" })
+t.eq("next places the cursor by the config of the problem it opens", {
+    vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":h:t"),
+    vim.api.nvim_win_get_cursor(0)[1],
+}, { "B", 2 })
+os.remove(b .. "/.tuna.lua")
+
 vim.notify = quiet
 t.report()

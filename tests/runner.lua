@@ -1155,6 +1155,33 @@ if fui then
         -- so what is checked is that the session saved a verdict over the case it judged.
         local _, feed_total = core.local_verdict(dir .. "/sol.cpp")
         t.eq("a finished feed session saves its local verdict", feed_total, 1)
+
+        -- A session that ended cleanly is judged as a testcase is in every mode, answer or
+        -- not: a checker of its own reads the output of a testcase that has none.
+        local judge_mod = require("tuna.run.checker")
+        local real_judge, judged = judge_mod.judge, {}
+        judge_mod.judge = function(tc, _, _, callback)
+            judged[#judged + 1] = tc.expected == nil and "no answer" or "an answer"
+            callback(false, "said by the checker")
+        end
+        for _, row in ipairs(fr.tcdata) do
+            row.expected = nil
+        end
+        fr:run_testcases()
+        vim.wait(2000, function()
+            return fr.completed == false
+        end, 10)
+        vim.wait(2000, function()
+            return fr.completed
+        end, 20)
+        judge_mod.judge = real_judge
+        local last = fr.tcdata[#fr.tcdata]
+        -- A session torn down early has no clean ending to judge, so what is checked is the
+        -- one that had: it went to the judge, whose verdict the row wears.
+        if last.status ~= "killed" and not last.status:match("^sig") then
+            t.eq("a feed session with no answer still goes to the judge", judged, { "no answer" })
+            t.eq("and wears its verdict and its words", { last.status, last.checker_message }, { "wrong", "said by the checker" })
+        end
         vim.fn.delete(exec)
         sidecar.set_entry(dir .. "/sol.cpp", "results", nil)
     end

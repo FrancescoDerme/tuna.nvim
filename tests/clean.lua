@@ -115,6 +115,22 @@ do
     clean.confirm_dirs({ { path = d1, rel = "d1", files = 0 }, { path = d2, rel = "d2", files = 0 } }, 1, nil, { deleted = 0, dirs = 0 }, { width = 40 }, function() end)
     t.eq("and so does each directory prompt", rows, { 1, 2 })
 
+    -- A prompt dismissed is `stop`: nothing more is deleted or asked, and the pass still ends,
+    -- which is where it says what it removed.
+    widgets.menu = function(_, _, _, _, on_close)
+        rows[#rows + 1] = true
+        on_close()
+    end
+    for name, confirm in pairs({ file = clean.confirm_each, directory = clean.confirm_dirs }) do
+        local stats, ended = { deleted = 0, builds = 0, dirs = 0, emptied = {} }, 0
+        rows = {}
+        confirm({ { path = d1, rel = "d1", files = 0, reason = "empty file", sim = 1 }, { path = d2, rel = "d2", files = 0, reason = "empty file", sim = 1 } }, 1, nil, stats, { width = 40 }, function()
+            ended = ended + 1
+        end)
+        t.eq("a " .. name .. " prompt dismissed stops the pass, which ends once", { #rows, stats.stopped, ended }, { 1, true, 1 })
+        t.ok("with nothing deleted", vim.uv.fs_stat(d1) ~= nil and vim.uv.fs_stat(d2) ~= nil)
+    end
+
     widgets.menu = real_menu
     vim.fn.delete(fdir, "rf")
     vim.fn.delete(d1, "rf")
@@ -295,6 +311,66 @@ do
     end
     t.eq("a typed directory reads ~ as home too", clean.validate_dir("~/cp"), fake .. "/cp")
     vim.uv.os_homedir = real
+end
+
+-- Every language the config runs is read, not a fixed few, and reading one only ever keeps
+-- more: its files are asked about when empty or still their template, a build with a source
+-- of its name beside it is no orphan, and a folder a source stores its testcases in is kept.
+do
+    local widgets = require("tuna.ui.widgets")
+    local real_menu = widgets.menu
+    local tdir, root = t.tempdir(), t.tempdir()
+    local starter = "package main\n\nfunc main() {\n}\n"
+    t.write(tdir, "template.go", starter)
+    local function setup_go(with_go)
+        config.setup({
+            run_command = with_go and { go = { exec = "go", args = { "run", "$(FNAME)" } } } or nil,
+            scaffold = { templates = { solution = tdir .. "/template.$(FEXT)" } },
+            testcases_directory = "tests",
+        })
+    end
+    for _, sub in ipairs({ "A", "B", "C", "D/tests", "E/tests" }) do
+        vim.fn.mkdir(root .. "/" .. sub, "p")
+    end
+    t.write(root .. "/A", "main.go", starter) -- still its template
+    t.write(root .. "/B", "main.go", "") -- empty
+    t.write(root .. "/C", "main.go", "package main\n\nfunc main() {\n\tsolve()\n}\n\nfunc solve() {}\n") -- written in
+    t.write(root .. "/C", "main", "\127ELF\2\1\1\0") -- its build
+    t.write(root .. "/C", "debug.h", "") -- a header, no program
+    t.write(root .. "/D", "main.go", "package main\n\nfunc main() {\n\tsolve()\n}\n\nfunc solve() {}\n")
+    t.write(root .. "/D/tests", "main_input0.txt", "1\n") -- the testcases a source still stores
+    t.write(root .. "/E/tests", "main_input0.txt", "1\n") -- testcases whose source is gone
+
+    local function scanned()
+        return vim.tbl_map(function(f)
+            return f.rel .. ": " .. f.reason
+        end, clean.scan(root, config.current_setup, math.huge, 1.0))
+    end
+    local function offered_dirs()
+        local offered = {}
+        widgets.menu = function(_, _, on_choice, _, _, preview)
+            offered[#offered + 1] = preview.title
+            on_choice(2) -- Keep
+        end
+        clean.prune_dirs(root, config.current_setup, nil, nil, { deleted = 0, builds = 0, dirs = 0, emptied = {} }, math.huge, function() end)
+        widgets.menu = real_menu
+        return offered
+    end
+
+    setup_go(true)
+    t.eq("a language the config runs is read: an untouched or empty file is offered, one written in is not, nor a header, nor a build with its source", scanned(), {
+        "A/main.go: 100% match to solution template",
+        "B/main.go: empty file",
+    })
+    t.eq("and the folder a source stores its testcases in is kept, one whose source is gone offered", offered_dirs(), { "E/tests/" })
+
+    -- A language the config does not run is not read: none of its files is offered, so a build
+    -- beside one reads as an orphan, which is asked about like any other.
+    setup_go(false)
+    t.eq("a language the config does not run is not read", scanned(), { "C/main: build of main, whose source is gone" })
+    config.setup({})
+    vim.fn.delete(root, "rf")
+    vim.fn.delete(tdir, "rf")
 end
 
 t.report()

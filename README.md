@@ -176,7 +176,7 @@ A new solution opens where the `template_cursor` pattern matches your template (
 
 When entering a contest, some judges, like AtCoder, place you in the problems page, from which pressing the green plus is convenient.
 Others, like Codeforces, place you inside the first problem, so going to the problems page to download the contest at the start of the competition would lose precious seconds.
-To solve this, when dealing with judges of the second type, you can create a scratch file via `:Tuna scratch`.
+To solve this, when dealing with judges of the second type, you can create a scratch file via [`:Tuna scratch`](REFERENCE.md#scratch).
 A scratch file also follows your template, and you can solve and submit the easiest problem of the contest in it (there are no testcases for tuna to run, and submitting won't work unless you add the problem's URL in a `// submit at:` header line, which defeats the purpose of being fast).
 After having solved this problem, you can download the rest of the contest with `:Tuna download sync`, which folds your scratch into the first problem's file.
 

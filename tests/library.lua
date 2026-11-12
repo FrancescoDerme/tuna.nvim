@@ -43,6 +43,12 @@ local snips = library.parse({ "x", "// TUNALIB: add start", "void add() {}", "//
 t.eq("a guarded region is a snippet", { snips[1].name, snips[1].lines, snips[1].first }, { "add", { "void add() {}" }, 3 })
 local _, warning = library.parse({ "// TUNALIB: dsu start", "int p[10];" }, "TUNALIB")
 t.has("an unclosed guard is reported", warning, "unclosed 'dsu' guard")
+-- The marker is matched as written, whatever characters it holds.
+for _, marker in ipairs({ "MY-LIB", "LIB+", "[LIB]", "LIB.V2" }) do
+    local guarded = library.parse({ "// " .. marker .. ": add start", "void add() {}", "// " .. marker .. ": add end" }, marker)
+    t.eq("a marker written " .. marker .. " guards a snippet", #guarded, 1)
+end
+t.eq("and stands for nothing but itself", #library.parse({ "// LIBXV2: add start", "x", "// LIBXV2: add end" }, "LIB.V2"), 0)
 
 -- The comment block right under a start guard is the snippet's notes, in its own comment
 -- syntax, ending at the first line that is not one; from `Complexity:` on, its complexity.

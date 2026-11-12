@@ -72,7 +72,6 @@ The rules that hold everywhere are in the root `CLAUDE.md`.
   `create_missing`'s `instead`), so a half-written generator does not turn every `:Tuna run`
   into a search. `stress_helpers` hands back the generator even then. Every run looks the
   bruteforce up again, and one found makes the board a stress run again (`hunt` follows it).
-  A stop marks the testcases the re-run lane had not reached `not run`, as in every mode.
   The Run pane's `brute` row, on every stress board so the rows stay put, says `none`, and the
   legend says what is kept instead.
 - `idle()` means the search has stopped, so every path that ends a run has to `finish()`,

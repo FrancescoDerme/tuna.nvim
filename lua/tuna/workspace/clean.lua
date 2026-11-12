@@ -28,10 +28,6 @@ local widgets = require("tuna.ui.widgets")
 
 local M = {}
 
--- Config language name -> the file extension solutions of that language use, so a
--- directory scan only reads files that could plausibly be a solution/scaffold.
-local LANG_EXT = { c = "c", cpp = "cpp", python = "py", java = "java", rust = "rs" }
-
 --------------------------------------------------------------------------------
 -- Template matching
 --------------------------------------------------------------------------------
@@ -147,22 +143,33 @@ local function tool_roles(cfg)
     return map
 end
 
----The file extensions worth reading during a scan.
+---Whether a file named `name` is a source file worth reading during a scan: one in a language
+---the config compiles or runs, whichever it is, by Neovim's filetype for the name, and the
+---languages tuna ships starters in and downloads into, whatever the config runs. A header is
+---none: it has its language's filetype and is no program.
+---
+---Every use errs towards keeping. A file that is a source is only ever *asked about*, when it
+---is still its template or empty; a build with a source of its name beside it is not
+---offered; and a folder a source stores its testcases in is kept. So reading more languages
+---offers more files to be asked about and fewer builds and folders, never one unasked.
 ---@param cfg table
----@return table<string, boolean>
-local function source_exts(cfg)
-    local exts = { cpp = true, py = true } -- scaffold built-ins always relevant
-    for _, group in ipairs({ cfg.compile_command, cfg.run_command }) do
-        for lang in pairs(group or {}) do
-            if LANG_EXT[lang] then
-                exts[LANG_EXT[lang]] = true
-            end
-        end
-    end
+---@return fun(name: string): boolean
+local function source_test(cfg)
+    local tools = require("tuna.run.tools")
+    local always = { cpp = true, py = true }
     if cfg.downloaded_files_extension then
-        exts[cfg.downloaded_files_extension] = true
+        always[cfg.downloaded_files_extension] = true
     end
-    return exts
+    return function(name)
+        if tools.is_header(name) then
+            return false
+        end
+        if always[name:match("%.([^./]+)$") or ""] then
+            return true
+        end
+        local ft = tools.filetype_of(name)
+        return ft ~= "" and ((cfg.run_command or {})[ft] ~= nil or (cfg.compile_command or {})[ft] ~= nil)
+    end
 end
 
 ---The templates a file at `full` of `role` could have been written from, read once per scan.
@@ -404,23 +411,41 @@ local function builds_of(path)
     return out
 end
 
+---The stems of the sources in `dir`, read once per scan: what a build there may be the build of.
+---@param dir string
+---@param is_source fun(name: string): boolean `source_test`
+---@param cache table<string, table<string, true>> by directory
+---@return table<string, true>
+local function source_stems(dir, is_source, cache)
+    if not cache[dir] then
+        local stems = {}
+        local handle = vim.uv.fs_scandir(dir)
+        while handle do
+            local name, typ = vim.uv.fs_scandir_next(handle)
+            if not name then
+                break
+            end
+            if typ ~= "directory" and is_source(name) then
+                stems[(name:gsub("%.[^.]*$", ""))] = true
+            end
+        end
+        cache[dir] = stems
+    end
+    return cache[dir]
+end
+
 ---The name of the source a build was made from, when that source is gone: a compiled
 ---program named as a build (`build_stem`), with no source of that name beside it in a
 ---language the scan reads.
 ---@param full string
 ---@param leaf string its basename
----@param exts table<string, boolean> `source_exts`
+---@param is_source fun(name: string): boolean `source_test`
+---@param cache table<string, table<string, true>> `source_stems`'s
 ---@return string? stem
-local function orphaned_build(full, leaf, exts)
+local function orphaned_build(full, leaf, is_source, cache)
     local stem = build_stem(leaf)
-    if not stem then
+    if not stem or source_stems(vim.fs.dirname(full), is_source, cache)[stem] then
         return nil
-    end
-    local dir = vim.fs.dirname(full)
-    for source_ext in pairs(exts) do
-        if utils.file_exists(dir .. "/" .. stem .. "." .. source_ext) then
-            return nil
-        end
     end
     return is_program(full) and stem or nil
 end
@@ -434,13 +459,13 @@ end
 ---@param threshold number similarity threshold in [0,1]
 ---@return { path: string, rel: string, reason: string, sim: number, pinned: boolean?, build: boolean? }[] files, boolean truncated
 local function scan(dir, cfg, depth, threshold)
-    local exts = source_exts(cfg)
+    local is_source, stems = source_test(cfg), {}
     local roles = tool_roles(cfg)
     local skips = skip_set(cfg)
     local budget = entry_budget(cfg)
     local cache = {}
     local out = {}
-    pcall(function()
+    local walked, why = pcall(function()
         -- `skip` prunes at traversal time, which is the only thing that helps: a
         -- filter applied to yielded entries has already paid to walk them.
         for name, typ in vim.fs.dir(dir, { depth = depth, skip = descend_into(skips) }) do
@@ -450,7 +475,7 @@ local function scan(dir, cfg, depth, threshold)
                 return
             end
             local full, leaf = dir .. "/" .. name, name:match("[^/]+$") or name
-            local stem = typ == "file" and orphaned_build(full, leaf, exts)
+            local stem = typ == "file" and orphaned_build(full, leaf, is_source, stems)
             if stem then
                 out[#out + 1] = {
                     path = full,
@@ -463,7 +488,7 @@ local function scan(dir, cfg, depth, threshold)
             elseif typ == "file" and not leaf:match("^%.") then
                 local ext = name:match("%.([^./]+)$") or ""
                 local base = leaf:gsub("%.[^.]*$", "")
-                if exts[ext] or roles[base] then
+                if is_source(leaf) or roles[base] then
                     local reason, sim = classify(full, ext, base, roles, cfg, threshold, cache)
                     if reason then
                         out[#out + 1] = {
@@ -478,6 +503,12 @@ local function scan(dir, cfg, depth, threshold)
             end
         end
     end)
+    if not walked then
+        -- A walk that raised (a directory that cannot be read) covered part of the tree, which
+        -- is what a partial scan is: said, and the files found so far still offered.
+        budget.truncated = true
+        utils.notify("clean: the scan stopped early, " .. tostring(why), "WARN")
+    end
     -- Most-certainly-unused first: a build whose source is gone, which nothing can run
     -- again, then the closer a file still is to its template, the less of it was ever
     -- written, so reviewing in decreasing match order front-loads the easy deletions and
@@ -564,7 +595,7 @@ end
 ---backend's root (`tests`, from `tests/$(TCNUM)`), each read from the config a buffer of that
 ---source would get, its `.tuna.lua` included.
 ---@param dir string normalized
----@param ctx { exts: table<string, boolean>, stores: table<string, string[]> }
+---@param ctx { is_source: (fun(name: string): boolean), stores: table<string, string[]> }
 ---@return string[]
 local function stores_in(dir, ctx)
     if ctx.stores[dir] then
@@ -578,7 +609,7 @@ local function stores_in(dir, ctx)
         if not name then
             break
         end
-        if typ == "file" and ctx.exts[name:match("%.([^.]+)$") or ""] then
+        if typ == "file" and ctx.is_source(name) then
             local file = dir .. "/" .. name
             cfg = cfg or config.load_local_config_and_extend(dir)
             local base = vim.fs.normalize(testcases.tc_directory(dir, file, cfg))
@@ -599,7 +630,7 @@ end
 ---above it, within the scan. Such a folder holds nothing but testcases, like a problem whose
 ---solution is gone, and only where it stands tells them apart.
 ---@param dir string normalized
----@param ctx { root: string, exts: table<string, boolean>, stores: table<string, string[]> }
+---@param ctx { root: string, is_source: (fun(name: string): boolean), stores: table<string, string[]> }
 ---@return boolean
 local function holds_live_testcases(dir, ctx)
     local cur = dir
@@ -725,7 +756,7 @@ end
 ---evaluated from two different starting points (the targeted pass over what the run
 ---emptied, and the general sweep) without walking any subtree twice.
 ---@param dir string
----@param ctx { root: string, pats: string[], exts: table<string, boolean>, protected: table<string, boolean>, skips: table<string, boolean>, budget: table, decided: table<string, { removable: boolean, files: integer }>, stores: table<string, string[]> }
+---@param ctx { root: string, pats: string[], is_source: (fun(name: string): boolean), protected: table<string, boolean>, skips: table<string, boolean>, budget: table, decided: table<string, { removable: boolean, files: integer }>, stores: table<string, string[]> }
 ---@param out { path: string, files: integer }[] collected, deepest first
 ---@param depth number levels left to descend
 ---@return boolean removable whether `dir` itself could go
@@ -952,7 +983,12 @@ local function confirm_each(files, i, restore, stats, ui, done)
             end
         end
         confirm_each(files, i + 1, restore, stats, ui, done) -- idx 2 (Keep) lands here too
-    end, restore, nil, preview, { notice = ui.notice, row = start })
+    end, restore, function()
+        -- Dismissed: `stop`, the answer that deletes nothing more, so the pass still ends by
+        -- saying what it removed.
+        stats.stopped = true
+        done()
+    end, preview, { notice = ui.notice, row = start })
 end
 
 ---Wipe the buffers backing anything inside a directory that is about to be removed,
@@ -1045,7 +1081,10 @@ local function confirm_dirs(dirs, i, restore, stats, ui, done)
             end
         end
         confirm_dirs(dirs, i + 1, restore, stats, ui, done)
-    end, restore, nil, preview, { notice = ui.notice, row = ui.row })
+    end, restore, function()
+        stats.stopped = true -- dismissed is `stop`, as for a file
+        done()
+    end, preview, { notice = ui.notice, row = ui.row })
 end
 
 ---The pane shown above every confirmation when a scan could not cover its whole tree,
@@ -1088,7 +1127,7 @@ local function prune_dirs(root, cfg, bufnr, restore, stats, depth, done)
     local ctx = {
         root = vim.fs.normalize(root),
         pats = disposable_patterns(cfg),
-        exts = source_exts(cfg),
+        is_source = source_test(cfg),
         protected = protected_directories(root, cfg, bufnr),
         skips = skip_set(cfg),
         budget = entry_budget(cfg),

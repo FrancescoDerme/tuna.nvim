@@ -67,6 +67,17 @@ local function choose_testcase(tctbl, verb, cb)
     end
 end
 
+---The lowest testcase number `tctbl` does not hold.
+---@param tctbl table<integer, table>
+---@return integer
+local function free_number(tctbl)
+    local n = 0
+    while tctbl[n] do
+        n = n + 1
+    end
+    return n
+end
+
 ---Add a new testcase, or edit an existing one (via the editor, choosing first if no
 ---number is given and there is more than one).
 ---@param add boolean add a fresh testcase instead of editing
@@ -77,10 +88,7 @@ function M.edit_testcase(add, tcnum)
     local tctbl = testcases.buf_get_testcases(bufnr)
 
     if add then
-        tcnum = 0
-        while tctbl[tcnum] do
-            tcnum = tcnum + 1
-        end
+        tcnum = free_number(tctbl)
         tctbl[tcnum] = { input = "" }
     end
 
@@ -415,11 +423,7 @@ function M.generate_testcase()
     end
     local generate = require("tuna.run.generate")
     generate.input(bufnr, config.get_buffer_config(bufnr), function(input, seed)
-        local tctbl = testcases.buf_get_testcases(bufnr)
-        local n = 0
-        while tctbl[n] do
-            n = n + 1
-        end
+        local n = free_number(testcases.buf_get_testcases(bufnr))
         testcases.buf_save_testcase(bufnr, n, input)
         generate.said(n, seed)
     end)
@@ -999,6 +1003,9 @@ function M.complete(arg_lead, cmd_line, cursor_pos)
         return {}
     end
 
+    -- Sorted as a copy: the lists completed from are shared, and their own order is what the
+    -- menu and the messages offer the roles and modes in.
+    candidates = vim.list_slice(candidates)
     table.sort(candidates)
     return vim.tbl_filter(function(c)
         return c:sub(1, #arg_lead) == arg_lead

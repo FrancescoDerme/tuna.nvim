@@ -473,7 +473,7 @@ function M.track(bufnr)
         return
     end
     if is_problem_buffer(bufnr, path) then
-        M.record_problem(path)
+        M.record_problem(path, config.get_buffer_config(bufnr)) -- resolved by the check above
     end
 end
 

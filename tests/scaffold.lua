@@ -321,6 +321,30 @@ do
     dir, buf = problem()
     scaffold.create("solution", buf)
     t.eq("an empty name writes nothing", vim.fn.glob(dir .. "/*.cpp", false, true), { dir .. "/main.cpp" })
+
+    -- The name typed says the language: one offered in the solution's and typed in another
+    -- starts from that language's template.
+    widgets.input = function(_, _, on_submit)
+        on_submit("other.py")
+    end
+    scaffold.create("solution", buf)
+    t.eq("a name typed in another language starts from that language's template", read(dir .. "/other.py"), table.concat(vim.list_slice(vim.fn.readfile(shipped .. "/solution.py"), 3), "\n") .. "\n")
+    vim.cmd("buffer " .. buf)
+
+    -- One that cannot be written is said, not reported as created and opened.
+    local quiet = vim.notify
+    local said = t.capture_notifications()
+    widgets.input = function(_, _, on_submit)
+        on_submit(dir .. "/main.cpp/under-a-file.cpp")
+    end
+    local told
+    scaffold.create("solution", buf, nil, { on_done = function(path)
+        told = path or false
+    end })
+    vim.notify = quiet
+    t.eq("a file that cannot be written is nothing created", told, false)
+    t.ok("and says so", #said == 1 and said[1]:find("could not write", 1, true) ~= nil, said)
+    t.eq("with nothing opened", vim.api.nvim_get_current_buf(), buf)
     widgets.input = real_input
 end
 
@@ -344,6 +368,10 @@ t.eq(
 vim.cmd("edit " .. dir .. "/main.cpp")
 t.eq("then the languages there are for one", complete("", "Tuna scaffold generator ", 24), { "cpp", "py", "rs" })
 t.eq("named by its tool_names too", complete("", "Tuna scaffold gen ", 18), { "cpp", "py", "rs" })
+-- Completing sorts what it offers and leaves the roles in their own order, the one the menu and
+-- the messages offer them in.
+t.eq("completing the roles offers them sorted", complete("", "Tuna scaffold ", 14), { "bruteforce", "checker", "generator", "interactor", "solution" })
+t.eq("and leaves their own order as it was", require("tuna.run.tools").SCAFFOLDS, { "solution", "checker", "generator", "bruteforce", "interactor" })
 
 -- The shipped solution starters carry a tags line to fill in, which names no tag as it is.
 for _, ext in ipairs({ "cpp", "py" }) do

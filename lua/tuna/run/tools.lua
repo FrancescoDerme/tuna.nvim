@@ -60,6 +60,7 @@ local function filetype_of(path)
     end
     return ft
 end
+M.filetype_of = filetype_of
 
 --------------------------------------------------------------------------------
 -- Discovery

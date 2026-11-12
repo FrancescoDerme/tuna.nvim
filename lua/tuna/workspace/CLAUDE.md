@@ -35,7 +35,9 @@ problems and remembering them. The rules that hold everywhere are in the root `C
     find. A solution goes through `widgets.input`, offered the name of the solution it is
     written beside (the current file when it is a runnable solution, else the folder's first)
     while it is free, else it with the next free number (`main2.cpp`), in that solution's
-    language. A helper's language is the one asked for, else `scaffold.language`, else the
+    language, unless the name typed carries another extension, which then says the language:
+    a template never lands in a file of another language. A file that cannot be written is
+    said, and nothing is opened. A helper's language is the one asked for, else `scaffold.language`, else the
     solution's; one the role has no template in offers the languages it has (a helper is
     compiled and run in its own language, whatever the solution's). A solution's is the one
     asked for, else that solution's, else `downloaded_files_extension`, and with no template it
@@ -74,7 +76,13 @@ problems and remembering them. The rules that hold everywhere are in the root `C
     Every file compares against every template of its role (`scaffold.templates`, a helper
     by its `tool_names`, anything else a solution), a modifier only a problem fills matching
     anything, so no sidecar is needed, and the best match wins: which template a file came
-    from is recorded nowhere. Globs are cached per scan by pattern. A file that is one of
+    from is recorded nowhere. Globs are cached per scan by pattern. The files read are the
+    sources (`source_test`): every language the config compiles or runs, by Neovim's filetype
+    for the name (`tools.filetype_of`), plus the languages tuna ships starters in and
+    downloads into, headers left out. Reading a language only ever keeps more, which is why
+    it follows the config rather than a list: a source is asked about, never deleted unasked,
+    a build with a source of its name beside it is no orphan (`source_stems`), and a folder a
+    source stores its testcases in is kept. A file that is one of
     its role's templates is never offered, an empty one included; any other empty file is
     always unused.
   - The flow is floats only: a `form` for directory, depth and threshold, then one
@@ -83,11 +91,13 @@ problems and remembering them. The rules that hold everywhere are in the root `C
     prompt, since the pass deletes as it goes), each starting on the answer last given
     (`ui.row`), and the same for directories. A pinned file (`scan` marks it) comes after the other files, is
     titled `pinned, …` and starts on `keep` whatever was answered last, so a run of Deletes
-    cannot carry it along.
+    cannot carry it along. A prompt dismissed is `stop`: the pass ends there and still says
+    what it removed.
   - **Scan cost is bounded**: pruning at traversal (`descend_into`, `clean.skip_directories`,
     dot-directories, judged by the directory's own name at every depth: `vim.fs.dir` hands
     `skip` the path relative to the root), a shared `clean.max_entries` budget reported through
-    the `notice` pane, early rejection on the line-count ceiling, and a 1 MiB size guard.
+    the `notice` pane, early rejection on the line-count ceiling, and a 1 MiB size guard. A
+    walk that raises is a partial scan too, said once, with what it found still offered.
   - **Directory pass**: offers directories left empty apart from disposable files (testcases
     and the sidecar). Directories are evaluated post-order, deepest first. Directories the run
     emptied are evaluated before the general sweep, so the budget can't starve them.
@@ -120,9 +130,9 @@ problems and remembering them. The rules that hold everywhere are in the root `C
   the one a solution with no problem known gets): the configured order puts a judge's ahead of
   it for downloads, which know the judge, and a scratch does not. Then an empty file.
   Dismissing creates nothing, and with no template at all the scratch opens empty. `download
-  sync` sets `M.pending` and starts a download of mode `sync`, which stores what the page
-  the button is pressed on sends, one task as a problem and several as a contest, and says
-  so in its own start message: there is no option for which, since the page decides.
+  sync` sets `M.pending` and starts a download of mode `sync` (see
+  `lua/tuna/problem/CLAUDE.md`), saying in its own start message that the page the button is
+  pressed on decides what is downloaded, which is why there is no option for it.
   `is_scratch(path, cfg)` is how `:Tuna pin` and the menu know the scratch, which is no
   problem yet and is never pinned; `M.absorb(filepath, cfg, template)` keeps as many header lines as
   the template the problem was written from (returned by `store_downloaded_task`), replaces
@@ -173,6 +183,8 @@ problems and remembering them. The rules that hold everywhere are in the root `C
   to it would give the window a directory of its own. `solution_in` prefers the same file name,
   then the same extension, then any runnable file that is not a support file
   (`tools.is_support`). The ends of a contest warn instead of wrapping.
+  The cursor is placed by the config of the problem opened (its folder's `.tuna.lua`), not of
+  the one left.
   Neovim's directory comes along (`recent.change_dir`, with the new problem's `cd_command`) only
   when it was the problem left or a folder inside it (`working_in`, by real path): working in a
   problem, `:e` and a file finder would point at the one left, while a contest's folder, where
@@ -222,14 +234,15 @@ problems and remembering them. The rules that hold everywhere are in the root `C
     `judges.label` left it out, then lifts a row by the typed words that **start a word** of
     one of its tags: a word found anywhere in a tag let the `a` of `2263 a` lift every tag
     holding an a over the problem named A.
-  - **Tags are read from the sidecar** (`tags` section, `problem/tags.lua`), not the sources:
-    the walk reads sidecars only, and a source per problem would be a read for every solution.
-    They are copied there whenever the file is read or written in Neovim, so one tagged in
-    another editor is found once it has been opened.
+  - **Tags are read from the sidecar** (its `tags` section, see `lua/tuna/problem/CLAUDE.md`),
+    not the sources: the walk reads sidecars only, and a source per problem would be a read
+    for every solution.
   - It shows no verdicts: it is for reaching a known problem, nothing typed can match one, and
     checking one hashes every solution. Not a search of the recent lists either: they hold a
     handful of rows already on screen.
-- **`library.lua`**: snippets are regions between `library.marker` guard comments in plain
+- **`library.lua`**: `parse` matches `library.marker` as written (`vim.pesc`), since one
+  holding a pattern character (`MY-LIB`) would otherwise guard nothing. Snippets are regions
+  between `library.marker` guard comments in plain
   source files; files without guards are offered whole. Only files with the current buffer's
   extension are shown, dotfiles and dot-directories left out at every depth, and `library.path`
   goes through `expand_home`/`normalize_path`. Snippets are inserted below the cursor, dedented

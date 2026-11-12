@@ -15,8 +15,7 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
   anew, both from one recursive `{ ratio, child }` grid, levels alternating columns and rows.
   Splits need room Vim may refuse (`E36`), where floats tile any size: `split.relayout` then
   closes what it opened, puts `equalalways` back and raises, and `lay_out` draws the board as
-  floats from there on, said once. Both give a window its options through
-  `layout.window_options`.
+  floats from there on, said once.
 - **Six pane buffers, never more**: a buffer nothing shows is a cost with nothing bought. The
   build step, which has no input, answer or output, borrows the four detail buffers for its
   sources (`BUILD_PANES`), keeping their names out of all a user reads or writes there.

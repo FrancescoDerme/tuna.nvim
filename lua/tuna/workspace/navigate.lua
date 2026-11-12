@@ -134,10 +134,12 @@ function M.step(offset, bufnr)
     -- one folder share it, so there is nowhere to move.
     local follow = target.dir ~= dir and working_in(dir)
     require("tuna.ui.surface").edit(file)
+    -- The problem opened is read by its own config, a `.tuna.lua` of its folder included.
+    local target_cfg = config.load_local_config_and_extend(target.dir)
     if follow then
-        require("tuna.workspace.recent").change_dir(target.dir, config.load_local_config_and_extend(target.dir))
+        require("tuna.workspace.recent").change_dir(target.dir, target_cfg)
     end
-    utils.place_cursor(cfg)
+    utils.place_cursor(target_cfg)
     utils.notify(("problem %d/%d: %s"):format(target_idx, #problems, target.name), "INFO")
 end
 
