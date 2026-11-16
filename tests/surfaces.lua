@@ -313,6 +313,21 @@ do
     close_layer(80)
 end
 
+-- An ornament, only looked at, shows one line of a buffer it shares and is never scrolled or
+-- entered: no footer counts the rest, and focus cannot reach it.
+do
+    local surface = require("tuna.ui.surface")
+    local b = api.nvim_create_buf(false, true)
+    api.nvim_buf_set_lines(b, 0, -1, false, { "a", "b", "c" })
+    local w = surface.float(b, { layer = surface.LAYER.dialog, width = 5, height = 1, row = 2, col = 2, border = "single", ornament = true })
+    vim.api.nvim_exec_autocmds("WinScrolled", {})
+    settle()
+    local cfg = api.nvim_win_get_config(w)
+    ok("an ornament has no footer", not (cfg.footer and cfg.footer[1] and cfg.footer[1][1] ~= ""), vim.inspect(cfg.footer))
+    ok("and cannot be focused", cfg.focusable == false)
+    api.nvim_win_close(w, true)
+end
+
 -- A menu whose preview varies takes one width for all of it: what it shows fits, between half
 -- and seven tenths of the editor.
 do

@@ -294,7 +294,9 @@ end
 ---UI's grid's and anything left unset fights it. What differs between surfaces is where they
 ---sit and what they show, which is what the caller passes.
 ---@param bufnr integer
----@param opts { layer: integer, width: integer, height: integer, row: integer, col: integer, border: any, border_highlight: string|false|nil, border_group: string?, title: string|table|nil, enter: boolean?, keep_scrolloff: boolean?, wrap: boolean? }
+---@param opts { layer: integer, width: integer, height: integer, row: integer, col: integer, border: any, border_highlight: string|false|nil, border_group: string?, title: string|table|nil, enter: boolean?, keep_scrolloff: boolean?, wrap: boolean?, ornament: boolean? }
+---  `ornament` — a float only looked at (the menu's banner): out of reach of the mouse and
+---  `<C-w>w`, with no border colour, footer or bar, as it is never scrolled or entered.
 ---  `keep_scrolloff` — for a pane *read* like a buffer rather than navigated as a list:
 ---  a list pins `scrolloff` to 0 so its first and last rows stay reachable, which is
 ---  wrong for content the user scrolls through.
@@ -319,11 +321,14 @@ function M.float(bufnr, opts)
         title_pos = opts.title and "center" or nil,
         style = "minimal",
         zindex = opts.layer,
+        focusable = not opts.ornament,
     })
-    require("tuna.utils").set_border_highlight(winid, opts.border_highlight, opts.border_group)
-    follow_overflow(winid)
+    if not opts.ornament then
+        require("tuna.utils").set_border_highlight(winid, opts.border_highlight, opts.border_group)
+        follow_overflow(winid)
+    end
     pcall(function()
-        if vim.o.laststatus ~= 3 then
+        if opts.ornament or vim.o.laststatus ~= 3 then
             return
         end
         -- lualine draws the bar on a timer, from a queue of refreshes, so a float entered shows

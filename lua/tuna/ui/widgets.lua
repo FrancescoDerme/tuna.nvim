@@ -2243,14 +2243,100 @@ end
 ---@field bufs integer[]
 ---@field header string[]? banner rows drawn above the lists
 ---@field keys table<string, fun()>? keys of the whole board
----@field header_win integer?
----@field header_buf integer?
+---@field header_wins integer[] the banner's windows, one per run of letters on a row
 ---@field focused integer
 ---@field on_choice fun(section: integer, item: integer)?
 ---@field on_close fun()?
 ---@field restore_winid integer?
 ---@field skip_close boolean swallow WinClosed events during a resize/teardown
-local panels = { ui_visible = false, sections = {}, wins = {}, bufs = {}, focused = 1 }
+local panels = { ui_visible = false, sections = {}, wins = {}, bufs = {}, header_wins = {}, focused = 1 }
+
+---Close the board's windows, the banner's and the lists', as its own doing: `skip_close` stays
+---set, for the caller to clear once it is done.
+local function close_board()
+    panels.skip_close = true
+    for _, w in ipairs(panels.header_wins) do
+        close_win(w)
+    end
+    for _, w in ipairs(panels.wins) do
+        close_win(w)
+    end
+end
+
+---The windows under `layer`, topmost first, as the rectangles they cover, a float's border
+---included, each with the group its background is drawn in. None of them is the current
+---window while the menu is open, so one with no 'winhighlight' of its own is drawn in
+---`NormalNC` where the colorscheme defines it, and one with a 'winhighlight' in what that
+---puts in place of `NormalNC`, else of `NormalFloat` (`Normal` for a split).
+---@param layer integer
+---@return { top: integer, left: integer, bottom: integer, right: integer, group: string }[]
+local function windows_below(layer)
+    local nc = next(api.nvim_get_hl(0, { name = "NormalNC" })) ~= nil
+    local found = {}
+    for _, w in ipairs(api.nvim_tabpage_list_wins(0)) do
+        local c = api.nvim_win_get_config(w)
+        local float = c.relative ~= ""
+        if not (float and (c.hide or (c.zindex or 50) >= layer)) then
+            -- A border is eight cells, edges at 2, 4, 6 and 8, an empty one drawing nothing.
+            local function edge(n)
+                local cell = float and type(c.border) == "table" and c.border[n]
+                cell = type(cell) == "table" and cell[1] or cell
+                return (cell and cell ~= "") and 1 or 0
+            end
+            local base = float and "NormalFloat" or "Normal"
+            local wh = vim.wo[w].winhighlight
+            local group = nc and "NormalNC" or base
+            if wh ~= "" then
+                local map = {}
+                for from, to in wh:gmatch("([^:,]+):([^,]+)") do
+                    map[from] = to
+                end
+                group = map.NormalNC or map[base] or base
+            end
+            local pos = api.nvim_win_get_position(w)
+            found[#found + 1] = {
+                z = float and (c.zindex or 50) or 0,
+                top = pos[1],
+                left = pos[2],
+                bottom = pos[1] + edge(2) + api.nvim_win_get_height(w) + edge(6) - 1,
+                right = pos[2] + edge(8) + api.nvim_win_get_width(w) + edge(4) - 1,
+                group = group,
+            }
+        end
+    end
+    table.sort(found, function(a, b)
+        return a.z > b.z
+    end)
+    return found
+end
+
+---Cut a run of the banner where what is under it changes, each piece with the group whose
+---background is under it: the topmost window's there, else `Normal`.
+---@param text string
+---@param row integer
+---@param col integer
+---@param below table[] from `windows_below`
+---@return { text: string, col: integer, group: string }[]
+local function pieces_over(text, row, col, below)
+    local pieces = {}
+    for _, ch in ipairs(vim.fn.split(text, "\\zs")) do
+        local group = "Normal"
+        for _, f in ipairs(below) do
+            if row >= f.top and row <= f.bottom and col >= f.left and col <= f.right then
+                group = f.group
+                break
+            end
+        end
+        local last = pieces[#pieces]
+        if last and last.group == group then
+            last.text = last.text .. ch
+        else
+            pieces[#pieces + 1] = { text = ch, col = col, group = group }
+        end
+        col = col + api.nvim_strwidth(ch)
+    end
+    return pieces
+end
 
 ---Single-choice lists in columns, a column stacking several top to bottom, all visible and
 ---one focused. `<CR>` chooses from the focused list only. Call with `sections == nil` to
@@ -2271,22 +2357,14 @@ function M.panels(sections, on_choice, restore_winid, on_close, header, keys)
                 panels.sections[i].sel = api.nvim_win_get_cursor(w)[1]
             end
         end
-        panels.skip_close = true
-        close_win(panels.header_win)
-        for _, w in ipairs(panels.wins) do
-            close_win(w)
-        end
+        close_board()
     else
         if #sections == 0 then
             return
         end
         if panels.ui_visible then
             replace(panels, function()
-                panels.skip_close = true
-                close_win(panels.header_win)
-                for _, w in ipairs(panels.wins or {}) do
-                    close_win(w)
-                end
+                close_board()
                 panels.skip_close = false
             end)
         end
@@ -2432,39 +2510,57 @@ function M.panels(sections, on_choice, restore_winid, on_close, header, keys)
     local board_w = math.max(total, head and head_w or 0)
     local col = math.max(0, math.floor((vim_width - board_w) / 2))
 
-    panels.header_win, panels.header_buf = nil, nil
+    panels.header_wins = {}
     if head then
-        local hb = api.nvim_create_buf(false, true)
-        -- Centred by padding the lines across the board's width, so the art sits over the
-        -- middle of the lists whichever of the two is wider.
-        local inner = board_w
-        local pad = string.rep(" ", math.max(0, math.floor((inner - head_w) / 2)))
-        local centred = {}
-        for i, l in ipairs(head) do
-            centred[i] = pad .. l
-        end
-        api.nvim_buf_set_lines(hb, 0, -1, false, centred)
-        -- The letters wear `TunaMenuTitle`, which keeps them out of the window's blending.
-        for i, line in ipairs(centred) do
+        -- Free-standing: the wordmark is its letters over whatever is behind the board (the
+        -- file, the runner UI) rather than one more box in it. A float paints its whole
+        -- rectangle, so each run of letters on a row is a float of its own, and between
+        -- them nothing is drawn at all. A letter's cell takes the background of what is
+        -- under it, so a run is cut where that changes, at the edge of a window beneath.
+        -- The art is centred over the board's width, so it sits over the middle of the
+        -- lists whichever of the two is wider.
+        -- The pieces are the lines of one buffer, a window showing each: a buffer of their
+        -- own, set up as `open_float` sets up every widget's, would cost each piece what the
+        -- whole board does.
+        local pad = math.max(0, math.floor((board_w - head_w) / 2))
+        local below = windows_below(surface.LAYER.dialog)
+        local pieces = {}
+        for i, line in ipairs(head) do
+            local r = row + i - 1
             for s, e in line:gmatch("()[^ ]+()") do
-                pcall(api.nvim_buf_set_extmark, hb, panels_ns, i - 1, s - 1, { end_col = e - 1, hl_group = "TunaMenuTitle" })
+                local c = col + pad + api.nvim_strwidth(line:sub(1, s - 1))
+                for _, piece in ipairs(pieces_over(line:sub(s, e - 1), r, c, below)) do
+                    piece.row = r
+                    pieces[#pieces + 1] = piece
+                end
             end
         end
-        vim.bo[hb].modifiable = false
-        panels.header_buf = hb
-        -- Free-standing: no border, and no background either, so the wordmark is its
-        -- letters over whatever is behind the board rather than one more box in it.
-        panels.header_win = open_float(hb, false, {
-            width = board_w,
-            height = head_h,
-            row = row,
-            col = col,
-            border = "none",
-        })
-        -- Blended all the way: a float paints its whole rectangle, and a background left
-        -- unpainted is still a background, so only blending lets the editor show between
-        -- the letters. The letters keep their own colour through `TunaMenuTitle`.
-        vim.wo[panels.header_win].winblend = 100
+        if #pieces > 0 then
+            local hb = api.nvim_create_buf(false, true)
+            api.nvim_buf_set_lines(hb, 0, -1, false, vim.tbl_map(function(p)
+                return p.text
+            end, pieces))
+            for k, p in ipairs(pieces) do
+                api.nvim_buf_set_extmark(hb, panels_ns, k - 1, 0, { end_col = #p.text, hl_group = "TunaMenuTitle" })
+            end
+            surface.adopt(hb, "widget")
+            surface.read_only(hb)
+            vim.bo[hb].bufhidden = "wipe"
+            for k, p in ipairs(pieces) do
+                local w = surface.float(hb, {
+                    layer = surface.LAYER.dialog,
+                    width = api.nvim_strwidth(p.text),
+                    height = 1,
+                    row = p.row,
+                    col = p.col,
+                    border = "none",
+                    ornament = true,
+                })
+                api.nvim_win_set_cursor(w, { k, 0 })
+                api.nvim_set_option_value("winhighlight", "NormalFloat:" .. p.group, { scope = "local", win = w })
+                panels.header_wins[k] = w
+            end
+        end
         row = row + head_h + HEAD_GAP
     end
     -- The lists are centred under the banner rather than left-aligned with it.
@@ -2515,11 +2611,7 @@ function M.panels(sections, on_choice, restore_winid, on_close, header, keys)
 
     local function teardown()
         panels.ui_visible = false
-        panels.skip_close = true
-        close_win(panels.header_win)
-        for _, w in ipairs(panels.wins) do
-            close_win(w)
-        end
+        close_board()
         panels.skip_close = false
         if panels.restore_winid and api.nvim_win_is_valid(panels.restore_winid) then
             api.nvim_set_current_win(panels.restore_winid)

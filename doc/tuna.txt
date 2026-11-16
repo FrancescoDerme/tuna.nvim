@@ -791,7 +791,9 @@ rest: >lua
     },
 <
 `mappings` are buffer-local, set for the solution filetypes in
-`keymaps.filetypes`, and `global` are set once and always there.
+`keymaps.filetypes`, and `global` are set once and always there. The runner
+UI's panes get the `mappings` too, acting on the solution they show, except
+`library` and any key the runner UI uses itself.
 
 Every action can be mapped this way. An action is a name for a `:Tuna` command
 with its arguments fixed. Actions are defined in `M.actions` in

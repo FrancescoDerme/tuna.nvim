@@ -425,6 +425,52 @@ do
     r:delete_ui()
 end
 
+-- The solution keys reach the panes, which no `FileType` autocmd maps, so a key there acts
+-- on the solution rather than falling through to the board's own letters.
+do
+    local km_config = require("tuna.config").current_setup
+    local saved, quiet = km_config.keymaps, vim.notify
+    local function board_with(keymaps)
+        km_config.keymaps = keymaps
+        require("tuna.keymaps").setup()
+        r = require("tuna.run").new(buf)
+        stub_system()
+        r:run_testcases({ [0] = { input = "1\n" } })
+        r:show_ui()
+        settled(r)
+        vim.system = real_system
+    end
+    local function rhs(name, lhs)
+        local m = vim.api.nvim_buf_call(r.ui.windows[name].bufnr, function()
+            return vim.fn.maparg(lhs, "n", false, true)
+        end)
+        return m.rhs or (m.callback and "callback") or ""
+    end
+    -- Restored however the checks end, as the maps would otherwise stay on for the rest of the file.
+    local done, err = pcall(function()
+        board_with({ preset = "<leader>t", mappings = { submit = "s" } })
+        t.eq("a pane has the solution's keys", { rhs("tc", "<leader>tr"), rhs("si", "<leader>tgj") }, { "<cmd>Tuna run<cr>", "<cmd>Tuna go judge<cr>" })
+        t.ok("and a board key wins over a solution key on the same key", rhs("tc", "s") ~= "<cmd>Tuna submit<cr>", rhs("tc", "s"))
+        -- The library inserts at the cursor, which on a pane is in a testcase: its key says so
+        -- there, rather than falling through to the board's `t`, which generates a testcase.
+        local said = t.capture_notifications()
+        vim.api.nvim_buf_call(r.ui.windows.tc.bufnr, function()
+            vim.api.nvim_feedkeys(vim.keycode("<leader>tl"), "x", false)
+        end)
+        vim.notify = quiet
+        t.has("the library's key says it works from the solution", table.concat(said, "\n"), "library works from the solution, not the runner UI.")
+        r:delete_ui()
+        -- A solution whose filetype has no maps has none on its panes either.
+        board_with({ preset = "<leader>t", filetypes = { "python" } })
+        t.eq("a pane of a solution whose filetype has no maps has none", rhs("tc", "<leader>tr"), "")
+        r:delete_ui()
+    end)
+    vim.notify = quiet
+    km_config.keymaps = saved
+    require("tuna.keymaps").setup()
+    assert(done, err)
+end
+
 --------------------------------------------------------------------------------
 -- Both interfaces, as the row on screen changes kind
 --------------------------------------------------------------------------------

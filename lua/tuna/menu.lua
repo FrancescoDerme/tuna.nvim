@@ -603,6 +603,7 @@ M._test = {
     entry_status = entry_status,
     problem_names = problem_names,
     recent_layout = recent_layout,
+    BANNER = BANNER,
 }
 
 return M

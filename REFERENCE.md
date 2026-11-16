@@ -481,6 +481,7 @@ keymaps = {
 ```
 
 `mappings` are buffer-local, set for the solution filetypes in `keymaps.filetypes`, and `global` are set once and always there.
+The runner UI's panes get the `mappings` too, acting on the solution they show, except `library` and any key the runner UI uses itself.
 
 Every action can be mapped this way. An action is a name for a `:Tuna` command with its arguments fixed. Actions are defined in `M.actions` in [`lua/tuna/keymaps.lua`](lua/tuna/keymaps.lua): `menu`, `run`, `run_all`, `run_stress`, `run_interactive`, `show_ui`, `add_testcase`, `edit_testcase`, `delete_testcase`, `generate_testcase`, `submit`, `submit_clear`, `download_testcases`, `download_problem`, `download_contest`, `download_sync`, `clean`, `pin`, `next_problem`, `prev_problem`, `next_scaffold`, `prev_scaffold`, `go_problem`, `go_contest`, `go_judge`, `find`, `scratch` and `library`.
 

@@ -5,11 +5,8 @@ check.
 
 ## Entry points
 
-- **`menu.lua`**: the `:Tuna` menu, built on `widgets.panels` (not `widgets.menu`) with a
-  free-standing banner (no border and `winblend = 100`, so the editor shows between the
-  wordmark's letters, which are extmarked `TunaMenuTitle`, whose `blend = 0` keeps them out
-  of the blending that would otherwise paint them in the colours underneath): Contests over
-  Problems over Pinned in the left column (from `recent.snapshot()`), the commands on the
+- **`menu.lua`**: the `:Tuna` menu, built on `widgets.panels` (not `widgets.menu`) with its
+  wordmark as `panels`' free-standing banner: Contests over Problems over Pinned in the left column (from `recent.snapshot()`), the commands on the
   right under "catch of the day". Pinned is last because it is the unbounded one: `panels`
   hands a column's rows out smallest list first, so it is the list that scrolls. The three
   are laid out together by `recent_layout`, so statuses line up down the column, and the
@@ -68,5 +65,12 @@ check.
   edited and deleted on the runner UI, where they are seen, and most come from downloads.
   `pin` is `b` ("bookmark"), `p` being the previous problem, and `find` is global `f`, as
   `go to`'s keys are, wanted before any solution is open.
+- The runner UI's panes are no solution buffers, so the `FileType` autocmd never maps them,
+  and a missing key falls through to the pane's own (`<leader>ts` reaching `t`, which
+  generates a testcase). `show_ui` calls `map_pane` on each pane buffer with the `mappings`
+  the last `setup()` resolved, before binding its own keys, so a board key wins a clash, and
+  only for a solution whose filetype has them, as its own buffer would. `library` is left off
+  (`NOT_ON_PANES`): it inserts at the cursor, which there is in a testcase. Its key says so
+  rather than going unmapped, which would replay it as the board's letters (`t` generating).
 - **`health.lua`**: read-only checks for Neovim version, setup, the executables named by
   compile/run commands, Competitive Companion, submit providers and optional plugins.

@@ -234,6 +234,41 @@ end
 ---@type string[]
 local applied_global = {}
 
+---The solution maps the last `setup()` resolved, with their labels and filetypes, for the
+---runner UI's panes (`M.map_pane`): a pane shows a solution without being one, so the
+---`FileType` autocmd never reaches it.
+---@type table<string, string|string[]>, table<string, string>, table<string, true>
+local pane_maps, pane_labels, pane_fts = {}, {}, {}
+
+-- Solution actions a pane goes without: `library` inserts at the cursor, which on a pane
+-- is in a testcase, not the solution. Its key still answers there, saying so, as a key left
+-- unmapped would be replayed as the board's own letters.
+local NOT_ON_PANES = { library = true }
+
+---Set the solution maps on a runner UI pane buffer, when the solution it shows has them,
+---by its filetype. `:Tuna` resolves a pane to that solution, so they act on it. The UI
+---binds its own keys after this, so one of its keys wins over a solution map on the same key.
+---@param bufnr integer the pane's buffer
+---@param solution integer the solution's buffer
+function M.map_pane(bufnr, solution)
+    if not (vim.api.nvim_buf_is_valid(solution) and pane_fts[vim.bo[solution].filetype]) then
+        return
+    end
+    local maps = {}
+    for action, lhs in pairs(pane_maps) do
+        if NOT_ON_PANES[action] then
+            for _, key in ipairs(keys_of(lhs)) do
+                vim.keymap.set("n", key, function()
+                    require("tuna.utils").notify(("%s works from the solution, not the runner UI."):format(action:gsub("_", " ")), "WARN")
+                end, { buffer = bufnr, silent = true, desc = (pane_labels[action] or action:gsub("_", " ")) .. " (from the solution)" })
+            end
+        else
+            maps[action] = lhs
+        end
+    end
+    set_maps(maps, { buffer = bufnr }, pane_labels)
+end
+
 ---Install the opt-in keymaps: set the always-available `global` maps, and register a
 ---`FileType` autocmd that applies the buffer-local `mappings` on the solution
 ---filetypes (also covering already-open buffers, for a lazy-loaded setup). Re-runnable:
@@ -243,6 +278,7 @@ function M.setup()
         pcall(vim.keymap.del, "n", lhs)
     end
     applied_global = {}
+    pane_maps, pane_labels, pane_fts = {}, {}, {}
     -- Cleared even when nothing will be re-registered: a config that dropped its
     -- `mappings` should stop mapping new solution buffers.
     local ft_group = vim.api.nvim_create_augroup("TunaKeymaps", { clear = true })
@@ -276,6 +312,10 @@ function M.setup()
     if not vim.tbl_isempty(mappings) then
         warn_unknown(mappings, "mappings")
         local fts = filetypes(km)
+        pane_maps, pane_labels = mappings, mlabels
+        for _, ft in ipairs(fts) do
+            pane_fts[ft] = true
+        end
         vim.api.nvim_create_autocmd("FileType", {
             group = ft_group,
             pattern = fts,

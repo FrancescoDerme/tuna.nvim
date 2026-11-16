@@ -188,9 +188,20 @@ specific Vim error about a buffer the user never opened.
 - `panels`: lists in columns where `<CR>` acts on the focused list only (the `:Tuna` menu).
   `form`: stacked lists where `<CR>` submits every selection (clean). A `panels` section may
   carry `highlights`, byte-range spans drawn as extmarks in `tuna_panels`. They differ in what
-  `<CR>` means, so they stay separate. `panels` has an optional borderless header dropped
+  `<CR>` means, so they stay separate. `panels` has an optional free-standing banner, dropped
   when space is short, lists sized to their own content, and explicitly unmodifiable
-  buffers. A section's
+  buffers. The banner is drawn as its letters alone: each run of letters on a row is a
+  borderless `ornament` float (`surface.float`: unfocusable, with no footer, border colour or
+  bar), so nothing is drawn between runs and whatever is behind shows there. A blended float
+  is no substitute: Neovim fills a blended cell from the editor's grid, under any float
+  beneath, so a `winblend = 100` banner breaks the runner UI's borders up into the file's text
+  and gives a letter the file's background over a pane. Each letter's cell takes the
+  background of the window under it instead (`windows_below`, `pieces_over`), a run cut where
+  that changes. A window the user is not in is drawn in `NormalNC` where the colorscheme
+  defines it, unless it has a `winhighlight` of its own, which leaves it `NormalFloat` (or
+  `Normal`) unless it maps those, and none under the open menu is current. The pieces are the
+  lines of one buffer, a window on each: a buffer per piece set up by `open_float` multiplies
+  the cost of opening the menu several times over. A section's
   `column` stacks it with others: a column is as wide as its widest list, its lists share the
   band's rows smallest first (a list given fewer rows than items scrolls, with the user's
   scrolloff), and `switch_window_keys` move by position (`neighbour`: within the stack, or to

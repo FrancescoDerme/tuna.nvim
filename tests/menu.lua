@@ -451,33 +451,108 @@ end
 
 vim.o.columns, vim.o.lines = 140, 45
 require("tuna.menu").open()
-local titles, lists_top, banner = {}, math.huge, nil
+local titles, lists_top, pieces = {}, math.huge, {}
 for _, w in ipairs(api.nvim_list_wins()) do
     local c = api.nvim_win_get_config(w)
     if c.relative ~= "" then
         if type(c.title) == "table" then
             titles[#titles + 1] = vim.trim(c.title[1][1])
             lists_top = math.min(lists_top, c.row)
-        elseif borderless(c) then
-            banner = { win = w, config = c }
+        elseif borderless(c) and not c.focusable then
+            pieces[#pieces + 1] = { win = w, config = c }
         end
     end
 end
 table.sort(titles)
 t.eq("the menu's lists, the commands being the catch of the day", titles, { "catch of the day", "contests", "pinned", "problems" })
-t.ok("the banner is drawn", banner ~= nil)
-if banner then
-    t.ok("with no border around it", borderless(banner.config), banner.config.border)
-    t.eq("blended all the way, so the editor shows between its letters", vim.wo[banner.win].winblend, 100)
-    -- The letters are drawn in a group that stays out of that blending, or they would be
-    -- painted in the colours of whatever is behind the banner.
-    local letters = vim.api.nvim_buf_get_extmarks(api.nvim_win_get_buf(banner.win), ns, 0, -1, { details = true })
-    t.ok("its letters are highlighted", #letters > 0, #letters)
-    t.eq("in the banner's own group", letters[1] and letters[1][4].hl_group, "TunaMenuTitle")
-    t.eq("which is exempt from the blending", vim.api.nvim_get_hl(0, { name = "TunaMenuTitle" }).blend, 0)
-    t.eq("a blank row above the lists", lists_top, banner.config.row + banner.config.height + 1)
+t.ok("the banner is drawn", #pieces > 0)
+if #pieces > 0 then
+    -- Each run of letters on a row is a window of its own, with nothing drawn between them,
+    -- so whatever is behind the board shows there: the file, or the runner UI.
+    local banner_rows, top, left, last = {}, math.huge, math.huge, 0
+    for _, p in ipairs(pieces) do
+        top, left, last = math.min(top, p.config.row), math.min(left, p.config.col), math.max(last, p.config.row)
+    end
+    local lines = {}
+    for _, p in ipairs(pieces) do
+        local text = api.nvim_buf_get_lines(api.nvim_win_get_buf(p.win), 0, -1, false)[api.nvim_win_get_cursor(p.win)[1]]
+        local i = p.config.row - top + 1
+        lines[i] = lines[i] or {}
+        lines[i][#lines[i] + 1] = { col = p.config.col - left, text = text, width = p.config.width }
+    end
+    for i, row in ipairs(lines) do
+        table.sort(row, function(x, y) return x.col < y.col end)
+        local line = ""
+        for _, run in ipairs(row) do
+            line = line .. string.rep(" ", run.col - api.nvim_strwidth(line)) .. run.text
+        end
+        banner_rows[i] = line
+    end
+    local shipped = {}
+    for i, l in ipairs(require("tuna.menu")._test.BANNER) do
+        shipped[i] = l:gsub("%s+$", ""):sub(3)
+    end
+    t.eq("the banner is the wordmark, drawn as its letters alone", banner_rows, shipped)
+    local blank, sized = false, true
+    for _, p in ipairs(pieces) do
+        local text = api.nvim_buf_get_lines(api.nvim_win_get_buf(p.win), 0, -1, false)[api.nvim_win_get_cursor(p.win)[1]]
+        blank = blank or text:find(" ") ~= nil
+        sized = sized and p.config.width == api.nvim_strwidth(text) and p.config.height == 1
+    end
+    t.ok("no window of it holds a blank", not blank)
+    t.ok("each is one row, as wide as its letters", sized)
+    local letters = vim.api.nvim_buf_get_extmarks(api.nvim_win_get_buf(pieces[1].win), ns, 0, -1, { details = true })
+    t.eq("its letters are in the banner's own group", letters[1] and letters[1][4].hl_group, "TunaMenuTitle")
+    t.eq("a blank row above the lists", lists_top, last + 2)
 end
 press("<Esc>")
+local left_open = 0
+for _, w in ipairs(api.nvim_list_wins()) do
+    if api.nvim_win_get_config(w).relative ~= "" then
+        left_open = left_open + 1
+    end
+end
+t.eq("closing the menu closes every window of the banner", left_open, 0)
+
+-- A letter's cell takes the background of the window under it, a run cut where that changes:
+-- here a float with a 'winhighlight' of its own whose edge falls inside a run of letters.
+if #pieces > 0 then
+    local widest = pieces[1].config
+    for _, p in ipairs(pieces) do
+        if p.config.width > widest.width then
+            widest = p.config
+        end
+    end
+    local edge = widest.col + 2 -- the first column past the float
+    local under_buf = api.nvim_create_buf(false, true)
+    local under = api.nvim_open_win(under_buf, false, { relative = "editor", row = 0, col = 0, width = edge, height = 40, zindex = 50 })
+    vim.wo[under].winhighlight = "NormalFloat:Pmenu"
+    local function backdrops()
+        require("tuna.menu").open()
+        local got = { cut = true, over = {}, beside = {} }
+        for _, w in ipairs(api.nvim_list_wins()) do
+            local c = api.nvim_win_get_config(w)
+            if c.relative ~= "" and borderless(c) and not c.focusable then
+                got.cut = got.cut and (c.col >= edge or c.col + c.width <= edge)
+                local side = c.col < edge and got.over or got.beside
+                side[vim.wo[w].winhighlight] = true
+            end
+        end
+        press("<Esc>")
+        return got
+    end
+    local got = backdrops()
+    t.ok("a run is cut at the edge of the float beneath it", got.cut)
+    t.eq("over the float, its letters take the float's background", got.over, { ["NormalFloat:Pmenu"] = true })
+    t.eq("beside it, the file's", got.beside, { ["NormalFloat:Normal"] = true })
+    -- A window the user is not in, with no 'winhighlight' of its own, is drawn in `NormalNC`.
+    vim.api.nvim_set_hl(0, "NormalNC", { bg = "#101010" })
+    got = backdrops()
+    t.eq("where the colorscheme defines NormalNC, the file's is that", got.beside, { ["NormalFloat:NormalNC"] = true })
+    t.eq("but a window with a 'winhighlight' keeps its own", got.over, { ["NormalFloat:Pmenu"] = true })
+    vim.api.nvim_set_hl(0, "NormalNC", {})
+    api.nvim_win_close(under, true)
+end
 
 --------------------------------------------------------------------------------
 -- Pinned

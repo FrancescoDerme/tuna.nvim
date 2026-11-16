@@ -64,4 +64,18 @@ t.eq("find is on f, everywhere, and nothing is left on the old search key", {
 
 t.has(":Tuna completes its subcommands", table.concat(vim.fn.getcompletion("Tuna ", "cmdline"), " "), "run")
 
+-- A colorscheme that clears no groups as it loads: the groups drawn from the theme follow it.
+local function hl(name)
+    return vim.api.nvim_get_hl(0, { name = name })
+end
+local diff_before = hl("TunaDiffText").bg
+vim.api.nvim_set_hl(0, "Normal", { fg = 0x102030, bg = 0xf0f0f0 })
+vim.api.nvim_exec_autocmds("ColorScheme", {})
+t.eq("the banner's letters follow the new theme's text", hl("TunaMenuTitle").fg, 0x102030)
+t.ok("and the diff's tint its background", hl("TunaDiffText").bg ~= diff_before, hl("TunaDiffText"))
+vim.api.nvim_set_hl(0, "TunaMenuTitle", { fg = 0x123456 })
+vim.api.nvim_set_hl(0, "Normal", { fg = 0x203040, bg = 0x000000 })
+vim.api.nvim_exec_autocmds("ColorScheme", {})
+t.eq("but a colour given them by someone else stays", hl("TunaMenuTitle").fg, 0x123456)
+
 t.report()

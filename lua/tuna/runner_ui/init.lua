@@ -1811,6 +1811,9 @@ function RunnerUI:show_ui()
         vim.bo[buf].modifiable = false
         self.windows[name] = { bufnr = buf }
         pane_owner[buf] = self.runner
+        -- The user's solution keys, before the board's own, so a board key on the same
+        -- key wins.
+        require("tuna.keymaps").map_pane(buf, self.runner.bufnr)
     end
     -- Laid out for the row it is about to open on, not for line 1: the two differ exactly
     -- when the build step is not the row worth reading, and drawing the build's grid first

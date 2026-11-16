@@ -13,9 +13,9 @@ local download_started = false
 ---tag that covers the rest: `TunaFade1` and on (see `widgets.menu`).
 M.FADE = { 0.85, 0.75, 0.65, 0.55, 0.45, 0.35 }
 
--- The definition `setup_fades` last gave each `TunaFade` group, to tell a group of its own from
--- one a user has taken over.
-local fades_given = {}
+-- The definition last given each group drawn from the theme (`follow_theme`), to tell a group
+-- of tuna's own from one a user or a colorscheme has taken over.
+local given = {}
 
 ---@private
 ---Lay `fg` over `bg` at `alpha` opacity, both 24-bit RGB. Used to tint a highlight
@@ -34,8 +34,26 @@ local function blend(fg, bg, alpha)
     return out
 end
 
+---Give `name` the definition `want`, drawn from the theme, unless someone else has defined it:
+---it is set while it is empty or still what was given last. A group set with `default = true` is
+---never set again once defined, so a colorscheme that clears no groups as it loads would leave
+---it drawn from the theme before. Only a change is set: setting a group redraws every window,
+---even to what it was.
+---@param name string
+---@param want table
+local function follow_theme(name, want)
+    local have = vim.api.nvim_get_hl(0, { name = name })
+    if next(have) == nil or vim.deep_equal(have, given[name]) then
+        if not vim.deep_equal(have, want) then
+            vim.api.nvim_set_hl(0, name, want)
+        end
+        given[name] = want
+    end
+end
+
 ---Create Tuna's highlight groups. Defined with `default = true` so user/colorscheme
----overrides win; re-applied on every `ColorScheme` so they survive a theme switch.
+---overrides win; re-applied on every `ColorScheme` so they survive a theme switch, those drawn
+---from the theme through `follow_theme`.
 function M.setup_highlight_groups()
     -- The wrong values in the diff are marked by tinting the background red rather
     -- than filling it: a saturated block is louder than the thing it is pointing at.
@@ -55,7 +73,6 @@ function M.setup_highlight_groups()
         -- the editor's own `DiffAdd` is the wrong word for it. Nor is `DiffText`, a neutral
         -- background in most themes, reading as "selected". They keep the text's own colour
         -- and take a red-tinted background instead (see `wrong_bg`).
-        TunaDiffText = { bg = wrong_bg, ctermbg = 52 }, -- the tokens/characters that disagree
         TunaDiffAdd = { link = "TunaDiffText" }, -- a line the expected output doesn't have
         TunaDiffDelete = { link = "TunaDiffText" }, -- a line missing from the output
         -- The accent on the runner UI's *editable* panes (Input, Expected Output):
@@ -70,18 +87,15 @@ function M.setup_highlight_groups()
         -- `TunaEditable` still wins, and `runner_ui.editable_border_highlight` points
         -- at any group you like.
         TunaEditable = { ctermfg = "magenta", fg = "#c678dd", bold = true },
-        -- The letters of the `:Tuna` menu's banner. Its window is blended all the way, so
-        -- the editor shows between them instead of a panel the rest of the board doesn't
-        -- have; a blended cell takes the colours of whatever is under it, which would paint
-        -- the wordmark in the syntax colours of the code behind it. `blend = 0` keeps the
-        -- letters out of that, and their colour follows `Normal`, the art being the editor's
-        -- own text.
-        TunaMenuTitle = { fg = normal.fg, blend = 0 },
     }
     for name, val in pairs(groups) do
         val.default = true
         vim.api.nvim_set_hl(0, name, val)
     end
+    follow_theme("TunaDiffText", { bg = wrong_bg, ctermbg = 52 }) -- the tokens/characters that disagree
+    -- The letters of the `:Tuna` menu's banner, in `Normal`'s colour, the art being the editor's
+    -- own text.
+    follow_theme("TunaMenuTitle", normal.fg and { fg = normal.fg } or {})
     M.setup_fades()
 end
 
@@ -95,16 +109,7 @@ function M.setup_fades()
     local float = vim.api.nvim_get_hl(0, { name = "NormalFloat", link = false })
     local text, behind = float.fg or normal.fg, float.bg or normal.bg
     for i, alpha in ipairs(M.FADE) do
-        local name = "TunaFade" .. i
-        local have = vim.api.nvim_get_hl(0, { name = name })
-        if next(have) == nil or vim.deep_equal(have, fades_given[i]) then
-            local want = text and behind and { fg = blend(text, behind, alpha) } or {}
-            -- Only a change: setting a group redraws every window, even to what it was.
-            if not vim.deep_equal(have, want) then
-                vim.api.nvim_set_hl(0, name, want)
-            end
-            fades_given[i] = want
-        end
+        follow_theme("TunaFade" .. i, text and behind and { fg = blend(text, behind, alpha) } or {})
     end
 end
 
