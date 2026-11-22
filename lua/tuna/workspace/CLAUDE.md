@@ -219,10 +219,14 @@ problems and remembering them. The rules that hold everywhere are in the root `C
     submitted) is not listed, and a sidecar holding only `results` has no name to list it by.
   - A problem is what a folder's `task` entries name, **one row** however many attempts it has
     (one `url`, else one `name`), listed while one of its files is there: a solution the walk saw
-    beside the sidecar (`task` outlives its file), or a helper tagged. Its tags are its
-    solutions' and those of the folder's helpers and headers (`tools.is_support`), which serve
-    each solution beside them, so a folder of several problems gives each one a tagged
-    generator's, and never another problem's untasked solution. Its name and contest are the
+    beside the sidecar (`task` outlives its file), or a file tagged (an untagged helper alone
+    lists nothing). In a folder of one problem, a solution with no `task` is an attempt at it,
+    as `sidecar.task` reads it: a `main2.cpp` scaffolded beside a download has none, since
+    `scaffold` forgets what its name held. Its files are its solutions, then the folder's
+    helpers (sources by `run_command`, so no build or testcase) and tagged headers
+    (`tools.is_support`), which serve each solution beside them, and its tags are theirs, so
+    a folder of several problems gives each one its generator, and never another problem's
+    untasked solution. Its name and contest are the
     first of its attempts naming them, in file order, as a submit records a task with neither.
     Picking it opens the solution worked on last, else the first `tool_names.solution` name,
     else the first, and with no solution left the tagged helper. The row is the problem's name
@@ -234,6 +238,19 @@ problems and remembering them. The rules that hold everywhere are in the root `C
     `judges.label` left it out, then lifts a row by the typed words that **start a word** of
     one of its tags: a word found anywhere in a tag let the `a` of `2263 a` lift every tag
     holding an a over the problem named A.
+  - **A problem is found by its files** (`named`: each one's name, its name without the
+    extension, its role, `solution` for a solution): a word naming one is taken out of what
+    that row fuzzy-matches and lifts it as a tag does. Only a whole word names a file: file
+    names in the fuzzy text, or a prefix, would answer letters typed for a name on every row
+    (each has a `main.cpp`, and `b` starts every `brute.cpp`). Rows are grouped by the words
+    left to them, one `matchfuzzy` per group, and ordered by lifts, then fewer words left,
+    then match order. Nearly every row is in the whole query's group, so a keystroke costs
+    what it did before files counted: a row allocates nothing unless a word names a file of
+    it, and tags are checked only on the rows matched.
+  - **`catalogue` asks what a file is once per name** (`kind_of`), for the whole walk: every
+    name in every folder is classified (helper, header, source), folders repeat the same few
+    names, and the answer goes through Vimscript and, for a build with no extension, an
+    uncached `vim.filetype.match`: asked per file, it costs over a second for 3000 problems.
   - **Tags are read from the sidecar** (its `tags` section, see `lua/tuna/problem/CLAUDE.md`),
     not the sources: the walk reads sidecars only, and a source per problem would be a read
     for every solution.

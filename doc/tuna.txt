@@ -324,8 +324,9 @@ GETTING AROUND                                               *tuna-navigation*
   problems.
 - `:Tuna go judge` opens the problem you are on in your browser.
 - `:Tuna find`, or `/` in the menu, finds any problem or contest you have
-  downloaded, by name or by the tags you write in a solution's header, such
-  as `// tags: binary search, greedy`.
+  downloaded, by name, by the tags you write in a solution's header, such as
+  `// tags: binary search, greedy`, or by the files it has, such as
+  `main2.cpp` or `generator`.
 - `:Tuna pin` puts the problem you are on aside to solve later, and pinning it
   again lets it go. The menu provides access to your pinned problems.
 
@@ -593,6 +594,10 @@ Every command is a subcommand of `:Tuna` with tab-completion, and a lowercase
         first lines of any of its files: >cpp
             // tags: binary search, greedy
 <
+        And by its files: a word that is a file's whole name (`main2.cpp`),
+        its name without the extension (`main2`, `gen`) or what it is
+        (`generator`, `bruteforce`, `checker`, `interactor`, `solution`) finds
+        the problems that have one.
 
                                                                  *tuna-pinned*
 :Tuna pin

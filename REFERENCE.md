@@ -279,6 +279,8 @@ A problem is also found by its tags, written in a comment among the first lines 
 // tags: binary search, greedy
 ```
 
+And by its files: a word that is a file's whole name (`main2.cpp`), its name without the extension (`main2`, `gen`) or what it is (`generator`, `bruteforce`, `checker`, `interactor`, `solution`) finds the problems that have one.
+
 ## pin
 
 `:Tuna pin` puts the problem you are on aside to solve later, and running it again undoes the pin.

@@ -1,9 +1,10 @@
 -- lua/tuna/workspace/search.lua
 --
--- `:Tuna find`: every problem and contest under where downloads land, searched by name, contest
--- and tags, and opened as `:Tuna go` opens one. The sidecars are the source: a `task` entry says
--- a file is a problem's solution, and gives its name and contest whatever the folders are
--- called, and a `tags` entry a file's tags (`tags.lua`). Nothing is kept between searches.
+-- `:Tuna find`: every problem and contest under where downloads land, searched by name, contest,
+-- tags and the files a problem has, and opened as `:Tuna go` opens one. The sidecars are the
+-- source: a `task` entry says a file is a problem's solution, and gives its name and contest
+-- whatever the folders are called, and a `tags` entry a file's tags (`tags.lua`). Nothing is
+-- kept between searches.
 
 local api = vim.api
 local uv = vim.uv
@@ -22,7 +23,10 @@ local M = {}
 ---@field name string what the list shows: a problem's name, or a contest's
 ---@field text string what a search matches: the name, the contest and the tags
 ---@field tags string[]? a problem's tags, from every file of it, which a search ranks first
----@field files tuna.SearchFile[]? a problem's files: its solutions, then the other files tagged
+---@field files tuna.SearchFile[]? a problem's files: its solutions, then its helpers and the
+---  headers tagged
+---@field named table<string, true>? the words naming a problem's files, lowercase: each one's
+---  name, its name without the extension and its role (`main2.cpp`, `main2`, `solution`)
 ---@field path string what picking a problem opens: a solution, else one of its files; a
 ---  contest's directory
 ---@field label string? a problem's contest, as the judge names it
@@ -173,9 +177,9 @@ end
 
 ---The rows for what `walk` found. A problem is what the `task` entries of a folder name, one
 ---row whatever number of attempts it has (one URL, else one name), listed while a file of it is
----still there: a solution, or a helper tagged. Its tags are those of its solutions and of the
----folder's helpers and headers, which serve each solution beside them, and picking it opens
----the solution worked on last, else a conventional name, else the first. A contest is a
+---still there: a solution, or a file tagged. Its files and tags are those of its solutions and
+---of the folder's helpers and headers, which serve each solution beside them, and picking it
+---opens the solution worked on last, else a conventional name, else the first. A contest is a
 ---`group` naming two problems or more. Recent ones first, then by path.
 ---@param found { dir: string, names: table<string, true>, content: string }[]
 ---@param cfg table
@@ -195,6 +199,37 @@ local function catalogue(found, cfg)
     end
     local with_tags = type(cfg.search.tags) == "string" and cfg.search.tags ~= "" and (cfg.search.tag_lines or 0) > 0
     local tools = require("tuna.run.tools")
+    -- The role each helper name stands for, so `generator` finds a `gen.cpp`.
+    local roles = {}
+    for _, role in ipairs(tools.ROLES) do
+        for _, name in ipairs(cfg.tool_names[role] or {}) do
+            roles[name] = roles[name] or role
+        end
+    end
+    -- What a file is, by its name, asked once per name for the whole walk: folders repeat
+    -- the same names (`main.cpp`, `gen`, `1.in`), and the answer goes through Vimscript and,
+    -- for a name with no extension, an uncached `vim.filetype.match`.
+    local kinds = {}
+    ---@return { header: boolean, helper: boolean, source: boolean, stem: string, words: string[] }
+    local function kind_of(base)
+        local k = kinds[base]
+        if not k then
+            local stem = vim.fn.fnamemodify(base, ":r")
+            local ft = tools.filetype_of(base)
+            local header = tools.is_header(base)
+            k = {
+                header = header,
+                helper = tools.is_helper(base, cfg),
+                -- A source tuna runs, rather than a build or a testcase.
+                source = not header and ft ~= "" and (cfg.run_command or {})[ft] ~= nil,
+                stem = stem,
+                -- The words naming it (`named`): its name, its stem and its role.
+                words = { base:lower(), stem:lower(), not header and (roles[stem] or "solution") or nil },
+            }
+            kinds[base] = k
+        end
+        return k
+    end
 
     local rows, groups = {}, {}
     for _, f in ipairs(found) do
@@ -203,7 +238,10 @@ local function catalogue(found, cfg)
         local tagged = with_tags and type(store.tags) == "table" and store.tags or {}
         ---The tags of `base`, while it is there.
         local function tags_of(base)
-            local list = f.names[base] and type(tagged[base]) == "table" and tagged[base] or {}
+            local list = f.names[base] and type(tagged[base]) == "table" and tagged[base]
+            if not list then
+                return {}
+            end
             return vim.tbl_filter(function(tag)
                 return type(tag) == "string"
             end, list)
@@ -214,7 +252,7 @@ local function catalogue(found, cfg)
             if pa ~= pb then
                 return pa < pb
             end
-            local ra, rb = prefer[vim.fn.fnamemodify(a, ":r")] or math.huge, prefer[vim.fn.fnamemodify(b, ":r")] or math.huge
+            local ra, rb = prefer[kind_of(a).stem] or math.huge, prefer[kind_of(b).stem] or math.huge
             if ra ~= rb then
                 return ra < rb
             end
@@ -242,42 +280,70 @@ local function catalogue(found, cfg)
                 end
             end
         end
-        -- The helpers and headers tagged, which serve every solution beside them.
-        local others = {}
-        for base in pairs(tagged) do
-            local file = f.dir .. "/" .. base
-            if tools.is_support(file, cfg) and #tags_of(base) > 0 and not recent.ignored(file) then
-                others[#others + 1] = base
+        table.sort(keys)
+        -- What serves every solution beside it: the helpers there, and the headers tagged.
+        -- In a folder of one problem, a solution with no `task` of its own is an attempt at
+        -- it (a `main2.cpp` scaffolded beside the download), as `sidecar.task` reads it.
+        local others, loose, keeps = {}, {}, false
+        for base in pairs(f.names) do
+            if base:byte(1) ~= 46 then -- not a dotfile, the sidecar among them
+                local k = kind_of(base)
+                local take, tagged_here = false, false
+                if k.helper or k.header then
+                    tagged_here = tagged[base] ~= nil and #tags_of(base) > 0
+                    take = tagged_here or k.source
+                elseif k.source and #keys == 1 and tasks[base] == nil then
+                    take = true
+                end
+                if take and not recent.ignored(f.dir .. "/" .. base) then
+                    if k.helper or k.header then
+                        others[#others + 1] = base
+                        keeps = keeps or tagged_here
+                    else
+                        loose[#loose + 1] = base
+                    end
+                end
             end
         end
         table.sort(others)
-        table.sort(keys)
 
         for _, key in ipairs(keys) do
             local p = problems[key]
             local present = vim.tbl_filter(function(base)
                 return f.names[base]
             end, p.solutions)
-            local files, all, seen = {}, {}, {}
+            vim.list_extend(present, loose)
+            table.sort(present)
+            local files, all, seen, named = {}, {}, {}, {}
             for _, base in ipairs(vim.list_extend(vim.list_slice(present), others)) do
                 local tags = tags_of(base)
                 files[#files + 1] = { name = base, tags = tags }
+                for _, word in pairs(kind_of(base).words) do
+                    named[word] = true
+                end
                 for _, tag in ipairs(tags) do
                     if not seen[tag] then
                         seen[tag], all[#all + 1] = true, tag
                     end
                 end
             end
-            if #files > 0 then
+            -- Listed while a solution of it is there, or a file tagged: an untagged generator
+            -- left alone in a folder is not enough to say there is a problem.
+            if #present > 0 or keeps then
                 table.sort(present, before)
                 local name = p.name or p.solutions[1]
                 local group = p.group
+                local opens = present[1]
+                    or vim.iter(files):find(function(e)
+                        return #e.tags > 0
+                    end).name
                 local row = {
                     name = name,
                     text = table.concat({ name, group or "", unpack(all) }, " "),
                     tags = all,
                     files = files,
-                    path = f.dir .. "/" .. (present[1] or files[1].name),
+                    named = named,
+                    path = f.dir .. "/" .. opens,
                     label = group and judges.label(group) or nil,
                     url = p.url,
                 }
@@ -330,10 +396,14 @@ local function catalogue(found, cfg)
 end
 
 ---The rows a search shows, in order, as indices into `rows`: all of them with nothing typed,
----else those whose name, contest and tags fuzzy-match, the words in any order. A row with a tag
----a word typed starts a word of comes first, more such words first, then the best match: a tag
----is written to be searched for, where letters scattered over a name match by chance, and `dp`
----would otherwise rank every name with a d before a p over the problem tagged `interval dp`.
+---else those whose name, contest and tags fuzzy-match the words that name none of their files,
+---the words in any order. A word names a file when it is the file's name, that name without
+---its extension or its role, whole (`main2.cpp`, `gen`, `generator`), never a part of one, as
+---`b` would otherwise find every problem with a `brute.cpp`. A row with a file a word names, or
+---a tag a word starts a word of, comes first, more such words first, then the best match: a
+---tag is written to be searched for, where letters scattered over a name match by chance, and
+---`dp` would otherwise rank every name with a d before a p over the problem tagged
+---`interval dp`.
 ---@param rows tuna.SearchRow[]
 ---@param query string
 ---@return integer[]
@@ -346,28 +416,59 @@ local function rank(rows, query)
         end
         return out
     end
-    local keyed = {}
+    -- Rows grouped by the words their files leave to fuzzy-match. Nearly every row names no
+    -- file and goes in the group of the whole query, so a query is one `matchfuzzy` over most
+    -- rows and a few small ones, and a row allocates nothing unless a word names a file of it.
+    local whole = table.concat(words, " ")
+    local by_rest, rests, left = {}, {}, {}
     for i, r in ipairs(rows) do
-        keyed[i] = { text = r.text, idx = i }
-    end
-    local found, hits, place = {}, {}, {}
-    for pos, k in ipairs(vim.fn.matchfuzzy(keyed, table.concat(words, " "), { key = "text" })) do
-        local n = 0
-        for _, word in ipairs(words) do
-            for _, tag in ipairs(rows[k.idx].tags or {}) do
-                if tag_matched(tag, { word }) then
-                    n = n + 1
-                    break
+        local rest
+        if r.named then
+            for w, word in ipairs(words) do
+                if r.named[word] then
+                    rest = rest or vim.list_slice(words, 1, w - 1)
+                elseif rest then
+                    rest[#rest + 1] = word
                 end
             end
         end
-        found[pos], hits[k.idx], place[k.idx] = k.idx, n, pos
+        local key = rest and table.concat(rest, " ") or whole
+        if not by_rest[key] then
+            by_rest[key], rests[#rests + 1], left[key] = {}, key, rest and #rest or #words
+        end
+        table.insert(by_rest[key], { text = r.text, idx = i })
     end
+    local found, hits, fewer, place = {}, {}, {}, {}
+    for _, key in ipairs(rests) do
+        -- A group every word names a file of is all found, as exact as a match gets.
+        local matched = key == "" and by_rest[key] or vim.fn.matchfuzzy(by_rest[key], key, { key = "text" })
+        for pos, k in ipairs(matched) do
+            local r, n = rows[k.idx], #words - left[key]
+            for _, word in ipairs(words) do
+                if not (r.named and r.named[word]) then
+                    for _, tag in ipairs(r.tags or {}) do
+                        if tag_matched(tag, { word }) then
+                            n = n + 1
+                            break
+                        end
+                    end
+                end
+            end
+            found[#found + 1], hits[k.idx], fewer[k.idx], place[k.idx] = k.idx, n, left[key], pos
+        end
+    end
+    -- More words lifting a row first, then fewer words left to chance, then the best match.
     table.sort(found, function(a, b)
         if hits[a] ~= hits[b] then
             return hits[a] > hits[b]
         end
-        return place[a] < place[b]
+        if fewer[a] ~= fewer[b] then
+            return fewer[a] < fewer[b]
+        end
+        if place[a] ~= place[b] then
+            return place[a] < place[b]
+        end
+        return a < b
     end)
     return found
 end

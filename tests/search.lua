@@ -291,9 +291,10 @@ for _, r in ipairs(shared) do
 end
 local good = (by_name["Good Subsets"] or {})[1] or {}
 t.eq("a problem's attempts are one row", #(by_name["Good Subsets"] or {}), 1)
-t.eq("listing its files there, solutions first, then the others tagged, each with its tags", good.files, {
+t.eq("listing its files there, solutions first, then its helpers, each with its tags", good.files, {
     { name = "main.cpp", tags = { "binary search" } },
     { name = "main2.cpp", tags = { "binary search", "dp" } },
+    { name = "brute.py", tags = {} },
     { name = "gen.py", tags = { "count subsets" } },
 })
 t.eq("found by each tag once", good.tags, { "binary search", "dp", "count subsets" })
@@ -315,6 +316,60 @@ t.eq("a problem whose solution is gone is still found by another file, which pic
     (by_name["Leftover"] or {})[1] and by_name["Leftover"][1].path,
 }, { "/left/gen.py" })
 
+-- A problem is found by the files it has: a name, a name without its extension, a role.
+local scaffolded = s.catalogue({
+    {
+        dir = "/one",
+        names = { ["main.cpp"] = true, ["main2.cpp"] = true, ["gen.cpp"] = true, ["gen"] = true, ["1.in"] = true },
+        content = vim.json.encode({ task = { ["main.cpp"] = { name = "Kiwis", group = "Round 3", url = "https://x.test/3/K" } } }),
+    },
+    {
+        dir = "/many",
+        names = { ["A.cpp"] = true, ["B.cpp"] = true, ["C.cpp"] = true },
+        content = vim.json.encode({
+            task = {
+                ["A.cpp"] = { name = "A. Limes", group = "Round 2", url = "https://x.test/2/A" },
+                ["B.cpp"] = { name = "B. Mangoes", group = "Round 2", url = "https://x.test/2/B" },
+            },
+        }),
+    },
+    {
+        dir = "/alone",
+        names = { ["gen.cpp"] = true },
+        content = vim.json.encode({ task = { ["main.cpp"] = { name = "Nectarines", url = "https://x.test/n" } } }),
+    },
+}, cfg)
+local kiwis = vim.iter(scaffolded):find(function(r)
+    return r.name == "Kiwis"
+end) or {}
+t.eq("a solution with no task of its own is the folder's one problem's, and builds and testcases are no file of it", vim.tbl_map(function(e)
+    return e.name
+end, kiwis.files or {}), { "main.cpp", "main2.cpp", "gen.cpp" })
+t.eq("in a folder of several problems it is none of theirs", vim.tbl_map(function(r)
+    return { r.name, #(r.files or {}) }
+end, vim.tbl_filter(function(r)
+    return r.label == "Round 2"
+end, scaffolded)), { { "A. Limes", 1 }, { "B. Mangoes", 1 } })
+t.eq("and an untagged helper left alone lists no problem", vim.iter(scaffolded):any(function(r)
+    return r.name == "Nectarines"
+end), false)
+local function found(query)
+    return vim.tbl_map(function(i)
+        return scaffolded[i].name
+    end, s.rank(scaffolded, query))
+end
+t.eq("a search finds a problem by a file's name, its name without the extension and its role", {
+    found("main2.cpp"),
+    found("main2"),
+    found("generator"),
+    found("GEN kiwis"),
+}, { { "Kiwis" }, { "Kiwis" }, { "Kiwis" }, { "Kiwis" } })
+t.eq("a word naming a file lifts its problem over names it scatters over", { found("main")[1], s.rank({
+    { text = "Gen Zeta Round 1", named = {} },
+    { text = "Zeta Round 9", named = { gen = true } },
+}, "gen zeta")[1] }, { "Kiwis", 2 })
+t.eq("never a part of a file's name, nor its letters scattered", { found("gener"), found("gen.c"), found("mn2cp") }, { {}, {}, {} })
+
 local shown = s.panes_of(good, { "dp" }, function()
     return { "int main() {}" }
 end)
@@ -326,7 +381,7 @@ t.eq("beside it, its files and their tags over the source, under its contest", {
     shown[1].lines,
     shown[2].title,
     shown[2].lines,
-}, { "Round 5", { "main.cpp: binary search", "main2.cpp: binary search, dp", "gen.py: count subsets" }, "/p/main.cpp", { "int main() {}" } })
+}, { "Round 5", { "main.cpp: binary search", "main2.cpp: binary search, dp", "brute.py", "gen.py: count subsets" }, "/p/main.cpp", { "int main() {}" } })
 t.eq("the tags the search matches drawn as text, the others dimmed", dimmed, { "binary search", "binary search", "count subsets" })
 local read = false
 t.eq("the files alone are given without reading the source", #s.panes_of(good, {}, function()
