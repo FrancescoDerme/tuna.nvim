@@ -266,8 +266,9 @@ end
 ---@param cfg table
 ---@return tuna.CCTask?
 local function task_of(file, cfg)
-    local data = require("tuna.problem.sidecar").task(file, cfg)
-    return (data and data.url) and { name = data.name or "", group = data.group or "", url = data.url } or nil
+    local sidecar = require("tuna.problem.sidecar")
+    local data = sidecar.task(file, cfg)
+    return sidecar.identity(data) and { name = data.name or "", group = data.group or "", url = data.url or "" } or nil
 end
 
 ---The languages `role` can be scaffolded in for the solution in `bufnr`.

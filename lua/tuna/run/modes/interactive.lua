@@ -310,9 +310,9 @@ function InteractiveRunner:legend_rows()
     return { title = "interactive, " .. self.source, rows = rows }
 end
 
----One extra "Run" pane row, under the judge: which side is playing the interactor. A
----setting like the mode and the judge, so it sits with them rather than below the run's
----own rows.
+---One extra "Run" pane row, under the checker or comparison: which side is playing the
+---interactor. A setting like those two, so it sits with them rather than below the run's own
+---rows.
 ---@return string[][]
 function InteractiveRunner:status_settings()
     return { { "source", self.source } }

@@ -351,7 +351,7 @@ do
     sync({ task("A", 2), task("B", 2) }, function() end)
     t.has("several are said to be a contest", said[#said], "contest downloaded, 2 problems")
     t.eq("and stored as one", { vim.fn.filereadable(dir .. "/contest/A.cpp"), vim.fn.filereadable(dir .. "/contest/B.cpp") }, { 1, 1 })
-    t.eq("with nothing written as a single problem", vim.fn.readdir(dir .. "/single"), { "One.cpp" })
+    t.eq("with nothing written as a single problem", vim.fn.glob(dir .. "/single/*", false, true), { dir .. "/single/One.cpp" })
 
     -- The scratch a sync armed goes into that sync's download and no other: dismissed at
     -- its prompt, or stopped before anything arrives, it is let go, so a later download is
@@ -365,6 +365,154 @@ do
     d.make_handler("sync", false, nil, require("tuna.config").current_setup)({ task("Dismissed", 1) }, function() end)
     t.eq("a sync dismissed at its prompt lets its scratch go", scratch.pending, nil)
     require("tuna").setup({})
+end
+
+--------------------------------------------------------------------------------
+-- :Tuna new: a problem or contest made by hand, stored as a download is
+--------------------------------------------------------------------------------
+
+t.eq("a range of letters is each problem in it", d.problem_names("A-D"), { "A", "B", "C", "D" })
+t.eq("a range of numbers is padded to one width, so it sorts in order", d.problem_names("1-10")[1], "01")
+t.eq("names are split by commas, a name given twice is one problem", d.problem_names("C. Two Boxes, D. GCD, A-B, B"), { "C. Two Boxes", "D. GCD", "A", "B" })
+t.eq("a name that only looks like a range is a name", d.problem_names("B-A, a-C"), { "B-A", "a-C" })
+t.eq("a range of numbers is padded to the wider of its ends as typed", { d.problem_names("001-003")[1], d.problem_names("9-10")[1] }, { "001", "09" })
+t.eq("and stands for every number in it, however many", #d.problem_names("1-100"), 100)
+t.eq("so is no problem at all", d.problem_names(" , "), nil)
+
+do
+    local dir = t.tempdir()
+    require("tuna").setup({
+        scaffold = { templates = { solution = false } },
+        downloaded_problems_path = dir .. "/problems/$(JUDGE)/$(PROBLEM)/main.$(FEXT)",
+        downloaded_problems_prompt_path = false,
+        downloaded_contests_directory = dir .. "/contests/$(JUDGE)/$(CONTEST)",
+        downloaded_contests_problems_path = "$(PROBLEM)/main.$(FEXT)",
+        downloaded_contests_prompt_directory = false,
+        downloaded_contests_prompt_extension = false,
+        open_downloaded_problems = false,
+        open_downloaded_contests = false,
+        cd_downloaded_problems = false,
+        cd_downloaded_contests = false,
+    })
+    local cfg = require("tuna.config").current_setup
+    local sidecar = require("tuna.problem.sidecar")
+    local recent = require("tuna.workspace.recent")
+    local asked = {}
+    local function answer(...)
+        local queue = { ... }
+        asked = {}
+        widgets.input = function(title, _, on_submit)
+            asked[#asked + 1] = title
+            on_submit(table.remove(queue, 1))
+        end
+    end
+
+    local said = t.capture_notifications()
+    answer("", "Onsite", "Swiss Subregional", "A-B")
+    require("tuna.problem.download").new("contest", cfg)
+    local contest = dir .. "/contests/onsite/swiss subregional"
+    t.has("an empty answer is said", said[1] or "", "a contest needs a judge")
+    t.eq("and asked again", asked[2], "judge")
+    t.eq("a contest made by hand is written where a download goes", { vim.fn.filereadable(contest .. "/A/main.cpp"), vim.fn.filereadable(contest .. "/B/main.cpp") }, { 1, 1 })
+    t.eq("each problem recorded by its name and contest", sidecar.get_entry(contest .. "/B/main.cpp", "task", cfg), { name = "B", group = "Onsite - Swiss Subregional" })
+    t.eq("and the contest remembered, by its judge and name", {
+        recent.snapshot().contests[1].dir,
+        recent.snapshot().contests[1].judge,
+        recent.snapshot().contests[1].name,
+    }, { contest, "onsite", "swiss subregional" })
+    t.eq("with no testcases written", vim.fn.glob(contest .. "/A/*_input*"), "")
+
+    -- A contest begun by hand: its problems already there are kept as they are, and known as
+    -- the problems named.
+    local begun = dir .. "/contests/onsite/begun"
+    vim.fn.mkdir(begun .. "/C. Two Boxes", "p")
+    t.write(begun .. "/C. Two Boxes", "main.cpp", "mine\n")
+    t.write(begun .. "/C. Two Boxes", ".tuna.json", vim.json.encode({ results = { ["main.cpp"] = { passed = 1, total = 1 } } }))
+    local offered
+    widgets.menu = function(items, _, on_choice)
+        offered = items
+        on_choice(1)
+    end
+    answer("onsite", "begun", "C. Two Boxes")
+    require("tuna.problem.download").new("contest", cfg)
+    t.eq("with every problem there, keeping them is offered first, before overriding", offered, { "keep them all", "override all", "stop" })
+    t.eq("keeping a problem leaves its source as it is", vim.fn.readfile(begun .. "/C. Two Boxes/main.cpp"), { "mine" })
+    t.eq("and records the problem it is", (sidecar.get_entry(begun .. "/C. Two Boxes/main.cpp", "task", cfg) or {}).name, "C. Two Boxes")
+    t.eq("beside what its sidecar held", sidecar.get_entry(begun .. "/C. Two Boxes/main.cpp", "results", cfg), { passed = 1, total = 1 })
+    t.eq("and the contest is remembered", recent.snapshot().contests[1].dir, begun)
+    answer("onsite", "begun", "C. Two Boxes, D. GCD")
+    require("tuna.problem.download").new("contest", cfg)
+    t.eq("with some missing, the rest are written", { offered[1], vim.fn.filereadable(begun .. "/D. GCD/main.cpp") }, { "write missing only", 1 })
+    t.eq("and the two are one contest", (recent.contest_of(begun .. "/D. GCD/main.cpp", cfg) or {}).dir, begun)
+    widgets.menu = function(_, _, on_choice)
+        on_choice(1)
+    end
+
+    -- A problem made by hand is not where a scratch waiting for a download goes.
+    local scratch = require("tuna.workspace.scratch")
+    scratch.pending = { lines = { "scratch body" }, row = 1, bufnr = vim.api.nvim_create_buf(false, true) }
+    require("tuna.config").current_setup.open_downloaded_problems = true
+    answer("Two Boxes", "Practice")
+    require("tuna.problem.download").new("problem", cfg)
+    local problem = dir .. "/problems/practice/Two Boxes/main.cpp"
+    t.eq("a problem made by hand asks its name and judge", asked, { "problem", "judge" })
+    t.eq("and is written where a download goes", vim.fn.filereadable(problem), 1)
+    t.eq("recorded by its name and judge", sidecar.get_entry(problem, "task", cfg), { name = "Two Boxes", group = "Practice" })
+    t.ok("leaving a waiting scratch to its download", scratch.pending ~= nil)
+    scratch.pending = nil
+
+    said = t.capture_notifications()
+    require("tuna.commands").execute({ "new" })
+    t.has("bare :Tuna new says what it makes", said[1] or "", "problem | contest")
+    require("tuna").setup({})
+end
+-- `:Tuna new` takes its turn in the download queue, so its floats and a download's never
+-- replace each other, dropping what one of them was asking for.
+do
+    require("tuna").setup({})
+    local cfg = require("tuna.config").current_setup
+    local download = require("tuna.problem.download")
+    t.eq("a listener opens", download.start_downloading("persistently", 0, false, false, nil, cfg), nil)
+    local held, menus = {}, {}
+    widgets.input = function(title, _, _, on_close)
+        held[#held + 1] = { title = title, close = on_close }
+    end
+    widgets.menu = function(_, title, on_choice, _, on_close)
+        menus[#menus + 1] = { title = title, close = on_close }
+    end
+    download.new("contest", cfg)
+    t.drain()
+    t.eq("with a listener open, :Tuna new asks in its turn", held[1] and held[1].title, "judge")
+    d.last_queue():enqueue({ d.validate_task({ name = "Sent" }) })
+    t.drain()
+    t.eq("a download arriving meanwhile waits for it", #menus, 0)
+    held[1].close()
+    t.drain()
+    t.eq("and is stored once it is over", menus[1] and menus[1].title, "downloaded 'Sent'")
+    local said = t.capture_notifications()
+    download.new("problem", cfg)
+    t.drain()
+    t.eq("one asked for while a download is stored waits for it, and says so", { #held, said[1] }, { 1, "tuna: new: after the download being stored." })
+    menus[1].close()
+    t.drain()
+    t.eq("asking once it is over", held[2] and held[2].title, "problem")
+    held[2].close()
+    download.stop_downloading()
+    t.drain()
+
+    -- A one-shot download closes its listener before its questions are answered.
+    t.eq("a one-shot listener opens", download.start_downloading("problem", 0, false, false, nil, cfg), nil)
+    d.last_queue():enqueue({ d.validate_task({ name = "Once" }) })
+    t.drain()
+    t.eq("its download asks where to store it, the listener closed", { held[3] and held[3].title, download.is_downloading() }, { "problem path", false })
+    download.new("contest", cfg)
+    t.drain()
+    t.eq("a :Tuna new meanwhile waits", #held, 3)
+    held[3].close()
+    t.drain()
+    t.eq("and asks once the download is over", held[4] and held[4].title, "judge")
+    held[4].close()
+    t.drain()
 end
 widgets.menu, widgets.input = real_menu, real_input
 

@@ -38,16 +38,16 @@ t.eq("and `$(CWD)` and a relative path are the current directory", {
 local root = vim.fs.normalize(t.tempdir())
 local cf = "https://codeforces.com/contest/7/problem/"
 -- One folder per problem, a contest of plain files, and a lone problem.
-problem(root .. "/contests/r7/A", "main.cpp", "A. Apples", "Round 7", cf .. "A")
-problem(root .. "/contests/r7/B", "main.cpp", "B. Bananas", "Round 7", cf .. "B")
-problem(root .. "/flat", "A.cpp", "A. Cherries", "Round 8", "https://x.test/8/A")
-problem(root .. "/flat", "B.cpp", "B. Dates", "Round 8", "https://x.test/8/B")
+problem(root .. "/contests/r7/A", "main.cpp", "A. Apples", "Judge - Judge Round 7", cf .. "A")
+problem(root .. "/contests/r7/B", "main.cpp", "B. Bananas", "Judge - Judge Round 7", cf .. "B")
+problem(root .. "/flat", "A.cpp", "A. Cherries", "Judge - Judge Round 8", "https://x.test/8/A")
+problem(root .. "/flat", "B.cpp", "B. Dates", "Judge - Judge Round 8", "https://x.test/8/B")
 problem(root .. "/problems/one", "main.cpp", "Elderberries", "Set", "https://x.test/set/1")
 -- Two attempts at one problem are no contest, and neither are scattered problems.
 problem(root .. "/problems/two", "main.cpp", "Figs", "Figs group", "https://x.test/figs")
 problem(root .. "/problems/two", "main2.cpp", "Figs", "Figs group", "https://x.test/figs")
-problem(root .. "/a/deep/one", "main.cpp", "Grapes", "Spread", "https://x.test/s/1")
-problem(root .. "/b/two", "main.cpp", "Honey", "Spread", "https://x.test/s/2")
+problem(root .. "/a/deep/one", "main.cpp", "Grapes", "Judge - Spread", "https://x.test/s/1")
+problem(root .. "/b/two", "main.cpp", "Honey", "Judge - Spread", "https://x.test/s/2")
 -- What is not a problem: a task whose file is gone, and a sidecar with no task.
 problem(root .. "/gone", "main.cpp", "Gone", nil, "https://x.test/gone")
 os.remove(root .. "/gone/main.cpp")
@@ -182,7 +182,7 @@ press("<Up>")
 t.eq("the list keys go round within the problems", { selected_list() }, { "problems", #listed[2] })
 close_picker()
 t.eq("every problem, its attempts one row, and contest and nothing else, what is recent first, then by path", listed, {
-    { "Round 8", "Round 7" },
+    { "Judge Round 8", "Judge Round 7" },
     { "A. Cherries", "Grapes", "Honey", "A. Apples", "B. Bananas", "B. Dates", "Elderberries", "Figs" },
 })
 
@@ -238,6 +238,41 @@ t.eq(
 t.eq("the contest is entered under that name", named[1].contest, "Codeforces Round 9")
 t.eq("a search still matches the whole group", #s.rank(named, "codeforces - codeforces"), 3)
 
+-- Problems made one by one for a judge name no contest, so none is listed for them.
+t.eq("problems sharing a judge and naming no contest are listed as no contest", vim.tbl_map(function(r)
+    return r.name
+end, s.catalogue({
+    {
+        dir = "/kattis",
+        names = { ["Foo.cpp"] = true, ["Bar.cpp"] = true },
+        content = vim.json.encode({
+            task = { ["Foo.cpp"] = { name = "Foo", group = "kattis" }, ["Bar.cpp"] = { name = "Bar", group = "kattis" } },
+        }),
+    },
+}, cfg)), { "Bar", "Foo" })
+
+-- A contest made by hand has no URLs: its problems are told apart by their names.
+local by_hand = s.catalogue({
+    {
+        dir = "/onsite",
+        names = { ["A.cpp"] = true, ["A2.cpp"] = true, ["B.cpp"] = true },
+        content = vim.json.encode({
+            task = {
+                ["A.cpp"] = { name = "A", group = "onsite - final" },
+                ["A2.cpp"] = { name = "A", group = "onsite - final" },
+                ["B.cpp"] = { name = "B", group = "onsite - final" },
+            },
+        }),
+    },
+}, cfg)
+t.eq(
+    "problems made by hand are a contest, a second attempt one row with its problem",
+    vim.tbl_map(function(r)
+        return r.name
+    end, by_hand),
+    { "onsite - final", "A", "B" }
+)
+
 -- A problem is one row however many attempts it has, and its tags are those of every file of it.
 local subsets = { name = "Good Subsets", group = "Round 5", url = "https://x.test/5/G" }
 local shared = s.catalogue({
@@ -259,8 +294,8 @@ local shared = s.catalogue({
         names = { ["A.cpp"] = true, ["B.cpp"] = true, ["C.cpp"] = true, ["gen.py"] = true },
         content = vim.json.encode({
             task = {
-                ["A.cpp"] = { name = "A. Ink", group = "Round 6", url = "https://x.test/6/A" },
-                ["B.cpp"] = { name = "B. Jam", group = "Round 6", url = "https://x.test/6/B" },
+                ["A.cpp"] = { name = "A. Ink", group = "Judge - Judge Round 6", url = "https://x.test/6/A" },
+                ["B.cpp"] = { name = "B. Jam", group = "Judge - Judge Round 6", url = "https://x.test/6/B" },
             },
             tags = { ["gen.py"] = { "random" }, ["C.cpp"] = { "dp" } },
         }),
@@ -302,7 +337,7 @@ t.eq("and opening its conventional solution", good.path, "/p/main.cpp")
 t.eq("a helper tagged in a folder of several problems is each one's, a solution of none of them no one's", {
     by_name["A. Ink"][1].tags,
     by_name["B. Jam"][1].tags,
-    by_name["Round 6"] ~= nil,
+    by_name["Judge Round 6"] ~= nil,
 }, { { "random" }, { "random" }, true })
 t.eq("an attempt with no name or contest takes another's", {
     (by_name["Named Late"] or {})[1] and by_name["Named Late"][1].label,
@@ -328,8 +363,8 @@ local scaffolded = s.catalogue({
         names = { ["A.cpp"] = true, ["B.cpp"] = true, ["C.cpp"] = true },
         content = vim.json.encode({
             task = {
-                ["A.cpp"] = { name = "A. Limes", group = "Round 2", url = "https://x.test/2/A" },
-                ["B.cpp"] = { name = "B. Mangoes", group = "Round 2", url = "https://x.test/2/B" },
+                ["A.cpp"] = { name = "A. Limes", group = "Judge - Judge Round 2", url = "https://x.test/2/A" },
+                ["B.cpp"] = { name = "B. Mangoes", group = "Judge - Judge Round 2", url = "https://x.test/2/B" },
             },
         }),
     },
@@ -348,7 +383,7 @@ end, kiwis.files or {}), { "main.cpp", "main2.cpp", "gen.cpp" })
 t.eq("in a folder of several problems it is none of theirs", vim.tbl_map(function(r)
     return { r.name, #(r.files or {}) }
 end, vim.tbl_filter(function(r)
-    return r.label == "Round 2"
+    return r.label == "Judge Round 2"
 end, scaffolded)), { { "A. Limes", 1 }, { "B. Mangoes", 1 } })
 t.eq("and an untagged helper left alone lists no problem", vim.iter(scaffolded):any(function(r)
     return r.name == "Nectarines"
@@ -389,7 +424,7 @@ t.eq("the files alone are given without reading the source", #s.panes_of(good, {
     return {}
 end, 1), 1)
 t.eq("so nothing is read", read, false)
-local contest = by_name["Round 6"][1]
+local contest = by_name["Judge Round 6"][1]
 t.eq("a contest's problems with their tags, over the solution entering it opens", {
     s.panes_of(contest, {}, function()
         return {}

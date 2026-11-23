@@ -37,7 +37,7 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
     `next scaffold`, completion, cursor placement.
   - `search.lua`: `:Tuna find`: the walk, what a sidecar lists, tags, the panes, `rank`, what
     it says.
-  - `download.lua`: the listener's boundary, what is stored, `sync`, the queue.
+  - `download.lua`: the listener's boundary, what is stored, `sync`, the queue, `:Tuna new`.
   - `startup.lua`: what a session that never uses tuna loads, and that tuna works without
     `setup()`.
   - `testcases.lua`: the split, the three backends, empty against absent, the testcase

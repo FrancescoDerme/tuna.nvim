@@ -163,9 +163,10 @@ problems and remembering them. The rules that hold everywhere are in the root `C
     files are offered whole). Pinning is not affected.
   - Recording a problem inside a remembered contest moves that contest to the top with the
     problem as its `problem`, even when the problem was already on top. A contest is
-    otherwise recorded by downloads, or inferred (`infer_contest`) when another problem's
-    sidecar task agrees on its `group`: in its own folder, which then holds the contest's
-    problems as files, else in a sibling folder. Both store the `judge` and contest
+    otherwise recorded by downloads (`:Tuna new` included), or inferred (`infer_contest`) when
+    another problem's sidecar task, by `sidecar.identity`, agrees on its contest
+    (`judges.contest_key`): in its own folder, which then holds the contest's problems as
+    files, else in a sibling folder. Both store the `judge` and contest
     `judges.parse` gives, which is how the menu names a contest. `contest_of(file)` is the same
     lookup, remembered then inferred.
   - `change_dir` honours `cd_command` (`cd`/`tcd`/`lcd`/`false`). `snapshot()` returns the
@@ -231,8 +232,9 @@ problems and remembering them. The rules that hold everywhere are in the root `C
     Picking it opens the solution worked on last, else the first `tool_names.solution` name,
     else the first, and with no solution left the tagged helper. The row is the problem's name
     alone: the contest is the files pane's title. `tag_lines = 0` turns tags off as
-    `tags = false` does, the ones stored included. A contest is a `group` naming two problems by `url`, in
-    the folder holding them (`contest_dir`) and not listed when they are scattered. Rows are
+    `tags = false` does, the ones stored included. A contest is a `judges.contest_key` naming
+    two problems (`sidecar.identity`), in the folder holding them (`contest_dir`) and not
+    listed when they are scattered. Rows are
     recent first (`recent`'s lists), then by path. `rank` is `matchfuzzy` over
     `name group tags`, the whole group, so typing a judge still finds a row whose
     `judges.label` left it out, then lifts a row by the typed words that **start a word** of

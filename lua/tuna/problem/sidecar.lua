@@ -12,7 +12,8 @@
 --
 -- Current keys:
 --   task   = { [basename] = { url, name, group, mirror, mirror_at } }
---                         — the problem each file is a solution of (download.lua, submit.lua)
+--                         — the problem each file is a solution of (download.lua, submit.lua),
+--                           with no `url` for one made by hand
 --   submit = { [basename] = { state, text, url, hash } } — last verdict per file
 --   run    = { [basename] = { mode, source, checker, compare } }
 --                         — the per-problem run state of `tools.lua`
@@ -152,6 +153,24 @@ function M.set_entry(filepath, section, entry, cfg)
     M.write(dir, cfg, store, name)
 end
 
+---What tells a task's problem from another: its URL, else its name, which is all a problem
+---made by hand (`:Tuna new`) has. Every reader asking whether two tasks are one problem
+---compares this, so a contest of problems with no URL is still several problems.
+---@param task table?
+---@return string? identity nil for a task naming neither
+function M.identity(task)
+    if type(task) ~= "table" then
+        return nil
+    end
+    for _, key in ipairs({ "url", "name" }) do
+        local value = task[key]
+        if type(value) == "string" and value ~= "" then
+            return value
+        end
+    end
+    return nil
+end
+
 ---The problems a sidecar names, each file's task.
 ---@param store table?
 ---@return table[]
@@ -188,7 +207,7 @@ function M.task(filepath, cfg)
     end
     local only
     for _, entry in ipairs(tasks_of(store)) do
-        if only and entry.url ~= only.url then
+        if only and M.identity(entry) ~= M.identity(only) then
             return nil
         end
         only = entry

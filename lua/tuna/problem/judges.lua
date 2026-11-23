@@ -146,4 +146,22 @@ function M.parse(task, judge_parsers)
     return judge, contest
 end
 
+---What tells a task's contest from another's: the judge and contest `parse` gives it, or nil for
+---a task naming no contest, a problem made by hand alone or a group naming only its judge. The
+---group as sent tells contests apart no better: every single problem of one judge would share it,
+---and a Codeforces mirror sends the same bare one for every round.
+---@param task table? a task, as `sidecar.task` reads one
+---@param judge_parsers table<string, tuna.JudgeParser|false>?
+---@return string? key
+function M.contest_key(task, judge_parsers)
+    if type(task) ~= "table" or type(task.group) ~= "string" or task.group == "" then
+        return nil
+    end
+    local judge, contest = M.parse(task, judge_parsers)
+    if contest == "unknown_contest" then
+        return nil
+    end
+    return judge .. " - " .. contest
+end
+
 return M

@@ -40,6 +40,10 @@ Every command is a subcommand of `:Tuna` with tab-completion, and a lowercase `:
   <td>download from Competitive Companion</td>
 </tr>
 <tr>
+  <td><a href="#new"><code>:Tuna new &lt;problem|contest&gt;</code></a></td>
+  <td>make a problem or contest by hand, for a judge Competitive Companion can't read</td>
+</tr>
+<tr>
   <td><a href="#scaffold"><code>:Tuna scaffold &lt;solution|checker|generator|bruteforce|interactor&gt; [ext]</code></a></td>
   <td>drop in a starter file</td>
 </tr>
@@ -213,7 +217,21 @@ Press the green plus in your browser and tuna does the rest.
 - `status` says whether the listener is open, and `stop` closes it.
 
 Where everything lands is set by `downloaded_problems_path` and `downloaded_contests_directory`.
-A problem that already exists is asked about before it's overwritten, and a contest asks once for the whole batch, offering to write only the problems that are missing.
+A problem that already exists is asked about before it's overwritten, and a contest offers to keep the problems already there and write only the missing ones.
+
+## new
+
+```
+:Tuna new <problem|contest>
+```
+
+Makes by hand what a download would write, for a judge Competitive Companion can't read.
+`problem` asks for the problem's name and its judge.
+`contest` asks for the judge, the contest's name and its problems: a range of letters or numbers such as `A-L` or `1-12`, or names split by commas, such as `C. Two Boxes, D. GCD`.
+Each problem is written where a download would put it, [`:Tuna go contest`](#go), [`:Tuna next`](#next-and-prev) and [`:Tuna find`](#find) all reach it.
+
+To add a problem to a contest later, run `:Tuna new contest` again, naming that problem alone.
+As always, tuna asks before overwriting.
 
 ## scaffold
 
@@ -271,7 +289,7 @@ Bare `:Tuna go` means the problem.
 ```
 
 Finds any problem or contest by name and takes you there, with a preview of each solution.
-It looks under `downloaded_problems_path` and `downloaded_contests_directory`, and lists what tuna knows the name of, so a problem you downloaded or submitted.
+It looks under `downloaded_problems_path` and `downloaded_contests_directory`, and lists what tuna knows the name of, so a problem you downloaded, made with [`:Tuna new`](#new) or submitted.
 
 A problem is also found by its tags, written in a comment among the first lines of any of its files:
 
@@ -485,7 +503,7 @@ keymaps = {
 `mappings` are buffer-local, set for the solution filetypes in `keymaps.filetypes`, and `global` are set once and always there.
 The runner UI's panes get the `mappings` too, acting on the solution they show, except `library` and any key the runner UI uses itself.
 
-Every action can be mapped this way. An action is a name for a `:Tuna` command with its arguments fixed. Actions are defined in `M.actions` in [`lua/tuna/keymaps.lua`](lua/tuna/keymaps.lua): `menu`, `run`, `run_all`, `run_stress`, `run_interactive`, `show_ui`, `add_testcase`, `edit_testcase`, `delete_testcase`, `generate_testcase`, `submit`, `submit_clear`, `download_testcases`, `download_problem`, `download_contest`, `download_sync`, `clean`, `pin`, `next_problem`, `prev_problem`, `next_scaffold`, `prev_scaffold`, `go_problem`, `go_contest`, `go_judge`, `find`, `scratch` and `library`.
+Every action can be mapped this way. An action is a name for a `:Tuna` command with its arguments fixed. Actions are defined in `M.actions` in [`lua/tuna/keymaps.lua`](lua/tuna/keymaps.lua): `menu`, `run`, `run_all`, `run_stress`, `run_interactive`, `show_ui`, `add_testcase`, `edit_testcase`, `delete_testcase`, `generate_testcase`, `submit`, `submit_clear`, `download_testcases`, `download_problem`, `download_contest`, `download_sync`, `new_problem`, `new_contest`, `clean`, `pin`, `next_problem`, `prev_problem`, `next_scaffold`, `prev_scaffold`, `go_problem`, `go_contest`, `go_judge`, `find`, `scratch` and `library`.
 
 ## Highlights
 

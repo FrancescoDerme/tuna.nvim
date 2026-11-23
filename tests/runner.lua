@@ -1921,14 +1921,14 @@ do
             end
         end
     end
-    t.eq("the Run pane says there is no bruteforce", brute_row(hunt), "brute: none")
+    t.eq("the Run pane says there is no bruteforce", brute_row(hunt), "brute  : none")
     t.has("and the legend what is kept instead", legend_line(hunt.ui, "with no bruteforce"), "crashes")
     t.write(sdir2, "brute.cpp", "int main(){}\n")
     hunt:run_testcases()
     vim.wait(5000, function()
         return hunt.finished
     end, 10)
-    t.eq("a bruteforce written since makes it a stress run again", { hunt.hunt, brute_row(hunt) }, { false, "brute: brute.cpp" })
+    t.eq("a bruteforce written since makes it a stress run again", { hunt.hunt, brute_row(hunt) }, { false, "brute  : brute.cpp" })
     vim.fn.delete(sdir2 .. "/brute.cpp")
 
     if stress.active[sbuf] then
@@ -4065,6 +4065,48 @@ do
     table.sort(stdins)
     t.eq("<C-r> after a save runs every testcase, once each", stdins, { "first", "in", "typed" })
     vim.system = counted
+
+    -- `:wa` writes every testcase being written, the ones the panes no longer show included,
+    -- which are kept on the board where Vim's own write of all buffers does not reach, and
+    -- runs each one it wrote.
+    local news = {}
+    for i = 1, 2 do
+        ui:add_testcase()
+        drain(ui)
+        vim.cmd.stopinsert()
+        news[i] = ui:current_row().tcnum
+        type_into("si", { "new " .. i })
+    end
+    local function wall()
+        vim.api.nvim_set_current_win(ui.windows.si.winid)
+        vim.api.nvim_feedkeys(":wa\r", "x", false)
+        drain(ui)
+        settled(board)
+        drain(ui)
+    end
+    local function input_of(n)
+        local path = rdir .. "/sol_input" .. n .. ".txt"
+        return vim.fn.filereadable(path) == 1 and vim.fn.readfile(path) or nil
+    end
+    asked, answers, runs = {}, {}, 0
+    wall()
+    t.eq(":wa writes both new testcases, asking nothing", { input_of(news[1]), input_of(news[2]), #asked }, { { "new 1" }, { "new 2" }, 0 })
+    t.eq("and runs both", { runs, ui:has_pending() }, { 2, false })
+    -- Stopped at a question, it still runs what it wrote before it.
+    t.write(rdir, "sol_output" .. news[2] .. ".txt", "7\n")
+    C3.execute({ "run" })
+    settled(board)
+    board, ui = C3.runners[rbuf], C3.runners[rbuf].ui
+    drain(ui)
+    show(board:row_for(news[1]))
+    type_into("si", { "new 1 edited" })
+    show(board:row_for(news[2]))
+    type_into("eo", { "" })
+    asked, answers, runs = {}, { ["the answer to testcase " .. news[2] .. " is empty"] = 3 }, 0
+    wall()
+    t.eq(":wa stopped at keep editing runs the testcase written before it", { input_of(news[1]), runs, ui.pending[news[2]] ~= nil }, { { "new 1 edited" }, 1, true })
+    ui:discard_pending()
+    show(2)
 
     -- A command line left with `<Esc>` is a command not given, whatever it held.
     show(2)

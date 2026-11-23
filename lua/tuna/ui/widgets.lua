@@ -321,11 +321,15 @@ local input = { ui_visible = false }
 ---@param default_text string? initial text
 ---@param on_submit fun(text: string)? called with the entered text on `<CR>`
 ---@param on_close fun()? called when the prompt is cancelled
-function M.input(title, default_text, on_submit, on_close)
+---@param opts { insert: boolean? }? `insert` opens it typing, for a prompt with nothing offered
+---  to accept as it is
+function M.input(title, default_text, on_submit, on_close, opts)
+    local typing
     if title == nil then -- resize: rebuild with the current text
         if not input.ui_visible then
             return
         end
+        typing = api.nvim_get_mode().mode:sub(1, 1) == "i"
         input.skip_on_close = true
         input.default_text = api.nvim_buf_get_lines(input.bufnr, 0, -1, false)[1] or ""
         close_win(input.winid)
@@ -341,6 +345,7 @@ function M.input(title, default_text, on_submit, on_close)
         input.default_text = default_text or ""
         input.on_submit = on_submit
         input.on_close = on_close
+        typing = opts ~= nil and opts.insert == true
     end
 
     local cfg = config.get_buffer_config(api.nvim_get_current_buf())
@@ -406,13 +411,20 @@ function M.input(title, default_text, on_submit, on_close)
     })
 
     -- Opened in **normal** mode, with the cursor at the end of the default so `a` or `A`
-    -- picks up where typing would. Not insert mode: a chained prompt (the contest
-    -- download asks for a directory, then an extension) opens from inside the previous
-    -- prompt's `<CR>` mapping, and the `stopinsert` that mapping issues takes effect only
-    -- once it returns, which would drop the new prompt straight back out of insert.
-    -- Normal mode is reachable either way, and it is what the rest of the plugin's
-    -- floats do.
+    -- picks up where typing would, and `<CR>` takes a default offered (a download's path).
+    -- A prompt with nothing to accept (`opts.insert`) opens typing instead, the insert
+    -- begun on the next tick: a chained prompt opens from inside the previous prompt's
+    -- `<CR>` mapping, and the `stopinsert` that mapping issues takes effect only once it
+    -- returns, which would drop an insert begun now straight back out.
     pcall(api.nvim_win_set_cursor, input.winid, { 1, math.max(0, #(input.default_text or "")) })
+    if typing then
+        local win = input.winid
+        vim.schedule(function()
+            if input.ui_visible and input.winid == win and api.nvim_get_current_win() == win then
+                vim.cmd("startinsert!")
+            end
+        end)
+    end
 end
 
 --------------------------------------------------------------------------------
@@ -424,7 +436,8 @@ end
 ---@param tcnum integer
 ---@param back_to integer the window "keep editing" returns to
 ---@param proceed fun(expect_empty_output: boolean) not called on "keep editing", or dismissed
-function M.ask_empty_answer(tcnum, back_to, proceed)
+---@param kept fun()? called on "keep editing", or dismissed, for a caller with work to finish
+function M.ask_empty_answer(tcnum, back_to, proceed, kept)
     -- Opened *out* of the write command rather than inside it. A float entered from a
     -- `BufWriteCmd` does not keep the focus: Vim restores the window the command ran in
     -- as it finishes the `:w`, which would leave the menu on screen with the cursor
@@ -436,10 +449,16 @@ function M.ask_empty_answer(tcnum, back_to, proceed)
             function(idx)
                 if idx == 1 or idx == 2 then
                     proceed(idx == 2)
+                elseif kept then
+                    kept()
                 end
             end,
             back_to,
-            function() end
+            function()
+                if kept then
+                    kept()
+                end
+            end
         )
     end)
 end

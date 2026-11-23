@@ -132,14 +132,14 @@ function StressRunner:legend_rows()
     return { title = "stress", rows = rows }
 end
 
----The bruteforce the search compares with, on a row of its own under the judge: `none` in a
+---The bruteforce the search compares with, on a row of its own under the checker or comparison: `none` in a
 ---search for crashes alone. On every stress board, so the rows stay put when one comes back.
 ---@return string[][]
 function StressRunner:status_settings()
     return { { "brute", self.ref and vim.fn.fnamemodify(self.ref.source or self.ref.exec, ":t") or "none" } }
 end
 
----Extra "Run" pane rows below mode/judge: the live stress counters, as
+---Extra "Run" pane rows below the mode and the checker or comparison: the live stress counters, as
 ---{ label, value } pairs (the UI aligns the colons), one per line.
 ---@return string[][]
 function StressRunner:status_tail()

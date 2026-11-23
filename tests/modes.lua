@@ -466,45 +466,45 @@ local function status()
     return pr.ui:status_lines()
 end
 t.eq("nothing forced: nothing marked", status(), {
-    "mode : normal",
-    "judge: checker.py",
-    "diff : off",
-    "help : ?",
+    "mode   : normal",
+    "checker: checker.py",
+    "diff   : off",
+    "help   : ?",
 })
 
 tools.set_mode(psol, "normal")
 pr:run_testcases(ptcs)
 settle()
-t.eq("a forced mode is marked on its own row", status()[1], "mode*: normal")
+t.eq("a forced mode is marked on its own row", status()[1], "mode*  : normal")
 
 tools.set_checker(psol, "off")
 pr:run_testcases(ptcs)
 settle()
-t.eq("a checker forced off forces the judge, which then reads as the comparison", { status()[1], status()[2] }, { "mode* : normal", "judge*: squish" })
+t.eq("a checker forced off forces the comparison, which the row then names", { status()[1], status()[2] }, { "mode*   : normal", "compare*: squish" })
 
 tools.set_mode(psol, nil)
 tools.set_checker(psol, "auto")
 
--- The judge is looked up again by every run, the comparison override included, so this
+-- The checker is looked up again by every run, the comparison override included, so this
 -- reaches the runner that is already open.
 tools.set_compare(psol, "exact")
 os.remove(pdir .. "/checker.py")
 pr:run_testcases(ptcs)
 settle()
-t.eq("an overridden comparison forces the judge on its own", { status()[1], status()[2] }, { "mode  : normal", "judge*: exact" })
+t.eq("an overridden comparison is forced on its own", { status()[1], status()[2] }, { "mode    : normal", "compare*: exact" })
 
 tools.set_compare(psol, nil)
 t.write(pdir, "checker.py", "print()\n")
 pr:run_testcases(ptcs)
 settle()
-t.eq("handing it back, with a checker of its own, is no forcing", status()[2], "judge: checker.py")
+t.eq("handing it back, with a checker of its own, is no forcing", status()[2], "checker: checker.py")
 
--- An override the checker makes no use of is not what the judge row shows, so it forces
+-- An override the checker makes no use of is not what the row shows, so it forces
 -- nothing: a checker is only ever found.
 tools.set_compare(psol, "exact")
 pr:run_testcases(ptcs)
 settle()
-t.eq("an override a checker overrules forces nothing", status()[2], "judge: checker.py")
+t.eq("an override a checker overrules forces nothing", status()[2], "checker: checker.py")
 tools.set_compare(psol, nil)
 
 -- `:Tuna compare` reaches the board that is open before any run, and leaves the buffer its
@@ -517,11 +517,11 @@ commands.runners[pbuf] = pr
 local quiet = vim.notify
 vim.notify = function() end
 commands.set_compare(pbuf, { "exact" })
-t.eq("`:Tuna compare` shows on the open board at once", status()[2], "judge*: exact")
+t.eq("`:Tuna compare` shows on the open board at once", status()[2], "compare*: exact")
 t.eq("and the buffer keeps the board's runner", commands.runners[pbuf], pr)
 commands.set_compare(pbuf, { "squish" })
 vim.notify = quiet
-t.eq("and so does handing it back", status()[2], "judge: squish")
+t.eq("and so does handing it back", status()[2], "compare: squish")
 commands.runners[pbuf] = nil
 pr.ui:delete()
 
@@ -559,8 +559,8 @@ tools.set_source(vsol, "live")
 require("tuna.run.modes.interactive").run(vbuf, {}, { show_only = true })
 local vr = require("tuna.run.modes.interactive").active[vbuf]
 settle()
-t.eq("the source sits under the judge, marked when forced as the others are", vim.list_slice(vr.ui:status_lines(), 2, 3), {
-    "judge  : squish",
+t.eq("the source sits under the comparison, marked when forced as the others are", vim.list_slice(vr.ui:status_lines(), 2, 3), {
+    "compare: squish",
     "source*: live",
 })
 vr:delete_ui()

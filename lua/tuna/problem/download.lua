@@ -17,12 +17,14 @@
 --     keeps two contests downloaded back-to-back from interleaving their dialogs.
 --
 -- It also exposes `status()`/`is_downloading()`, so a lualine component can show at a
--- glance whether the listener is live and in what mode.
+-- glance whether the listener is live and in what mode, and `new()`, which stores a problem
+-- or contest made by hand through the same storage, for a judge Companion cannot read.
 
 local utils = require("tuna.utils")
 local config = require("tuna.config")
 local testcases = require("tuna.problem.testcases")
 local judges = require("tuna.problem.judges")
+local sidecar = require("tuna.problem.sidecar")
 
 local M = {}
 
@@ -322,7 +324,8 @@ function BatchesSerialProcessor.new(callback)
     return setmetatable({ queue = {}, callback = callback, busy = false, stopped = false }, BatchesSerialProcessor)
 end
 
----@param batch tuna.CCTask[]
+---@param batch tuna.CCTask[]|fun(finished: fun()) a batch downloaded, or a job taking its turn,
+---  which calls `finished` however it ends
 function BatchesSerialProcessor:enqueue(batch)
     table.insert(self.queue, batch)
     self:process()
@@ -330,7 +333,17 @@ end
 
 ---@private
 function BatchesSerialProcessor:process()
-    if self.busy or self.stopped or #self.queue == 0 then
+    if self.busy then
+        return
+    end
+    -- Once stopped, a batch still queued goes, as the listener that sent it is closed, and a
+    -- job (`:Tuna new`, which waits its turn) still runs: it was asked for, not sent.
+    if self.stopped then
+        self.queue = vim.tbl_filter(function(item)
+            return type(item) == "function"
+        end, self.queue)
+    end
+    if #self.queue == 0 then
         return
     end
     self.busy = true
@@ -354,9 +367,10 @@ function BatchesSerialProcessor:process()
     -- inside it would otherwise leave `busy` set for good, silently stalling every
     -- download afterwards. Reported like any other tuna failure, and the queue moves on.
     vim.schedule(function()
-        local ok, err = pcall(self.callback, batch, finished)
+        local job = type(batch) == "function"
+        local ok, err = pcall(job and batch or self.callback, job and finished or batch, finished)
         if not ok then
-            utils.notify("download: storing the batch failed, " .. tostring(err))
+            utils.notify((job and "new: " or "download: storing the batch failed, ") .. tostring(err))
             finished()
         end
     end)
@@ -365,6 +379,11 @@ end
 function BatchesSerialProcessor:stop()
     self.stopped = true
 end
+
+-- The queue of the download started last. It outlives its listener while a batch is stored (a
+-- one-shot download closes the listener first), which is when `:Tuna new` must wait its turn.
+---@type tuna.BatchesSerialProcessor?
+local last_queue = nil
 
 --------------------------------------------------------------------------------
 -- Storage: turn tasks into files
@@ -571,7 +590,9 @@ end
 ---@param task tuna.CCTask
 ---@param cfg table
 ---@param finished fun()?
-local function store_single_problem(task, cfg, finished)
+---@param by_hand boolean? made by `:Tuna new`, which a waiting scratch is not folded into: it
+---  belongs to the download `:Tuna download sync` is listening for
+local function store_single_problem(task, cfg, finished, by_hand)
     local default_path = eval_path(cfg.downloaded_problems_path, task, cfg.downloaded_files_extension, cfg)
     if not default_path then
         utils.notify("'downloaded_problems_path' evaluation failed for task '" .. task.name .. "'.")
@@ -602,7 +623,9 @@ local function store_single_problem(task, cfg, finished)
                 if local_cfg.open_downloaded_problems then
                     require("tuna.ui.surface").edit(filepath)
                     utils.place_cursor(local_cfg)
-                    require("tuna.workspace.scratch").absorb(filepath, local_cfg, template)
+                    if not by_hand then
+                        require("tuna.workspace.scratch").absorb(filepath, local_cfg, template)
+                    end
                 end
                 -- After the open, so an `lcd` lands on the window the problem was just
                 -- opened in. Like the contest case, independent of whether it was
@@ -646,7 +669,8 @@ end
 ---@param tasks tuna.CCTask[]
 ---@param cfg table
 ---@param finished fun()?
-local function store_contest(tasks, cfg, finished)
+---@param by_hand boolean? made by `:Tuna new`, as for `store_single_problem`
+local function store_contest(tasks, cfg, finished, by_hand)
     local default_dir = eval_path(cfg.downloaded_contests_directory, tasks[1], cfg.downloaded_files_extension, cfg)
     if not default_dir then
         utils.notify("'downloaded_contests_directory' evaluation failed.")
@@ -694,7 +718,14 @@ local function store_contest(tasks, cfg, finished)
                         local opened = false
                         local first_problem
                         for _, t in ipairs(targets) do
-                            if not (skip_existing and utils.file_exists(t.filepath)) then
+                            if skip_existing and utils.file_exists(t.filepath) then
+                                -- Kept as it is, but known as the problem at its place when
+                                -- nothing says otherwise: a contest begun by hand is then a
+                                -- contest as a downloaded one is.
+                                if not sidecar.get_entry(t.filepath, "task", local_cfg) then
+                                    require("tuna.problem.submit").write_task_store(t.filepath, t.task, local_cfg)
+                                end
+                            else
                                 t.template = store_downloaded_task(t.filepath, t.task, local_cfg)
                                 first_problem = first_problem or t.filepath
                                 -- Open the first problem actually written, so a partial
@@ -705,10 +736,16 @@ local function store_contest(tasks, cfg, finished)
                                     utils.place_cursor(local_cfg)
                                     -- A `:Tuna scratch` file waiting for this contest
                                     -- folds into the first problem opened.
-                                    require("tuna.workspace.scratch").absorb(t.filepath, local_cfg, t.template)
+                                    if not by_hand then
+                                        require("tuna.workspace.scratch").absorb(t.filepath, local_cfg, t.template)
+                                    end
                                     opened = true
                                 end
                             end
+                        end
+                        -- With every problem kept, the contest opens on its first, untouched.
+                        if not first_problem and targets[1] and local_cfg.open_downloaded_contests then
+                            require("tuna.ui.surface").edit(targets[1].filepath)
                         end
                         -- Downloading a contest is the moment you start working in it,
                         -- so move there. Done after the loop, so an `lcd` applies to the
@@ -724,29 +761,35 @@ local function store_contest(tasks, cfg, finished)
                         -- certain, so record it for `:Tuna go contest` — whether or
                         -- not a problem was opened.
                         local judge, contest_name = judges.parse(tasks[1], local_cfg.judge_parsers)
-                        require("tuna.workspace.recent").record_contest(directory, contest_name, first_problem, judge)
+                        require("tuna.workspace.recent").record_contest(
+                            directory,
+                            contest_name,
+                            first_problem or (targets[1] and targets[1].filepath),
+                            judge
+                        )
                         if finished then
                             finished()
                         end
                     end
 
-                    -- One prompt for the whole contest: override every problem, write
-                    -- only the ones missing, or stop (write none). Dismissing (Esc)
-                    -- counts as "stop". The middle option is offered only when there is
-                    -- something missing to write — with the contest complete on disk it
-                    -- would do nothing.
+                    -- One prompt for the whole contest: keep the problems there and write
+                    -- the rest, override every one, or stop (write none). Dismissing (Esc)
+                    -- counts as "stop". Keeping comes first, so the key that answers most
+                    -- prompts never overwrites a solution, and is offered with the contest
+                    -- complete on disk too: nothing is written then, but the contest is
+                    -- remembered and its problems known as the ones named.
                     if existing > 0 then
-                        local items, actions = { "override all" }, {
+                        local items, actions = {
+                            existing < #targets and "write missing only" or "keep them all",
+                            "override all",
+                        }, {
+                            function()
+                                write_all(true)
+                            end,
                             function()
                                 write_all()
                             end,
                         }
-                        if existing < #targets then
-                            items[#items + 1] = "write missing only"
-                            actions[#actions + 1] = function()
-                                write_all(true)
-                            end
-                        end
                         items[#items + 1] = "stop"
                         actions[#actions + 1] = function()
                             if finished then
@@ -776,6 +819,123 @@ local function store_contest(tasks, cfg, finished)
         end,
         finished
     )
+end
+
+--------------------------------------------------------------------------------
+-- Made by hand: a judge Competitive Companion cannot read
+--------------------------------------------------------------------------------
+
+---The problems a `:Tuna new contest` answer names: names split by commas, where a range of
+---single letters or of numbers (`A-L`, `1-12`) stands for each one in it, numbers padded to
+---the wider of the two as typed (`1-12` and `001-003`) so their folders sort in order. A name
+---given twice is one problem.
+---@param text string
+---@return string[]? names, string? why there are none
+local function problem_names(text)
+    local names, seen = {}, {}
+    local function add(name)
+        if not seen[name] then
+            seen[name], names[#names + 1] = true, name
+        end
+    end
+    for item in vim.gsplit(text, ",", { plain = true }) do
+        item = vim.trim(item)
+        local a, b = item:match("^(%a)%s*%-%s*(%a)$")
+        local from, to = item:match("^(%d+)%s*%-%s*(%d+)$")
+        local m, n = tonumber(from), tonumber(to)
+        if a and a:byte() < b:byte() and (a:upper() == a) == (b:upper() == b) then
+            for c = a:byte(), b:byte() do
+                add(string.char(c))
+            end
+        elseif m and m < n then
+            local format = "%0" .. math.max(#from, #to) .. "d"
+            for i = m, n do
+                add(format:format(i))
+            end
+        elseif item ~= "" then
+            add(item)
+        end
+    end
+    if #names == 0 then
+        return nil, "a contest needs a problem."
+    end
+    return names
+end
+
+---`:Tuna new problem` and `:Tuna new contest`: a problem or a contest from a judge Competitive
+---Companion cannot read, asked for in floats and stored as a download is, with no testcases
+---and no URL. Nothing else tells it from a downloaded one: its sidecar names its problem and
+---contest, so `recent`, `:Tuna next` and `:Tuna find` know it as they know a download.
+---
+---It takes its turn in the download queue while one listens or stores, as a downloaded batch
+---does: its floats and a download's would otherwise replace each other, each dropping what the
+---other was asking for.
+---@param kind "problem"|"contest"
+---@param cfg table
+function M.new(kind, cfg)
+    local widgets = require("tuna.ui.widgets")
+
+    ---@param finished fun() runs once, however the flow ends
+    local function flow(finished)
+        ---Ask until `read` takes the answer, saying why it did not; dismissing ends the flow.
+        ---Each prompt opens typing, as nothing is offered to accept.
+        ---@param title string
+        ---@param read fun(text: string): any, string?
+        ---@param on_answer fun(value: any)
+        local function ask_for(title, read, on_answer)
+            widgets.input(title, "", function(text)
+                local value, why = read(vim.trim(text))
+                if value == nil then
+                    utils.notify("new: " .. why, "WARN")
+                    ask_for(title, read, on_answer)
+                else
+                    on_answer(value)
+                end
+            end, finished, { insert = true })
+        end
+        local function required(why)
+            return function(text)
+                if text == "" then
+                    return nil, why
+                end
+                return text
+            end
+        end
+
+        local batch = "tuna-new-" .. vim.uv.hrtime()
+        local function task(name, group, size)
+            return validate_task({ name = name, group = group, batch = { id = batch, size = size } })
+        end
+
+        if kind == "problem" then
+            ask_for("problem", required("a problem needs a name."), function(name)
+                ask_for("judge", required("a problem needs a judge."), function(judge)
+                    store_single_problem(task(name, judge, 1), cfg, finished, true)
+                end)
+            end)
+            return
+        end
+        ask_for("judge", required("a contest needs a judge."), function(judge)
+            ask_for("contest", required("a contest needs a name."), function(contest)
+                ask_for("problems, a range like A-L or names split by commas", problem_names, function(names)
+                    local tasks = vim.tbl_map(function(name)
+                        return task(name, judge .. " - " .. contest, #names)
+                    end, names)
+                    store_contest(tasks, cfg, finished, true)
+                end)
+            end)
+        end)
+    end
+
+    local queue = last_queue
+    if queue and (queue.busy or not queue.stopped) then
+        if queue.busy then
+            utils.notify("new: after the download being stored.", "INFO")
+        end
+        queue:enqueue(flow)
+    else
+        flow(function() end)
+    end
 end
 
 --------------------------------------------------------------------------------
@@ -963,6 +1123,7 @@ function M.start_downloading(mode, port, notify_on_start, notify_on_download, bu
     end
 
     rs = { mode = mode, port = port, listener = listener, processor = processor }
+    last_queue = processor
     if notify_on_start then
         utils.notify("ready to download " .. mode .. ", press the green plus button in your browser.", "INFO")
     end
@@ -977,11 +1138,16 @@ M._test = {
     request_body = request_body,
     store_testcases_into_buffer = store_testcases_into_buffer,
     store_single_problem = store_single_problem,
+    store_contest = store_contest,
+    problem_names = problem_names,
     make_handler = make_handler,
     validate_task = validate_task,
     canonicalize_task = canonicalize_task,
     eval_download_modifiers = eval_download_modifiers,
     eval_path = eval_path,
+    last_queue = function()
+        return last_queue
+    end,
 }
 
 return M

@@ -76,7 +76,8 @@ submissions. The rules that hold everywhere are in the root `CLAUDE.md`.
 
 - `problem_store_file` (`.tuna.json`) beside the source. Keys:
   - `task = { [basename] = { url, name, group, mirror, mirror_at } }`, the problem each file is
-    a solution of, as downloaded (`submit.write_task_store`) or backfilled by a submit;
+    a solution of, as downloaded (`submit.write_task_store`) or backfilled by a submit, with no
+    `url` for one made by hand (`:Tuna new`);
   - `submit = { [basename] = { state, text, url, hash } }`;
   - `run = { [basename] = { mode, source, checker, compare } }`, holding only what was forced,
     each value validated on read;
@@ -109,6 +110,11 @@ submissions. The rules that hold everywhere are in the root `CLAUDE.md`.
   a folder of a contest's problems, which is why it is kept per file: one folder-level task
   would name whichever problem was written last. `task` is not pruned with its file: a
   solution written again in its place is still that problem's.
+- **A problem is told from another by `identity(task)`**: its URL, else its name. Every reader
+  asking whether two tasks are one problem goes through it (`task`'s folder rule, `recent`'s
+  contest inference and `contest_versions`, `:Tuna find`'s rows), never by `url`: a problem made
+  by hand has none, and compared by URL a contest of them would be one problem. An empty URL is
+  no URL, in `resolve_url` too.
 
 ## Download and judges
 
@@ -118,7 +124,9 @@ submissions. The rules that hold everywhere are in the root `CLAUDE.md`.
   is a file location tuna builds, folders included, and a directory a folder. Renaming
   them to `_file` was weighed and left, so don't retry it.
 - Pipeline: `Listener` (TCP, `companion_port` 27121) → `TasksCollector` (groups by `batch`) →
-  `BatchesSerialProcessor` (one batch handler at a time).
+  `BatchesSerialProcessor` (one batch handler at a time). Its queue also takes jobs, functions
+  given `finished` (`:Tuna new`); once stopped it drops the batches still queued, their listener
+  being closed, and still runs the jobs.
 - The listener handles a request, and answers it `200`, the moment its body is complete
   (`request_body`: `Content-Length` of it has arrived, or the sender closed without one),
   not when the sender gives up waiting for a reply and closes the connection.
@@ -136,9 +144,24 @@ submissions. The rules that hold everywhere are in the root `CLAUDE.md`.
   (mirrors have no per-problem pages and drop the contest later), with the mirror kept as
   `mirror`/`mirror_at`. A missing problem index is taken from the URL and prefixed to the name,
   because `$(PROBLEM)` orders the folders.
-- Existing targets ask in a float: `override` / `stop` for a problem;
-  `override all` / `write missing only` (only when some are missing) / `stop` for a contest.
-  Every branch, and dismissal, calls `finished`.
+- Existing targets ask in a float: `override` / `stop` for a problem; for a contest
+  `write missing only` (`keep them all` when none is missing) / `override all` / `stop`, keeping
+  first so `<CR>` never overwrites solutions. A problem kept gets the task written for it when
+  its sidecar names none, so a contest begun by hand becomes one tuna knows; keeping them all
+  still records the contest and opens its first problem. Every branch, and dismissal, calls
+  `finished`.
+- **`new(kind)`** (`:Tuna new problem|contest`) is a download for a judge Competitive Companion
+  cannot read: chained `input`s (an empty answer is said and asked again) build tasks through
+  `validate_task`, with `name` and `group` (`judge - contest`, the judge alone for a problem)
+  and no URL or tests, and hand them to `store_single_problem`/`store_contest` with `by_hand`,
+  which only keeps a waiting scratch out (it is `download sync`'s). Nothing else tells them
+  apart, so there is no second kind of problem or contest: one only recorded in `recent` would
+  age out of it and stay unknown to `:Tuna find` and inference. `problem_names` expands `A-L`
+  and `1-12` (padded to the wider end as typed, so folders sort in order), splits the rest on
+  commas and drops repeats. With a download listening or storing, it takes its turn in that
+  queue (`last_queue`, the processor of the download started last, which a one-shot download
+  outlives while it stores): its floats and a download's would otherwise replace each other,
+  each dropping what the other asked.
 - The source is written from the solution's template (`scaffold.template`/`render`, with the
   task), and `store_downloaded_task` returns which one, for `scratch.absorb`. No warning when
   a configured template is missing: what is written then is tuna's starter, whose header
@@ -164,7 +187,11 @@ submissions. The rules that hold everywhere are in the root `CLAUDE.md`.
   (`eval_path`): a template's text and paths keep them.
 - `label(group)` is the group to show: the contest half when it names the judge anywhere (a
   plain substring, in any case), so nothing says the judge twice, else the whole group.
-  It is for display alone: `group` stays what is stored and compared.
+  It is for display alone: `group` stays what is stored.
+- `contest_key(task)` is what tells contests apart, `judge - contest` as `parse` gives them, nil
+  for a task naming no contest (`unknown_contest`): `recent`'s inference and `:Tuna find`'s
+  contest rows compare it, never the group as sent, which a judge's single problems (made by
+  hand, the judge alone) all share, as a Codeforces mirror's rounds do.
 
 ## Submit (`submit.lua`)
 
@@ -238,4 +265,6 @@ submissions. The rules that hold everywhere are in the root `CLAUDE.md`.
   deleting on such a report would lose the verdict of a source that never changed.
   `verdict_for(path)` reads a verdict without an open buffer (the menu).
 - `persist_task` records the submitted file's problem as its own (`url`, and `name`/`group` from
-  header markers when missing), taking the folder's when it has none.
+  header markers when missing), taking the folder's when it has none. A URL it gives a problem
+  known by its name (made by hand) goes to every entry there naming it with none, or its
+  attempts would have two identities and count as two problems.

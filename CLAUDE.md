@@ -13,9 +13,9 @@ required dependencies (toggleterm and lualine are optional). It is a rewrite of
 competitest.nvim, not a port. Everything is reached through one user command,
 `:Tuna <subcommand>`: testcase storage and inline editing, compile/run with verdicts in a
 floating runner UI, run modes (normal, run-all, stress, interactive), checkers, Competitive
-Companion downloads, submitting through external tools with the verdict in lualine, a snippet
-library, contest navigation, a scratch file, an unused-file cleaner, a menu and
-`:checkhealth tuna`.
+Companion downloads and their hand-made equivalent (`:Tuna new`), submitting through
+external tools with the verdict in lualine, a snippet library, contest navigation, a scratch
+file, an unused-file cleaner, a menu and `:checkhealth tuna`.
 
 ## Rules
 

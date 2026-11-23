@@ -231,7 +231,7 @@ local function catalogue(found, cfg)
         return k
     end
 
-    local rows, groups = {}, {}
+    local rows, groups, group_of = {}, {}, {}
     for _, f in ipairs(found) do
         local store = sidecar.decode(f.content) or {}
         local tasks = type(store.task) == "table" and store.task or {}
@@ -267,7 +267,7 @@ local function catalogue(found, cfg)
         for _, base in ipairs(bases) do
             local task = tasks[base]
             if type(task) == "table" and not recent.ignored(f.dir .. "/" .. base) then
-                local key = type(task.url) == "string" and task.url or type(task.name) == "string" and task.name or base
+                local key = sidecar.identity(task) or base
                 if not problems[key] then
                     problems[key], keys[#keys + 1] = { solutions = {} }, key
                 end
@@ -348,15 +348,20 @@ local function catalogue(found, cfg)
                     url = p.url,
                 }
                 rows[#rows + 1] = row
-                if group then
-                    groups[group] = groups[group] or {}
-                    table.insert(groups[group], row)
+                -- Gathered by contest, not by the group as sent: problems naming no contest
+                -- are no contest's, however many share a judge.
+                local contest = judges.contest_key({ group = group, url = p.url, name = p.name }, cfg.judge_parsers)
+                if contest then
+                    groups[contest] = groups[contest] or {}
+                    group_of[contest] = group_of[contest] or group
+                    table.insert(groups[contest], row)
                 end
             end
         end
     end
 
-    for group, members in pairs(groups) do
+    for contest, members in pairs(groups) do
+        local group = group_of[contest]
         local urls = {}
         for _, m in ipairs(members) do
             urls[m.url or m.path] = true

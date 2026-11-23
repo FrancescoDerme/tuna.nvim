@@ -223,8 +223,8 @@ hold everywhere are in the root `CLAUDE.md`.
   so a checker added, deleted or switched off, and a comparison overridden since
   (`compare_method`), apply to the next run of a cached runner. `:Tuna checker` and
   `:Tuna compare` also set them on the buffer's runners at once (`runners_of`), so an open
-  board's judge row says what the next run will use, and never drop a runner, whose board
-  no later run could then find to hide.
+  board's checker or compare row says what the next run will use, and never drop a runner,
+  whose board no later run could then find to hide.
 - `build_rows`: row 1 is `compile` when compiling, and the build gates the testcases. With **no
   testcases** it builds one `bare` testcase 0, labelled `no input`, run on empty stdin with no
   answer (so `done`) and editable; saving it creates the testcase. `n` in the UI reuses an

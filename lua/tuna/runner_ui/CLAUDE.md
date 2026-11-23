@@ -96,13 +96,16 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
   `selector_columns`: 10 wide while the pane holds them, content-sized plus a space when not,
   and without the time rather than cutting a number in half (the conversation layout's selector
   takes a 4 share).
-- `status_lines()`: mode, judge (the checker file, else the compare method), the mode's settings
-  (`status_settings`, interactive's source), diff on/off, runner tail, `help: ?`, rows fixed
-  per runner. A setting that is the user's choice (`mode`, `judge`, `source`) has a `*` after
-  its name, explained in the `?` legend: one column, where a word after the value is what the
-  narrow pane cuts off first, and a row naming the forced settings repeated the rows above it
-  and said `none` most of the time. `judge` is forced when the checker is off or the comparison
-  overridden, never for a checker found.
+- `status_lines()`: mode, what judges (`checker` with its file, else `compare` with the method),
+  the mode's settings (`status_settings`, interactive's source), diff on/off, runner tail,
+  `help: ?`, rows fixed per runner. The judging row is named after the command that sets what it
+  shows, not `judge`, which everywhere else in tuna is the online judge; one row rather than
+  two, since with a checker the comparison decides nothing and the pane is narrow. A setting
+  that is the user's choice (`mode`, `compare`, `source`) has a `*` after its name, explained in
+  the `?` legend: one column, where a word after the value is what the narrow pane cuts off
+  first, and a row naming the forced settings repeated the rows above it and said `none` most of
+  the time. `compare` is forced when the checker is off or the method overridden; `checker`
+  never is, a checker being only ever found.
 
 **Inline editing**
 - Editable panes are always-modifiable `acwrite` buffers. `:w` from **any** pane saves the row
@@ -143,7 +146,9 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
 - `save_all_pending(done)` is every save but a plain `:w`: each row goes through
   `with_answer_settled` in turn, so an answer stored empty stays so and a real one left empty is
   asked about, and `done` (close, run, carry on quitting) follows the last. `keep editing` ends
-  the chain there, which is why `:wq`, `:wqa` and `save and close` wait on it.
+  the chain there, which is why `:wq`, `:wqa` and `save and close` wait on it. The rows are
+  saved held and run together (`run_rows`) after the last, or at a `keep editing`: a save runs
+  its row only on an idle runner, so saved one at a time only the first would run.
 - `commands.settle_runners(bufnr, { run, keep }, proceed)`, which every run and `show_ui` go
   through, keeps one runner UI per buffer and loses nothing on a mode switch: before a run it
   asks about an unwritten edit in any of the buffer's runners (interactive, stress and run-all
@@ -174,6 +179,10 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
   `v:event.abort` **from Vimscript** (`vim.v.event` is a copy in Lua), and turned into
   `request_close`. `:q!` passes; `:qa`-style commands pass unless an edit would be lost, then
   ask and re-issue the quit. The zoom is exempt.
+- `:wa` (`surface.write_all_command`), typed anywhere while the board shows, saves every row in
+  `pending` through `save_all_pending`, not only the row the panes show, which is all Vim's own
+  write reaches. It captures first, which clears the panes' flags, so the command itself writes
+  only the user's files, natively, and the row on screen is saved once.
 - Focus rescue: remember the one hop out of the UI (`escaped_from`/`escaped_to`); when that
   window closes, return to the pane, but only if focus landed on a window that existed before
   the close (`WinClosed` snapshots `nvim_list_wins()`), so a dialog it opened keeps focus.

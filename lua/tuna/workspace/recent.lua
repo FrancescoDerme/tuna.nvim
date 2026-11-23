@@ -24,8 +24,8 @@
 -- The **contest** is recorded outright when one is downloaded (that is the one moment
 -- the contest directory is known for certain), and otherwise inferred from the
 -- sidecar `group`: a problem's contest directory is its parent when a sibling problem
--- carries the *same* group. Requiring the match is deliberate — "the parent directory"
--- alone would call `~/cp/problems/codeforces` a contest.
+-- carries the *same* contest (`judges.contest_key`). Requiring the match is deliberate —
+-- "the parent directory" alone would call `~/cp/problems/codeforces` a contest.
 
 local api = vim.api
 local utils = require("tuna.utils")
@@ -219,42 +219,49 @@ end
 -- even if the problem sits in a directory with thousands of neighbours.
 local SIBLING_LIMIT = 40
 
----Whether one of the problems the sidecar of `dir` names is of `group`, and not `url`.
+---Whether one of the problems the sidecar of `dir` names is of the contest `key` names
+---(`judges.contest_key`), and not the problem `identity` names (`sidecar.identity`).
 ---@param dir string
----@param group string
----@param url string?
+---@param key string
+---@param identity string?
 ---@param cfg table
 ---@return boolean
-local function names_another(dir, group, url, cfg)
-    for _, task in ipairs(require("tuna.problem.sidecar").tasks(dir, cfg)) do
-        if task.group == group and task.url ~= url then
+local function names_another(dir, key, identity, cfg)
+    local sidecar = require("tuna.problem.sidecar")
+    local judges = require("tuna.problem.judges")
+    for _, task in ipairs(sidecar.tasks(dir, cfg)) do
+        local id = sidecar.identity(task)
+        if id and id ~= identity and judges.contest_key(task, cfg.judge_parsers) == key then
             return true
         end
     end
     return false
 end
 
----Infer the contest a problem belongs to, when another problem agrees on its sidecar `group`:
----its own folder, when that holds the contest's problems as files, else its parent, when a
----sibling problem folder does. Without that agreement the parent is just "some directory
----holding problems" (a judge folder, say), which is not somewhere `:Tuna go contest` should
----take anyone.
+---Infer the contest a problem belongs to, when another problem agrees on its contest (the judge
+---and contest its sidecar `group` parses into): its own folder, when that holds the contest's
+---problems as files, else its parent, when a sibling problem folder does. Without that
+---agreement the parent is just "some directory holding problems" (a judge folder, say), which
+---is not somewhere `:Tuna go contest` should take anyone, and a problem naming no contest has
+---none to agree on.
 ---@param file string the problem's solution
 ---@param cfg table
 ---@return tuna.RecentContest?
 local function infer_contest(file, cfg)
-    local task = require("tuna.problem.sidecar").task(file, cfg)
-    local group = task and task.group
-    if type(group) ~= "string" or group == "" then
+    local sidecar = require("tuna.problem.sidecar")
+    local judges = require("tuna.problem.judges")
+    local task = sidecar.task(file, cfg)
+    local key = judges.contest_key(task, cfg.judge_parsers)
+    if not key then
         return nil
     end
     -- Named the way a download names it, so both show the same contest.
     local function contest_at(dir)
-        local judge, contest = require("tuna.problem.judges").parse(task, cfg.judge_parsers)
+        local judge, contest = judges.parse(task, cfg.judge_parsers)
         return { dir = dir, name = contest, judge = judge }
     end
     local dir = vim.fs.dirname(file)
-    if names_another(dir, group, task.url, cfg) then
+    if names_another(dir, key, sidecar.identity(task), cfg) then
         return contest_at(dir)
     end
     local parent = vim.fs.dirname(dir)
@@ -266,7 +273,7 @@ local function infer_contest(file, cfg)
             if seen > SIBLING_LIMIT then
                 break
             end
-            if names_another(parent .. "/" .. name, group, nil, cfg) then
+            if names_another(parent .. "/" .. name, key, nil, cfg) then
                 return contest_at(parent)
             end
         end
@@ -641,17 +648,17 @@ end
 function M.contest_versions(dir, cfg)
     local tools = require("tuna.run.tools")
     local sidecar = require("tuna.problem.sidecar")
-    local problems, by_url = {}, {}
+    local problems, by_identity = {}, {}
     for _, file in ipairs(tools.solutions_in(dir, cfg)) do
-        local url = (sidecar.task(file, cfg) or {}).url
-        local versions = url and by_url[url]
+        local id = sidecar.identity(sidecar.task(file, cfg))
+        local versions = id and by_identity[id]
         if versions then
             versions[#versions + 1] = file
         else
             versions = { file }
             problems[#problems + 1] = versions
-            if url then
-                by_url[url] = versions
+            if id then
+                by_identity[id] = versions
             end
         end
     end

@@ -447,7 +447,7 @@ end
 
 ---Look the judge up again, as every run does, so a checker added, deleted or switched off
 ---since the last run, and a comparison overridden since, are the ones that judge this run.
----The two are one setting to the user (the "judge" row of the Run pane), so they are resolved
+---The two are one row of the Run pane (`checker`, else `compare`), so they are resolved
 ---in one place and at one moment, like every helper.
 ---@param solution string absolute path of the solution being run
 function RunnerCore:refresh_judge(solution)

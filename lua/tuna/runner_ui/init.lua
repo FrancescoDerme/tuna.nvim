@@ -455,7 +455,8 @@ end
 ---silent and keeps re-saving a testcase from asking the same question again.
 ---@param tcnum integer
 ---@param proceed fun(expect_empty_output: boolean?)
-function RunnerUI:with_answer_settled(tcnum, proceed)
+---@param kept fun()? called when the question is answered `keep editing`, or dismissed
+function RunnerUI:with_answer_settled(tcnum, proceed, kept)
     local _, expected = self:edited_text(tcnum)
     if expected ~= "" then
         proceed(false)
@@ -469,7 +470,7 @@ function RunnerUI:with_answer_settled(tcnum, proceed)
         return
     end
 
-    require("tuna.ui.widgets").ask_empty_answer(tcnum, api.nvim_get_current_win(), proceed)
+    require("tuna.ui.widgets").ask_empty_answer(tcnum, api.nvim_get_current_win(), proceed, kept)
 end
 
 ---@private
@@ -1094,23 +1095,42 @@ end
 ---@private
 ---Write every unsaved testcase, in order, each settling what an empty answer means: one
 ---stored empty stays so, and a real one left empty is asked about.
+---
+---Saved, they run together once the last is written, or once `keep editing` stops the chain:
+---a save runs its row only on an idle runner, so each running as it was saved, the first
+---save's run would leave every later one written and never run.
 ---@param done fun()? run once all are written, and not on "keep editing", which stops here
 ---@param hold_run boolean? write them without running them, as `done` will
 function RunnerUI:save_all_pending(done, hold_run)
     self:capture_pending()
     local nums = vim.tbl_keys(self.pending)
     table.sort(nums)
+    local runs = not hold_run and not self.runner.preloaded and self.runner:idle()
+    local saved = {}
+    local function run_saved()
+        if not runs or #saved == 0 then
+            return
+        end
+        local rows = {}
+        for _, n in ipairs(saved) do
+            vim.list_extend(rows, self.runner:rows_for(n))
+        end
+        self.runner:run_rows(rows)
+    end
     local function save_from(i)
         if nums[i] == nil then
+            run_saved()
             if done then
                 done()
             end
             return
         end
         self:with_answer_settled(nums[i], function(expect_empty_output)
-            self:save_testcase(nums[i], expect_empty_output, hold_run)
+            if self:save_testcase(nums[i], expect_empty_output, hold_run or runs) then
+                saved[#saved + 1] = nums[i]
+            end
             save_from(i + 1)
-        end)
+        end, run_saved)
     end
     save_from(1)
 end
@@ -1917,6 +1937,19 @@ function RunnerUI:show_ui()
         group = self.augroup,
         callback = function()
             if not self.ui_visible then
+                return
+            end
+            -- `:wa` writes the buffers Vim counts as modified, the panes among them, which hold
+            -- the row on screen alone: every other row being written is kept in `pending`.
+            -- So every one is saved, as `:wqa` saves them, wherever it is typed. Captured
+            -- first, which clears the panes' flags, so the write itself leaves them alone and
+            -- the row on screen is saved once.
+            if surface.write_all_command() then
+                if self:has_pending() then
+                    vim.schedule(function()
+                        self:save_all_pending()
+                    end)
+                end
                 return
             end
             local cmd, forced = surface.quit_command()
@@ -2923,7 +2956,8 @@ function RunnerUI:selector_width()
 end
 
 ---@private
----The lines shown in the "Run" status pane: the run mode, the judge, a mode's own settings
+---The lines shown in the "Run" status pane: the run mode, what judges (the checker, else the
+---comparison), a mode's own settings
 ---(`status_settings`), which of those were forced, whether the diff is on, then any
 ---runner-specific tail (the stress counters). The count is stable for a given runner, so it
 ---can size the pane at build time.
@@ -2939,18 +2973,20 @@ function RunnerUI:status_lines()
     -- a word after the value would be the first thing a pane this narrow cuts off, and a row
     -- naming them would repeat the rows above it.
     local tools = require("tuna.run.tools")
+    -- What decides the verdicts, named after the command that sets it: the checker found, else
+    -- the comparison.
+    local by_checker = type(self.runner.checker) == "table"
     local forced = {}
     if path ~= "" then
         forced.mode = tools.get_mode(path) == mode
-        -- A checker is only ever found, never forced on, so the judge is your choice when you
-        -- turned the checker off, or when the comparison it falls back to is overridden.
-        forced.judge = type(self.runner.checker) ~= "table"
-            and (tools.checker_setting(path) == "off" or tools.get_compare(path) ~= nil)
+        -- A checker is only ever found, never forced on, so the comparison is your choice when
+        -- you turned the checker off, or when its method is overridden.
+        forced.compare = not by_checker and (tools.checker_setting(path) == "off" or tools.get_compare(path) ~= nil)
         forced.source = self.runner.source ~= nil and tools.get_source(path) == self.runner.source
     end
     local entries = {
         { "mode", mode },
-        { "judge", self.runner:judge_label() },
+        { by_checker and "checker" or "compare", self.runner:judge_label() },
     }
     -- A mode's own settings stand with the others (interactive's input source). Counters and
     -- the like come after, in `status_tail`.

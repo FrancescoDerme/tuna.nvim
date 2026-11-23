@@ -286,6 +286,11 @@ purpose of being fast). After having solved this problem, you can download the
 rest of the contest with `:Tuna download sync`, which folds your scratch into
 the first problem's file.
 
+When Competitive Companion can't read the judge, such as at an onsite
+competition, `:Tuna new contest` asks for the judge, the contest name, and its
+problems (a range such as `A-L` or names split by commas), and writes them as
+any other contest. `:Tuna new problem` does the same for a single problem.
+
 ------------------------------------------------------------------------------
 SUBMITTING                                                       *tuna-submit*
 
@@ -324,9 +329,9 @@ GETTING AROUND                                               *tuna-navigation*
   problems.
 - `:Tuna go judge` opens the problem you are on in your browser.
 - `:Tuna find`, or `/` in the menu, finds any problem or contest you have
-  downloaded, by name, by the tags you write in a solution's header, such as
-  `// tags: binary search, greedy`, or by the files it has, such as
-  `main2.cpp` or `generator`.
+  downloaded or made with `:Tuna new`, by name, by the tags you write in a
+  solution's header, such as `// tags: binary search, greedy`, or by the
+  files it has, such as `main2.cpp` or `generator`.
 - `:Tuna pin` puts the problem you are on aside to solve later, and pinning it
   again lets it go. The menu provides access to your pinned problems.
 
@@ -535,8 +540,21 @@ Every command is a subcommand of `:Tuna` with tab-completion, and a lowercase
 
         Where everything lands is set by `downloaded_problems_path` and
         `downloaded_contests_directory`. A problem that already exists is
-        asked about before it's overwritten, and a contest asks once for the
-        whole batch, offering to write only the problems that are missing.
+        asked about before it's overwritten, and a contest offers to keep the
+        problems already there and write only the missing ones.
+
+                                                                    *tuna-new*
+:Tuna new {problem/contest}
+        Make by hand what a download would write, for a judge Competitive
+        Companion can't read. `problem` asks for the problem's name and its
+        judge. `contest` asks for the judge, the contest's name and its
+        problems: a range of letters or numbers such as `A-L` or `1-12`, or
+        names split by commas, such as `C. Two Boxes, D. GCD`. Each problem is
+        written where a download would put it, `:Tuna go contest`,
+        `:Tuna next` and `:Tuna find` all reach it.
+
+        To add a problem to a contest later, run `:Tuna new contest` again,
+        naming that problem alone. As always, tuna asks before overwriting.
 
                                                                *tuna-scaffold*
 :Tuna scaffold {solution/checker/generator/bruteforce/interactor} [ext]
@@ -588,7 +606,7 @@ Every command is a subcommand of `:Tuna` with tab-completion, and a lowercase
         Find any problem or contest by name and go there, with a preview of
         each solution. It looks under `downloaded_problems_path` and
         `downloaded_contests_directory`, and lists what tuna knows the name
-        of, so a problem you downloaded or submitted.
+        of, so a problem you downloaded, made with `:Tuna new` or submitted.
 
         A problem is also found by its tags, written in a comment among the
         first lines of any of its files: >cpp
@@ -806,9 +824,9 @@ with its arguments fixed. Actions are defined in `M.actions` in
 `run_interactive`, `show_ui`, `add_testcase`, `edit_testcase`,
 `delete_testcase`, `generate_testcase`, `submit`, `submit_clear`,
 `download_testcases`, `download_problem`, `download_contest`, `download_sync`,
-`clean`, `pin`, `next_problem`, `prev_problem`, `next_scaffold`,
-`prev_scaffold`, `go_problem`, `go_contest`, `go_judge`, `find`, `scratch`
-and `library`.
+`new_problem`, `new_contest`, `clean`, `pin`, `next_problem`, `prev_problem`,
+`next_scaffold`, `prev_scaffold`, `go_problem`, `go_contest`, `go_judge`,
+`find`, `scratch` and `library`.
 
 ------------------------------------------------------------------------------
 HIGHLIGHTS                                                   *tuna-highlights*

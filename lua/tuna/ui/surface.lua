@@ -552,6 +552,20 @@ function M.quit_command()
     return nil, false
 end
 
+-- Every abbreviation of the command that writes every buffer and closes nothing.
+local WRITE_ALL_COMMANDS = { wa = true, wal = true, wall = true }
+
+---Whether `:wall` is being given, read in `CmdlineLeave` as `quit_command` is, `!` or not: how a
+---surface keeping edits Vim cannot see (the runner UI's rows not on screen) writes them too.
+---@return boolean
+function M.write_all_command()
+    if vim.v.event.abort or vim.v.event.cmdtype ~= ":" then
+        return false
+    end
+    local cmd = vim.fn.getcmdline():match("^%s*(%a+)!?%s*$")
+    return cmd ~= nil and WRITE_ALL_COMMANDS[cmd] == true
+end
+
 ---Show `words` dimmed in a buffer while it is empty, nothing with no `words`. Virtual text, so
 ---no part of its text, laid over what is under it (`hl_mode = "combine"`), as all of tuna's
 ---is: replacing it, the words would cut the cursorline short of the line's start. Asked on every

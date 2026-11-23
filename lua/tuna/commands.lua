@@ -21,6 +21,7 @@ local subcommand_args = {
     testcase = { "add", "edit", "delete", "split", "generate" },
     convert = { "files", "single_file", "directory" },
     download = { "testcases", "problem", "contest", "sync", "persistently", "status", "stop" },
+    new = { "problem", "contest" },
     scaffold = tools.SCAFFOLDS,
     checker = { "auto", "off" },
     submit = { "clear" },
@@ -676,7 +677,7 @@ end
 
 ---Set the problem's output-compare method. The configured one is kept as no override at
 ---all, so a later change to `output_compare_method` reaches the problem. Its runners take it
----at once, so the Run pane's judge row says what the next run will judge with, as
+---at once, so the Run pane's compare row says what the next run will judge with, as
 ---`set_checker` does.
 ---@param bufnr integer
 ---@param args string[]
@@ -849,6 +850,14 @@ M.subcommands = {
             return
         end
         M.download(args[1])
+    end,
+    -- What a download writes, for a judge Competitive Companion cannot read, asked for instead.
+    new = function(args)
+        if args[1] ~= "problem" and args[1] ~= "contest" then
+            utils.notify("new: what to make is required (problem | contest).")
+            return
+        end
+        require("tuna.problem.download").new(args[1], config.load_local_config_and_extend(vim.fn.getcwd()))
     end,
     -- A setting changes only when its new value is named (`off` forces the checker, `auto`
     -- hands it back), and the bare command says how it is set, as bare `:Tuna compare` does.

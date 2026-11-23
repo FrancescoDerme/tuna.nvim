@@ -344,6 +344,20 @@ do
     vim.bo.filetype = "cpp"
     submit.submit(vim.api.nvim_get_current_buf())
     t.eq("a submit records the problem as the file's own", (sidecar.get_entry(one .. "/main2.cpp", "task") or {}).url, cf .. "D")
+
+    -- A problem made by hand is known by its name: given a URL by a submit, its other attempts
+    -- take it too, so it stays one problem.
+    local made = t.tempdir()
+    t.write(made, "main.cpp", "int main() {}\n")
+    t.write(made, "main2.cpp", "// submit at: https://judge.test/p/A\nint main() {}\n")
+    sidecar.set_entry(made .. "/main.cpp", "task", { name = "A", group = "onsite - final" })
+    vim.cmd.edit(vim.fn.fnameescape(made .. "/main2.cpp"))
+    vim.bo.filetype = "cpp"
+    submit.submit(vim.api.nvim_get_current_buf())
+    t.eq("a URL a submit gives a problem made by hand reaches its other attempts", {
+        (sidecar.get_entry(made .. "/main.cpp", "task") or {}).url,
+        (sidecar.get_entry(made .. "/main2.cpp", "task") or {}).url,
+    }, { "https://judge.test/p/A", "https://judge.test/p/A" })
     submit.providers.stub = nil
     require("tuna").setup({})
 
@@ -381,6 +395,10 @@ do
     vim.api.nvim_buf_set_lines(marked, 0, -1, false, { "// submit at: $(URL)" })
     t.has("an unfilled marker is not opened", go_judge(marked), "go judge: resolved problem URL is not valid")
     vim.bo[marked].modified = false
+    local by_hand = t.tempdir()
+    t.write(by_hand, "main.cpp", "int main() {}\n")
+    t.write(by_hand, ".tuna.json", vim.json.encode({ task = { ["main.cpp"] = { name = "A", group = "onsite - final", url = "" } } }))
+    t.has("a problem made by hand has no URL, not an invalid one", go_judge(buffer_of(by_hand .. "/main.cpp")), "go judge: no problem URL")
     local nameless = vim.api.nvim_create_buf(false, true)
     t.has("a buffer with no file has no problem", go_judge(nameless), "go judge: this buffer has no file")
 

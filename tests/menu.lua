@@ -726,7 +726,7 @@ do
         return rows
     end
     t.eq("Scaffold offers every role", open_row("scaffold"), { "solution", "checker", "generator", "bruteforce", "interactor" })
-    t.eq("Download what can be downloaded", open_row("download"), { "testcases", "problem", "contest" })
+    t.eq("Download what can be downloaded, and what a judge with nothing to download takes instead", open_row("download"), { "testcases", "problem", "contest", "new problem, made by hand", "new contest, made by hand" })
 end
 
 vim.fn.delete(contest, "rf")

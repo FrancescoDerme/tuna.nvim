@@ -386,20 +386,25 @@ local function command_entries(sol, cur)
     end
 
     -- Always available: nothing here needs a solution to act on.
-    add(
-        "download",
-        choices_of(
-            "download",
-            vim.tbl_map(function(what)
-                return {
-                    label = what,
-                    run = function()
-                        commands.execute({ "download", what })
-                    end,
-                }
-            end, { "testcases", "problem", "contest" })
-        )
-    )
+    -- With what a judge Competitive Companion cannot read takes instead, made by hand.
+    local fetch = {}
+    for _, what in ipairs({ "testcases", "problem", "contest" }) do
+        fetch[#fetch + 1] = {
+            label = what,
+            run = function()
+                commands.execute({ "download", what })
+            end,
+        }
+    end
+    for _, what in ipairs({ "problem", "contest" }) do
+        fetch[#fetch + 1] = {
+            label = "new " .. what .. ", made by hand",
+            run = function()
+                commands.execute({ "new", what })
+            end,
+        }
+    end
+    add("download", choices_of("download", fetch))
     add("scratch", function()
         require("tuna.workspace.scratch").start()
     end)

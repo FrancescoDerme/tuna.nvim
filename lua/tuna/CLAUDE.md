@@ -46,7 +46,8 @@ check.
     buffer are dropped for others, `run all versions` needs a second solution, `stress test` a
     generator, and a mode is not offered beside the `run` already in it. `interactive` is kept
     with no interactor, as a live session needs none. Scaffold and Download are one row each
-    that opens its choices (`choices_of`). Testcases (the runner UI's) and the neighbouring
+    that opens its choices (`choices_of`), Download's holding `:Tuna new`'s two besides, as a
+    plain problem's commands keep to a dozen rows. Testcases (the runner UI's) and the neighbouring
     problems (keys) have no row. Run runs the resolved
     mode without forcing it and shows whether it is forced; a forced mode adds an entry making
     it automatic, and the checker entry shows automatic (with the file in use) or off.
@@ -61,8 +62,9 @@ check.
   its group. tuna never names the groups in which-key itself: the
   prefix is the user's choice and may already be a group of theirs, and two names for one
   key are settled by whichever `wk.add` ran last, so the user names them (REFERENCE.md shows
-  how). `clean` is not in the preset, nor are the testcase actions: testcases are added,
-  edited and deleted on the runner UI, where they are seen, and most come from downloads.
+  how). `clean` and `new_problem`/`new_contest` are not in the preset, nor are the testcase
+  actions: testcases are added, edited and deleted on the runner UI, where they are seen, and
+  most come from downloads.
   `pin` is `b` ("bookmark"), `p` being the previous problem, and `find` is global `f`, as
   `go to`'s keys are, wanted before any solution is open.
 - The runner UI's panes are no solution buffers, so the `FileType` autocmd never maps them,

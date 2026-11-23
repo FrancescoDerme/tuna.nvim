@@ -32,16 +32,18 @@ local live_mirror
 
 ---Persist a downloaded task's metadata (url/name/group) as the problem of the source written
 ---for it, so submit can recover the URL even when the file has no header marker. Kept per file,
----as a contest's problems may be files of one folder. No-op without a URL.
+---as a contest's problems may be files of one folder. A problem made by hand has a name and no
+---URL, and is recorded all the same, as its name and contest are what `recent` and
+---`:Tuna find` know it by. No-op for a task naming neither.
 ---@param filepath string the solution written for the task
 ---@param task tuna.CCTask
 ---@param cfg table
 function M.write_task_store(filepath, task, cfg)
-    if not task.url or task.url == "" then
+    if not sidecar.identity(task) then
         return
     end
     sidecar.set_entry(filepath, "task", {
-        url = task.url,
+        url = task.url ~= "" and task.url or nil,
         name = task.name,
         group = task.group,
         -- Where the problem was browsed from, when that is not where its URL points: a
@@ -120,6 +122,21 @@ local function persist_task(ctx)
             mirror = task.mirror,
             mirror_at = task.mirror_at,
         }, ctx.cfg)
+        -- A problem made by hand is known by its name until it has a URL, so its other
+        -- attempts there take the URL too: left without it, they would be another problem.
+        if task.url and task.name then
+            local dir = vim.fn.fnamemodify(ctx.filepath, ":h")
+            local store = sidecar.read(dir, ctx.cfg)
+            local given = false
+            for _, entry in pairs(type(store.task) == "table" and store.task or {}) do
+                if type(entry) == "table" and (entry.url == nil or entry.url == "") and entry.name == task.name and entry.group == task.group then
+                    entry.url, given = task.url, true
+                end
+            end
+            if given then
+                sidecar.write(dir, ctx.cfg, store)
+            end
+        end
     end
 end
 
@@ -268,7 +285,8 @@ local function resolve_url(bufnr, filepath, cfg)
     else
         candidates[#candidates + 1] = scan_header(bufnr, scfg.url, scfg.url_scan_lines)
         local task = sidecar.task(filepath, cfg)
-        candidates[#candidates + 1] = task and task.url or nil
+        -- An empty one is no URL, not an invalid one.
+        candidates[#candidates + 1] = task and task.url ~= "" and task.url or nil
     end
 
     local invalid

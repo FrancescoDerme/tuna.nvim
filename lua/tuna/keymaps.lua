@@ -36,6 +36,8 @@ M.actions = {
     download_testcases = "Tuna download testcases",
     download_problem = "Tuna download problem",
     download_contest = "Tuna download contest",
+    new_problem = "Tuna new problem", -- a problem or contest made by hand
+    new_contest = "Tuna new contest",
     clean = "Tuna clean",
     pin = "Tuna pin", -- put a problem aside to solve later, or take it back
     next_problem = "Tuna next problem", -- step to the next/previous problem of a contest
@@ -78,7 +80,8 @@ M.actions = {
 -- No group prefix is itself a mapping, so none of them costs a `timeoutlen` wait.
 -- `:Tuna clean` is deliberately absent: it is run once in a while, not during a
 -- contest, and the menu is where it belongs (the `clean` action is still there
--- for anyone who wants to map it).
+-- for anyone who wants to map it). So are `new_problem` and `new_contest`: a contest made by
+-- hand is rare, and the menu's `download` row reaches both.
 --
 -- `buffer` maps are set on solution filetypes only; `global` ones are always there,
 -- because they are what you reach for when no solution is open yet.

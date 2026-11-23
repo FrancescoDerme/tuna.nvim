@@ -99,10 +99,14 @@ specific Vim error about a buffer the user never opened.
 - **Dismissal** is bound only through `map_cancel`, from `config.cancel_keys`
   `{ normal = { "<Esc>", "<C-c>" }, insert = {} }`: Esc cancels from normal mode and only
   leaves insert mode. Per-widget keys extend the lists. `<C-c>` in insert mode can't be mapped.
-- `input(title, default, on_submit, on_close)` opens in **normal** mode, because chained
-  prompts can't reliably start in insert. Like every widget it takes its border from the
-  config; a caller that may skip the question (download's `prompt_*` options) decides that
-  itself (`ask` in `download.lua`).
+- `input(title, default, on_submit, on_close, opts)` opens in **normal** mode, so `<CR>` takes a
+  default offered (a download's path). `opts.insert` (`:Tuna new`'s prompts, which offer
+  nothing) opens it typing, with `startinsert!` on the next tick: a chained prompt opens inside
+  the previous one's `<CR>` mapping, whose `stopinsert` lands when it returns and would end an
+  insert begun at once. A script's `vim.wait` never reaches the main loop that starts it, so it
+  is checked by driving a `--listen` editor (`--remote-send`), not in the suite. Like every
+  widget it takes its border from the config; a caller that may skip the question (download's
+  `prompt_*` options) decides that itself (`ask` in `download.lua`).
 - `editor`: its two panes are moved between with `switch_window_keys` (left to Input, right
   to Output, in insert mode too), like every other UI with panes: there is no
   editor-only pane key, so one setting moves focus everywhere. It saves and closes the way
