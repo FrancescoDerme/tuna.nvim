@@ -227,7 +227,7 @@ A problem that already exists is asked about before it's overwritten, and a cont
 
 Makes by hand what a download would write, for a judge Competitive Companion can't read.
 `problem` asks for the problem's name and its judge.
-`contest` asks for the judge, the contest's name and its problems: a range of letters or numbers such as `A-L` or `1-12`, or names split by commas, such as `C. Two Boxes, D. GCD`.
+`contest` asks for the judge, the contest's name and its problems (you can give a range of letters or numbers, such as `A-L` or `1-12`, or names split by commas, such as `C. Two Boxes, D. GCD`).
 Each problem is written where a download would put it, [`:Tuna go contest`](#go), [`:Tuna next`](#next-and-prev) and [`:Tuna find`](#find) all reach it.
 
 To add a problem to a contest later, run `:Tuna new contest` again, naming that problem alone.

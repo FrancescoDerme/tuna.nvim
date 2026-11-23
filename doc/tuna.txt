@@ -548,10 +548,10 @@ Every command is a subcommand of `:Tuna` with tab-completion, and a lowercase
         Make by hand what a download would write, for a judge Competitive
         Companion can't read. `problem` asks for the problem's name and its
         judge. `contest` asks for the judge, the contest's name and its
-        problems: a range of letters or numbers such as `A-L` or `1-12`, or
-        names split by commas, such as `C. Two Boxes, D. GCD`. Each problem is
-        written where a download would put it, `:Tuna go contest`,
-        `:Tuna next` and `:Tuna find` all reach it.
+        problems (you can give a range of letters or numbers, such as `A-L`
+        or `1-12`, or names split by commas, such as `C. Two Boxes, D. GCD`).
+        Each problem is written where a download would put it,
+        `:Tuna go contest`, `:Tuna next` and `:Tuna find` all reach it.
 
         To add a problem to a contest later, run `:Tuna new contest` again,
         naming that problem alone. As always, tuna asks before overwriting.
