@@ -128,7 +128,8 @@ hold everywhere are in the root `CLAUDE.md`.
   - `row_label(tc, unsaved)`, `status_settings()` (rows with the mode and judge) and `status_tail()`
     (rows after them);
   - `on_ui_shown(ui)` and `owns_pane(name)`;
-  - `layout()` supplies a mode-specific grid that replaces the configured one;
+  - `layout()` supplies a mode-specific grid that replaces the configured one, and
+    `blank_panes(tc)` the panes a row has nothing to show in, which its grid leaves out;
   - `pane_titles()`;
   - `on_details_rendered(ui, tc)` runs after the detail panes are drawn, for panes the mode
     draws itself;

@@ -111,25 +111,33 @@ function M.adopt(bufnr, kind, opts)
     vim.bo[bufnr].modified = false
 end
 
+-- Keys as **terminal codes**, not as written, each worked out once: `nvim_buf_get_keymap` hands
+-- back what a key really is (`<C-r>` comes back as a raw `\18`), so matching the written form
+-- against it finds nothing and a surface's own action (the runner UI's `<C-r>`, run all) would
+-- be `<Nop>`ed over.
+local codes = setmetatable({}, {
+    __index = function(memo, key)
+        local code = api.nvim_replace_termcodes(key, true, true, true)
+        memo[key] = code
+        return code
+    end,
+})
+
 ---Make a buffer that cannot be changed *say* so, by neutralising the keys that would
 ---try. Bound only where nothing is mapped yet, so a surface's real actions keep their
 ---meanings — which is why this is called **after** those are bound.
 ---@param bufnr integer
 ---@param opts { selectable: boolean? }? `selectable`: a buffer worth pasting from, which Visual
 ---  mode copies from, unlike a list or a line read at a glance
+---@return { [1]: string, [2]: string }[] guards the `{ mode, key }` pairs mapped, for a buffer
+---  that can be typed into again to take off
 function M.read_only(bufnr, opts)
+    local guards = {}
     if not (bufnr and api.nvim_buf_is_valid(bufnr)) then
-        return
+        return guards
     end
     vim.bo[bufnr].modifiable = false
     vim.bo[bufnr].modified = false
-    -- Compared as **terminal codes**, not as written: `nvim_buf_get_keymap` hands back
-    -- what a key really is (`<C-r>` comes back as a raw `\18`), so matching the written
-    -- form against it finds nothing and a surface's own action (the runner UI's
-    -- `<C-r>`, run all) would be `<Nop>`ed over.
-    local function code(key)
-        return api.nvim_replace_termcodes(key, true, true, true)
-    end
     local inert = { n = vim.list_slice(M.CHANGE_KEYS), x = M.CHANGE_KEYS }
     if not (opts and opts.selectable) then
         vim.list_extend(inert.n, VISUAL_KEYS)
@@ -137,14 +145,16 @@ function M.read_only(bufnr, opts)
     for mode, keys in pairs(inert) do
         local taken = {}
         for _, m in ipairs(api.nvim_buf_get_keymap(bufnr, mode)) do
-            taken[code(m.lhs)] = true
+            taken[codes[m.lhs]] = true
         end
         for _, key in ipairs(keys) do
-            if not (taken[code(key)] or (mode == "x" and SELECTING[key])) then
-                vim.keymap.set(mode, key, "<Nop>", { buffer = bufnr, nowait = true })
+            if not (taken[codes[key]] or (mode == "x" and SELECTING[key])) then
+                api.nvim_buf_set_keymap(bufnr, mode, key, "<Nop>", { nowait = true, noremap = true })
+                guards[#guards + 1] = { mode, key }
             end
         end
     end
+    return guards
 end
 
 -- The floats whose footer says how much of their buffer is out of sight, the buffers watched for

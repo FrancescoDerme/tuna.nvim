@@ -17,7 +17,8 @@ specific Vim error about a buffer the user never opened.
   describe the float instead of the file underneath).
 - `read_only(buf)`: unmodifiable, and `CHANGE_KEYS` mapped to `<Nop>` wherever nothing else
   claims them, in Normal and Visual mode alike. Call it **after** binding real keys; claims are
-  compared on terminal codes (`<C-R>` equals `<C-r>`). `selectable` leaves Visual mode open on
+  compared on terminal codes (`<C-R>` equals `<C-r>`). It returns the guards it mapped, for a
+  buffer that turns typable again to take off. `selectable` leaves Visual mode open on
   what is worth pasting somewhere (the library's code, a source previewed, a runner UI pane
   showing a testcase or a tool's output), where only `SELECTING` keeps its meaning. Everything
   else starts no selection: a list, a line read at a glance (the library's notes and

@@ -19,6 +19,11 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
 - **Six pane buffers, never more**: a buffer nothing shows is a cost with nothing bought. The
   build step, which has no input, answer or output, borrows the four detail buffers for its
   sources (`BUILD_PANES`), keeping their names out of all a user reads or writes there.
+- **A pane is a role, a buffer a slot.** A pane is what a row shows (Input, Output, `errors:
+  gen.cpp`), a buffer is what holds it, named by its code name (`si`, `eo`, `so`, `se`), which
+  is the role it has on a testcase row. Keep the two apart in this guide and in comments: the
+  `si` buffer is the Input pane on a testcase row and a source's errors on the build step, so
+  "Input is read-only" says something no user sees.
 - `M.owner_of(bufnr)` answers which runner a pane buffer belongs to, from the module-level
   `pane_owner` map filled in `show_ui` and cleared in `delete` (`commands.target_buffer`).
 - `layout.resolve` validates a layout (known names, no duplicates, well-formed pairs, the names
@@ -32,9 +37,12 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
   through `w.winid and api.nvim_win_is_valid(w.winid)`, never the second half alone.
 - **The grid follows the row on screen.** `grid(row)` answers the build step with
   `runner_ui.compile_layout` (checked as a `build` grid) and other rows with the mode's
-  `layout()` or the interface's configured grid (`configured_grid`); `titles_for(row)` gives
-  every pane's title there, stored on the pane records before the interface places them, taken
-  again each re-tile, since the row can rename a pane. `build_assignment` gives each source of
+  `layout()` or the interface's configured grid (`configured_grid`), without the panes the row
+  has nothing to show in (the mode's `blank_panes(row)`, run-all's solution headers leaving out
+  Input and Expected Output), `leave_out` giving their room to the panes beside them by their
+  share, never to the selector, whose width and the Run pane's stay put; `titles_for(row)`
+  gives every pane's title there, stored on the pane records before the interface places them,
+  taken again each re-tile, since the row can rename a pane. `build_assignment` gives each source of
   the build step one of the `BUILD_PANES` buffers in order, and `stack_into` splits the `build`
   cell into them, one above the other, so the grid, the titles (`errors: gen.cpp`,
   `build_titles`, a pane named after its source only when there is more than one), the text
@@ -190,11 +198,28 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
   order.
 
 **Keys**
-- Actions (`run_again` r/R, `run_all_again` <C-r>, `stop` s/S, `stop_all` <C-s>, `toggle_diff`,
-  `zoom_*`, add/delete/undo/split) are bound on **every read-only pane**, in both letter cases.
-  Editable panes get only close, pane switching and `?`. Add, delete, undo and split are bound
-  in every mode and do nothing where testcases can't be edited; left unbound, `n`/`N` would fall
-  through to Vim's search.
+- **A pane typed into is a Vim buffer, a read-only pane the board's.** Actions (`run_again`
+  r/R, `run_all_again` <C-r>, `stop` s/S, `stop_all` <C-s>, `toggle_diff`, `zoom_*`,
+  add/delete/undo/split) are bound on **every read-only pane**, in both letter cases, with
+  `surface.read_only`'s guards. Editable panes get only close, pane switching, `?` and the
+  search's `n`/`N` guard (below). Add,
+  delete, undo and split are bound in every mode and do nothing where testcases can't be
+  edited; left unbound, `n`/`N` would fall through to Vim's search.
+- The `si` and `eo` buffers are read-only on some rows (the build step's borrowed sources, any
+  row `row_editable` refuses), so their keys **follow the buffer** (`follow_typed_panes`, after
+  every details render, not as the board opens, when they are new and read-only only until the
+  first render): the actions and guards while it is read-only, taken off once it can be typed
+  into, last bound first, the key each one covered put back (`board_keys`). A pane the mode
+  owns is left to the mode, which binds its own letters there.
+- **The board searches apart from the files around it** (`follow_search`, module-level, one
+  search for every board): Vim's one last pattern and `hlsearch` are swapped for the board's on
+  entering a pane or the zoom (`pane_owner`) and back on leaving, scheduled from `WinEnter`/
+  `BufEnter`, as autocmds put `v:hlsearch` back when they end. An empty pattern is put unlit,
+  and the editable panes' `n`/`N` do nothing with it: Vim would fall back on the last
+  substitute pattern, the solution's. Everything else on the editable panes stays Vim's. The
+  guard answers with Vim's own `n`, so a user's mapping of it (`nzzzv`, hlslens) does not reach
+  those panes, a cost accepted for now: binding it only while the board has no search, and
+  taking it off once one is made, would give the mapping back.
 - `close` (`<Esc>`, `<C-c>`, `q`, `Q`) is bound on every pane in **normal mode only**.
   `switch_window_keys` (default `<C-hjkl>`, a top-level option shared with widgets) also work in
   insert mode and move from the cursor, as Vim's own window moves do (`focus_dir`): the pane

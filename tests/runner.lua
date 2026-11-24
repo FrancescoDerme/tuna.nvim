@@ -541,6 +541,39 @@ do
     vim.o.columns, vim.o.lines, vim.o.equalalways = columns, lines, equalalways
 end
 
+-- The board searches apart from the files around it: a pane neither repeats the solution's
+-- search nor lights the solution with its own, and the solution's comes back as it was left.
+do
+    local br, ui, _, _, done = board("popup")
+    done()
+    local hlsearch = vim.o.hlsearch
+    vim.o.hlsearch = true
+    local outside = vim.api.nvim_get_current_win()
+    vim.api.nvim_set_current_win(ui.restore_winid)
+    t.drain()
+    vim.fn.setreg("/", "int")
+    vim.cmd("nohlsearch")
+    local function search_in(win)
+        vim.api.nvim_set_current_win(win)
+        t.drain()
+        return { vim.fn.getreg("/"), vim.v.hlsearch }
+    end
+    t.eq("a pane starts with no search and nothing lit", search_in(ui.windows.si.winid), { "", 0 })
+    vim.v.errmsg = ""
+    vim.api.nvim_feedkeys("n", "xt", false)
+    t.eq("where n repeats nothing, the solution's search included", { vim.v.errmsg, vim.v.hlsearch }, { "", 0 })
+    vim.api.nvim_feedkeys("/2\r", "xt", false)
+    t.eq("leaving the board puts the solution's search back, unlit as it was", search_in(ui.restore_winid), { "int", 0 })
+    t.eq("and coming back, the board's own", search_in(ui.windows.si.winid), { "2", 1 })
+    br:delete_ui()
+    t.drain()
+    t.eq("a board put away leaves the solution's", { vim.fn.getreg("/"), vim.v.hlsearch }, { "int", 0 })
+    vim.o.hlsearch = hlsearch
+    if vim.api.nvim_win_is_valid(outside) then
+        vim.api.nvim_set_current_win(outside)
+    end
+end
+
 t.write(dir, "checker.cpp", "int main() {}\n")
 -- Text to be read wraps, at word boundaries and keeping its indent: the Errors pane on a
 -- testcase row and every pane on the build step, which holds compiler output. The Output,
@@ -921,6 +954,49 @@ for _, row in ipairs(mr and mr.tcdata or {}) do
     end
 end
 check_spawns("run all", run_exec)
+
+-- A solution's header row has no input and no answer, so its grid leaves Input and Expected
+-- Output out, and the panes left take their room. A testcase row keeps the whole grid.
+do
+    local header, case
+    for _, row in ipairs(mr.tcdata) do
+        header = header or (row.kind == "solution" and row) or nil
+        case = case or (row.kind == "case" and row) or nil
+    end
+    local ui = mr.ui
+    t.eq("a run-all header's grid leaves out Input and Expected Output, the selector as wide as ever", ui:grid(header), {
+        { 3, "tc" },
+        { 8, { { 1, "so" }, { 1, "se" } } },
+    })
+    t.eq("a run-all testcase row keeps the configured grid", ui:grid(case), require("tuna.config").current_setup.popup_ui.layout)
+    local function show(row)
+        ui:select_row(ui:row_index(row))
+        ui.update_windows, ui.update_details = true, true
+        ui:update_ui()
+        drain(ui)
+        return vim.api.nvim_win_get_width(ui.windows.tc.winid)
+    end
+    local case_width = show(case)
+    local header_width = show(header)
+    t.eq("and the header draws no window for them", { ui.windows.si.winid, ui.windows.eo.winid }, {})
+    t.eq("with the selector as wide as on a testcase row", header_width, case_width)
+    local leave_out = require("tuna.runner_ui")._test.leave_out
+    t.eq("a column left with one pane is that pane", leave_out({
+        { 1, "tc" },
+        { 1, { { 1, "so" }, { 1, "eo" } } },
+        { 1, { { 1, "se" }, { 1, "si" } } },
+    }, { si = true, eo = true }), { { 1, "tc" }, { 1, "so" }, { 1, "se" } })
+    t.eq("the room a pane leaves goes to those beside it by their share, none to the selector", leave_out({
+        { 2, { { 1, "tc" }, { 1, "se" } } },
+        { 1, "so" },
+        { 3, "eo" },
+        { 1, "si" },
+    }, { eo = true }), {
+        { 2, { { 1, "tc" }, { 1, "se" } } },
+        { 2.5, "so" },
+        { 2.5, "si" },
+    })
+end
 
 -- Trailing numbers pick the testcases, as in normal mode: a missing one is reported, and
 -- with none left nothing runs.
@@ -2033,6 +2109,56 @@ do
         vim.api.nvim_buf_get_lines(bui.windows.so.bufnr, 0, 1, false)[1],
     }, { " errors: main.cpp (e) ", " errors: gen.cpp (i) ", "gen.cpp warns" })
     t.ok("and wear no accent, nothing on the build step is typed into", not accented(bui, "eo"), "eo")
+    -- Input and Expected Output are the board's while their buffers are read-only, as here,
+    -- where Vim's letters would only raise `E21`, and Vim's while they can be typed into.
+    do
+        local function pane_map(name, lhs)
+            return vim.api.nvim_buf_call(bui.windows[name].bufnr, function()
+                return vim.fn.maparg(lhs, "n", false, true)
+            end)
+        end
+        local function keys_on(name)
+            local m = {}
+            for _, lhs in ipairs({ "r", "d", "p", "<C-s>", "n" }) do
+                local map = pane_map(name, lhs)
+                m[#m + 1] = map.expr == 1 and "search"
+                    or map.callback and "board"
+                    or map.rhs == "<Nop>" and "inert"
+                    or map.rhs
+                    or "vim"
+            end
+            return m
+        end
+        local function show(row)
+            bui:select_row(row)
+            bui.update_windows, bui.update_details = true, true
+            bui:update_ui()
+            drain(bui)
+        end
+        t.eq("a borrowed pane on the build step has the board's keys, and the edits it cannot take inert",
+            { keys_on("si"), keys_on("eo") },
+            { { "board", "board", "inert", "board", "board" }, { "board", "board", "inert", "board", "board" } })
+        show(2)
+        t.eq("on a testcase row the keys are Vim's again, n the search it was",
+            { keys_on("si"), keys_on("eo") },
+            { { "vim", "vim", "vim", "vim", "search" }, { "vim", "vim", "vim", "vim", "search" } })
+        -- A key the pane had before, a solution key perhaps, is the one it gets back.
+        vim.keymap.set("n", "d", "<cmd>echo<cr>", { buffer = bui.windows.si.bufnr })
+        show(1)
+        t.eq("and the board's again on the build step, over a key the pane had", keys_on("si"), { "board", "board", "inert", "board", "board" })
+        show(2)
+        t.eq("which it gets back on a testcase row", pane_map("si", "d").rhs, "<cmd>echo<cr>")
+        vim.keymap.del("n", "d", { buffer = bui.windows.si.bufnr })
+        -- A key two actions share is bound twice, the second over the first.
+        local config = bui.config
+        bui.config = vim.deepcopy(config)
+        bui.config.runner_ui.mappings.toggle_diff = { "d", "D", "x" }
+        show(1)
+        show(2)
+        t.eq("a key two actions share is Vim's again on a testcase row", pane_map("si", "x").callback, nil)
+        bui.config = config
+        show(1)
+    end
     t.eq("four sources, and still the six panes every board has, not one buffer more", vim.tbl_count(bui.windows), 6)
     t.ok("the legend has a section for the search", legend_section(bui, "stress"))
     -- Its own box, closing the left column, under the keys and with nothing left over beside it.

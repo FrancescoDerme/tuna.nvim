@@ -149,7 +149,9 @@ The rules that hold everywhere are in the root `CLAUDE.md`.
   of any language, each with its own filetype's commands. The directory is the buffer's parent,
   or the cwd for a scratch buffer.
 - `MultiRunner` is a flattened matrix: solution header rows (`row_label`, live `correct/total`)
-  above indented testcase rows. Its testcases are those a normal run from the buffer reads,
+  above indented testcase rows. A header has no input and no answer, so its grid leaves Input
+  and Expected Output out (`blank_panes`), and those two are shown only where they can be typed
+  into. Its testcases are those a normal run from the buffer reads,
   and its rows are the one record of them (`testcase_numbers`): `lay_out` builds the matrix
   for a list of numbers, keeping every row already there, so an add, a delete and a row
   renumbered by a restore leave nothing behind to disagree with the grid. Keep no copy of the

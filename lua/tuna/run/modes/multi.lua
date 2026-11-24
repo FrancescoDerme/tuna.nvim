@@ -88,6 +88,16 @@ function MultiRunner:pane_content(tc, name)
     return core.RunnerCore.pane_content(self, tc, name)
 end
 
+---A solution's header row has no input and no answer, so its grid leaves out the panes that
+---would show them, and Input and Expected Output are drawn only where they can be typed into.
+---@param tc table
+---@return table<string, boolean>?
+function MultiRunner:blank_panes(tc)
+    if tc.kind == "solution" then
+        return { si = true, eo = true }
+    end
+end
+
 ---A solution's header row.
 ---@param sol table
 ---@return table

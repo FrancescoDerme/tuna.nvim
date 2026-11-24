@@ -42,6 +42,70 @@ local BUILD_ACTIONS = {
     checker = "zoom_stdout",
 }
 
+---Bind `fn` to `key` in `mode` on buffer `buf`, without waiting for a longer key. Through the API
+---directly, past `vim.keymap.set`'s handling of its arguments: a board binds hundreds of keys
+---every time it opens.
+---@param mode string
+---@param buf integer
+---@param key string
+---@param fn function
+local function bind(mode, buf, key, fn)
+    api.nvim_buf_set_keymap(buf, mode, key, "", { callback = fn, nowait = true, noremap = true })
+end
+
+---Whether `layout` places the selector.
+---@param layout table|string
+---@return boolean
+local function holds_selector(layout)
+    if type(layout) == "string" then
+        return layout == "tc"
+    end
+    for _, entry in ipairs(layout) do
+        if holds_selector(entry[2]) then
+            return true
+        end
+    end
+    return false
+end
+
+---`layout` without the panes in `blank`: a level they empty goes with them, and a nested level
+---left with one entry is that entry. The room they had goes to what is left beside them, shared
+---by ratio, and never to the selector, which keeps its width and the Run pane's however many
+---panes a row shows.
+---@param layout table|string
+---@param blank table<string, boolean>
+---@param nested boolean? below the top level, which stays a list
+---@return table|string|nil
+local function leave_out(layout, blank, nested)
+    if type(layout) == "string" then
+        return not blank[layout] and layout or nil
+    end
+    local out, freed = {}, 0
+    for _, entry in ipairs(layout) do
+        local child = leave_out(entry[2], blank, true)
+        if child then
+            out[#out + 1] = { entry[1], child }
+        else
+            freed = freed + entry[1]
+        end
+    end
+    local takers = 0
+    for _, entry in ipairs(out) do
+        takers = takers + (holds_selector(entry[2]) and 0 or entry[1])
+    end
+    if freed > 0 and takers > 0 then
+        for _, entry in ipairs(out) do
+            if not holds_selector(entry[2]) then
+                entry[1] = entry[1] + freed * entry[1] / takers
+            end
+        end
+    end
+    if nested and #out == 1 then
+        return out[1][2]
+    end
+    return #out > 0 and out or nil
+end
+
 ---Split the grid's `build` cell into `panes`, one above the other, leaving the rest of the
 ---grid alone. A single pane takes the cell whole.
 ---@param layout table|string
@@ -74,6 +138,41 @@ end
 -- with its window, and an entry left behind would point a command at a runner that is gone.
 ---@type table<integer, table>
 local pane_owner = {}
+
+-- The board searches apart from the files around it. Vim has one last search pattern and one
+-- `hlsearch` state for every window, so a `/` typed in a testcase would light the solution's
+-- lines, and an `n` in a pane would repeat the solution's search there and turn its highlight
+-- back on. So the board keeps its own (`board`), put in place while the cursor is in a pane or
+-- the zoom, and the one found there (`outer`) is put back when it leaves. One for every board,
+-- as only one is on screen at a time. The swap is scheduled: autocmds put `v:hlsearch` back
+-- when they end.
+local search = {
+    inside = false,
+    board = { pattern = "", hlsearch = 0, forward = 1 },
+    ---@type { pattern: string, hlsearch: integer, forward: integer }?
+    outer = nil,
+}
+local search_group
+
+local function follow_search()
+    local inside = pane_owner[api.nvim_get_current_buf()] ~= nil
+    if inside == search.inside then
+        return
+    end
+    local here = { pattern = vim.fn.getreg("/"), hlsearch = vim.v.hlsearch, forward = vim.v.searchforward }
+    local there = inside and search.board or search.outer or here
+    if inside then
+        search.outer = here
+    else
+        search.board = here
+    end
+    search.inside = inside
+    vim.fn.setreg("/", there.pattern)
+    vim.v.searchforward = there.forward
+    -- After the pattern, which turns the highlight on. With no pattern Vim would light the last
+    -- substitute pattern instead, the solution's.
+    vim.v.hlsearch = there.pattern ~= "" and there.hlsearch or 0
+end
 
 local ns = api.nvim_create_namespace("tuna_runner_ui")
 -- Its own namespace, so the diff can be painted and cleared without touching the
@@ -276,6 +375,56 @@ function RunnerUI:writable_pane(name)
         return true
     end
     return self.runner.owns_pane ~= nil and self.runner:owns_pane(name)
+end
+
+---@private
+---Bind the board's keys on the `si` and `eo` buffers while they are read-only, and take them off
+---once they can be typed into: a pane typed into is a Vim buffer, a read-only one the board's.
+---Which it is depends on the row on screen: the build step borrows these buffers for its
+---sources, and a row that is no testcase shows them read-only, where Vim's letters would only
+---raise `E21`. Run after every render of the details, which is where that changes, and not
+---as the board opens, when the buffers are new and read-only only until the first render. A pane the mode types into itself (`owns_pane`) binds its own keys, so it is left
+---to the mode.
+function RunnerUI:follow_typed_panes()
+    if not (self.board_actions and self.runner.editable_testcases) then
+        return
+    end
+    local mappings = self.config.runner_ui.mappings
+    for _, name in ipairs({ "si", "eo" }) do
+        local w = self.windows[name]
+        local buf = w and w.bufnr
+        local owned = self.runner.owns_pane ~= nil and self.runner:owns_pane(name)
+        if buf and api.nvim_buf_is_valid(buf) and not owned then
+            local read_only = not vim.bo[buf].modifiable
+            if read_only and not w.board_keys then
+                -- Each with what the key meant on the buffer before, given back with it.
+                local bound = {}
+                api.nvim_buf_call(buf, function()
+                    for _, entry in ipairs(self.board_actions) do
+                        for _, key in ipairs(as_list(mappings[entry[1]])) do
+                            local before = vim.fn.maparg(key, "n", false, true)
+                            bind("n", buf, key, entry[2])
+                            bound[#bound + 1] = { "n", key, before.buffer == 1 and before or nil }
+                        end
+                    end
+                end)
+                w.board_keys = vim.list_extend(bound, surface.read_only(buf, { selectable = true }))
+            elseif not read_only and w.board_keys then
+                -- Last bound first: a key two actions share was covered by the first of them
+                -- when the second was bound, and is given back to what it was before both.
+                api.nvim_buf_call(buf, function()
+                    for i = #w.board_keys, 1, -1 do
+                        local k = w.board_keys[i]
+                        pcall(vim.keymap.del, k[1], k[2], { buffer = buf })
+                        if k[3] then
+                            vim.fn.mapset(k[1], false, k[3])
+                        end
+                    end
+                end)
+                w.board_keys = nil
+            end
+        end
+    end
 end
 
 ---@private
@@ -1619,7 +1768,8 @@ end
 ---The grid `row` is drawn with. The build step is not a testcase: it has no input, no
 ---answer and no output to compare, so it gets `runner_ui.compile_layout`, the selector and a
 ---`build` cell split into one pane per source it compiles. Every other row gets the mode's
----own layout, else the configured one.
+---own layout, else the configured one, without the panes the row has nothing to show in
+---(`blank_panes`, run-all's solution headers).
 ---@param row table?
 ---@return table
 function RunnerUI:grid(row)
@@ -1630,13 +1780,16 @@ function RunnerUI:grid(row)
         return stack_into(cell, build.panes) --[[@as table]]
     end
     local name, layout, default = configured_grid(self.config, self.kind)
+    local grid
     if self.runner.layout then
         local own, own_name = self.runner:layout()
         if own then
-            return self:checked_grid(own_name or "run mode layout", own, default)
+            grid = self:checked_grid(own_name or "run mode layout", own, default)
         end
     end
-    return self:checked_grid(name, layout, default)
+    grid = grid or self:checked_grid(name, layout, default)
+    local blank = row and self.runner.blank_panes and self.runner:blank_panes(row)
+    return blank and leave_out(grid, blank) or grid
 end
 
 ---@private
@@ -1844,6 +1997,15 @@ function RunnerUI:show_ui()
 
     augroup_counter = augroup_counter + 1
     self.augroup = api.nvim_create_augroup("tuna_runner_ui_" .. augroup_counter, { clear = true })
+    if not search_group then
+        search_group = api.nvim_create_augroup("tuna_runner_search", { clear = true })
+        api.nvim_create_autocmd({ "WinEnter", "BufEnter" }, {
+            group = search_group,
+            callback = function()
+                vim.schedule(follow_search)
+            end,
+        })
+    end
 
     local mappings = self.config.runner_ui.mappings
 
@@ -1868,14 +2030,24 @@ function RunnerUI:show_ui()
         -- else in tuna. In normal mode they mean what they mean in the rest of the UI,
         -- and an unsaved edit is caught by the prompt rather than by withholding the key.
         for _, key in ipairs(as_list(mappings.close)) do
-            vim.keymap.set("n", key, close_or_unzoom, { buffer = w.bufnr, nowait = true })
+            bind("n", w.bufnr, key, close_or_unzoom)
+        end
+        -- Vim's `n`/`N` on the panes typed into, but with nothing searched on the board yet
+        -- they do nothing: its pattern is then empty, and Vim would fall back on the last
+        -- substitute pattern, made in the solution.
+        if self:writable_pane(name) then
+            for _, key in ipairs({ "n", "N" }) do
+                vim.keymap.set("n", key, function()
+                    return vim.fn.getreg("/") ~= "" and key or ""
+                end, { buffer = w.bufnr, expr = true, nowait = true })
+            end
         end
         -- The key legend is reachable from wherever you are, editable panes included:
         -- being lost is exactly when it is wanted. Normal mode only, like the rest.
         for _, key in ipairs(as_list(mappings.help)) do
-            vim.keymap.set("n", key, function()
+            bind("n", w.bufnr, key, function()
                 self:show_help()
-            end, { buffer = w.bufnr, nowait = true })
+            end)
         end
         for i, key in ipairs(switch) do
             local d = dirs[i]
@@ -1883,7 +2055,7 @@ function RunnerUI:show_ui()
                 local function go()
                     self:focus_dir(d)
                 end
-                vim.keymap.set("n", key, go, { buffer = w.bufnr, nowait = true })
+                bind("n", w.bufnr, key, go)
                 -- Editable panes are left mid-typing, so the same keys have to work
                 -- from insert mode too (as they do in the widgets). Typing carries on into a
                 -- pane that can be typed into, Input to Expected Output, and stops in one that
@@ -1892,12 +2064,12 @@ function RunnerUI:show_ui()
                 -- that is asked, moved or not: from the zoom of a pane the grid leaves out the
                 -- key lands on the selector even with no pane that way.
                 if self:writable_pane(name) then
-                    vim.keymap.set("i", key, function()
+                    bind("i", w.bufnr, key, function()
                         go()
                         if not vim.bo.modifiable then
                             vim.cmd("stopinsert")
                         end
-                    end, { buffer = w.bufnr, nowait = true })
+                    end)
                 end
             end
         end
@@ -1907,11 +2079,11 @@ function RunnerUI:show_ui()
             local picker = self.config.picker_ui.mappings
             for delta, keys in pairs({ [1] = picker.focus_next, [-1] = picker.focus_prev }) do
                 for _, key in ipairs(as_list(keys)) do
-                    vim.keymap.set("n", key, function()
+                    bind("n", w.bufnr, key, function()
                         if w.winid and api.nvim_win_is_valid(w.winid) then
                             require("tuna.ui.widgets").move_cursor(w.winid, api.nvim_buf_line_count(w.bufnr), delta)
                         end
-                    end, { buffer = w.bufnr, nowait = true })
+                    end)
                 end
             end
         end
@@ -2037,7 +2209,8 @@ function RunnerUI:show_ui()
     -- The editable panes are the exception, and only because their single letters
     -- belong to the buffer (`d` deletes, `r` replaces, `u` undoes); they get `close`,
     -- the pane-switch keys and `help` above, and everything else from a read-only pane
-    -- one `switch_window_key` away.
+    -- one `switch_window_key` away, or once their own buffers are read-only
+    -- (`follow_typed_panes`).
     local tc_buf = self.windows.tc.bufnr
     local action_bufs = {}
     for name, w in pairs(self.windows) do
@@ -2045,10 +2218,12 @@ function RunnerUI:show_ui()
             action_bufs[#action_bufs + 1] = w.bufnr
         end
     end
+    self.board_actions = {}
     local function map_tc(action, fn)
+        self.board_actions[#self.board_actions + 1] = { action, fn }
         for _, key in ipairs(as_list(mappings[action])) do
             for _, buf in ipairs(action_bufs) do
-                vim.keymap.set("n", key, fn, { buffer = buf, nowait = true })
+                bind("n", buf, key, fn)
             end
         end
     end
@@ -3306,6 +3481,7 @@ function RunnerUI:update_ui()
                 if self.runner.on_details_rendered then
                     self.runner:on_details_rendered(self, tc)
                 end
+                self:follow_typed_panes()
                 -- Which testcase the panes are now showing, i.e. whom a later edit of
                 -- them belongs to. `nil` on a row with nothing to edit (`compile`,
                 -- run-all's solution headers), so nothing can be captured for it.
@@ -3326,6 +3502,7 @@ end
 
 -- The pure half of the selector's layout, for the test suite.
 M._test = {
+    leave_out = leave_out,
     selector_columns = selector_columns,
     build_text = build_text,
     build_titles = build_titles,
