@@ -7,8 +7,8 @@
 -- routine (`execute_process`). A mode subclass supplies its own driving loop (parallel
 -- lanes, a generation search, interactive sessions), what a failed build means to it
 -- (`on_build_failed`), and whichever UI seams it needs (`status_settings`,
--- `status_tail`, `pane_content`, `on_ui_shown`, `layout`, `pane_titles`,
--- `on_details_rendered`, `legend_rows`).
+-- `status_tail`, `pane_content`, `on_ui_shown`, `layout`, `blank_panes`, `pane_titles`,
+-- `zoom_actions`, `on_details_rendered`, `legend_rows`).
 --
 -- Inheritance is plain Lua metatable single-dispatch: `M.extend()` returns a
 -- subclass table chained to `RunnerCore`, and instances `setmetatable(obj, Sub)`.
@@ -58,7 +58,9 @@ M.SKIP = setmetatable({}, {
 ---@field source string? the interactive source playing the other side
 ---The seams a mode may fill for the UI (see the header):
 ---@field layout (fun(self: tuna.RunnerCore): table?, string?)? its own grid, and the option naming it
----@field pane_titles (fun(self: tuna.RunnerCore): table<string, string>?)? names its panes go by
+---@field blank_panes (fun(self: tuna.RunnerCore, tc: table): table<string, boolean>?)? panes a row has nothing for
+---@field pane_titles (fun(self: tuna.RunnerCore, tc: table?): table<string, string>?)? names its panes go by on a row
+---@field zoom_actions (fun(self: tuna.RunnerCore, tc: table): table<string, string>?)? the zoom action a pane takes on a row
 ---@field legend_rows (fun(self: tuna.RunnerCore): { title: string, rows: string[][] }?)? its legend section
 ---@field on_ui_shown fun(self: tuna.RunnerCore, ui: tuna.RunnerUI)? after the UI is shown or re-tiled
 ---@field on_details_rendered fun(self: tuna.RunnerCore, ui: tuna.RunnerUI, tc: table)? after the detail panes are drawn

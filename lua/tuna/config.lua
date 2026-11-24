@@ -660,6 +660,9 @@ M.defaults = {
             zoom_expected = { "a", "A" },
             zoom_stdout = { "o", "O" },
             zoom_stderr = { "e", "E" },
+            -- Run-all's solution rows, which list their testcases' verdicts where a testcase
+            -- row has its output.
+            zoom_verdicts = { "p", "P" },
             toggle_diff = { "d", "D" },
             -- `<Esc>`/`<C-c>` are what dismisses every other surface in the plugin
             -- (`cancel_keys`), so they dismiss this

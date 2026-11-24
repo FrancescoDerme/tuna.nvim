@@ -130,13 +130,15 @@ hold everywhere are in the root `CLAUDE.md`.
   - `on_ui_shown(ui)` and `owns_pane(name)`;
   - `layout()` supplies a mode-specific grid that replaces the configured one, and
     `blank_panes(tc)` the panes a row has nothing to show in, which its grid leaves out;
-  - `pane_titles()`;
+  - `pane_titles(tc)` and `zoom_actions(tc)`, the name a pane goes by on a row and the
+    `zoom_*` action that zooms it there;
   - `on_details_rendered(ui, tc)` runs after the detail panes are drawn, for panes the mode
     draws itself;
   - `legend_rows()` returns `{ title, rows }`, a box of the `?` legend of the mode's own,
     closing its left column
     (stress: the search row and what the run keys do to the search; interactive: the source
-    playing the other side and what decides the verdict).
+    playing the other side and what decides the verdict; run-all: a solution's row and the
+    key zooming its verdicts).
 - **Editing contract**:
   - `editable_testcases` is a class flag. `row_editable(tc)` is true only for numeric `tcnum`,
     which excludes compile and run-all headers.

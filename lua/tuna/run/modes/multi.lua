@@ -73,9 +73,9 @@ function MultiRunner:solution_summary(hrow)
     return table.concat(lines, "\n")
 end
 
----Detail-pane content: solution rows show a per-testcase summary (Output) and any
----compile output (Errors); testcase rows are the base class's — including the Errors
----pane carrying a checker's message.
+---Detail-pane content: solution rows show a per-testcase summary (Verdicts, in the `so`
+---buffer) and any compile output (Errors); testcase rows are the base class's — including
+---the Errors pane carrying a checker's message.
 function MultiRunner:pane_content(tc, name)
     if tc.kind == "solution" then
         if name == "so" then
@@ -96,6 +96,37 @@ function MultiRunner:blank_panes(tc)
     if tc.kind == "solution" then
         return { si = true, eo = true }
     end
+end
+
+---On a solution's header row the `so` buffer lists its testcases' verdicts, no program's
+---output, so it is named and zoomed for that: `o` would promise an output.
+---@param tc table?
+---@return table<string, string>?
+function MultiRunner:pane_titles(tc)
+    if tc and tc.kind == "solution" then
+        return { so = " verdicts " }
+    end
+end
+
+---@param tc table
+---@return table<string, string>?
+function MultiRunner:zoom_actions(tc)
+    if tc.kind == "solution" then
+        return { so = "zoom_verdicts" }
+    end
+end
+
+---What the `?` legend adds for run-all: what a solution's row shows, and the key zooming it
+---while one is bound.
+---@return { title: string, rows: string[][] }
+function MultiRunner:legend_rows()
+    local keys = self.config.runner_ui.mappings.zoom_verdicts
+    keys = type(keys) == "string" and { keys } or type(keys) == "table" and keys or {}
+    local rows = { { "a solution's row", "its verdicts, and its build's errors" } }
+    if #keys > 0 then
+        rows[2] = { "zoom verdicts", table.concat(keys, " / ") }
+    end
+    return { title = "run all", rows = rows }
 end
 
 ---A solution's header row.

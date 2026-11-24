@@ -151,8 +151,10 @@ The rules that hold everywhere are in the root `CLAUDE.md`.
 - `MultiRunner` is a flattened matrix: solution header rows (`row_label`, live `correct/total`)
   above indented testcase rows. A header has no input and no answer, so its grid leaves Input
   and Expected Output out (`blank_panes`), and those two are shown only where they can be typed
-  into. Its testcases are those a normal run from the buffer reads,
-  and its rows are the one record of them (`testcase_numbers`): `lay_out` builds the matrix
+  into. Its `so` buffer lists the solution's verdicts there, so it is `verdicts`, zoomed by
+  `zoom_verdicts` (`p`), not `output` by `o` (`pane_titles`, `zoom_actions`). Its testcases
+  are those a normal run from the buffer reads, and its rows are the one record of them
+  (`testcase_numbers`): `lay_out` builds the matrix
   for a list of numbers, keeping every row already there, so an add, a delete and a row
   renumbered by a restore leave nothing behind to disagree with the grid. Keep no copy of the
   list beside the rows: renumbering a row leaves it stale, and the next add brings the old

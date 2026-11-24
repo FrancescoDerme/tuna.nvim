@@ -980,6 +980,53 @@ do
     local header_width = show(header)
     t.eq("and the header draws no window for them", { ui.windows.si.winid, ui.windows.eo.winid }, {})
     t.eq("with the selector as wide as on a testcase row", header_width, case_width)
+    -- The `so` buffer lists the solution's verdicts there, no output, and is named, keyed and
+    -- zoomed so: `o` would promise an output, and the panes left out zoom nothing.
+    local function title(name)
+        return vim.api.nvim_win_get_config(ui.windows[name].winid).title[1][1]
+    end
+    local function zooms()
+        vim.api.nvim_set_current_win(ui.windows.tc.winid)
+        local opened = {}
+        for _, key in ipairs({ "p", "o", "i", "a" }) do
+            vim.api.nvim_feedkeys(key, "xt", false)
+            opened[key] = ui.zoom_winid and vim.api.nvim_win_get_config(ui.zoom_winid).title[1][1] or false
+            ui:unzoom()
+        end
+        return opened
+    end
+    t.eq("a run-all header names its summary pane verdicts, with the key that zooms it", title("so"), " verdicts (p) ")
+    t.eq("and only that key zooms it", zooms(), { p = " verdicts (p) ", o = false, i = false, a = false })
+    t.has("the legend names the key in a section of run-all's", legend_section(ui, "run all") and legend_line(ui, "zoom verdicts"), "p / P")
+    local mappings = ui.config.runner_ui.mappings
+    local verdicts_keys = mappings.zoom_verdicts
+    mappings.zoom_verdicts = false
+    t.eq("and leaves the line out with no key bound", legend_line(ui, "zoom verdicts"), nil)
+    mappings.zoom_verdicts = verdicts_keys
+    show(case)
+    t.eq("a testcase row's pane is Output again", title("so"), " output (o) ")
+    t.eq("zoomed by its own keys, and the verdicts key zooms nothing", zooms(), {
+        p = false,
+        o = " output (o) ",
+        i = " input (i) ",
+        a = " expected output (a) ",
+    })
+    -- A grid that already leaves out what a header blanks is the same on both kinds of row, and
+    -- the title still follows the row.
+    local key = ui.kind == "split" and "horizontal_layout" or "layout"
+    local options = ui.kind == "split" and ui.config.split_ui or ui.config.popup_ui
+    local configured = options[key]
+    options[key] = { { 3, "tc" }, { 4, "so" }, { 4, "se" } }
+    show(header)
+    local on_header = title("so")
+    show(case)
+    t.eq("with a grid the same on both kinds of row, the title and its key still follow the row", {
+        on_header,
+        title("so"),
+        zooms().o,
+    }, { " verdicts (p) ", " output (o) ", " output (o) " })
+    options[key] = configured
+    show(case)
     local leave_out = require("tuna.runner_ui")._test.leave_out
     t.eq("a column left with one pane is that pane", leave_out({
         { 1, "tc" },
@@ -2119,7 +2166,7 @@ do
         end
         local function keys_on(name)
             local m = {}
-            for _, lhs in ipairs({ "r", "d", "p", "<C-s>", "n" }) do
+            for _, lhs in ipairs({ "r", "d", "J", "<C-s>", "n" }) do
                 local map = pane_map(name, lhs)
                 m[#m + 1] = map.expr == 1 and "search"
                     or map.callback and "board"

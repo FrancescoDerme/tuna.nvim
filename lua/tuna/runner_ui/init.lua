@@ -23,12 +23,17 @@ local M = {}
 -- the detail panes' own: the build step shows no stdout, answer or input, so they are free
 -- there, and borrowing them means the build step never makes a buffer of its own. Nothing a
 -- user reads or writes names them on that row: the grid places a `build` cell, the titles
--- name the source, and the zoom keys zoom what is actually there (`zoom_target`).
+-- name the source, and the zoom keys zoom what is actually there (`zoom_opens`).
 local BUILD_PANES = { "se", "so", "eo", "si" }
 
--- The action that zooms each detail pane. The keys are bound from it and, with
--- `runner_ui.show_title_keys`, the titles name its key from it, so the two cannot disagree.
+-- The action that zooms each detail pane on a testcase row. A mode may give a pane another on
+-- the rows where it shows something else (`zoom_actions`, run-all's verdicts). The keys and,
+-- with `runner_ui.show_title_keys`, the titles both read `zoom_opens`, so the two cannot
+-- disagree.
 local ZOOM_ACTIONS = { so = "zoom_stdout", eo = "zoom_expected", si = "zoom_input", se = "zoom_stderr" }
+
+-- Every zoom key bound, each zooming the pane the row on screen gives its action, if any.
+local ZOOM_KEYS = { "zoom_stdout", "zoom_expected", "zoom_input", "zoom_stderr", "zoom_verdicts" }
 
 -- On the build step each source is opened by the key of the pane its program is about when a
 -- testcase runs: the solution by its errors, the generator and the interactor by the input
@@ -238,6 +243,7 @@ end
 ---@field zoom_winid integer?
 ---@field zoomed string? which detail pane is zoomed
 ---@field drawn_row table? the row the panes were last laid out for
+---@field drawn_titles table<string, string>? the panes' titles it laid out
 ---@field restore_winid integer?
 ---@field kind "popup"|"split" the interface in use
 ---@field grids table<string, { layout: table, grid: table }> grids checked, by option name
@@ -348,17 +354,28 @@ function RunnerUI:selected_index()
 end
 
 ---@private
----The pane a `zoom_*` key zooms on the row laid out, as its title says. On a testcase row it is
----the pane the key names. On the build step every pane holds a compiler's words, and each key opens the source
----whose role it stands for (`BUILD_ACTIONS`), or nothing when this run compiles no such source.
----@param name string the pane the key names
----@return string?
-function RunnerUI:zoom_target(name)
-    local build = self:build_assignment(self.drawn_row)
-    if not build then
-        return name
+---The pane each `zoom_*` action zooms on `row`, as its title says. On the build step every pane
+---holds a compiler's words, and each key opens the source whose role it stands for
+---(`BUILD_ACTIONS`). Elsewhere each pane opens with its action (`ZOOM_ACTIONS`, or the one the
+---mode gives it there), except one the row leaves out (`blank_panes`). An action with no pane
+---zooms nothing.
+---@param row table?
+---@return table<string, string> action to pane
+function RunnerUI:zoom_opens(row)
+    local build = self:build_assignment(row)
+    if build then
+        return build.opens
     end
-    return build.opens[ZOOM_ACTIONS[name]]
+    local r = self.runner
+    local actions = vim.tbl_extend("force", ZOOM_ACTIONS, row and r.zoom_actions and r:zoom_actions(row) or {})
+    local blank = row and r.blank_panes and r:blank_panes(row) or {}
+    local opens = {}
+    for pane, action in pairs(actions) do
+        if not blank[pane] then
+            opens[action] = pane
+        end
+    end
+    return opens
 end
 
 ---@private
@@ -1654,45 +1671,36 @@ local function build_titles(build)
 end
 
 ---@private
----Every pane's title on `row`: its own, a name the mode gives it (interactive's `live`), the
----source it holds on the build step, and with `runner_ui.show_title_keys` the key that zooms it.
+---Every pane's title on `row`: its own, a name the mode gives it there (interactive's `live`,
+---run-all's `verdicts`), the source it holds on the build step, and with
+---`runner_ui.show_title_keys` the key that zooms it.
 ---@param row table?
 ---@return table<string, string>
 function RunnerUI:titles_for(row)
     local r = self.runner
-    local titles = vim.tbl_extend("force", layout_util.titles, r.pane_titles and r:pane_titles() or {})
+    local titles = vim.tbl_extend("force", layout_util.titles, r.pane_titles and r:pane_titles(row) or {})
     local build = self:build_assignment(row)
     if build then
         titles = vim.tbl_extend("force", titles, build_titles(build))
     end
     if self.config.runner_ui.show_title_keys then
-        titles = self:titled_with_keys(titles, build)
+        titles = self:titled_with_keys(titles, row)
     end
     return titles
 end
 
 ---@private
----`titles` with the key that zooms each pane at the end (` errors (e) `). On the
----build step the keys follow the sources' roles rather than the panes' names, so each is
----written on the pane it actually opens.
+---`titles` with the key that zooms each pane on `row` at the end (` errors (e) `), from
+---`zoom_opens`, so each key is written on the pane it actually opens there.
 ---@param titles table<string, string>
----@param build table? the build step's assignment, when the row is the build step
+---@param row table?
 ---@return table<string, string>
-function RunnerUI:titled_with_keys(titles, build)
+function RunnerUI:titled_with_keys(titles, row)
     local out = vim.deepcopy(titles)
-    local function write(pane, action)
-        local key = as_list(self.config.runner_ui.mappings[action])[1]
+    for action, pane in pairs(self:zoom_opens(row)) do
+        local key = as_list(self.config.runner_ui.mappings[action] or {})[1]
         if key then
             out[pane] = ("%s (%s) "):format(out[pane]:gsub("%s+$", ""), key)
-        end
-    end
-    if build then
-        for action, pane in pairs(build.opens) do
-            write(pane, action)
-        end
-    else
-        for pane, action in pairs(ZOOM_ACTIONS) do
-            write(pane, action)
         end
     end
     return out
@@ -1828,7 +1836,8 @@ function RunnerUI:lay_out(idx)
     local row = idx and self.runner.tcdata[idx] or self:current_row()
     local grid = self:grid(row)
     self.drawn_layout, self.drawn_row = grid, row
-    for name, title in pairs(self:titles_for(row)) do
+    self.drawn_titles = self:titles_for(row)
+    for name, title in pairs(self.drawn_titles) do
         self.windows[name].title = title
     end
     local cur, focused = api.nvim_get_current_win(), nil
@@ -2276,9 +2285,9 @@ function RunnerUI:show_ui()
     map_tc("toggle_diff", function()
         self:toggle_diff_view()
     end)
-    for pane, action in pairs(ZOOM_ACTIONS) do
+    for _, action in ipairs(ZOOM_KEYS) do
         map_tc(action, function()
-            local shown = self:zoom_target(pane)
+            local shown = self:zoom_opens(self:current_row())[action]
             if shown then
                 self:zoom(shown)
             end
@@ -3405,9 +3414,16 @@ function RunnerUI:update_ui()
         end
         self:follow_after_compile()
         -- The row on screen decides the grid (the build step gets its sources and nothing
-        -- else), so a row of another kind means the panes are laid out again before anything
-        -- is drawn into them. The redraw renders on its own tick.
-        if not vim.deep_equal(self:grid(self:current_row()), self.drawn_layout) then
+        -- else) and the panes' titles, so a row of another kind means the panes are laid out
+        -- again before anything is drawn into them. The titles are compared too: a grid that
+        -- already leaves out what a run-all header blanks is the same on both kinds of row,
+        -- where `so` is Output on one and Verdicts on the other. The redraw renders on its own
+        -- tick.
+        local row = self:current_row()
+        if
+            not vim.deep_equal(self:grid(row), self.drawn_layout)
+            or not vim.deep_equal(self:titles_for(row), self.drawn_titles)
+        then
             self:redraw_grid()
             return
         end

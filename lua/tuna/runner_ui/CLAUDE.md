@@ -50,8 +50,10 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
   text, as the render tick asks for the grid each render. The UI fills the build step's panes,
   not `pane_content`: a build is the same in every mode. No "keep the testcase grid" setting for
   the build row: it has no `build` cell, and a detail pane's name would mean two things.
-- The render tick compares the grid with `drawn_layout` and calls `redraw_grid`, which lays it
-  out again (`lay_out`; a resize is the same call): the panes keep their buffers (content,
+- The render tick compares the grid and the titles with `drawn_layout` and `drawn_titles` (a
+  grid already without Input and Expected Output is the same on a run-all header and a
+  testcase row, whose `so` titles differ) and calls `redraw_grid`, which lays it out again
+  (`lay_out`; a resize is the same call): the panes keep their buffers (content,
   keymaps, unwritten edits) and only windows move, open or close, since rebuilding would drop
   all of that and race the rows landing in them. Focus stays on its pane, else the selector: the
   split interface closes the window you are in on every re-tile, and the new grid may leave the
@@ -231,23 +233,30 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
   lands on the selector even with no pane that way.
 - `RunnerUI:writable_pane` decides which panes are typed into. The legend (`?`, `show_help`) and
   messages render keys from the config.
-- The `zoom_*` keys (`zoom_input`, `zoom_expected`, `zoom_stdout`, `zoom_stderr`) zoom a pane
+- The `zoom_*` keys (`zoom_input`, `zoom_expected`, `zoom_stdout`, `zoom_stderr`, run-all's
+  `zoom_verdicts`) zoom a pane
   (`zoom`, a large float over the grid showing its buffer) until a close key, `:q` or a pane key
   (`unzoom`). The zoom is its pane larger, so a pane key there moves as from the pane, its
   window given the zoom's cursor first (`focus_dir`); the zoom of a pane the grid omits moves
   from the selector, where `unzoom` lands. A zoom key does nothing in a zoom, nor unzooms: an
   editable pane's letters are text, and a key that acted in one zoom and typed in another would
   be learned wrong.
-  `ZOOM_ACTIONS` binds them and, with `runner_ui.show_title_keys`, names them in the titles
-  (`titled_with_keys`), so the two cannot disagree. They zoom what the row holds
-  (`zoom_target`): on a testcase row the pane they name, on the build step the source whose role
-  the key stands for (`BUILD_ACTIONS`), the pane its program is about when a testcase runs: the
-  solution by errors, the generator and the interactor by input (they write it), the bruteforce
-  by the answer, the checker by output (it judges it). No run compiles two sources sharing a key
-  (the generator and the interactor never meet), and a key with no such source zooms nothing. No
-  new letters: every free one is a motion a list needs (`gg`, `w`, `b`, `v`, `y`). Mapping by
-  buffer would have `o` open a generator's compiler errors. With more than one source the legend
-  spells the build row's keys out (`legend_build_row`), as there they do not mean what they say.
+  The keys and, with `runner_ui.show_title_keys`, the titles (`titled_with_keys`) both read
+  `zoom_opens(row)`, the pane each action zooms on the row, so the two cannot disagree. A key
+  acts on the row selected, as every board key does. On a testcase row a key zooms the pane it
+  names (`ZOOM_ACTIONS`). A pane holding something else
+  on a row is named and keyed for it by the mode (`pane_titles(row)`, `zoom_actions(row)`): a
+  run-all header's `so` lists its verdicts, `verdicts (p)`, as `o` would promise an output. A
+  pane the row leaves out (`blank_panes`) zooms nothing. On the build step a key zooms the
+  source whose role it stands for (`BUILD_ACTIONS`), the pane its program is about when a
+  testcase runs: the solution by errors, the generator and the interactor by input (they write
+  it), the bruteforce by the answer, the checker by output (it judges it). No run compiles two
+  sources sharing a key (the generator and the interactor never meet), and a key with no such
+  source zooms nothing. The build step takes no letters of its own, as nearly every free one is
+  a motion a list needs (`gg`, `w`, `b`, `v`, `y`); `p` (paste, inert on a read-only pane) is
+  the verdicts' key. Mapping by buffer would have `o` open a generator's compiler errors. With
+  more than one source the legend spells the build row's keys out (`legend_build_row`), as
+  there they do not mean what they say.
 
 **Look**
 - The selector and the detail panes have their own line-number options
