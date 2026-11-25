@@ -869,7 +869,10 @@ end
 ---is a browser tab either way, for most judges — but whether anything reports the outcome
 ---back: the `browser` provider watches nothing, a command run in a terminal (`watch = false`)
 ---is not read, and one declared not to say (`expects_verdict = false`) is not parsed. Nothing
----will come back from those, so nothing may be counted as though it might.
+---will come back from those, so nothing may be counted as though it might. Nor from a problem
+---with no URL to submit to (one made by hand with `:Tuna new`). A URL is looked for where it
+---is kept, the sidecar, or a `submit.url` function, not in the header: a submit writes the URL
+---it found there into the sidecar, and before the first submit no verdict exists anyway.
 ---@param path string absolute solution path
 ---@return boolean
 function M.reports_verdict(path)
@@ -879,6 +882,9 @@ function M.reports_verdict(path)
     local cfg = config.current_setup
     local task = sidecar.task(path, cfg) or {}
     local scfg = judge_scfg(cfg.submit or {}, task.url)
+    if type(scfg.url) ~= "function" and not is_valid_url(task.url) then
+        return false
+    end
     if (scfg.provider or "command") ~= "command" then
         return false
     end

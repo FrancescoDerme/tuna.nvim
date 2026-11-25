@@ -13,17 +13,20 @@ require("tuna").setup({})
 local menu = require("tuna.menu")._test
 local core = require("tuna.run.core")
 
----A solution file, with a recorded verdict for it when `verdict` is given.
+---A solution file of a problem of its own, with a URL to submit to, and a recorded verdict for
+---it when `verdict` is given.
 local function solution(dir, name, verdict)
     local text = "int main() {}\n"
     t.write(dir, name, text)
+    local path = dir .. "/.tuna.json"
+    local store = vim.fn.filereadable(path) == 1 and vim.json.decode(table.concat(vim.fn.readfile(path), "\n")) or {}
+    store.task = store.task or {}
+    store.task[name] = { url = "https://atcoder.jp/contests/t/tasks" .. dir .. "/" .. name }
     if verdict then
-        local path = dir .. "/.tuna.json"
-        local store = vim.fn.filereadable(path) == 1 and vim.json.decode(table.concat(vim.fn.readfile(path), "\n")) or {}
         store.submit = store.submit or {}
         store.submit[name] = { state = verdict, text = verdict, hash = vim.fn.sha256(text) }
-        t.write(dir, ".tuna.json", vim.json.encode(store))
     end
+    t.write(dir, ".tuna.json", vim.json.encode(store))
 end
 
 --------------------------------------------------------------------------------
@@ -168,6 +171,31 @@ t.eq(
     { { "0/3 " }, { "accepted", "TunaDone" } }
 )
 
+-- A contest made by hand has no URL to submit to, so however the submit tool is set up, no
+-- verdict can reach it either.
+local by_hand = t.tempdir()
+for _, name in ipairs({ "A", "B" }) do
+    vim.fn.mkdir(by_hand .. "/" .. name, "p")
+    solution(by_hand .. "/" .. name, "main.cpp")
+    t.write(
+        by_hand .. "/" .. name,
+        ".tuna.json",
+        vim.json.encode({ task = { ["main.cpp"] = { name = name, group = "onsite - swiss" } } })
+    )
+end
+core.save_local_verdict(by_hand .. "/A/main.cpp", { { tcnum = 0, status = "correct" } })
+t.ok("a problem with no URL reports no verdict", not submit.reports_verdict(by_hand .. "/A/main.cpp"))
+t.ok("unless a `submit.url` function finds one", (function()
+    require("tuna").setup({ submit = { url = function() end } })
+    local ok = submit.reports_verdict(by_hand .. "/A/main.cpp")
+    require("tuna").setup({})
+    return ok
+end)())
+t.eq("so a contest made by hand counts what passed locally", menu.contest_status({ dir = by_hand, name = "swiss" }), {
+    { "1/2 " },
+    { "passed", "TunaCorrect" },
+})
+
 t.eq("a contest with no problems says nothing", menu.contest_status({ dir = t.tempdir(), name = "e" }), {})
 t.eq("and neither does one whose directory is gone", menu.contest_status({ dir = "/nonexistent/tuna/contest", name = "g" }), {})
 
@@ -208,7 +236,7 @@ t.eq("once the source changes, the new run's local verdict shows", menu.entry_st
 t.eq("a contest counts judge verdicts only", vim.list_slice(menu.contest_status({ dir = flat, name = "f" }), 1, 2), { { "0/2 " }, { "accepted", "TunaDone" } })
 local keys = vim.tbl_keys(vim.json.decode(table.concat(vim.fn.readfile(flat .. "/.tuna.json"), "\n")))
 table.sort(keys)
-t.eq("the local verdict sits beside the judge's in the sidecar", keys, { "results", "submit" })
+t.eq("the local verdict sits beside the judge's in the sidecar", keys, { "results", "submit", "task" })
 
 --------------------------------------------------------------------------------
 -- The rows, and where their colours go

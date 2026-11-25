@@ -23,8 +23,11 @@ check.
     `passed`, any version passing a problem. That is
     `submit.reports_verdict`, which is about whether anything reports the outcome _back_ (the
     `browser` provider watches nothing, `watch = false` is not read, `expects_verdict = false`
-    is not parsed), not about how the submission is made, which is a browser tab for most
-    judges. `0/7 accepted` would be a claim about an answer nobody can hear, and would sit at
+    is not parsed, and a problem with no URL, made by `:Tuna new`, cannot be submitted at
+    all), not about how the submission is made, which is a browser tab for most judges. The
+    URL is looked for in the sidecar (or a `submit.url` function), never in the header, which
+    would be a read per problem: a submit writes the URL it found there into the sidecar,
+    and no verdict exists before one. `0/7 accepted` would be a claim about an answer nobody can hear, and would sit at
     zero for the life of the contest.
   - Statuses are `{ text, highlight? }` segments in the runner UI's words and colours
     (`accepted`/`TunaCorrect`, `rejected`/`TunaWrong`, `partial`/`TunaWarning`, `passed` green
