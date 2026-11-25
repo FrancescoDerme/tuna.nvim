@@ -494,9 +494,17 @@ local function panes_of(row, words, source, only)
     for i, e in ipairs(entries) do
         local line = e.name .. (#e.tags > 0 and ":" or "")
         for j, tag in ipairs(e.tags) do
-            line = line .. (j > 1 and ", " or " ") .. tag
-            if not tag_matched(tag, words) then
-                marks[#marks + 1] = { line = i - 1, col = #line - #tag, end_col = #line, group = "Comment" }
+            -- The comma between two tags is dimmed whatever they are, or the one before a
+            -- matched tag would read as part of the match.
+            local sep = j > 1 and ", " or " "
+            local from = #line + (j > 1 and 0 or #sep)
+            line = line .. sep .. tag
+            local to = tag_matched(tag, words) and #line - #tag or #line
+            local last = marks[#marks]
+            if last and last.line == i - 1 and last.end_col == from then
+                last.end_col = to
+            elseif to > from then
+                marks[#marks + 1] = { line = i - 1, col = from, end_col = to, group = "Comment" }
             end
         end
         lines[i] = line

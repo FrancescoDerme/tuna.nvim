@@ -417,7 +417,13 @@ t.eq("beside it, its files and their tags over the source, under its contest", {
     shown[2].title,
     shown[2].lines,
 }, { "Round 5", { "main.cpp: binary search", "main2.cpp: binary search, dp", "brute.py", "gen.py: count subsets" }, "/p/main.cpp", { "int main() {}" } })
-t.eq("the tags the search matches drawn as text, the others dimmed", dimmed, { "binary search", "binary search", "count subsets" })
+t.eq("the tags the search matches drawn as text, the others dimmed", dimmed, { "binary search", "binary search, ", "count subsets" })
+local unmatched = s.panes_of(good, {}, function()
+    return {}
+end, 1)[1]
+t.eq("the commas between tags dimmed with them, so none reads as part of a match", vim.tbl_map(function(h)
+    return unmatched.lines[h.line + 1]:sub(h.col + 1, h.end_col)
+end, unmatched.highlights), { "binary search", "binary search, dp", "count subsets" })
 local read = false
 t.eq("the files alone are given without reading the source", #s.panes_of(good, {}, function()
     read = true
