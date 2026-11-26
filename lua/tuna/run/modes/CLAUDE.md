@@ -77,46 +77,100 @@ The rules that hold everywhere are in the root `CLAUDE.md`.
 - `idle()` means the search has stopped, so every path that ends a run has to `finish()`,
   a failed build and a helper that didn't compile included.
 
-**Interactive (`interactive.lua`)**: one session at a time; the source is remembered per file.
+**Interactive (`interactive.lua`)**: the source is remembered per file.
+- **A session is its row's** (`tc.session`: the solution's stdin `sol_in`, its processes `sol`
+  and `int`, `running`). Its callbacks write to the row only while it is still the row's
+  (`mine`), so a row talked to again from the start leaves the session it replaced nothing to
+  write over; its end still calls `on_done`. Every session started lets the row's old one go
+  first (`drop_session`, in `run_one_session`): one a row's run key started while the others ran
+  in turn would otherwise be replaced unkilled, out of reach of every stop. Live
+  sessions run side by side, each on its row; feed and interactor run one after another.
+- A session started on its own (a row's run key, `n`, a typing key on a row with none) holds
+  the runner until it ends (`claim`/`release`), and the runner is idle once none holds it and no
+  run of every session is going (`sequence`). That run is a token of its own: a run started
+  after it replaces it, so the session it let go, ending later, does not carry the old run on
+  beside the new one. Where nothing will run (a failed build, no interactor) `settle_all`.
 - **feed**: the testcase input is sent a line at a time. It keeps the configured grid with the
   canonical Input/Expected Output panes and is the only editable source (`editable_testcases`
   set per instance). Its no-testcase row is `bare`. A session that ended cleanly is judged
   as a testcase is in every mode (`checker.judge`), answer or not: a comparison has nothing
   to say without one, and a checker of its own still reads the output. `run_single` claims the runner, and every
-  path where nothing will run settles it: a build that failed through `on_build_failed`, the
-  rest by setting `completed = true`.
+  path where nothing will run settles it through `settle_all`: a build that failed
+  (`on_build_failed`), an interactor gone.
+- **live** plays no testcase (nothing it is handed reaches the session), so its board is the
+  build and one session, `live_row`, whatever is on disk: a row per testcase would be the same
+  conversation held once each. A session row's `tcnum` is its name (`live 1`), like the build
+  step's, so nothing numbers, edits or compares it with disk. `n` is another session with the
+  same build, beside any still talking (`add_row`, which `RunnerUI:add_testcase` asks first;
+  `new_row_words` names it in the legend), the rows standing for sessions as a normal board's
+  stand for testcases. It waits for a build under way, whose program is still being written. A run of every session starts them all at once, the board following
+  the first. Typed numbers are dropped with a note. Nothing judges
+  a live session (`judges()` is false), so no checker is planned or built and the Run pane
+  leaves out the judge and diff rows.
 - **live** and **interactor** are a **conversation**. `layout()` returns the grid
   `interactive.layouts[source]` gives and the option's name with it, so a bad one is reported
   as what it is; `false` there (feed's default) means the configured grid. The shipped
-  conversation is selector | Output | Live | Errors (`so`/`si`/`se`), with no Expected Output,
-  at ratios `3/3/3/2`: the selector's 3 of 11 is the configured grid's, so it is as wide as in
-  every other mode, and `so`/`si` share a ratio and so a width, which works only because the
-  *last* column absorbs the grid's rounding (`rec_compute_layout`), hence Errors last.
+  conversation is selector | Output | Live | Errors (`so`/`si`/`se`), with no Expected Output:
+  a `fit` selector (see `lua/tuna/runner_ui/CLAUDE.md`) and the three columns at `1/1/1`, so
+  they are as wide as each other, `so`/`si` exactly, Errors give or take the cell the last
+  column absorbs from the grid's rounding (`rec_compute_layout`).
   - Each row keeps `tc.log`, one entry per rendered row `{ col, text, open }`, blank in the
     other columns. `log_append` continues an open row only while no other column has spoken.
     `log_note` puts tuna's own notes (timeout, exit code, spawn failure) on an Errors row.
     Nothing is echoed between columns, and `tc.stdout` stays the solution's own output.
-  - `on_details_rendered` draws the columns with `set_column` (no undo, not modified, skips
-    identical content). The build step is not a conversation and is left to the UI, which
-    draws it with one pane per source, as in every other mode.
-  - Columns are `scrollbind` and `nowrap` (`on_ui_shown`, when the row laid out,
+  - `on_details_rendered` draws the columns (no undo, not modified). A conversation only grows,
+    so a redraw of the row drawn last (`self.drawn`: the row, its log table, how many rows and
+    whether the last was open, each buffer's `changedtick`) writes only the rows from the last
+    open one down, at the cost of what is new. Anything else (another row, a trimmed log, a
+    column changed by something else: typing, the build step borrowing the buffers) draws it
+    whole through `set_column`, which still writes from the first line that differs, so
+    Neovim repaints only what changed. The build step is not a conversation and is left to the
+    UI, which draws it with one pane per source, as in every other mode.
+  - Columns are `scrollbind` with `smoothscroll` off (`on_ui_shown`, when the row laid out,
     `ui.drawn_row`, is a session's: the build step is no conversation, and its panes wrap and
-    scroll on their own). All three follow the latest line unless one is being read back
-    (cursor in it, not at the bottom), in which case none move. `scrollbind` is re-armed after
-    a scroll made from code, or later manual scrolls drift.
-  - `run_one_session` hands the cursor to the row it is about to talk to (`ui:goto_row`):
-    that row's columns are the conversation, and in live it is the only row whose column is
-    typable, so the UI would otherwise sit on compile with nothing to show and nothing to
-    type into.
+    scroll on their own). Output and Live are `nowrap`; Errors wraps as the UI wraps it on any
+    testcase row, and `fill_rows` puts blank `virt_lines` under the Output and Live rows facing
+    an Errors line that wraps, as many as the screen rows it takes past one
+    (`nvim_win_text_height`), so every row is as tall in each column and a top line means the
+    same rows in all three. Hard-wrapping the text instead would break what is yanked, searched
+    and zoomed. Fillers are measured again from the first row written, and all of them when the
+    Errors column's width changes (`on_ui_shown` forgets it). All three follow the latest line
+    unless one is being read back (cursor in it, not at the bottom), in which case none move;
+    following counts screen rows (`bottom_topline`), the rows being of different heights.
+    `scrollbind` is re-armed after a scroll made from code, or later manual scrolls drift.
+  - `run_one_session` starts the session and then hands the cursor to its row
+    (`ui:follow_row`, which never leaves a build step still going or one that spoke): that
+    row's columns are the conversation, and in live it is the only row whose column is
+    typable, so the UI would otherwise sit on compile with nothing to show and nothing to type
+    into.
+  - **Insert mode is asked for by a run, never by showing a board.** Every run of a live session
+    sets `type_into` to the session it starts, as it is asked for, before any build: a run of
+    every session (`run_testcases`, from `:Tuna run` and `<C-r>`) its first, `run_single` (`r`,
+    `n`, a typing key on a row with none) its own. Asked once the build ends instead, it would
+    survive the board being put away meanwhile, and a later `:Tuna show_ui` would type. A typing
+    key on a row already talking whose column is not typable yet asks for typing and runs
+    nothing, as another session would drop the one that just began. The render that shows that row talking consumes it, putting the cursor at the end of
+    its column in insert mode. `hand_over` lets it go when it can no longer be honoured as asked:
+    the cursor is not in the board (`runner_ui.owner_of`), or the session talks while the board
+    shows another row (a build that spoke holds it), since moving there by hand later would
+    throw you into insert mode unasked; `on_ui_hidden` lets it go with the board. A board opened
+    by `:Tuna show_ui` or shown again asks nothing: you may be back to read, stop or switch.
+    It is a row, so it never carries over to another one.
   - In live, the keys that start typing (`i`/`I`/`a`/`A`/`o`/`O` and `<CR>`) are bound on the
     Live column: while it is typable they are Vim's own (replayed through `feedkeys`), and
-    before that they run the session instead of raising `E21` (`start_talking` — a session on
-    another row just moves the cursor there). `type_when_live` is then consumed by the render
-    that makes the column typable, which puts the cursor at its end and starts insert.
+    before that they start a session on the row on screen (`start_talking`, through
+    `run_single`, with the build there is) instead of raising `E21`, and are typed into once it
+    talks. `<CR>` and `live_send` talk to the session of the row on screen
+    (`self.drawn.tc`). While the column is read-only the board's other keys are bound there
+    too (`pane_keys` names the ones it keeps), so `n` works on it as on every read-only pane.
   - In live, the Live column ends in the line being typed, faced by blank lines in the other
-    columns, and it is preserved across redraws (`keep_last`). `<CR>` clears it synchronously
-    and then calls `live_send`. When the session ends the line is removed, the column becomes
-    unmodifiable, and insert mode is left.
+    columns, and it is preserved across redraws (`keep_last`). `<CR>` leaves the line where it
+    is, opens a new one under it with the cursor on it, and calls `live_send`: the redraw then
+    finds the sent row already in place, where clearing it would show the line gone for a
+    frame. When the session ends the line is removed, the column becomes unmodifiable, and
+    insert mode is left. Completion plugins are kept out of the column
+    (`surface.no_completion`): what is typed there is sent, and a menu would stand between a
+    reply and `<CR>`.
   - Only live's Live pane wears the editable accent.
 - interactor: `vim.uv.spawn` pipes cross-wire the solution and the interactor; the verdict is
   the interactor's exit code, and it gets `$(INPUT)`/`$(ANSWER)`. The solution crashing and
@@ -134,15 +188,16 @@ The rules that hold everywhere are in the root `CLAUDE.md`.
   never drops a queued chunk, `settled` (its end handled, on the main loop, after them) does, and
   the interactor's limit ends the session from the main loop for the same reason, its exit
   callbacks leaving the ending to it. Read the other way, a program that prints and exits loses
-  the end of its output. The columns show the latest `SHOWN_ROWS` of the
-  conversation under a note of how many went before, and `tc.log` keeps no more than twice that
-  (`log.dropped` counts the rest), since a session is drawn whole on every render and each
-  render would otherwise cost more than the last, until reading fell behind printing. Live and
+  the end of its output. `tc.log` keeps at most `SHOWN_ROWS + TRIM_ROWS`
+  rows, trimmed back to the latest `SHOWN_ROWS` in one batch (`log.dropped` counts the rest,
+  on a note above them), since every row kept is a line in each column, and a batch costs one
+  whole redraw where trimming row by row would make every redraw whole. Live and
   interactor collect `tc.stdout` in pieces joined when the session ends, nothing reading it
   before (their panes are the log); feed shows it as it streams, so it is joined once a tick.
-- Sessions run one at a time (`run_sessions`). `kill_process` ends the one running, marking
-  its row `killed` so every source's exit path reads `killed`; `kill_all_processes` also sets
-  `stopped`, and no session starts after it.
+- `kill_process(idx)` ends the session of the row on the cursor, else, where sessions run one
+  after another, the one running (`active_index`), marking its row `killed` so every source's
+  exit path reads `killed`; a live session is stopped on its own row only.
+  `kill_all_processes` ends every session and sets `stopped`, and no session starts after it.
 
 **Run-all (`multi.lua`)**
 - Solutions are every runnable sibling source that is not a support file (`tools.is_support`),

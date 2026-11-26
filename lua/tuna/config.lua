@@ -124,8 +124,9 @@ M.defaults = {
 
     -- interactive problems (:Tuna run interactive [live|feed|interactor]) — the
     -- solution talks to the other side over stdio, turn by turn. Three sources:
-    --   * live       — YOU are the other side: type into the (editable) input pane,
-    --                  each <CR> line is sent to the solution; no auto-verdict.
+    --   * live       — YOU are the other side: type into the Live column, each <CR>
+    --                  line is sent to the solution; no auto-verdict. One session, no
+    --                  testcase; `n` on the board starts another beside it.
     --   * feed       — the testcase input plays the other side, one line per turn;
     --                  judged against the expected output if present.
     --   * interactor — a written interactor.* program decides the verdict (exit 0 =
@@ -140,13 +141,14 @@ M.defaults = {
         -- The grid each source draws, in the shape `popup_ui.layout` takes: a nested
         -- `{ ratio, pane }` tree over `tc`, `so`, `eo`, `si`, `se`. `live` and `interactor`
         -- read as a conversation, so they default to the selector beside Output, Live and
-        -- Errors, with no Expected Output — there is no one right answer to compare against.
-        -- `feed` replays a stored testcase, so it keeps the grid you configured for a run.
-        -- `false` means exactly that: whatever `popup_ui.layout` (or `split_ui`) says.
-        -- In `live` you type into `si`, so a layout without it leaves nowhere to talk.
+        -- Errors, as wide as each other, with no Expected Output — there is no one right
+        -- answer to compare against. `feed` replays a stored testcase, so it keeps the grid
+        -- you configured for a run. `false` means exactly that: whatever `popup_ui.layout`
+        -- (or `split_ui`) says. In `live` you type into `si`, so a layout without it leaves
+        -- nowhere to talk.
         layouts = {
-            live = { { 3, "tc" }, { 3, "so" }, { 3, "si" }, { 2, "se" } },
-            interactor = { { 3, "tc" }, { 3, "so" }, { 3, "si" }, { 2, "se" } },
+            live = { { "fit", "tc" }, { 1, "so" }, { 1, "si" }, { 1, "se" } },
+            interactor = { { "fit", "tc" }, { 1, "so" }, { 1, "si" }, { 1, "se" } },
             feed = false,
         },
     },
@@ -618,8 +620,8 @@ M.defaults = {
         -- (your solution, and a generator and a bruteforce, an interactor or a checker), each
         -- named after it. This is the shape they are stacked in.
         compile_layout = {
-            { 3, "tc" },
-            { 8, "build" },
+            { "fit", "tc" },
+            { 1, "build" },
         },
         -- Write the key that zooms each pane at the end of its title, e.g.
         -- ` errors (e) `. On the build row each source's pane shows its own key.
@@ -709,15 +711,19 @@ M.defaults = {
         -- alternates direction (the top level splits into columns). Panes:
         -- `tc` testcases, `so` output, `eo` expected output, `si` input, `se` errors.
         -- Any of them but `tc` may be left out — what is left simply divides the
-        -- space, and an omitted pane's content can still be zoomed.
+        -- space, and an omitted pane's content can still be zoomed. `tc` may take
+        -- `"fit"` instead of a ratio: its column is then as wide as the Run pane and the
+        -- testcase list can need, and where its level divides height (a side split) as
+        -- tall as the two are when the board opens, never more than half the board
+        -- either way; the others share the rest.
         -- Two pairings decide this arrangement: `so`/`eo` share a row because the
         -- diff compares them line against line, and the two editable panes
         -- (`eo`/`si`, the accented ones) share a column so what you can type into
         -- is one block at the edge rather than two corners of a diagonal.
         layout = {
-            { 3, "tc" },
-            { 4, { { 1, "so" }, { 1, "se" } } },
-            { 4, { { 1, "eo" }, { 1, "si" } } },
+            { "fit", "tc" },
+            { 1, { { 1, "so" }, { 1, "se" } } },
+            { 1, { { 1, "eo" }, { 1, "si" } } },
         },
     },
     -- The runner UI as real windows (`runner_ui.interface = "split"`): where the frame
@@ -731,15 +737,15 @@ M.defaults = {
         -- Same format and same freedom as `popup_ui.layout` above; the layout used
         -- depends on whether `position` puts the frame beside or below the editor.
         vertical_layout = {
-            { 1, "tc" },
+            { "fit", "tc" },
             { 1, { { 1, "so" }, { 1, "eo" } } },
             { 1, { { 1, "se" }, { 1, "si" } } },
         },
         height = 0.4,
         horizontal_layout = {
-            { 2, "tc" },
-            { 3, { { 1, "so" }, { 1, "se" } } },
-            { 3, { { 1, "eo" }, { 1, "si" } } },
+            { "fit", "tc" },
+            { 1, { { 1, "so" }, { 1, "se" } } },
+            { 1, { { 1, "eo" }, { 1, "si" } } },
         },
     },
 }

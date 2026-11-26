@@ -110,6 +110,18 @@ do
     }, { "0:" .. vim.env.HOME, "0:" .. vim.env.HOME })
 end
 
+-- A grid as it was written: the share a `fit` selector was given back to `fit`, since the
+-- ratio it becomes depends on the editor's width.
+local function shape(grid)
+    local out = vim.deepcopy(grid)
+    for _, entry in ipairs(out) do
+        if entry[2] == "tc" then
+            entry[1] = "fit"
+        end
+    end
+    return out
+end
+
 -- Until what the board has scheduled has run, its debounced settle pass included.
 local function drain(ui)
     t.drain(function()
@@ -522,7 +534,7 @@ end
 -- `E36`, says so once, and leaves `equalalways`, switched off while splits are made, as it was.
 do
     local columns, lines, equalalways = vim.o.columns, vim.o.lines, vim.o.equalalways
-    vim.o.columns, vim.o.lines, vim.o.equalalways = 40, 12, true
+    vim.o.columns, vim.o.lines, vim.o.equalalways = 40, 8, true
     local ok, br, ui, _, _, done = pcall(board, "split")
     t.ok("a board asked for as splits opens in an editor too small for them", ok, br)
     if ok then
@@ -810,6 +822,37 @@ for _, interface in ipairs({ "split", "popup" }) do
     br:delete_ui()
 end
 vim.go.cursorline = user_cursorline
+
+-- No pane has a sign, fold or status column, which a split would take from the user's settings:
+-- the selector is fitted the same before its windows exist as after, so the board does not
+-- re-tile as it opens.
+do
+    local sign, fold = vim.go.signcolumn, vim.go.foldcolumn
+    vim.go.signcolumn, vim.go.foldcolumn = "yes", "2"
+    for _, interface in ipairs({ "split", "popup" }) do
+        local br, ui, _, _, done = board(interface)
+        done()
+        local gutters = {}
+        for name, w in pairs(ui.windows) do
+            if w.winid and vim.api.nvim_win_is_valid(w.winid) then
+                gutters[name] = vim.wo[w.winid].signcolumn .. "/" .. vim.wo[w.winid].foldcolumn .. "/" .. vim.wo[w.winid].statuscolumn
+            end
+        end
+        local plain = vim.iter(pairs(gutters)):all(function(_, g)
+            return g == "no/0/"
+        end)
+        t.ok(interface .. ": no pane has a sign, fold or status column", plain, gutters)
+        local grid = br.config.runner_ui.interface == "split" and br.config.split_ui.vertical_layout or br.config.popup_ui.layout
+        local open = ui:fitted(grid)
+        local windows = ui.windows
+        ui.windows = {}
+        local before = ui:fitted(grid)
+        ui.windows = windows
+        t.eq(interface .. ": the selector is fitted the same before its windows exist as after", before, open)
+        br:delete_ui()
+    end
+    vim.go.signcolumn, vim.go.foldcolumn = sign, fold
+end
 vim.fn.delete(dir .. "/checker.cpp")
 
 -- The testcase list moves like every list tuna draws: the list keys step a row (a count
@@ -964,11 +1007,12 @@ do
         case = case or (row.kind == "case" and row) or nil
     end
     local ui = mr.ui
-    t.eq("a run-all header's grid leaves out Input and Expected Output, the selector as wide as ever", ui:grid(header), {
-        { 3, "tc" },
-        { 8, { { 1, "so" }, { 1, "se" } } },
+    t.eq("a run-all header's grid leaves out Input and Expected Output", shape(ui:grid(header)), {
+        { "fit", "tc" },
+        { 2, { { 1, "so" }, { 1, "se" } } },
     })
-    t.eq("a run-all testcase row keeps the configured grid", ui:grid(case), require("tuna.config").current_setup.popup_ui.layout)
+    t.eq("the selector as wide as ever", ui:grid(header)[1][1] / (ui:grid(header)[1][1] + 2), ui:grid(case)[1][1] / (ui:grid(case)[1][1] + 2))
+    t.eq("a run-all testcase row keeps the configured grid", shape(ui:grid(case)), require("tuna.config").current_setup.popup_ui.layout)
     local function show(row)
         ui:select_row(ui:row_index(row))
         ui.update_windows, ui.update_details = true, true
@@ -1162,9 +1206,9 @@ if iui then
     )
     t.eq("each full height and level with the others", { erow, orow, eh, oh }, { lrow, lrow, lh, lh })
 
-    -- The conversation's selector is the width it is in every other mode, and its two
-    -- conversing columns are exactly as wide as each other. Checked on the layout arithmetic
-    -- at several editor widths, because what the grid's division leaves over depends on it.
+    -- The selector is as wide as what it may hold needs, the same in every mode, and the
+    -- conversation's three columns share the rest evenly. Checked on the layout arithmetic at
+    -- several editor widths, because what the grid's division leaves over depends on it.
     local geometry = require("tuna.runner_ui.popup")._test.compute_layout
     local ui_cfg = require("tuna.config").get_buffer_config(buf)
     local conv_layout = ir:layout()
@@ -1172,14 +1216,30 @@ if iui then
     -- `columns` would resize the windows this section is standing in.
     local tuna_utils = require("tuna.utils")
     local real_size = tuna_utils.get_ui_size
-    for _, cols in ipairs({ 100, 140, 141, 183 }) do
+    -- Each pane's text after its line numbers, where it shows them.
+    local function textoff(name)
+        return vim.fn.getwininfo(iui.windows[name].winid)[1].textoff
+    end
+    local need = 0
+    for _, line in ipairs(iui:status_lines()) do
+        need = math.max(need, vim.fn.strwidth(line) + textoff("st"))
+    end
+    need = math.max(need, #"tc 10     correct   999.999 s" + textoff("tc"))
+    for _, cols in ipairs({ 60, 100, 140, 141, 183 }) do
         tuna_utils.get_ui_size = function()
             return cols, 40
         end
-        local normal = geometry(ui_cfg, 4, ui_cfg.popup_ui.layout)
-        local conv = geometry(ui_cfg, 4, conv_layout)
-        t.eq(("the conversation's selector is as wide as a normal run's, at %d columns"):format(cols), conv.tc.width, normal.tc.width)
+        local board = math.floor(cols * ui_cfg.popup_ui.width + 0.5)
+        local normal = geometry(ui_cfg, 4, iui:fitted(ui_cfg.popup_ui.layout))
+        local conv = geometry(ui_cfg, 4, iui:fitted(conv_layout))
+        t.eq(
+            ("the selector is as wide as the widest row it may hold, or half the board, at %d columns"):format(cols),
+            conv.tc.width,
+            math.min(need, math.floor(board / 2) - 2)
+        )
+        t.eq(("and as wide on a normal run's grid, at %d columns"):format(cols), normal.tc.width, conv.tc.width)
         t.eq(("Output and Live are the same width, at %d columns"):format(cols), conv.so.width, conv.si.width)
+        t.ok(("and Errors as wide, give or take the grid's rounding, at %d columns"):format(cols), math.abs(conv.se.width - conv.so.width) <= 2, { conv.so.width, conv.se.width })
     end
     tuna_utils.get_ui_size = real_size
 
@@ -1217,16 +1277,13 @@ if iui then
 
     -- Live: what you send is Live's own row, never copied into Output, and the line being
     -- typed survives output landing under it. A stand-in pipe makes the session "live".
-    for i, r in ipairs(ir.tcdata) do
-        if r == row then
-            ir.active_index = i
-        end
-    end
-    ir.sol_in = {
-        is_closing = function()
-            return false
-        end,
-        write = function() end,
+    row.session = {
+        sol_in = {
+            is_closing = function()
+                return false
+            end,
+            write = function() end,
+        },
     }
     row.log = nil
     ir:live_send("42")
@@ -1241,7 +1298,7 @@ if iui then
     drain(iui)
     t.eq("the line being typed survives output arriving under it", lines_of("si"), { "42", "", "typing" })
     t.eq("faced by a blank line in the other columns", lines_of("so"), { "", "reply", "" })
-    ir.sol_in = nil
+    row.session = nil
 
     -- Reading back through one column holds all three level with it, output landing or not.
     for k = 1, 80 do
@@ -1266,6 +1323,56 @@ if iui then
     local said = vim.api.nvim_win_get_config(sow).footer
     t.eq("the column read back counts what landed below it", said and said[1] and said[1][1], " ↓ " .. hidden .. " ")
     vim.api.nvim_set_current_win(back)
+
+    -- In live you play the other side, so no testcase has anything to give a session: one
+    -- session, whatever is on disk, and nothing judges it.
+    local labels = {}
+    for _, r in ipairs(ir.tcdata) do
+        labels[#labels + 1] = r.tcnum
+    end
+    t.ok("the problem has testcases on disk", next(tcs.buf_get_testcases(buf)) ~= nil)
+    t.eq("a live board holds the build and one session", labels, { "compile", "live 1" })
+    -- The Run pane is a read-out of a few named rows, where a number says nothing.
+    t.eq("the Run pane has no line numbers, the detail panes' or not", { vim.wo[iui.windows.st.winid].number, vim.wo[iui.windows.st.winid].relativenumber, vim.wo[iui.windows.so.winid].number }, { false, false, true })
+    local run_rows = table.concat(iui:status_lines(), "\n")
+    t.ok("its Run pane names nothing that judges and no diff", not (run_rows:find("compare") or run_rows:find("checker") or run_rows:find("diff")), run_rows)
+
+    -- Errors wraps, and under each row it takes more than one screen row for, Output and Live
+    -- get as many blank virtual lines, so the three columns stay level row for row.
+    vim.api.nvim_feedkeys("G", "x", false)
+    row.log = nil
+    conv.log_append(row, "so", "? 1\n")
+    conv.log_append(row, "se", ("debug "):rep(math.floor(vim.api.nvim_win_get_width(sew) / 2)) .. "\n")
+    conv.log_append(row, "so", "? 2\n")
+    ir:update_ui(false)
+    drain(iui)
+    local fill_ns = vim.api.nvim_get_namespaces().tuna_conversation
+    local rows_taken = vim.api.nvim_win_text_height(sew, { start_row = 1, end_row = 1 }).all
+    t.ok("a long Errors row wraps", rows_taken > 1, rows_taken)
+    local function filler(name, line)
+        local marks = vim.api.nvim_buf_get_extmarks(iui.windows[name].bufnr, fill_ns, { line, 0 }, { line, -1 }, { details = true })
+        return marks[1] and #marks[1][4].virt_lines or 0
+    end
+    t.eq("Output and Live get the rows it wraps onto, as blank lines under it", { filler("so", 1), filler("si", 1) }, { rows_taken - 1, rows_taken - 1 })
+    t.eq("and nothing under a row that does not wrap", { filler("so", 0), filler("so", 2) }, { 0, 0 })
+    t.eq("so each row is as tall in every column", vim.api.nvim_win_text_height(sow, { start_row = 0, end_row = 2 }).all, vim.api.nvim_win_text_height(sew, { start_row = 0, end_row = 2 }).all)
+
+    -- A redraw writes only what is new: with nothing new it writes nothing, and a new row is
+    -- written alone, the rows above it left as they are.
+    local changes = {}
+    vim.api.nvim_buf_attach(iui.windows.so.bufnr, false, {
+        on_lines = function(_, _, _, first)
+            changes[#changes + 1] = first
+        end,
+    })
+    ir:update_ui(false)
+    drain(iui)
+    t.eq("a redraw with nothing new writes nothing", changes, {})
+    conv.log_append(row, "so", "? 3\n")
+    ir:update_ui(false)
+    drain(iui)
+    t.eq("a new row is written alone, under the others", changes, { 3 })
+    t.eq("and the column reads as it would drawn whole", lines_of("so"), conv.conversation(row.log).so)
 end
 
 -- The grid follows the source. `feed` replays a stored testcase, so it keeps the canonical
@@ -1394,13 +1501,13 @@ t.eq("nothing is typable before a session", vim.bo[live_buf].modifiable, false)
 t.eq("and nothing is built", lr.preloaded, true)
 drain(lr.ui)
 t.eq(
-    "it opens on the conversation, its columns unwrapped and scroll-bound",
+    "it opens on the conversation, its columns scroll-bound, Errors wrapping and Output not",
     { lr.ui:selected_index(), column(lr.ui, "se"), column(lr.ui, "so") },
-    { 2, { false, true }, { false, true } }
+    { 2, { true, true }, { false, true } }
 )
 typing_keys.i()
 t.eq("pressing one builds and starts the session", lr.preloaded, false)
-t.eq("and remembers to hand the column over once it is live", lr.type_when_live, true)
+t.eq("and remembers to hand the column over once it is live", lr.type_into, lr.tcdata[2])
 -- The runner is `completed` until the sessions start, so both edges are waited for: the
 -- sessions run (and fail, nothing being built for real) before the stand-in pipe below.
 vim.wait(1000, function()
@@ -1412,11 +1519,43 @@ end, 20)
 drain(lr.ui)
 do
     local was = lr.tcdata[2].status
-    lr.spawn_solution = function() end
-    lr:run_live(2, function() end)
+    local cbs
+    lr.spawn_solution = function(_, _, given)
+        cbs = given
+    end
+    local ended = 0
+    lr:run_live(2, function()
+        ended = ended + 1
+    end)
     t.eq("a session being played reads live on its row", lr.tcdata[2].status, "live")
+    -- Talked to again from the start, the row has a new session, and the one it replaced has
+    -- nothing more to say there, though its end still settles what it held.
+    lr.tcdata[2].session = {}
+    cbs.on_stdout("late\n")
+    cbs.on_exit(0, 0)
+    t.eq("a session let go writes nothing to its row", { #lr.tcdata[2].log, lr.tcdata[2].status }, { 0, "live" })
+    t.eq("and still ends", ended, 1)
     lr.spawn_solution = nil
+    lr.tcdata[2].session = nil
     lr.tcdata[2].status = was
+    drain(lr.ui)
+end
+
+-- Sessions started on their own run side by side, so the runner is idle once the last ends.
+do
+    local done = {}
+    local run_one_session = lr.run_one_session
+    lr.run_one_session = function(_, _, on_done)
+        done[#done + 1] = on_done
+    end
+    lr:run_single(2)
+    lr:run_single(2)
+    t.eq("two sessions hold the runner", { #done, lr:idle() }, { 2, false })
+    done[1]()
+    t.eq("until both have ended", lr:idle(), false)
+    done[2]()
+    t.eq("and no longer then", lr:idle(), true)
+    lr.run_one_session = run_one_session
     drain(lr.ui)
 end
 
@@ -1424,21 +1563,22 @@ end
 -- end of the line being composed. A stand-in pipe makes the session "live". The row is chosen
 -- through the UI and left to settle first, since the grid is rebuilt when the kind of row on
 -- screen changes and that takes the panes with it.
-lr.active_index = 2
-lr.sol_in = {
-    is_closing = function()
-        return false
-    end,
-    write = function() end,
+lr.tcdata[2].session = {
+    sol_in = {
+        is_closing = function()
+            return false
+        end,
+        write = function() end,
+    },
 }
 lr.ui:follow_row(2)
 drain(lr.ui)
-lr.type_when_live = true
+lr.type_into = lr.tcdata[2]
 lr:update_ui(true)
 vim.wait(500, function()
-    return lr.type_when_live == nil
+    return lr.type_into == nil
 end, 20)
-t.eq("the column is handed over once it is live", lr.type_when_live, nil)
+t.eq("the column is handed over once it is live", lr.type_into, nil)
 local live_pane = lr.ui.windows.si
 t.eq("with the cursor in it", vim.api.nvim_get_current_win(), live_pane.winid)
 local composing_line = vim.api.nvim_buf_line_count(live_pane.bufnr)
@@ -1448,6 +1588,268 @@ t.eq("at the end of the line being composed", vim.api.nvim_win_get_cursor(live_p
 })
 -- Insert mode itself needs a UI to enter, so that part is not checked here.
 vim.cmd("stopinsert")
+
+-- <CR> sends the line being typed and leaves it where it was typed, a new line opened under
+-- it at once, so nothing on screen waits for the redraw: the line does not vanish for a frame.
+do
+    local sent = {}
+    lr.tcdata[2].session.sol_in.write = function(_, data)
+        sent[#sent + 1] = data
+    end
+    local live = lr.ui.windows.si
+    local n = vim.api.nvim_buf_line_count(live.bufnr)
+    vim.api.nvim_buf_set_lines(live.bufnr, n - 1, n, false, { "7" })
+    local enter
+    for _, m in ipairs(vim.api.nvim_buf_get_keymap(live.bufnr, "i")) do
+        if m.lhs == "<CR>" then
+            enter = m.callback
+        end
+    end
+    vim.api.nvim_set_current_win(live.winid)
+    enter()
+    t.eq("<CR> sends the line typed", sent, { "7\n" })
+    t.eq("which stays where it was, a new line opened under it", vim.api.nvim_buf_get_lines(live.bufnr, n - 1, -1, false), { "7", "" })
+    t.eq("with the cursor on it, before any redraw", vim.api.nvim_win_get_cursor(live.winid), { n + 1, 0 })
+    drain(lr.ui)
+    t.eq("and the redraw keeps both", vim.api.nvim_buf_get_lines(live.bufnr, n - 1, -1, false), { "7", "" })
+    t.eq("faced by a blank line in Output", vim.api.nvim_buf_line_count(lr.ui.windows.so.bufnr), n + 1)
+end
+
+-- A session a run starts is typed into once the board shows it talking, from the board where
+-- you are. A build that said something holds the board, and the request goes rather than wait
+-- for you to move there by hand; a board you are not in takes nothing from you; and a board put
+-- away and shown again asks for nothing, what you came back for being yours to say.
+do
+    local run_live = lr.run_live
+    local session = lr.tcdata[2].session
+    lr.run_live = function(_, i)
+        lr.tcdata[i].session = session
+        lr:update_ui(true)
+    end
+    local function settle_typing()
+        drain(lr.ui)
+        vim.wait(200, function()
+            return lr.type_into == nil
+        end, 10)
+        drain(lr.ui)
+    end
+    local tc_win = lr.ui.windows.tc.winid
+    lr.ui.user_moved = false
+    lr.ui:select_row(1)
+    vim.api.nvim_set_current_win(tc_win)
+    lr:run_single(2)
+    t.eq("a run asks to type into the session it starts", lr.type_into, lr.tcdata[2])
+    settle_typing()
+    t.eq("a session after a quiet build is where the board goes", lr.ui:selected_index(), 2)
+    t.eq("and typing starts there", vim.api.nvim_get_current_win(), lr.ui.windows.si.winid)
+    vim.cmd("stopinsert")
+
+    lr.ui:select_row(1)
+    vim.api.nvim_set_current_win(tc_win)
+    lr.build_spoke = function()
+        return true
+    end
+    lr:run_single(2)
+    settle_typing()
+    t.eq("a build that said something keeps the board on it", lr.ui:selected_index(), 1)
+    t.eq("and lets the request go", lr.type_into, nil)
+    lr.build_spoke = nil
+    lr.ui:select_row(2)
+    lr:update_ui(true)
+    settle_typing()
+    t.eq("so moving to the session by hand types nothing", vim.api.nvim_get_current_win(), tc_win)
+
+    local other = vim.api.nvim_list_wins()[1]
+    for _, win in ipairs(vim.api.nvim_list_wins()) do
+        if not require("tuna.runner_ui").owner_of(vim.api.nvim_win_get_buf(win)) then
+            other = win
+        end
+    end
+    lr.ui:select_row(1)
+    vim.api.nvim_set_current_win(other)
+    lr:run_single(2)
+    settle_typing()
+    t.eq("from outside the board, the board still follows the session", lr.ui:selected_index(), 2)
+    t.eq("but takes no typing from you", { lr.type_into, vim.api.nvim_get_current_win() }, { nil, other })
+
+    vim.api.nvim_set_current_win(tc_win)
+    lr.type_into = lr.tcdata[2]
+    lr.ui:delete()
+    t.eq("putting the board away lets a request go", lr.type_into, nil)
+    lr:show_ui()
+    lr:update_ui(true)
+    settle_typing()
+    t.eq("and showing it again types nothing", vim.api.nvim_get_current_win() ~= lr.ui.windows.si.winid, true)
+    lr.run_live = run_live
+end
+
+-- A run of every session asks to type as it is asked for, so a board put away while it builds
+-- lets the request go before the session starts, and the board shown later asks nothing.
+do
+    local function standin()
+        return {
+            sol_in = {
+                is_closing = function()
+                    return false
+                end,
+                write = function() end,
+            },
+        }
+    end
+    local with_helpers, run_live = lr.with_helpers, lr.run_live
+    local held
+    lr.with_helpers = function(_, cont)
+        held = cont
+    end
+    lr.run_live = function(_, i)
+        lr.tcdata[i].session = standin()
+        lr:update_ui(true)
+    end
+    vim.api.nvim_set_current_win(lr.ui.windows.tc.winid)
+    lr:run_testcases()
+    t.eq("a run of every session asks to type into the first", lr.type_into, lr.tcdata[2])
+    lr.ui:delete()
+    held()
+    t.eq("put away while it builds, the board lets the request go", lr.type_into, nil)
+    lr:show_ui()
+    lr:update_ui(true)
+    drain(lr.ui)
+    t.ok("so shown again once the session talks, it types nothing", vim.api.nvim_get_current_win() ~= lr.ui.windows.si.winid)
+    lr.with_helpers = with_helpers
+
+    -- `n` waits for a build under way: a session started then runs a program its compiler is
+    -- still writing.
+    local build = lr.tcdata[1]
+    local code = build.exit_code
+    build.exit_code = nil
+    local rows = #lr.tcdata
+    lr.ui:add_testcase()
+    t.eq("n waits for the build to finish", #lr.tcdata, rows)
+    build.exit_code = code
+
+    -- A session started on a row lets go of the one still there, which nothing could stop
+    -- once replaced.
+    local killed = false
+    lr.tcdata[2].session = {
+        running = true,
+        sol = {
+            is_active = function()
+                return true
+            end,
+            kill = function()
+                killed = true
+            end,
+        },
+    }
+    lr.run_live = function() end
+    lr:run_one_session(2, function() end, true)
+    t.ok("a session started on a row lets go of the one still there", killed)
+
+    -- A typing key on a row already talking, its column not typable yet, asks to type and
+    -- starts nothing: another session would drop the one that just began.
+    lr.tcdata[2].session = standin()
+    lr.ui:select_row(2)
+    lr:update_ui(true)
+    drain(lr.ui)
+    vim.cmd("stopinsert")
+    local live_buf = lr.ui.windows.si.bufnr
+    vim.bo[live_buf].modifiable = false
+    local runs, run_single = 0, lr.run_single
+    lr.run_single = function()
+        runs = runs + 1
+    end
+    lr.type_into = nil
+    local key
+    for _, m in ipairs(vim.api.nvim_buf_get_keymap(live_buf, "n")) do
+        if m.lhs == "i" then
+            key = m.callback
+        end
+    end
+    key()
+    t.eq("a typing key on a session already talking types, and runs nothing", { runs, lr.type_into }, { 0, lr.tcdata[2] })
+    lr.run_single, lr.run_live = run_single, run_live
+    lr.type_into = nil
+    drain(lr.ui)
+    vim.cmd("stopinsert")
+end
+
+-- `n` on a live board is another conversation with the same build, on a row of its own, beside
+-- any still running: the rows are sessions as a normal board's are testcases, none on disk.
+do
+    local legend = legend_line(lr.ui, "new session")
+    t.ok("the legend says n starts a session", legend ~= nil, legend)
+    local before = #lr.tcdata
+    local run_single = lr.run_single
+    local ran = {}
+    lr.run_single = function(_, idx)
+        ran[#ran + 1] = idx
+    end
+    t.ok("with a session talking on the board", require("tuna.run.modes.interactive")._test.talking(lr.tcdata[2]))
+    lr.ui:add_testcase()
+    t.eq("n adds a session's row beside it", { #lr.tcdata, lr.tcdata[#lr.tcdata].tcnum }, { before + 1, "live 2" })
+    t.eq("runs it", ran, { #lr.tcdata })
+    drain(lr.ui)
+    t.eq("and the board shows it", lr.ui:selected_index(), #lr.tcdata)
+    lr.ui:add_testcase()
+    t.eq("and another, as many as asked for", lr.tcdata[#lr.tcdata].tcnum, "live 3")
+
+    -- `n` is the board's on the Live column only while it is read-only: typed into, it is a letter.
+    local function key_on(buf, lhs)
+        for _, m in ipairs(vim.api.nvim_buf_get_keymap(buf, "n")) do
+            if m.lhs == lhs then
+                return m.callback
+            end
+        end
+    end
+    local live, board = lr.ui.windows.si.bufnr, key_on(lr.ui.windows.tc.bufnr, "n")
+    drain(lr.ui)
+    t.eq("the Live column of a row with no session is read-only", vim.bo[live].modifiable, false)
+    t.ok("and n there adds a session, as on every read-only pane", board ~= nil and key_on(live, "n") == board)
+    t.ok("while its own keys still start typing", key_on(live, "i") ~= nil and key_on(live, "i") ~= key_on(lr.ui.windows.tc.bufnr, "i"))
+    lr.ui:select_row(2)
+    lr:update_ui(true)
+    drain(lr.ui)
+    t.eq("a talking row's Live column is typed into", vim.bo[live].modifiable, true)
+    t.ok("where n is not the board's", key_on(live, "n") ~= board)
+    vim.cmd("stopinsert")
+    lr.run_single = run_single
+    lr.type_into = nil
+end
+
+-- Sessions side by side are each their own: a line goes to the session of the row on screen,
+-- and stopping one leaves the others talking.
+do
+    local function stand_in(sent)
+        return {
+            running = true,
+            sol = {
+                is_active = function()
+                    return true
+                end,
+                kill = function() end,
+            },
+            sol_in = {
+                is_closing = function()
+                    return false
+                end,
+                write = function(_, data)
+                    sent[#sent + 1] = data
+                end,
+            },
+        }
+    end
+    local one, two = {}, {}
+    local a, b = lr.tcdata[3], lr.tcdata[4]
+    a.session, b.session = stand_in(one), stand_in(two)
+    lr:live_send("to a", a)
+    lr:live_send("to b", b)
+    t.eq("a line goes to its own row's session", { one, two }, { { "to a\n" }, { "to b\n" } })
+    lr:kill_process(3)
+    t.eq("stopping one row's session", { a.killed == true, b.killed == true }, { true, false })
+    lr:kill_process(1)
+    t.eq("and a stop on a row with none stops nothing", b.killed == true, false)
+    a.session, b.session = nil, nil
+end
 lr.sol_in = nil
 lr:kill_all_processes()
 lr.ui:delete()
@@ -1518,8 +1920,9 @@ if xui then
     local xc = vim.api.nvim_win_get_config(xui.windows.si.winid)
     t.eq("its conversation pane is titled Live", xc.title and xc.title[1][1], " live (i) ")
     t.ok("and wears no accent, since nothing is typed into it", not (xc.title and xc.title[1][2] == "TunaEditableBorder"), xc.title)
-    -- The conversation's columns stay level: unwrapped and scroll-bound, Errors included. The
-    -- build step is no conversation, so there its panes wrap and scroll on their own.
+    -- The conversation's columns stay level: scroll-bound, Errors wrapping as it does on every
+    -- testcase row and the other two not. The build step is no conversation, so there its
+    -- panes wrap and scroll on their own.
     local function show_row(row)
         vim.api.nvim_set_current_win(xui.windows.tc.winid)
         vim.api.nvim_win_set_cursor(0, { row, 0 })
@@ -1527,7 +1930,7 @@ if xui then
         drain(xui)
     end
     show_row(2)
-    t.eq("a conversation's columns stay unwrapped and scroll together", { column(xui, "se"), column(xui, "so") }, { { false, true }, { false, true } })
+    t.eq("a conversation's columns scroll together, Errors wrapping and Output not", { column(xui, "se"), column(xui, "so") }, { { true, true }, { false, true } })
     show_row(1)
     t.eq("while the build step's panes wrap and scroll on their own", column(xui, "se"), { true, false })
     xui:delete()
@@ -1544,7 +1947,7 @@ do
         wins[name] = { bufnr = vim.api.nvim_create_buf(false, true), title = name == "si" and " live " or title }
     end
     local setup = require("tuna.config").current_setup
-    popup.relayout(wins, setup, nil, 2, setup.popup_ui.layout)
+    popup.relayout(wins, setup, nil, 2, require("tuna.runner_ui")._test.fit_grid(setup.popup_ui.layout, { width = 30, height = 10 }, { width = 120, height = 40 }, true))
     local cfg = vim.api.nvim_win_get_config(wins.si.winid)
     t.eq("the interface draws a renamed pane's title", cfg.title and cfg.title[1][1], " live ")
     for _, w in pairs(wins) do
@@ -1777,9 +2180,23 @@ do
     -- found nothing tries new inputs, and the Run pane says which seed is being tried.
     t.ok("every run searches from a seed of its own", looking.seed_base ~= crashed.seed_base, { looking.seed_base, crashed.seed_base })
     t.ok("and the Run pane shows the one being tried", vim.tbl_contains(vim.tbl_map(function(r)
-        return r[1] .. "=" .. r[2]
+        return r[1] .. "=" .. vim.trim(r[2])
     end, looking:status_tail()), "seed=" .. looking:seed(1)), looking:status_tail())
     t.eq("last in the list, so a counterexample lands above it", looking.tcdata[#looking.tcdata], row)
+    -- Its counters are as wide at the start of a run as at its end, so the Run pane the
+    -- selector is fitted to never widens mid-search.
+    local function widths()
+        return vim.tbl_map(function(r)
+            return vim.fn.strwidth(r[2])
+        end, looking:status_tail())
+    end
+    local iter, count = looking.iter, looking.count
+    looking.count = 100
+    looking.iter = 1
+    local first = widths()
+    looking.iter = looking.count
+    t.eq("the stress counters are as wide on the last input as on the first", widths(), first)
+    looking.iter, looking.count = iter, count
     t.ok("and is no testcase, nothing on disk answers for it", not looking:row_editable(row), row)
     script.solx = { stdout = "5\n" }
     held(script.solx)
@@ -2116,9 +2533,9 @@ do
     end, 10)
     local bui, first = br.ui, br.tcdata[1]
 
-    t.eq("the build step stacks one pane per source it compiles", bui:grid(bui.runner.tcdata[1]), {
-        { 3, "tc" },
-        { 8, { { 1, "se" }, { 1, "so" }, { 1, "eo" }, { 1, "si" } } },
+    t.eq("the build step stacks one pane per source it compiles", shape(bui:grid(bui.runner.tcdata[1])), {
+        { "fit", "tc" },
+        { 1, { { 1, "se" }, { 1, "so" }, { 1, "eo" }, { 1, "si" } } },
     })
     local assigned = bui:build_assignment(first)
     t.eq("the solution first, then the helpers the mode needs", build_titles(assigned), {
@@ -2133,7 +2550,7 @@ do
         eo = "",
         si = "checker.cpp warns\n",
     })
-    t.eq("a testcase row keeps the grid of the run", bui:grid(bui.runner.tcdata[2]), require("tuna.config").current_setup.popup_ui.layout)
+    t.eq("a testcase row keeps the grid of the run", shape(bui:grid(bui.runner.tcdata[2])), require("tuna.config").current_setup.popup_ui.layout)
     t.ok("a row that is not the build step has no sources", bui:build_assignment(br.tcdata[2]) == nil)
     t.ok("a helper that warned keeps the cursor on the build step", br:build_spoke(first), first.stderr)
     t.eq("though the solution itself built quietly", { first.stderr, first.exit_code }, { "", 0 })
@@ -2457,9 +2874,9 @@ do
     onl:run_testcases({ [0] = { input = "1\n" } })
     -- The build is held by the stub above and never lands: the step is what is looked at.
     drain(onl.ui)
-    t.eq("one source alone keeps the build step's configured grid", onl.ui:grid(onl.ui.runner.tcdata[1]), {
-        { 3, "tc" },
-        { 8, "se" },
+    t.eq("one source alone keeps the build step's configured grid", shape(onl.ui:grid(onl.ui.runner.tcdata[1])), {
+        { "fit", "tc" },
+        { 1, "se" },
     })
     t.eq("and the Errors pane its own name", build_titles(onl.ui:build_assignment(onl.tcdata[1])), {})
     -- One source is one key: the others have no source of their own to open here.
@@ -3488,8 +3905,9 @@ local boards = {
         end,
         run = function()
             local r = require("tuna.run").new(wbuf)
-            r:show_ui()
-            r:run_testcases(wtcs)
+            r:open_on(function()
+                r:run_testcases(wtcs)
+            end)
             return r
         end,
     },
@@ -3560,6 +3978,99 @@ for _, board in ipairs(boards) do
     r:kill_all_processes()
     r:delete_ui()
     vim.system = real_system
+end
+
+-- A build reused is over as the run starts, since every mode starts its run before opening the
+-- board (`open_on`): the board opens on the row the run is about, and never lays out the build
+-- step only to leave it a tick later. Every grid the board lays out is recorded.
+do
+    local runner_ui = require("tuna.runner_ui")
+    local new = runner_ui.new
+    local laid = {}
+    runner_ui.new = function(runner)
+        local ui = new(runner)
+        local lay_out = ui.lay_out
+        ui.lay_out = function(self, ...)
+            local done = lay_out(self, ...)
+            laid[#laid + 1] = self.drawn_row
+            return done
+        end
+        return ui
+    end
+    -- What the compilers would have written, so their builds can be reused.
+    for _, program in ipairs({ "sol", "gen", "brute" }) do
+        t.write(wdir, program, "")
+    end
+    for _, board in ipairs(boards) do
+        stub_system()
+        for _ = 1, 2 do
+            local r = board.run()
+            settled(r)
+            r:kill_all_processes()
+            r:delete_ui()
+        end
+        laid = {}
+        local r = board.run()
+        settled(r)
+        drain(r.ui)
+        -- Run-all has no build step: each solution's build is a row of its own.
+        if r.tcdata[1].compile then
+            t.eq(board.name .. ": a build reused reads so", r.tcdata[1].status, "cached")
+        end
+        local compile_laid = vim.tbl_filter(function(row)
+            return row and row.compile
+        end, laid)
+        t.ok(board.name .. ": the board opens on the row the run is about, never laying out the build step", #laid > 0 and #compile_laid == 0, #laid)
+        r:kill_all_processes()
+        r:delete_ui()
+        vim.system = real_system
+    end
+    -- A solution reused beside a helper still compiling: the build step is not over, and the
+    -- helper's words are its to show, so the board opens there.
+    os.remove(wdir .. "/gen")
+    stub_system()
+    laid = {}
+    local sr = boards[3].run()
+    t.ok("stress: a helper still compiling keeps the board on the build step", laid[1] ~= nil and laid[1].compile == true, laid[1])
+    settled(sr)
+    sr:kill_all_processes()
+    sr:delete_ui()
+    vim.system = real_system
+
+    -- In live the row the board opens on is a session already talking, so the board hands its
+    -- column over at once, as it does when it follows a run to it.
+    local interactive = require("tuna.run.modes.interactive")
+    local class = getmetatable(interactive.active[wbuf]).__index
+    local spawn = class.spawn_solution
+    class.spawn_solution = function(_, session)
+        session.running = true
+        session.sol_in = {
+            is_closing = function()
+                return false
+            end,
+            write = function() end,
+        }
+    end
+    stub_system()
+    interactive.run(wbuf, { "live" })
+    local live = interactive.active[wbuf]
+    vim.wait(1000, function()
+        return live.type_into == nil and vim.api.nvim_get_current_win() == live.ui.windows.si.winid
+    end, 20)
+    t.eq("live: opened on a session talking, its column is handed over", vim.api.nvim_get_current_win(), live.ui.windows.si.winid)
+    vim.cmd("stopinsert")
+    class.spawn_solution = spawn
+    for _, row in ipairs(live.tcdata) do
+        row.session = nil
+    end
+    live:delete_ui()
+    require("tuna.run.tools").set_source(wdir .. "/sol.cpp", "feed")
+    vim.system = real_system
+
+    runner_ui.new = new
+    for _, program in ipairs({ "sol", "gen", "brute" }) do
+        os.remove(wdir .. "/" .. program)
+    end
 end
 
 -- A build that failed reads the same in every mode that has a compile row: it is one piece of
@@ -3759,14 +4270,17 @@ do
     vim.wait(3000, function()
         return held ~= nil
     end, 20)
-    ir.sol_handle = {
-        is_active = function()
-            return true
-        end,
-        kill = function() end,
+    ir.tcdata[ir.active_index].session = {
+        running = true,
+        sol = {
+            is_active = function()
+                return true
+            end,
+            kill = function() end,
+        },
     }
     ir:kill_all_processes()
-    ir.sol_handle = nil
+    ir.tcdata[ir.active_index].session = nil
     t.eq("interactive: the session being stopped is marked killed", ir.tcdata[ir.active_index].killed, true)
     held()
     local last = ir.tcdata[#ir.tcdata]
@@ -4546,6 +5060,16 @@ t.eq("the selector and a build cell are all it needs", (layout_util.resolve({ { 
 t.eq("and nothing warned about it", warned, {})
 local run_default = require("tuna.config").defaults.popup_ui.layout
 t.eq("while a testcase row's grid may not place a build cell", (layout_util.resolve({ { 1, "tc" }, { 1, "build" } }, "popup_ui.layout", run_default)), run_default)
+-- `fit` sizes the selector to what it holds, which no other pane has a width for.
+t.eq("the selector may take the share fit", (layout_util.resolve({ { "fit", "tc" }, { 1, "so" } }, "x", run_default)), { { "fit", "tc" }, { 1, "so" } })
+warned = {}
+t.eq("no other pane may", (layout_util.resolve({ { 1, "tc" }, { "fit", "so" } }, "popup_ui.layout", run_default)), run_default)
+t.has("and the warning says why", warned[1], "only 'tc' takes the share 'fit'")
+local fit_grid = require("tuna.runner_ui")._test.fit_grid
+local fitted = fit_grid({ { "fit", "tc" }, { 1, { { 1, "so" }, { "fit", "tc" } } } }, { width = 30, height = 10 }, { width = 120, height = 40 }, true)
+t.eq("a fit selector becomes the share that is as wide as asked", fitted[1][1] / (fitted[1][1] + 1) * 120, 30)
+local tall = fitted[2][2][2][1]
+t.ok("and where its level divides height, the share that is as tall as asked", math.abs(tall / (tall + 1) * 40 - 10) < 1e-9, tall)
 vim.notify = notify_before
 vim.system = real_system
 
@@ -4901,7 +5425,7 @@ do
     local shown = require("tuna.run.modes.interactive")._test
     if shown and shown.conversation then
         local cols = shown.conversation(session.log)
-        t.ok("its columns show the latest rows under a note of the rest", #cols.so <= 5001 and cols.se[1]:match("^%[%d+ earlier lines not shown%]$") ~= nil, { #cols.so, cols.se[1] })
+        t.ok("its columns show the latest rows under a note of the rest", #cols.so <= shown.SHOWN_ROWS + shown.TRIM_ROWS + 1 and cols.se[1]:match("^%[%d+ earlier lines not shown%]$") ~= nil, { #cols.so, cols.se[1] })
         t.ok("keeping no more of the log than the columns can show", #session.log <= 2 * 5000 + 1, #session.log)
     end
     if ir and ir.ui then

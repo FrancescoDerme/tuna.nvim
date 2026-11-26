@@ -293,13 +293,15 @@ function M.run_testcases(bufnr, list, only_show)
             -- way in to writing a problem's first testcase from the runner UI.
             r:load_testcases(tctbl)
         end
-    else
-        r:kill_all_processes()
-        r:choose_row_again()
-        r.subset = list ~= nil -- named testcases: a re-run adds no others it finds on disk
-        r:run_testcases(tctbl)
+        r:open_on()
+        return
     end
-    r:show_ui()
+    r:kill_all_processes()
+    r:choose_row_again()
+    r.subset = list ~= nil -- named testcases: a re-run adds no others it finds on disk
+    r:open_on(function()
+        r:run_testcases(tctbl)
+    end)
 end
 
 -- Solutions whose offer to share their folder's testcases was turned down, by path: asked

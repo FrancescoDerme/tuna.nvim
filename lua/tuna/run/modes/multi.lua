@@ -702,26 +702,22 @@ function M.run(bufnr, opts)
     core.register(M.active, bufnr, mr)
     utils.ensure_directory(mr.rundir)
 
-    -- Rows first, and marked before the board opens, so it opens on the row it will show
-    -- (see interactive).
+    -- Rows first, and marked before the board opens, so it opens on the row it will show.
     mr:lay_out(nums, tctbl, "", "TunaRunning")
-    if opts.show_only then
-        mr:mark_not_run()
-    end
-    mr:show_ui()
     if opts.show_only then
         -- Listed, not run: the first run key saves and runs the matrix (`built_first`),
         -- `run_all` compiling every solution first.
+        mr:mark_not_run()
         mr.completed = true
         mr.build = function(cont)
             save()
             cont()
         end
-        mr:update_ui(true)
-        return
+        return mr:open_on()
     end
-    mr:update_ui(true)
-    mr:run_all()
+    mr:open_on(function()
+        mr:run_all()
+    end)
 end
 
 ---Open the run-all UI for a buffer with its rows listed and nothing run.

@@ -425,7 +425,9 @@ t.eq("an interactor rerun with the interactor gone offers to write it", asked, {
     title = "the interactor source needs an interactor",
     items = { "create interactor.py", "stop" },
 })
-t.eq("and runs no session", ir.sol_handle, nil)
+t.ok("and runs no session", vim.iter(ir.tcdata):all(function(row)
+    return row.session == nil
+end))
 t.eq("stopping writes nothing", vim.fn.glob(idir .. "/interactor.*"), "")
 local sasked, sr = rerun_after_deleting("stress", "brute.py", 3)
 t.eq("a stress restart with its bruteforce gone offers that one, or a search for crashes without it", sasked, {
@@ -555,13 +557,24 @@ end
 -- The interactive source is a setting like the others, so it is named the same way.
 local _, vsol = problem({ "interactor.py" })
 local vbuf = open(vsol)
-tools.set_source(vsol, "live")
+tools.set_source(vsol, "interactor")
 require("tuna.run.modes.interactive").run(vbuf, {}, { show_only = true })
 local vr = require("tuna.run.modes.interactive").active[vbuf]
 settle()
 t.eq("the source sits under the comparison, marked when forced as the others are", vim.list_slice(vr.ui:status_lines(), 2, 3), {
     "compare: squish",
+    "source*: interactor",
+})
+vr:delete_ui()
+-- In live you are the judge: nothing compares, and there is no diff to show.
+tools.set_source(vsol, "live")
+require("tuna.run.modes.interactive").run(vbuf, {}, { show_only = true })
+vr = require("tuna.run.modes.interactive").active[vbuf]
+settle()
+t.eq("live's Run pane names the mode, the source and the legend's key", vr.ui:status_lines(), {
+    "mode   : interactive",
     "source*: live",
+    "help   : ?",
 })
 vr:delete_ui()
 

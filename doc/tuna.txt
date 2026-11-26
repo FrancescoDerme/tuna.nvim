@@ -437,7 +437,9 @@ Every command is a subcommand of `:Tuna` with tab-completion, and a lowercase
         - `interactive` lets your solution talk to something over stdin and
           stdout. A word after it picks the other side: `live` (you type),
           `feed` (the testcase input, a line at a time) or `interactor` (an
-          interactor program).
+          interactor program). `live` plays no testcase, so it holds one
+          session, and `n` on the runner UI starts another beside it with
+          the same build.
 
         In normal, interactive and run-all modes, trailing numbers run only
         those testcases: `:Tuna run 2 3`, `:Tuna run all 2 3`. A problem that

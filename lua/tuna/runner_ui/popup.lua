@@ -103,6 +103,20 @@ local function draw_pane(w, name, config, s, p)
     require("tuna.runner_ui.layout").window_options(w.winid, name, config)
 end
 
+---The size the grid is laid out in, and that its top level divides width, as `compute_layout`
+---lays it out: what a `fit` selector is measured against.
+---@param config table
+---@return { width: integer, height: integer, across: boolean }
+function M.frame(config)
+    local vim_width, vim_height = utils.get_ui_size()
+    local _, band_h = utils.float_band()
+    return {
+        width = math.floor(vim_width * config.popup_ui.width + 0.5),
+        height = math.min(math.floor(vim_height * config.popup_ui.height + 0.5), band_h),
+        across = true,
+    }
+end
+
 ---@param config table
 ---@param status_rows integer content rows of the "Run" pane (border added here)
 ---@param layout table the (validated) layout to lay out

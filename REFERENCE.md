@@ -114,6 +114,7 @@ A keyword forces that mode for the problem, and it is remembered across restarts
   Asked for with no bruteforce, it offers to search without one: it keeps an input your solution crashes on, runs out of time on or exits with an error on, with no answer, and turns back into a stress run once a bruteforce is there.
 - `interactive` lets your solution talk to something over stdin and stdout.
   A word after it picks the other side: `live` (you type), `feed` (the testcase input, a line at a time) or `interactor` (an interactor program).
+  `live` plays no testcase, so it holds one session, and `n` on the runner UI starts another beside it with the same build.
 
 In normal, interactive and run-all modes, trailing numbers run only those testcases: `:Tuna run 2 3`, `:Tuna run all 2 3`.
 A problem that runs as stress takes no testcase numbers because a number after `:Tuna run stress` counts how many inputs to try.

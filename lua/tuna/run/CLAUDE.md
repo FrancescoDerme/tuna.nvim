@@ -127,11 +127,14 @@ hold everywhere are in the root `CLAUDE.md`.
   - `pane_content(tc, name)` returns text, or `core.SKIP` to leave a pane alone;
   - `row_label(tc, unsaved)`, `status_settings()` (rows with the mode and judge) and `status_tail()`
     (rows after them);
-  - `on_ui_shown(ui)` and `owns_pane(name)`;
+  - `on_ui_shown(ui)`, `on_ui_hidden()` (the board put away, what a mode keeps for it let go)
+    and `owns_pane(name)`;
   - `layout()` supplies a mode-specific grid that replaces the configured one, and
     `blank_panes(tc)` the panes a row has nothing to show in, which its grid leaves out;
   - `pane_titles(tc)` and `zoom_actions(tc)`, the name a pane goes by on a row and the
     `zoom_*` action that zooms it there;
+  - `judges()`, false for a run nothing judges (live), and `add_row()`/`new_row_words()`, what
+    `n` does and is called when the mode's rows are its own rather than testcases;
   - `on_details_rendered(ui, tc)` runs after the detail panes are drawn, for panes the mode
     draws itself;
   - `legend_rows()` returns `{ title, rows }`, a box of the `?` legend of the mode's own,

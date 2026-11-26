@@ -263,6 +263,19 @@ function RunnerCore:show_ui()
     self.ui:show_ui()
 end
 
+---Open the board on a run, the run started first, in every mode: what a run settles as it
+---starts (a build it reuses, a session it starts) is then settled when the board picks the row it
+---opens on and lays its grid out for it, so a board never opens on the build step only to leave
+---it a moment later. With no `run`, the rows are only listed (marked `not run` by the caller).
+---@param run fun()?
+function RunnerCore:open_on(run)
+    if run then
+        run()
+    end
+    self:show_ui()
+    self:update_ui(true)
+end
+
 ---Re-show/refresh the UI after a `VimResized`.
 function RunnerCore:resize_ui()
     if self.ui then

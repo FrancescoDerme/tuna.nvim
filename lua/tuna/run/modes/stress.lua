@@ -140,17 +140,25 @@ function StressRunner:status_settings()
 end
 
 ---Extra "Run" pane rows below the mode and the checker or comparison: the live stress counters, as
----{ label, value } pairs (the UI aligns the colons), one per line.
+---{ label, value } pairs (the UI aligns the colons), one per line. Each is as wide as it will
+---ever be in this run, its number padded to the width of its largest, so a counter gaining a
+---digit never widens the pane the board's selector column is fitted to.
 ---@return string[][]
 function StressRunner:status_tail()
+    ---`n`, padded to the width of `largest`.
+    local function padded(n, largest)
+        return ("%" .. #tostring(largest) .. "s"):format(n)
+    end
     local rows = {
-        { "iter", ("%d / %d"):format(self.iter, self.count) },
-        { "saved", ("%d / %d"):format(self.saved_this_run, self.saves_per_run) },
+        { "iter", ("%s / %d"):format(padded(self.iter, self.count), self.count) },
+        { "saved", ("%s / %d"):format(padded(self.saved_this_run, self.saves_per_run), self.saves_per_run) },
         { "max", ("%d testcases"):format(self.max_saved) },
     }
     if self.pass_seed then
-        -- The seed of the input being tried, the one to hand the generator to see it again.
-        table.insert(rows, 2, { "seed", self.iter > 0 and tostring(self:seed(self.iter)) or "—" })
+        -- The seed of the input being tried, the one to hand the generator to see it again. A
+        -- base is kept to six digits (`generate.seed`), the iteration added to it.
+        local seed = self.iter > 0 and tostring(self:seed(self.iter)) or "—"
+        table.insert(rows, 2, { "seed", padded(seed, 999999 + self.count) })
     end
     return rows
 end
@@ -742,24 +750,21 @@ function M.run(bufnr, count_override, opts)
     -- checker each get a pane beside it.
     sr:plan_builds(sr:search_helpers())
 
-    -- Open the runner UI with the rows listed (the compile row, the testcases on disk and the
-    -- search's row) right away.
+    -- The rows listed (the compile row, the testcases on disk and the search's row) before the
+    -- board opens on them.
     sr:load_testcases()
-    if opts.show_only then
-        sr:mark_not_run()
-    end
-    sr:show_ui()
-    sr:update_ui(true)
-
     if opts.show_only then
         -- Listed, not run: a row's run key builds and runs that row (`built_first`); a run of
         -- the whole set builds anyway.
+        sr:mark_not_run()
         sr:defer_build(function(cont)
             sr:build_all(sr:search_helpers(), cont)
         end)
-        return
+        return sr:open_on()
     end
-    sr:run_testcases()
+    sr:open_on(function()
+        sr:run_testcases()
+    end)
 end
 
 ---Open the stress UI for a buffer with its rows listed and nothing run.

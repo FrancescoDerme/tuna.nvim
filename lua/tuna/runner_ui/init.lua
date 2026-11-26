@@ -137,6 +137,54 @@ local function stack_into(layout, panes)
     return out
 end
 
+-- How wide the selector's label and verdict columns are while the pane holds them, and so the
+-- most a verdict takes there.
+local SELECTOR_WIDE = 10
+
+---Give the selector the room it needs: a grid may give `tc` the share `fit` instead of a ratio,
+---which becomes the ratio that lays it out `need.width` cells wide where its level divides
+---width, `need.height` rows tall where it divides height (`size` the room this level divides),
+---so the panes beside it share whatever the selector does not need.
+---@param layout table|string
+---@param need { width: integer, height: integer } the selector's size, borders included
+---@param size { width: integer, height: integer } the room this level divides
+---@param across boolean whether this level divides width (else height)
+---@return table|string
+local function fit_grid(layout, need, size, across)
+    if type(layout) == "string" then
+        return layout
+    end
+    local sum, count = 0, 0
+    for _, entry in ipairs(layout) do
+        if type(entry[1]) == "number" then
+            sum, count = sum + entry[1], count + 1
+        end
+    end
+    local room = across and size.width or size.height
+    local want = across and need.width or need.height
+    local ratios, total = {}, 0
+    for i, entry in ipairs(layout) do
+        local ratio = entry[1]
+        if ratio == "fit" then
+            if count == 0 then
+                ratio = 1
+            elseif room > want then
+                ratio = want * sum / (room - want)
+            else
+                ratio = sum / count
+            end
+        end
+        ratios[i], total = ratio, total + ratio
+    end
+    local out = {}
+    for i, entry in ipairs(layout) do
+        local share = math.floor(room * ratios[i] / total + 0.5)
+        local inner = across and { width = share, height = size.height } or { width = size.width, height = share }
+        out[i] = { ratios[i], fit_grid(entry[2], need, inner, not across) }
+    end
+    return out
+end
+
 -- Which runner each pane buffer belongs to (`M.owner_of`). A `:Tuna` command typed in a pane
 -- is about the solution that pane is showing, and this answers "whose pane is this?" without
 -- asking every mode module for its runners. Cleared when a UI goes: a pane buffer is wiped
@@ -400,10 +448,11 @@ end
 ---Which it is depends on the row on screen: the build step borrows these buffers for its
 ---sources, and a row that is no testcase shows them read-only, where Vim's letters would only
 ---raise `E21`. Run after every render of the details, which is where that changes, and not
----as the board opens, when the buffers are new and read-only only until the first render. A pane the mode types into itself (`owns_pane`) binds its own keys, so it is left
----to the mode.
+---as the board opens, when the buffers are new and read-only only until the first render. A pane
+---the mode types into itself (`owns_pane`, live's Live column) is followed the same way, in
+---every mode, the keys the mode binds there (`pane_keys`) left to it.
 function RunnerUI:follow_typed_panes()
-    if not (self.board_actions and self.runner.editable_testcases) then
+    if not self.board_actions then
         return
     end
     local mappings = self.config.runner_ui.mappings
@@ -411,7 +460,13 @@ function RunnerUI:follow_typed_panes()
         local w = self.windows[name]
         local buf = w and w.bufnr
         local owned = self.runner.owns_pane ~= nil and self.runner:owns_pane(name)
-        if buf and api.nvim_buf_is_valid(buf) and not owned then
+        -- A pane the mode types into itself keeps the keys it binds there (`pane_keys`: live's
+        -- keys that start typing), and takes the board's others while it is read-only.
+        local own = {}
+        for _, key in ipairs(owned and self.runner.pane_keys and self.runner:pane_keys(name) or {}) do
+            own[vim.keycode(key)] = true
+        end
+        if buf and api.nvim_buf_is_valid(buf) and (owned or self.runner.editable_testcases) then
             local read_only = not vim.bo[buf].modifiable
             if read_only and not w.board_keys then
                 -- Each with what the key meant on the buffer before, given back with it.
@@ -419,9 +474,11 @@ function RunnerUI:follow_typed_panes()
                 api.nvim_buf_call(buf, function()
                     for _, entry in ipairs(self.board_actions) do
                         for _, key in ipairs(as_list(mappings[entry[1]])) do
-                            local before = vim.fn.maparg(key, "n", false, true)
-                            bind("n", buf, key, entry[2])
-                            bound[#bound + 1] = { "n", key, before.buffer == 1 and before or nil }
+                            if not own[vim.keycode(key)] then
+                                local before = vim.fn.maparg(key, "n", false, true)
+                                bind("n", buf, key, entry[2])
+                                bound[#bound + 1] = { "n", key, before.buffer == 1 and before or nil }
+                            end
                         end
                     end
                 end)
@@ -563,7 +620,7 @@ function RunnerUI:legend_sections()
     rows[#rows + 1] = self:legend_build_row(m)
     vim.list_extend(rows, {
         { "", "" },
-        { "new testcase", keys("add_testcase") },
+        { self.runner.new_row_words and self.runner:new_row_words() or "new testcase", keys("add_testcase") },
         { "generate testcase", keys("generate_testcase") },
         { "delete testcase", keys("delete_testcase") },
         { "lift out marked cases", keys("split_testcase") },
@@ -1320,6 +1377,10 @@ end
 ---Add a testcase: a new row, selected, with both panes empty and waiting. Like any
 ---other edit it is only written by `:w`, so an abandoned one costs nothing.
 function RunnerUI:add_testcase()
+    -- A mode whose rows are not all testcases may add one of its own (a live session).
+    if self.runner.add_row and self.runner:add_row() then
+        return
+    end
     if not self.runner.editable_testcases then
         return
     end
@@ -1536,6 +1597,15 @@ function RunnerUI:follow_row(idx)
     if not self.ui_visible or self.user_moved then
         return
     end
+    -- A build step still going, or one that had something to say, answers the run in every
+    -- mode: nothing the run does moves the board off it, or a warning landing a moment later
+    -- would arrive on a row nobody is looking at any more.
+    local first = self.runner.tcdata[1]
+    if idx ~= 1 and first and first.compile and self:current_row() == first then
+        if self.runner:build_pending(first) or self.runner:build_spoke(first) then
+            return
+        end
+    end
     self:goto_row(idx)
 end
 
@@ -1553,12 +1623,7 @@ function RunnerUI:follow_after_compile()
         return
     end
     -- The build step is every source this run compiles, the solution and the helpers its
-    -- mode needs. The cursor waits for all of them, and stays here if any of them had
-    -- something to say, or a warning landing a moment later would arrive on a row nobody
-    -- is looking at any more.
-    if self.runner:build_pending(first) or self.runner:build_spoke(first) then
-        return
-    end
+    -- mode needs: `follow_row` waits for all of them and stays if any had something to say.
     local last = self:last_row()
     self:follow_row(last and last ~= 1 and last or 2)
 end
@@ -1587,11 +1652,13 @@ function RunnerUI:initial_row()
 end
 
 ---@private
----Whether a run's build is under way: a compile row that has not finished, on a runner that is
----running rather than listing its rows (`preloaded`). It is about the *run*, not the process:
----asking whether the compiler runs right now leaves a window between the rows being built and
----it being spawned, and a UI opened inside that window draws the panes of a run for a build
----about to start, only to redraw them a tick later.
+---Whether a run's build is under way: a build step with a source not built yet, the solution
+---or a helper beside it, on a runner that is running rather than listing its rows
+---(`preloaded`). It is about the *run*, not the process: asking whether the compiler runs right
+---now leaves a window between the rows being built and it being spawned, and a UI opened inside
+---that window draws the panes of a run for a build about to start, only to redraw them a tick
+---later. A solution whose build was reused is built at once, while its helpers may still be
+---compiling, and their words are the build step's to show.
 ---@return boolean
 function RunnerUI:building()
     local first = self.runner.tcdata[1]
@@ -1599,7 +1666,7 @@ function RunnerUI:building()
         and first.compile == true
         and self.runner.tcdata[2] ~= nil
         and not self.runner.preloaded
-        and first.exit_code == nil
+        and (first.exit_code == nil or self.runner:build_pending(first))
 end
 
 ---@private
@@ -1785,7 +1852,7 @@ function RunnerUI:grid(row)
     if build then
         local default = require("tuna.config").defaults.runner_ui.compile_layout
         local cell = self:checked_grid("runner_ui.compile_layout", self.config.runner_ui.compile_layout, default, "build")
-        return stack_into(cell, build.panes) --[[@as table]]
+        return stack_into(self:fitted(cell), build.panes) --[[@as table]]
     end
     local name, layout, default = configured_grid(self.config, self.kind)
     local grid
@@ -1795,9 +1862,50 @@ function RunnerUI:grid(row)
             grid = self:checked_grid(own_name or "run mode layout", own, default)
         end
     end
-    grid = grid or self:checked_grid(name, layout, default)
+    grid = self:fitted(grid or self:checked_grid(name, layout, default))
     local blank = row and self.runner.blank_panes and self.runner:blank_panes(row)
     return blank and leave_out(grid, blank) or grid
+end
+
+---@private
+---`grid` with a `fit` selector made a ratio (`fit_grid`). The width is what the selector could
+---ever need, not what it shows now, or the board would re-tile as labels, verdicts and times
+---change length mid-run (a stress search's row gaining a digit): the widest row of the Run
+---pane, else the selector's label and verdict columns at their full width with a time up to
+---`999.999 s` after them, each with its window's line numbers. The height, where the grid
+---stacks the selector over other panes, is the Run pane's rows and the list's, counted as the
+---board opens (`fit_rows`): rows added after (`n`, a counterexample saved) scroll the list rather
+---than re-tile the board. Never more than half the board either way, so the panes beside it
+---keep room.
+---@param grid table
+---@return table
+function RunnerUI:fitted(grid)
+    local frame = self.interface.frame(self.config, self.restore_winid)
+    local ui = self.config.runner_ui
+    ---What a pane's window puts before its text: line numbers, where it shows them.
+    local function margin(name, nu, rnu)
+        local w = self.windows[name]
+        if w and w.winid and api.nvim_win_is_valid(w.winid) then
+            return vim.fn.getwininfo(w.winid)[1].textoff
+        end
+        return (nu or rnu) and math.max(vim.o.numberwidth, #tostring(#self.runner.tcdata) + 1) or 0
+    end
+    local run = 0
+    for _, line in ipairs(self:status_lines()) do
+        run = math.max(run, vim.fn.strwidth(line))
+    end
+    local widest = math.max(
+        run + margin("st", false, false),
+        2 * SELECTOR_WIDE + #"999.999 s" + margin("tc", ui.selector_show_nu, ui.selector_show_rnu)
+    )
+    self.fit_rows = self.fit_rows or #self.runner.tcdata
+    -- A border on each side, or a split's separator; above and below, the Run pane's and the
+    -- list's.
+    local need = {
+        width = math.min(widest + 2, math.floor(frame.width / 2)),
+        height = math.min(#self:status_lines() + 2 + self.fit_rows + 2, math.floor(frame.height / 2)),
+    }
+    return fit_grid(grid, need, frame, frame.across) --[[@as table]]
 end
 
 ---@private
@@ -2797,6 +2905,12 @@ function RunnerUI:delete()
     if self.restore_winid and api.nvim_win_is_valid(self.restore_winid) then
         api.nvim_set_current_win(self.restore_winid)
     end
+    -- Measured again when it is shown again.
+    self.fit_rows = nil
+    -- What a mode keeps for the board on screen goes with it (live's request to type).
+    if self.runner.on_ui_hidden then
+        self.runner:on_ui_hidden()
+    end
 end
 
 ---Say something about the mode, rather than about a process, in a large float closable with
@@ -3072,15 +3186,15 @@ end
 ---@private
 ---The selector's three columns for a pane `width` wide: how wide the header and the verdict
 ---columns are, and whether the time still fits after them. Ten-wide columns are what every
----mode's rows line up on, so they are kept while they fit. A pane too narrow for them (the
----conversation layout's selector, which gives most of its width to the three columns of the
----conversation) sizes both to their content instead, and failing that gives the time up: a
----pane cutting a number in half says something untrue about the run.
+---mode's rows line up on, so they are kept while they fit. A pane too narrow for them (a
+---selector fitted to short labels, or a grid giving it a small share) sizes both to their
+---content instead, and failing that gives the time up: a pane cutting a number in half says
+---something untrue about the run.
 ---@param entries { header: string, status: string, time: string }[]
 ---@param width integer? nil when the selector has no window, so nothing is cutting the rows
 ---@return integer head_col, integer status_col, boolean with_time
 local function selector_columns(entries, width)
-    local WIDE = 10
+    local WIDE = SELECTOR_WIDE
     local head_w, st_w, time_w = 0, 0, 0
     for _, e in ipairs(entries) do
         head_w = math.max(head_w, vim.fn.strwidth(e.header))
@@ -3168,10 +3282,12 @@ function RunnerUI:status_lines()
         forced.compare = not by_checker and (tools.checker_setting(path) == "off" or tools.get_compare(path) ~= nil)
         forced.source = self.runner.source ~= nil and tools.get_source(path) == self.runner.source
     end
-    local entries = {
-        { "mode", mode },
-        { by_checker and "checker" or "compare", self.runner:judge_label() },
-    }
+    -- A run nothing judges (interactive's live) has neither what judges nor a diff to show.
+    local judges = not self.runner.judges or self.runner:judges()
+    local entries = { { "mode", mode } }
+    if judges then
+        entries[#entries + 1] = { by_checker and "checker" or "compare", self.runner:judge_label() }
+    end
     -- A mode's own settings stand with the others (interactive's input source). Counters and
     -- the like come after, in `status_tail`.
     if self.runner.status_settings then
@@ -3180,7 +3296,9 @@ function RunnerUI:status_lines()
     for _, e in ipairs(entries) do
         e[1] = forced[e[1]] and (e[1] .. "*") or e[1]
     end
-    entries[#entries + 1] = { "diff", diff_state }
+    if judges then
+        entries[#entries + 1] = { "diff", diff_state }
+    end
     if self.runner.status_tail then
         vim.list_extend(entries, self.runner:status_tail())
     end
@@ -3519,6 +3637,7 @@ end
 -- The pure half of the selector's layout, for the test suite.
 M._test = {
     leave_out = leave_out,
+    fit_grid = fit_grid,
     selector_columns = selector_columns,
     build_text = build_text,
     build_titles = build_titles,

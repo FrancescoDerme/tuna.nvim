@@ -47,18 +47,26 @@ local MISSING = {
 
 ---The options every pane's window takes when an interface opens it. The selector and the
 ---detail panes have line-number options of their own, set by a branch: an `and`/`or` would
----let a selector option set to `false` fall through to the detail panes' value.
+---let a selector option set to `false` fall through to the detail panes' value. The Run pane
+---is a read-out of a few named rows, where a number says nothing. No pane has a sign, fold or
+---status column: a split would take them from the user's settings (a float opens without), and
+---the selector's width is fitted to its text and its line numbers alone.
 ---@param winid integer
 ---@param name string the pane
 ---@param config table
 function M.window_options(winid, name, config)
     local ui = config.runner_ui
-    if name == "tc" then
+    if name == "st" then
+        vim.wo[winid].number, vim.wo[winid].relativenumber = false, false
+    elseif name == "tc" then
         vim.wo[winid].number, vim.wo[winid].relativenumber = ui.selector_show_nu, ui.selector_show_rnu
     else
         vim.wo[winid].number, vim.wo[winid].relativenumber = ui.show_nu, ui.show_rnu
     end
     vim.wo[winid].spell = false
+    for option, value in pairs({ signcolumn = "no", foldcolumn = "0", statuscolumn = "" }) do
+        vim.api.nvim_set_option_value(option, value, { scope = "local", win = winid })
+    end
 end
 
 ---@private
@@ -82,7 +90,15 @@ local function collect(layout, acc, placeable)
         return nil, "expected a list of { ratio, pane-or-layout } pairs"
     end
     for _, entry in ipairs(layout) do
-        if type(entry) ~= "table" or type(entry[1]) ~= "number" or entry[2] == nil then
+        if type(entry) ~= "table" or entry[2] == nil then
+            return nil, "expected a list of { ratio, pane-or-layout } pairs"
+        end
+        -- `fit` sizes the selector to what it holds, which no other pane has a width for.
+        if entry[1] == "fit" then
+            if entry[2] ~= "tc" then
+                return nil, "only 'tc' takes the share 'fit'"
+            end
+        elseif type(entry[1]) ~= "number" then
             return nil, "expected a list of { ratio, pane-or-layout } pairs"
         end
         local ok, err = collect(entry[2], acc, placeable)

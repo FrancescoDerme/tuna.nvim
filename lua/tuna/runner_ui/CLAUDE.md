@@ -42,7 +42,26 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
   Input and Expected Output), `leave_out` giving their room to the panes beside them by their
   share, never to the selector, whose width and the Run pane's stay put; `titles_for(row)`
   gives every pane's title there, stored on the pane records before the interface places them,
-  taken again each re-tile, since the row can rename a pane. `build_assignment` gives each source of
+  taken again each re-tile, since the row can rename a pane.
+- **A `fit` selector** (`{ "fit", "tc" }`, every shipped grid's) is made a ratio by `fitted`
+  before anything else reads the grid (`leave_out` and `stack_into` do arithmetic on shares):
+  `fit_grid` gives it the ratio that lays it out at a size in cells, against the frame the
+  interface reports (`frame`: popup and split each lay out from their own options), its width
+  where its level divides width and its height where it divides height (a side split, whose
+  top level is rows). The height is the Run pane's rows and the list's, counted when the board
+  opens (`fit_rows`, forgotten when it is put away): a row added later (`n`, a counterexample)
+  scrolls the list rather than re-tile the board under a run. The width is what the selector could *ever*
+  need on the board, never what it shows now: the widest Run pane row, else both selector
+  columns at `SELECTOR_WIDE` and a `999.999 s` time, plus its line numbers and borders, capped
+  at half the board. Measured from labels, verdicts or times on screen, the board would re-tile
+  mid-run as they change length (a stress search row gaining a digit), and a label longer than
+  its column is cut by `selector_columns` whatever the pane's width. A Run pane row that counts
+  (stress's `iter`, `seed`) is padded to its widest for the run, for the same reason. The
+  margin is the window's own once it exists and the line-number formula before, which agree
+  because no pane has a sign, fold or status column (`layout.window_options`): a split takes
+  those from the user's settings, and the two disagreeing would re-tile the board as it opens.
+  `layout.resolve` refuses `fit` on any pane but `tc`.
+- `build_assignment` gives each source of
   the build step one of the `BUILD_PANES` buffers in order, and `stack_into` splits the `build`
   cell into them, one above the other, so the grid, the titles (`errors: gen.cpp`,
   `build_titles`, a pane named after its source only when there is more than one), the text
@@ -83,13 +102,22 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
   compared, not the row: an event between rows moving and the render finds the cursor on its
   old line, and that is no move.
 - **Which row is shown** is the UI's choice until the selector is moved by hand (`user_moved`).
-  `follow_row` is how the UI chooses, a no-op once the user has. Three things choose: `show_ui` takes `opening_row()` on its scheduled tick, *after* the rows
-  exist (interactive and run-all build theirs after opening, so deciding earlier lands on line
-  1); every render calls `follow_after_compile`, leaving a compile row that ended with exit 0
-  and printed nothing for the row last looked at, else the first testcase (a failed or talkative
-  build is what answers the run, and one still running must not move under the user); and
-  interactive's `run_one_session` follows the row it
-  talks to (one session at a time, live's row the only typable one). While the choice is the
+  `follow_row` is how the UI chooses, a no-op once the user has, and in every mode it never
+  leaves a build step still going or one that had something to say (`build_pending`,
+  `build_spoke`): that is what answers the run, and a warning landing a moment later would
+  arrive on a row nobody is looking at. Three things choose: `show_ui` takes `opening_row()` on
+  its scheduled tick, *after* the rows exist; every render calls `follow_after_compile`, leaving
+  a compile row that ended with exit 0 and printed nothing for the row last looked at, else the
+  first testcase; and interactive's `run_one_session` follows the row it talks to (its columns
+  are the conversation, and only a talking row's Live column is typable). Picking a row is about
+  what is shown and nothing else: no mode changes the editor's mode on it, since a board opened
+  or shown again may be there to be read.
+- **Every mode starts its run before its board opens** (`RunnerCore:open_on`, from `commands`
+  for the normal runner and from each mode's `M.run`): what the run settles as it starts (a
+  build it reuses, a live session it starts) is settled when the board picks its row and lays
+  its grid out, so it never lays out the build step only to leave it a tick later. Nothing a
+  run does as it starts needs the board: the entry points check the helpers it needs before
+  making a runner. While the choice is the
   UI's, cursor and selection must agree, or the editor's own cursor event reads as a move by
   hand: `show_ui` selects nothing, `selected_line` on 1, until the tick chooses. The choice
   returns to the UI through `choose_row_again` (`user_moved` off,
@@ -99,15 +127,17 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
 - `opening_row()`: a run whose build has not finished opens on it (`building`), whatever was
   last looked at; otherwise `last_row` (`last_row_id`, matched by `row_id`), else
   `initial_row()`, the first testcase, or compile when it printed something. `building` is about
-  the *run*, not the process (`not preloaded and exit_code == nil`): between the rows being built and the compiler being
-  spawned, a UI opened would otherwise draw the panes of a run and redraw them a tick later. For
-  the same reason the modes `mark_not_run` before `show_ui`.
+  the *run*, not the process (`not preloaded`, and the compile row unfinished or a helper beside
+  it still compiling, `build_pending`): between the rows being built and the compiler being
+  spawned, a UI opened would otherwise draw the panes of a run and redraw them a tick later, and
+  a solution whose build was reused is over at once while its helpers are not. For the same
+  reason the modes `mark_not_run` before `show_ui`.
 - `render_selector` lays rows out in three columns (header, verdict, time) through
   `selector_columns`: 10 wide while the pane holds them, content-sized plus a space when not,
-  and without the time rather than cutting a number in half (the conversation layout's selector
-  takes a 4 share).
+  and without the time rather than cutting a number in half (a grid giving it a small share).
 - `status_lines()`: mode, what judges (`checker` with its file, else `compare` with the method),
   the mode's settings (`status_settings`, interactive's source), diff on/off, runner tail,
+  the judge and diff rows left out where the mode judges nothing (`judges()`, live),
   `help: ?`, rows fixed per runner. The judging row is named after the command that sets what it
   shows, not `judge`, which everywhere else in tuna is the online judge; one row rather than
   two, since with a checker the comparison decides nothing and the pane is narrow. A setting
@@ -131,7 +161,8 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
   blocks quitting with E37/E162.
 - `capture_pending` runs before anything repoints the panes. `discard_pending` clears `pending`
   and the flags together.
-- Keys with no text to author: `n` adds a row, `t` generates one, `x` deletes, `u` restores,
+- Keys with no text to author: `n` adds a row (a mode's own first, `add_row`: live's sessions),
+  `t` generates one, `x` deletes, `u` restores,
   `c` splits; structural keys wait for `idle()`. Generating takes `t`, not `g`: `gg` and `G`
   walk the list, and every key takes both cases. A split reads the unwritten pane text without saving it
   (that would run the marked-up input); the cases run once the case-count question settles.
@@ -212,7 +243,9 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
   every details render, not as the board opens, when they are new and read-only only until the
   first render): the actions and guards while it is read-only, taken off once it can be typed
   into, last bound first, the key each one covered put back (`board_keys`). A pane the mode
-  owns is left to the mode, which binds its own letters there.
+  types into itself (`owns_pane`, live's Live column) is followed the same way in every mode,
+  less the keys the mode binds there (`pane_keys`, the ones that start typing), so `n` starts a
+  session on it while it is read-only and is a letter once it is typed into.
 - **The board searches apart from the files around it** (`follow_search`, module-level, one
   search for every board): Vim's one last pattern and `hlsearch` are swapped for the board's on
   entering a pane or the zoom (`pane_owner`) and back on leaving, scheduled from `WinEnter`/
@@ -259,7 +292,8 @@ The runner UI every run mode draws its rows on. The rules that hold everywhere a
   there they do not mean what they say.
 
 **Look**
-- The selector and the detail panes have their own line-number options
+- The Run pane shows no line numbers: it is a read-out of named rows, where a number says
+  nothing. The selector and the detail panes have their own line-number options
   (`selector_show_nu`/`_rnu`, `show_nu`/`_rnu`), set by a branch (`layout.window_options`): an
   `and`/`or` would let the selector's `false` fall through to the panes' value.
 - Writable panes wear `runner_ui.editable_border_highlight` (default `TunaEditable`, bold

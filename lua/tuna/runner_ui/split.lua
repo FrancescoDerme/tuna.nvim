@@ -59,6 +59,29 @@ function M.relayout(windows, config, init_winid, status_rows, layout)
     end
 end
 
+---The size the frame is laid out in, and whether its top level divides width, as `place` lays
+---it out: beside the editor the frame is a column, its top level a stack of rows, and below or
+---above it a row of columns. What a `fit` selector is measured against.
+---@param config table
+---@param init_winid integer? the window the frame opens beside
+---@return { width: integer, height: integer, across: boolean }
+function M.frame(config, init_winid)
+    local position = config.split_ui.position
+    local beside = position == "left" or position == "right"
+    local width, height
+    if config.split_ui.relative_to_editor or not (init_winid and api.nvim_win_is_valid(init_winid)) then
+        width, height = utils.get_ui_size()
+    else
+        width, height = api.nvim_win_get_width(init_winid), api.nvim_win_get_height(init_winid)
+    end
+    if beside then
+        width = math.floor(width * config.split_ui.width + 0.5)
+    else
+        height = math.floor(height * config.split_ui.height + 0.5)
+    end
+    return { width = width, height = height, across = not beside }
+end
+
 ---@private
 ---`relayout`'s work, which may raise partway.
 function M.place(windows, config, init_winid, status_rows, layout)
