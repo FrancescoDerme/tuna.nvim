@@ -52,6 +52,10 @@ Every command is a subcommand of `:Tuna` with tab-completion, and a lowercase `:
   <td>submit or cancel a running submit and dismiss the verdict</td>
 </tr>
 <tr>
+  <td><a href="#verdict"><code>:Tuna verdict [accepted|rejected|partial|clear]</code></a></td>
+  <td>record the judge's verdict yourself, for a judge whose verdict never reaches tuna</td>
+</tr>
+<tr>
   <td><a href="#next-and-prev"><code>:Tuna next [problem|scaffold]</code> / <code>:Tuna prev [problem|scaffold]</code></a></td>
   <td>go to the problem either side of this one in a contest, or to this problem's next source file</td>
 </tr>
@@ -255,6 +259,16 @@ The modifiers in a template are filled in, and without a problem to fill them fr
 Hands the solution to the submit tool you configured, reads its output as it runs, and puts the judge's verdict in your statusline.
 `clear` dismisses the verdict, and cancels a submission still being watched.
 Setting it up is described in the [Submitting](#submitting) guide below.
+
+## verdict
+
+```
+:Tuna verdict [accepted|rejected|partial|clear]
+```
+
+Records the judge's verdict on the solution, for a judge whose verdict never reaches tuna: one you submit to by hand, or one set up with the `browser` provider.
+`clear` forgets the verdict recorded for the solution, whoever recorded it.
+Without an argument it changes nothing and says which verdict the solution has.
 
 ## next and prev
 
@@ -576,7 +590,7 @@ verdicts = {
 `pending` keeps watching, while `accepted`, `rejected` and `partial` are final and stop watching.
 A rule may have a third field, the text to show in place of the output it matched, for a tool that prints codes rather than words.
 
-If your tool prints nothing tuna recognises then nothing is claimed: a clean exit clears the indicator, and a non-zero exit is reported as a failure with the tool's own error line and its credentials blanked out.
+If your tool prints nothing tuna recognises then nothing is claimed: your statusline goes back to what it showed before, and a non-zero exit is reported as a failure with the tool's own error line and its credentials blanked out.
 
 Two cases want the other path, `submit.watch = false`, which runs the tool in a terminal:
 
@@ -607,6 +621,7 @@ It opens the submit page with the task preselected and puts your source on the s
 With [lualine configured](README.md#statusline), the verdict sits in your statusline, coloured by `submit.verdict_highlight`.
 It is per problem, lasts until you submit that problem again, survives a restart, and disappears the moment you edit the solution.
 `:Tuna submit clear` dismisses it, and cancels a submission still being watched.
+When no verdict comes back (as with the `browser` provider or if `submit.watch = false`), you can record the one the judge gave with [`:Tuna verdict`](#verdict).
 
 If something goes wrong, `submit.log_file` records each submission's raw output and the verdict tuna parsed from it, which is useful to work out which pattern your tool needs.
 

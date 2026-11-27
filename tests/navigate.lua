@@ -76,7 +76,7 @@ for _, name in ipairs({ "A", "B" }) do
         url = "https://codeforces.com/contest/9/problem/" .. name,
         name = name,
         group = "Codeforces - Round 9",
-    }, require("tuna.config").current_setup)
+    })
 end
 vim.cmd.edit(vim.fn.fnameescape(forgotten .. "/A.cpp"))
 navigate.step(1)

@@ -74,7 +74,10 @@ submissions. The rules that hold everywhere are in the root `CLAUDE.md`.
 
 ## Sidecar (`sidecar.lua`)
 
-- `problem_store_file` (`.tuna.json`) beside the source. Keys:
+- `problem_store_file` (`.tuna.json`) beside the source, one name for every problem, the
+  setup's (`name`), never a `.tuna.lua`'s: most readers have a path and no buffer (the menu,
+  the run state, `plugin/tuna.lua`'s stat), so a name resolved per folder would have its writers
+  and readers look in different files. No function takes a config for it. Keys:
   - `task = { [basename] = { url, name, group, mirror, mirror_at } }`, the problem each file is
     a solution of, as downloaded (`submit.write_task_store`) or backfilled by a submit, with no
     `url` for one made by hand (`:Tuna new`);
@@ -231,10 +234,17 @@ submissions. The rules that hold everywhere are in the root `CLAUDE.md`.
   - Output: strip terminal control sequences, then `scan_verdict` over `submit.verdicts`,
     **preferring the rightmost final verdict over pending** (in-place redraws collapse onto one
     line) and showing a short snippet, in lowercase: `scan_verdict` answers so and
-    `stored_verdict` lowers what a sidecar holds, whoever wrote it, `status` being no place for
-    it, as its `submitting …` names a file. `stored_verdict` is also where an entry with no text is no verdict.
-  - Exit with no verdict: `watch_outcome` decides on the exit code alone. Exit 0 clears the
-    indicator; it never reports a failure. `expects_verdict = false` only disables parsing.
+    `recorded_verdict` lowers what a sidecar holds, whoever wrote it, `status` being no place
+    for it, as its `submitting …` names a file. `recorded_verdict` is also where an entry with
+    no text is no verdict.
+  - **lualine shows a final verdict or a submission in progress, nothing else.** A submission
+    that ends with no verdict (any exit, `watch_timeout`, the terminal and browser paths'
+    `status_time`) `settle`s: lualine goes back to the verdict stored for the source, unless
+    the buffer has changes not saved. A failure is a notification, never a lualine state: shown
+    there it would outlast the attempt and disagree with the menu and `:Tuna verdict`, which
+    read what the judge said of the source.
+  - Exit with no verdict: `watch_outcome` decides on the exit code alone. Exit 0 reports
+    nothing; it never reports a failure. `expects_verdict = false` only disables parsing.
   - Failures: `failure_reason` checks `OFFLINE_HINTS` first, then `CRASH_HINTS`, then the
     redacted, clamped `meaningful_tail`. `redact` goes by name (`names_secret`: a name
     holding a word of `SECRET_WORDS`), over-blanking on purpose, in the three shapes a pair is
@@ -264,6 +274,17 @@ submissions. The rules that hold everywhere are in the root `CLAUDE.md`.
   submitted brings it back, and it is never deleted there: Vim reports more than edits, and
   deleting on such a report would lose the verdict of a source that never changed.
   `verdict_for(path)` reads a verdict without an open buffer (the menu).
+- **A verdict given by hand** (`record`, `:Tuna verdict`) is the entry a watched submit writes
+  (`text` the state's word, no `url`), against the hash of the source saved first, so lualine,
+  the menu and `restore` need nothing of their own for it. Recording stops a watch, as what
+  the user says replaces what the watch would, and a buffer that cannot be saved records
+  nothing (`save`, which `M.context` shares, says why in Vim's words). `record(bufnr, nil)`
+  deletes the entry whatever source it was for and hides a shown final verdict, but leaves a
+  watch alone, whose verdict is still to come; `M.clear` (`:Tuna submit clear`) only hides,
+  and cancels. `show_verdict` is the one sentence for recording and asking. It reads the
+  buffer's source: with changes not saved, a verdict for the file is for its saved version,
+  and one kept for an earlier source is named (`recorded_verdict`, what `stored_verdict`
+  checks against the hash).
 - `persist_task` records the submitted file's problem as its own (`url`, and `name`/`group` from
   header markers when missing), taking the folder's when it has none. A URL it gives a problem
   known by its name (made by hand) goes to every entry there naming it with none, or its

@@ -196,7 +196,8 @@ M.defaults = {
     -- submit verdict and the last run's local verdict per file, and the per-file run state (`:Tuna compare`, the
     -- checker setting, the chosen run mode / interactive source). Written beside the
     -- solution so it travels with the problem and `:Tuna clean` disposes of it along
-    -- with it.
+    -- with it. One name for every problem: set it in `setup()`, a `.tuna.lua` can't
+    -- rename it.
     problem_store_file = ".tuna.json",
 
     -- testcase storage (the on-disk layout is fully customizable)
@@ -519,7 +520,6 @@ M.defaults = {
             accepted = "TunaCorrect",
             partial = "TunaWarning",
             rejected = "TunaWrong",
-            error = "TunaWrong",
         },
         -- Per-judge overrides. The judge is derived from the submission URL's host
         -- (atcoder.jp -> "atcoder", codeforces.com -> "codeforces", …). Each entry is

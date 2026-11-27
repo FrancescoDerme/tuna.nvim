@@ -414,7 +414,7 @@ do
     t.has("an empty answer is said", said[1] or "", "a contest needs a judge")
     t.eq("and asked again", asked[2], "judge")
     t.eq("a contest made by hand is written where a download goes", { vim.fn.filereadable(contest .. "/A/main.cpp"), vim.fn.filereadable(contest .. "/B/main.cpp") }, { 1, 1 })
-    t.eq("each problem recorded by its name and contest", sidecar.get_entry(contest .. "/B/main.cpp", "task", cfg), { name = "B", group = "Onsite - Swiss Subregional" })
+    t.eq("each problem recorded by its name and contest", sidecar.get_entry(contest .. "/B/main.cpp", "task"), { name = "B", group = "Onsite - Swiss Subregional" })
     t.eq("and the contest remembered, by its judge and name", {
         recent.snapshot().contests[1].dir,
         recent.snapshot().contests[1].judge,
@@ -437,8 +437,8 @@ do
     require("tuna.problem.download").new("contest", cfg)
     t.eq("with every problem there, keeping them is offered first, before overriding", offered, { "keep them all", "override all", "stop" })
     t.eq("keeping a problem leaves its source as it is", vim.fn.readfile(begun .. "/C. Two Boxes/main.cpp"), { "mine" })
-    t.eq("and records the problem it is", (sidecar.get_entry(begun .. "/C. Two Boxes/main.cpp", "task", cfg) or {}).name, "C. Two Boxes")
-    t.eq("beside what its sidecar held", sidecar.get_entry(begun .. "/C. Two Boxes/main.cpp", "results", cfg), { passed = 1, total = 1 })
+    t.eq("and records the problem it is", (sidecar.get_entry(begun .. "/C. Two Boxes/main.cpp", "task") or {}).name, "C. Two Boxes")
+    t.eq("beside what its sidecar held", sidecar.get_entry(begun .. "/C. Two Boxes/main.cpp", "results"), { passed = 1, total = 1 })
     t.eq("and the contest is remembered", recent.snapshot().contests[1].dir, begun)
     answer("onsite", "begun", "C. Two Boxes, D. GCD")
     require("tuna.problem.download").new("contest", cfg)
@@ -457,7 +457,7 @@ do
     local problem = dir .. "/problems/practice/Two Boxes/main.cpp"
     t.eq("a problem made by hand asks its name and judge", asked, { "problem", "judge" })
     t.eq("and is written where a download goes", vim.fn.filereadable(problem), 1)
-    t.eq("recorded by its name and judge", sidecar.get_entry(problem, "task", cfg), { name = "Two Boxes", group = "Practice" })
+    t.eq("recorded by its name and judge", sidecar.get_entry(problem, "task"), { name = "Two Boxes", group = "Practice" })
     t.ok("leaving a waiting scratch to its download", scratch.pending ~= nil)
     scratch.pending = nil
 

@@ -62,45 +62,39 @@ local PANIC = table.concat({
     "note: run with `RUST_BACKTRACE=1` to display a backtrace",
 }, "\n")
 
-local reason, short = s.failure_reason(PANIC, "", 101)
+local reason = s.failure_reason(PANIC, "", 101)
 -- Being offline is the case the user can act on, so it is checked first: a crash
 -- *caused* by no network is an offline failure, not a crash.
 t.has("an offline panic is reported as no network", reason, "could not reach the judge")
-t.eq("and lualine says so", short, "no connection")
 t.ok("nothing leaks the apiKey", not reason:find("abcdef123456"), reason)
 t.ok("nor the apiSig", not reason:find("deadbeef"), reason)
 t.ok("the message is one line", not reason:find("\n"), reason)
 
 -- A tool that named its submission had submitted, so only the verdict was lost.
-local lost, lost_short = s.failure_reason(PANIC, "", 101, true)
+local lost = s.failure_reason(PANIC, "", 101, true)
 t.has("offline after the submission is named loses the verdict, not the submission", lost, "submission went through")
-t.eq("and lualine says so", lost_short, "verdict unknown")
 t.ok("still leaking nothing", not lost:find("abcdef123456"), lost)
-t.eq("a tool's own words after the submission are still its own, and no failed submit",
-    { s.failure_reason("error: quota reached", "", 1, true) }, { "error: quota reached", "verdict unknown" })
-t.eq("nor is a silent exit after it", { s.failure_reason("", "", 1, true) }, { "exited with code 1", "verdict unknown" })
+t.eq("a tool's own words after the submission are still its own", s.failure_reason("error: quota reached", "", 1, true), "error: quota reached")
+t.eq("as is a silent exit after it", s.failure_reason("", "", 1, true), "exited with code 1")
 
 for _, hint in ipairs({ "connection refused", "no route to host", "name resolution failed" }) do
-    local r, sh = s.failure_reason("error: " .. hint, "", 1)
+    local r = s.failure_reason("error: " .. hint, "", 1)
     t.has("'" .. hint .. "' is an offline failure", r, "could not reach the judge")
-    t.eq("'" .. hint .. "' shows as no connection", sh, "no connection")
 end
 
 -- A crash with nothing to say: a dump names an error on every line, so the tail
 -- heuristic picked the longest and least readable of them.
-local r2, short2 = s.failure_reason("thread 'main' panicked at src/main.rs:9:1:\nindex out of bounds", "", 101)
+local r2 = s.failure_reason("thread 'main' panicked at src/main.rs:9:1:\nindex out of bounds", "", 101)
 t.has("a crash with no network cause is reported as a crash", r2, "crashed")
 t.has("and points at the log", r2, "log_file")
-t.eq("with its own lualine state", short2, "tool crashed")
 
 local r3 = s.failure_reason("Traceback (most recent call last):\n  File \"x.py\", line 1", "", 1)
 t.has("a Python traceback counts as a crash", r3, "crashed")
 
 -- A tool with something real to say keeps saying it, including on stdout while
 -- exiting 0 — which is how the Rust submitter reports an unsupported judge.
-local r4, short4 = s.failure_reason("", "[INFO] reading config\nUnsupported domain: atcoder.jp\n[INFO] save cookie to: /tmp/c", 0)
+local r4 = s.failure_reason("", "[INFO] reading config\nUnsupported domain: atcoder.jp\n[INFO] save cookie to: /tmp/c", 0)
 t.has("a real message survives the routine noise around it", r4, "Unsupported domain")
-t.eq("and is an ordinary failure", short4, "submit failed")
 
 local r5 = s.failure_reason("[ERROR] submission failed: you have submitted exactly the same code before\n[INFO] done", "", 1)
 t.has("a judge's own alert is surfaced", r5, "same code before")
@@ -310,12 +304,12 @@ do
     for _, p in ipairs({ "A", "B", "C" }) do
         t.write(round, p .. ".cpp", "int main() {}\n")
     end
-    submit.write_task_store(round .. "/A.cpp", { url = cf .. "A", name = "A", group = "Codeforces - Round 7", mirror = "m1" }, cfg)
-    submit.write_task_store(round .. "/B.cpp", { url = cf .. "B", name = "B", group = "Codeforces - Round 7" }, cfg)
+    submit.write_task_store(round .. "/A.cpp", { url = cf .. "A", name = "A", group = "Codeforces - Round 7", mirror = "m1" })
+    submit.write_task_store(round .. "/B.cpp", { url = cf .. "B", name = "B", group = "Codeforces - Round 7" })
     local one = t.tempdir()
     t.write(one, "main.cpp", "int main() {}\n")
     t.write(one, "main2.cpp", "int main() {}\n")
-    submit.write_task_store(one .. "/main.cpp", { url = cf .. "D", name = "D", group = "Codeforces - Round 7" }, cfg)
+    submit.write_task_store(one .. "/main.cpp", { url = cf .. "D", name = "D", group = "Codeforces - Round 7" })
     local function context(path)
         vim.cmd.edit(vim.fn.fnameescape(path))
         vim.bo.filetype = "cpp"
@@ -334,7 +328,7 @@ do
     }, { "https://m1.codeforces.com/contest/7/problem/", nil })
     os.remove(round .. "/A.cpp")
     sidecar.set_entry(round .. "/B.cpp", "results", { passed = 1, total = 1 })
-    t.eq("a file's problem outlives it, for a solution written again in its place", (sidecar.task(round .. "/A.cpp", cfg) or {}).url, cf .. "A")
+    t.eq("a file's problem outlives it, for a solution written again in its place", (sidecar.task(round .. "/A.cpp") or {}).url, cf .. "A")
 
     -- A submit records the problem as the file's own, so the file keeps it whatever is added
     -- beside it.
@@ -479,6 +473,122 @@ do
         t.eq("an entry with no words is no verdict, " .. text, { pcall(submit.restore, buf) }, { true })
         t.eq("and shows nothing", submit.status(buf), "")
     end
+end
+
+--------------------------------------------------------------------------------
+-- A verdict given by hand
+--------------------------------------------------------------------------------
+
+-- Where nothing reports the judge's verdict back (an onsite judge, a problem made by hand), the
+-- user hears it and records it with `:Tuna verdict`, as the entry a watched submit writes.
+do
+    local submit, sidecar = require("tuna.problem.submit"), require("tuna.problem.sidecar")
+    local commands = require("tuna.commands")
+    local dir = t.tempdir()
+    local text = "int main() {}\n"
+    t.write(dir, "main.cpp", text)
+    local path = vim.fs.normalize(vim.uv.fs_realpath(dir)) .. "/main.cpp"
+    sidecar.set_entry(path, "task", { name = "A", group = "onsite - final" })
+    vim.cmd.edit(vim.fn.fnameescape(path))
+    vim.bo.filetype = "cpp"
+    local buf = vim.api.nvim_get_current_buf()
+    local notify = vim.notify
+    local seen = t.capture_notifications()
+    local function said()
+        return seen[#seen]
+    end
+
+    commands.execute({ "verdict" })
+    t.eq("bare, it says when none is recorded", said(), "tuna: verdict: none for this source.")
+    vim.api.nvim_buf_set_lines(buf, 0, 0, false, { "// typed" })
+    commands.execute({ "verdict", "accepted" })
+    local typed = "// typed\n" .. text
+    t.eq("a verdict recorded saves the source first and is kept against it", {
+        vim.bo[buf].modified,
+        sidecar.get_entry(path, "submit"),
+    }, { false, { state = "accepted", text = "accepted", hash = vim.fn.sha256(typed) } })
+    t.has("it shows in lualine", submit.status(buf), "accepted")
+    t.eq("and counts where the menu reads it", submit.verdict_for(path), { state = "accepted", text = "accepted" })
+    t.eq("recording says what the bare command says", said(), "tuna: verdict: accepted for this source.")
+    commands.execute({ "verdict", "rejected" })
+    t.eq("another replaces it", { submit.verdict_for(path).state, submit.status(buf):match("rejected") }, { "rejected", "rejected" })
+
+    vim.api.nvim_buf_set_lines(buf, 0, 1, false, {})
+    vim.api.nvim_exec_autocmds("TextChanged", { buffer = buf })
+    t.eq("an edit hides it, as one a judge gave", submit.status(buf), "")
+    commands.execute({ "verdict" })
+    t.eq("and the bare command says so before it is saved", said(), "tuna: verdict: none for this source, rejected was recorded for the saved version of it.")
+    vim.cmd("silent write")
+    commands.execute({ "verdict" })
+    t.eq("and the bare command then says it was for another source", said(), "tuna: verdict: none for this source, rejected was recorded for an earlier version of it.")
+
+    commands.execute({ "verdict", "clear" })
+    t.eq("clear forgets it, whichever source it was for", sidecar.get_entry(path, "submit"), nil)
+    t.eq("and nothing else about the problem", (sidecar.get_entry(path, "task") or {}).name, "A")
+    t.eq("saying none is recorded", said(), "tuna: verdict: none for this source.")
+    t.write(dir, "main.cpp", typed)
+    vim.cmd("silent edit!")
+    t.eq("so the source it was for does not bring it back", { submit.status(buf), submit.verdict_for(path) }, { "", nil })
+    commands.execute({ "verdict", "partial" })
+    commands.execute({ "verdict", "clear" })
+    t.eq("a verdict cleared while shown goes from lualine too", submit.status(buf), "")
+
+    -- What cannot be saved is said, and nothing is recorded for a source that is not on disk.
+    vim.api.nvim_buf_set_lines(buf, 0, 0, false, { "// unsaved" })
+    vim.bo[buf].readonly = true
+    commands.execute({ "verdict", "accepted" })
+    t.eq("a buffer that cannot be saved is said, in Vim's words", said(), "tuna: verdict: could not save main.cpp, E45: 'readonly' option is set (add ! to override).")
+    t.eq("and nothing is recorded", sidecar.get_entry(path, "submit"), nil)
+    vim.bo[buf].readonly = false
+    vim.cmd("silent edit!")
+
+    -- Clearing forgets what was recorded, and leaves a submission still to be judged alone.
+    local cfg = require("tuna.config").current_setup
+    s.run_watch({ filepath = path, bufnr = buf, cfg = cfg, scfg = cfg.submit, name = "main.cpp" }, "sleep 0.3; printf 'Accepted'")
+    commands.execute({ "verdict", "clear" })
+    t.has("a submission being watched stays on show through a clear", submit.status(buf), "submitting")
+    vim.wait(3000, function()
+        return (submit.state[path] or {}).state == "accepted"
+    end, 10)
+    t.eq("and its verdict still arrives", (submit.state[path] or {}).state, "accepted")
+
+    -- A submission that ends with no verdict leaves lualine as the judge left it: the verdict
+    -- stored for the source, a failure said once in the messages.
+    for what, cmd in pairs({ ["fails"] = "echo 'error: quota reached' >&2; exit 1", ["says nothing"] = "true" }) do
+        submit.restore(buf)
+        s.run_watch({ filepath = path, bufnr = buf, cfg = cfg, scfg = cfg.submit, name = "main.cpp" }, cmd)
+        t.has("a submission that " .. what .. " shows while it runs", submit.status(buf), "submitting")
+        vim.wait(3000, function()
+            return not submit.status(buf):find("submitting")
+        end, 10)
+        t.eq("and then the verdict the source had, when it " .. what, submit.status(buf), "🐟 accepted")
+    end
+    t.eq("a failure is said in the messages", said(), "tuna: submit failed, error: quota reached")
+    vim.api.nvim_buf_set_lines(buf, 0, 0, false, { "// typed" })
+    s.run_watch({ filepath = path, bufnr = buf, cfg = cfg, scfg = cfg.submit, name = "main.cpp" }, "exit 1")
+    vim.wait(3000, function()
+        return not submit.status(buf):find("submitting")
+    end, 10)
+    t.eq("and nothing for a buffer holding other source", submit.status(buf), "")
+    vim.cmd("silent edit!")
+
+    -- The sidecar has one name, which a folder's `.tuna.lua` does not change, so what one writer
+    -- puts in it every reader finds.
+    t.write(dir, ".tuna.lua", 'return { problem_store_file = "elsewhere.json" }\n')
+    commands.execute({ "verdict", "rejected" })
+    t.eq("a .tuna.lua renames no sidecar", {
+        vim.fn.filereadable(dir .. "/elsewhere.json"),
+        (sidecar.get_entry(path, "submit") or {}).state,
+    }, { 0, "rejected" })
+    os.remove(dir .. "/.tuna.lua")
+    commands.execute({ "verdict", "clear" })
+
+    commands.execute({ "verdict", "accept" })
+    t.has("a word it does not know is refused", said(), "use accepted, rejected, partial or clear")
+    t.eq("and records nothing", sidecar.get_entry(path, "submit"), nil)
+    t.eq("completion offers the verdicts and clear", commands.complete("", "Tuna verdict ", 13), { "accepted", "clear", "partial", "rejected" })
+    vim.notify = notify
+    vim.api.nvim_buf_delete(buf, { force = true })
 end
 
 t.report()

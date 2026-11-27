@@ -136,8 +136,9 @@ end
 ---judge verdicts count, a local verdict existing only for problems that were run. A count is
 ---never coloured, and a word is dimmed at zero.
 ---Where no verdict can reach tuna at all — nothing reports one back for this judge
----(`submit.reports_verdict`) — it counts what passed locally instead: `0/7 accepted` would be
----a claim about an answer nobody can hear, and would stay at zero forever.
+---(`submit.reports_verdict`) and none was recorded by hand (`:Tuna verdict`) — it counts what
+---passed locally instead: `0/7 accepted` would be a claim about an answer nobody can hear, and
+---would stay at zero forever. One verdict recorded says the user is the one hearing them.
 ---@param contest tuna.RecentContest?
 ---@return { [1]: string, [2]: string? }[]
 local function contest_status(contest)
@@ -153,11 +154,11 @@ local function contest_status(contest)
     local counts = { accepted = 0, rejected = 0, partial = 0 }
     local answerable = false
     for _, versions in ipairs(problems) do
-        answerable = answerable or submit.reports_verdict(versions[1])
         local state = best_verdict(versions)
         if state then
             counts[state] = counts[state] + 1
         end
+        answerable = answerable or state ~= nil or submit.reports_verdict(versions[1])
     end
     if not answerable then
         return local_status(problems)

@@ -19,8 +19,10 @@ check.
     depend on which version was opened last, as a pick of one file per problem would, and a
     rejected attempt says nothing about a problem another version was accepted on. Local
     verdicts don't count there, because they exist only for problems that were run — unless
-    no verdict can reach the contest at all, where it counts what passes locally and says
-    `passed`, any version passing a problem. That is
+    no verdict can reach the contest at all and none is current there, where it counts what
+    passes locally and says `passed`, any version passing a problem. A current verdict in a
+    contest nothing reports to was recorded by hand (`:Tuna verdict`), and says the user is
+    the one hearing the judge, so one is enough to count the judge's. The first test is
     `submit.reports_verdict`, which is about whether anything reports the outcome _back_ (the
     `browser` provider watches nothing, `watch = false` is not read, `expects_verdict = false`
     is not parsed, and a problem with no URL, made by `:Tuna new`, cannot be submitted at

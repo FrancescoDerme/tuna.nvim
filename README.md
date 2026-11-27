@@ -198,6 +198,7 @@ A downloaded problem knows the correct URL to submit at (even without the header
 
 `submit.judges.<judge>` overrides the submission tool per judge.
 The `browser` provider exists for judges for which you don't have a submission tool: it opens the submit page with the task preselected and puts your source on the clipboard.
+If you submit using the `browser` provider, or don't submit through tuna at all, you can still record the verdict with [`:Tuna verdict`](REFERENCE.md#verdict).
 
 For a working setup of a submit tool see [here](https://github.com/FrancescoDerme/dotfiles/blob/master/nvim/.config/nvim/lua/plugins/tuna.lua).
 In this example, the submission tool is [submitter](https://github.com/EgorKulikov/submitter).

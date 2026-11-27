@@ -12,8 +12,8 @@
 --
 -- The problem URL comes from a `submit.url` function, else a header marker (`submit at:
 -- <url>`, written by a template at download time), else the problem's sidecar. A final
--- verdict is kept in the sidecar against the hash of the source it was for, and shown in
--- lualine while that is the source on disk.
+-- verdict, watched or recorded by hand (`:Tuna verdict`), is kept in the sidecar against the
+-- hash of the source it was for, and shown in lualine while that is the source on disk.
 
 local config = require("tuna.config")
 local utils = require("tuna.utils")
@@ -37,8 +37,7 @@ local live_mirror
 ---`:Tuna find` know it by. No-op for a task naming neither.
 ---@param filepath string the solution written for the task
 ---@param task tuna.CCTask
----@param cfg table
-function M.write_task_store(filepath, task, cfg)
+function M.write_task_store(filepath, task)
     if not sidecar.identity(task) then
         return
     end
@@ -54,7 +53,7 @@ function M.write_task_store(filepath, task, cfg)
         -- has to expire (see `live_mirror`).
         mirror = task.mirror,
         mirror_at = task.mirror and os.time() or nil,
-    }, cfg)
+    })
 end
 
 ---First capture of a Lua `pattern` over a buffer's first `scan_lines` header lines,
@@ -86,8 +85,8 @@ end
 ---@param ctx table submit context (bufnr/filepath/url/cfg)
 local function persist_task(ctx)
     local scfg = ctx.cfg.submit
-    local own = sidecar.get_entry(ctx.filepath, "task", ctx.cfg)
-    local task = vim.deepcopy(own or sidecar.task(ctx.filepath, ctx.cfg) or {})
+    local own = sidecar.get_entry(ctx.filepath, "task")
+    local task = vim.deepcopy(own or sidecar.task(ctx.filepath) or {})
     local dirty = own == nil
 
     if ctx.url and ctx.url ~= "" and task.url ~= ctx.url then
@@ -121,12 +120,12 @@ local function persist_task(ctx)
             group = task.group,
             mirror = task.mirror,
             mirror_at = task.mirror_at,
-        }, ctx.cfg)
+        })
         -- A problem made by hand is known by its name until it has a URL, so its other
         -- attempts there take the URL too: left without it, they would be another problem.
         if task.url and task.name then
             local dir = vim.fn.fnamemodify(ctx.filepath, ":h")
-            local store = sidecar.read(dir, ctx.cfg)
+            local store = sidecar.read(dir)
             local given = false
             for _, entry in pairs(type(store.task) == "table" and store.task or {}) do
                 if type(entry) == "table" and (entry.url == nil or entry.url == "") and entry.name == task.name and entry.group == task.group then
@@ -134,7 +133,7 @@ local function persist_task(ctx)
                 end
             end
             if given then
-                sidecar.write(dir, ctx.cfg, store)
+                sidecar.write(dir, store)
             end
         end
     end
@@ -150,7 +149,7 @@ local function display_name(ctx)
     if marked then
         return marked
     end
-    local task = sidecar.task(ctx.filepath, ctx.cfg)
+    local task = sidecar.task(ctx.filepath)
     local nm = task and task.name
     if type(nm) == "string" and nm ~= "" then
         return nm
@@ -284,7 +283,7 @@ local function resolve_url(bufnr, filepath, cfg)
         candidates[#candidates + 1] = scfg.url({ bufnr = bufnr, filepath = filepath })
     else
         candidates[#candidates + 1] = scan_header(bufnr, scfg.url, scfg.url_scan_lines)
-        local task = sidecar.task(filepath, cfg)
+        local task = sidecar.task(filepath)
         -- An empty one is no URL, not an invalid one.
         candidates[#candidates + 1] = task and task.url ~= "" and task.url or nil
     end
@@ -333,7 +332,7 @@ local MIRROR_TTL = 24 * 60 * 60 -- a round is hours; its mirror lasts a day or t
 ---@param cfg table
 ---@return string? mirror, boolean expired
 function live_mirror(filepath, cfg)
-    local task = sidecar.task(filepath, cfg) or {}
+    local task = sidecar.task(filepath) or {}
     local mirror = task.mirror
     if type(mirror) ~= "string" or not mirror:match("^m%d+$") then
         return nil, false
@@ -443,6 +442,25 @@ local function resolve_lang(bufnr, scfg)
     return scfg.languages and scfg.languages[ft] or nil
 end
 
+---Write `bufnr` when it has changes: a submit and a recorded verdict both go by the file on
+---disk. Nil once it is saved, else why it could not be, in Vim's words, as a sentence naming
+---the file.
+---@param bufnr integer
+---@return string? err
+local function save(bufnr)
+    if not vim.bo[bufnr].modified then
+        return nil
+    end
+    local ok, err = pcall(vim.api.nvim_buf_call, bufnr, function()
+        vim.cmd("silent write")
+    end)
+    if ok then
+        return nil
+    end
+    local name = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(bufnr), ":t")
+    return ("could not save %s, %s."):format(name, tostring(err):match("(E%d+:[^\n]*)") or tostring(err):match("^[^\n]*"))
+end
+
 ---Build the submit context for a buffer, or nil + a reason on failure. Saves the
 ---buffer first (a submit must use the on-disk file). `scfg` is the **effective**
 ---submit config (base with any `submit.judges[<judge>]` override applied), resolved
@@ -455,11 +473,9 @@ function M.context(bufnr)
         return nil, "the current buffer has no file to submit."
     end
     local cfg = config.get_buffer_config(bufnr)
-
-    if vim.bo[bufnr].modified then
-        vim.api.nvim_buf_call(bufnr, function()
-            vim.cmd("silent write")
-        end)
+    local unsaved = save(bufnr)
+    if unsaved then
+        return nil, unsaved
     end
 
     local url, invalid = resolve_url(bufnr, filepath, cfg)
@@ -661,14 +677,15 @@ end
 --------------------------------------------------------------------------------
 -- Per-buffer submit state + lualine status
 --------------------------------------------------------------------------------
--- One entry per solution file path holds that problem's last submit verdict,
--- kept until the file is submitted again. lualine reads the *current* buffer's
--- entry, so the indicator follows you from problem to problem and never expires
--- on its own (the terminal path is the exception — it can't learn the verdict,
--- so it clears its "submitting …" after `status_time`).
+-- One entry per solution file path holds what lualine shows for it: a final verdict, or a
+-- submission in progress. lualine reads the *current* buffer's entry, so the indicator
+-- follows you from problem to problem. A submission that ends with no verdict (a failure, a
+-- tool that says nothing, a timeout, the terminal and browser paths' `status_time`) goes back
+-- to the verdict stored for the source (`settle`), and a failure is said in a notification:
+-- lualine shows what the judge said, never how the last attempt to ask went.
 
 ---@class tuna.SubmitState
----@field state string  "pending"|"accepted"|"rejected"|"partial"|"error"
+---@field state string  "pending"|"accepted"|"rejected"|"partial"
 ---@field text string   display text
 ---@field url string?   submission URL, if parsed
 ---@field final boolean whether `state` is a terminal verdict
@@ -710,17 +727,21 @@ local function refresh_status()
     pcall(vim.api.nvim_command, "redrawstatus") -- nudge lualine to re-evaluate now
 end
 
+-- Forward declaration: `set_state`'s timeout settles, and settling restores, defined below.
+local settle
+
 ---Set (or update) a solution's submit state and refresh lualine. When
----`timeout_ms` > 0 and the state isn't final, it auto-clears after that delay —
----used by the fire-and-forget terminal path, which never learns the verdict.
+---`timeout_ms` > 0 and the state isn't final, it settles after that delay —
+---used by the terminal and browser paths, which never learn the verdict.
 ---@param path string
 ---@param state string
 ---@param text string
 ---@param url string?
 ---@param timeout_ms integer?
+---@param bufnr integer? the buffer to settle, with `timeout_ms`
 ---@return integer? token the state's token (for callers that must detect being
 ---superseded by a newer submit / a manual clear), or nil if the path was empty.
-local function set_state(path, state, text, url, timeout_ms)
+local function set_state(path, state, text, url, timeout_ms, bufnr)
     if path == nil or path == "" then
         return nil
     end
@@ -732,8 +753,7 @@ local function set_state(path, state, text, url, timeout_ms)
         vim.defer_fn(function()
             local cur = M.state[path]
             if cur and cur.token == st.token then
-                M.state[path] = nil
-                refresh_status()
+                settle(path, bufnr)
             end
         end, timeout_ms)
     end
@@ -836,16 +856,29 @@ function M.status_hl(bufnr)
     return fg and { fg = fg, gui = "bold" } or spec
 end
 
----The final verdict the sidecar holds for `path`, in lowercase as every verdict tuna shows, while
----it still describes the source on disk (`still_current`). Read with the global config: the sidecar's name is not something a
+---The final verdict the sidecar holds for `path`, in lowercase as every verdict tuna shows,
+---whatever source it was for. Read with the global config: the sidecar's name is not something a
 ---per-directory config realistically changes, and this runs on every `BufReadPost`.
+---@param path string absolute solution path
+---@return { state: string, text: string, url: string?, hash: string? }?
+local function recorded_verdict(path)
+    local entry = sidecar.get_entry(path, "submit")
+    if entry and FINAL[entry.state] and type(entry.text) == "string" then
+        -- A NUL, which a sidecar may hold, is a Blob to `vim.fn`.
+        local text = vim.fn.tolower((entry.text:gsub("%z", "")))
+        return { state = entry.state, text = text, url = entry.url, hash = entry.hash }
+    end
+    return nil
+end
+
+---The verdict the sidecar holds for `path` while it still describes the source on disk
+---(`still_current`).
 ---@param path string absolute solution path
 ---@return { state: string, text: string, url: string? }?
 local function stored_verdict(path)
-    local entry = sidecar.get_entry(path, "submit", config.current_setup)
-    if entry and FINAL[entry.state] and type(entry.text) == "string" and still_current(entry, path) then
-        -- A NUL, which a sidecar may hold, is a Blob to `vim.fn`.
-        return { state = entry.state, text = vim.fn.tolower((entry.text:gsub("%z", ""))), url = entry.url }
+    local entry = recorded_verdict(path)
+    if entry and still_current(entry, path) then
+        return { state = entry.state, text = entry.text, url = entry.url }
     end
     return nil
 end
@@ -880,7 +913,7 @@ function M.reports_verdict(path)
         return false
     end
     local cfg = config.current_setup
-    local task = sidecar.task(path, cfg) or {}
+    local task = sidecar.task(path) or {}
     local scfg = judge_scfg(cfg.submit or {}, task.url)
     if type(scfg.url) ~= "function" and not is_valid_url(task.url) then
         return false
@@ -906,6 +939,91 @@ function M.restore(bufnr)
     end
     set_state(path, entry.state, entry.text, entry.url)
     arm_invalidation(bufnr)
+end
+
+---What lualine shows once a submission has ended with no verdict: the one stored for the
+---source, while the buffer holds the source on disk, else nothing.
+---@param path string
+---@param bufnr integer?
+settle = function(path, bufnr)
+    M.state[path] = nil
+    if bufnr and vim.api.nvim_buf_is_valid(bufnr) and not vim.bo[bufnr].modified then
+        M.restore(bufnr)
+    end
+    refresh_status()
+end
+
+--------------------------------------------------------------------------------
+-- A verdict given by hand (`:Tuna verdict`)
+--------------------------------------------------------------------------------
+-- For a judge nothing reports back from (an onsite judge, the `browser` provider), the user
+-- is the one who hears the verdict, so they record it. It is the entry a watched submit
+-- writes, against the source on disk, so lualine, the menu and `restore` take it as one.
+
+---Say which verdict the source in `bufnr` has: the one sentence for recording a verdict and
+---for asking about it (bare `:Tuna verdict`), as for the checker. The source is the buffer's:
+---with changes not saved, a verdict for the file on disk is for its saved version.
+---@param bufnr integer
+function M.show_verdict(bufnr)
+    local path = buf_path(bufnr)
+    local modified = vim.bo[bufnr].modified
+    local verdict = not modified and M.verdict_for(path) or nil
+    local live = M.state[path]
+    local old = recorded_verdict(path)
+    if verdict then
+        utils.notify("verdict: " .. verdict.text .. " for this source.", "INFO")
+    elseif live and live.state == "pending" then
+        utils.notify("verdict: none yet for this source, a submission is being watched.", "INFO")
+    elseif old then
+        local which = modified and still_current(old, path) and "the saved version" or "an earlier version"
+        utils.notify(("verdict: none for this source, %s was recorded for %s of it."):format(old.text, which), "INFO")
+    else
+        utils.notify("verdict: none for this source.", "INFO")
+    end
+end
+
+---Record `state` as the judge's verdict on the source in `bufnr`, saving the buffer first as a
+---submit does, since the verdict is kept against the source on disk. A submission being
+---watched is stopped: what the user says replaces what it would. With `state` nil, forget the
+---verdict recorded for the file, whoever recorded it and whichever source it was for, and
+---leave a submission being watched alone, as its verdict is still to come.
+---@param bufnr integer
+---@param state "accepted"|"rejected"|"partial"|nil
+function M.record(bufnr, state)
+    local path = buf_path(bufnr)
+    if path == "" then
+        utils.notify("verdict: this buffer has no file, so no source to give a verdict on.", "WARN")
+        return
+    end
+    if not state then
+        if sidecar.get_entry(path, "submit") then
+            sidecar.set_entry(path, "submit", nil)
+        end
+        local live = M.state[path]
+        if live and live.final then
+            disarm_invalidation(bufnr)
+            M.state[path] = nil
+            refresh_status()
+        end
+        M.show_verdict(bufnr)
+        return
+    end
+    local unsaved = save(bufnr)
+    if unsaved then
+        utils.notify("verdict: " .. unsaved, "WARN")
+        return
+    end
+    local hash = utils.file_hash(path)
+    if not hash then
+        utils.notify("verdict: " .. vim.fn.fnamemodify(path, ":t") .. " is not on disk, so there is no source to give it to.", "WARN")
+        return
+    end
+    M.clear(bufnr)
+    disarm_invalidation(bufnr)
+    sidecar.set_entry(path, "submit", { state = state, text = state, hash = hash })
+    set_state(path, state, state)
+    arm_invalidation(bufnr)
+    M.show_verdict(bufnr)
 end
 
 --------------------------------------------------------------------------------
@@ -1140,7 +1258,6 @@ end
 ---@param code integer? the tool's exit code
 ---@param submitted boolean? the tool had named its submission
 ---@return string message the notification line
----@return string short a few words for the lualine indicator
 local function failure_reason(err, out, code, submitted)
     local blob = strip_ansi(err .. "\n" .. out):lower()
     local function mentions(hints)
@@ -1157,20 +1274,19 @@ local function failure_reason(err, out, code, submitted)
     -- exactly what a submitter that `unwrap()`s its HTTP call does with the wifi off.
     if mentions(OFFLINE_HINTS) then
         if submitted then
-            return "lost the connection while waiting for the verdict, the submission went through.", "verdict unknown"
+            return "lost the connection while waiting for the verdict, the submission went through."
         end
-        return "could not reach the judge, is the network up?", "no connection"
+        return "could not reach the judge, is the network up?"
     end
     if mentions(CRASH_HINTS) then
-        return "the submit tool crashed (see 'submit.log_file' for its output)", "tool crashed"
+        return "the submit tool crashed (see 'submit.log_file' for its output)"
     end
 
-    local failed = submitted and "verdict unknown" or "submit failed"
     local tail = meaningful_tail(err, out)
     if tail == "" then
-        return "exited with code " .. tostring(code), failed
+        return "exited with code " .. tostring(code)
     end
-    return clamp(redact(tail)), failed
+    return clamp(redact(tail))
 end
 
 ---Start index of the last (rightmost) match of Lua pattern `pat` in `hay`, or nil.
@@ -1312,7 +1428,7 @@ local function run_watch(ctx, cmd)
                 reached_final = true
                 -- Persist the verdict (survives a restart) and drop it the moment
                 -- the solution is edited.
-                sidecar.set_entry(path, "submit", { state = state, text = seg, url = url, hash = submit_hash }, ctx.cfg)
+                sidecar.set_entry(path, "submit", { state = state, text = seg, url = url, hash = submit_hash })
                 arm_invalidation(ctx.bufnr)
             end
         end
@@ -1359,13 +1475,12 @@ local function run_watch(ctx, cmd)
             if not (st and st.token == my_token) then
                 return
             end
-            -- No verdict was recognised. A clean exit means the tool believes it
-            -- submitted — whether it never prints verdicts at all, or prints them in
-            -- words `submit.verdicts` does not know — so the "submitting …" flash is
-            -- cleared and nothing is claimed. Only a non-zero exit is a failure.
+            -- No verdict was recognised, so lualine goes back to what it showed for the
+            -- source. A clean exit means the tool believes it submitted — whether it never
+            -- prints verdicts at all, or prints them in words `submit.verdicts` does not
+            -- know — so nothing is claimed. Only a non-zero exit is a failure, said once.
+            settle(path, ctx.bufnr)
             if watch_outcome(res.code) == "clear" then
-                M.state[path] = nil
-                refresh_status()
                 return
             end
             -- Surface the tool's actual error line, not its trailing progress noise
@@ -1373,9 +1488,7 @@ local function run_watch(ctx, cmd)
             -- its crash dump either — see `failure_reason`. Falls back to stdout for
             -- tools that report the reason there (e.g. the Rust submitter's
             -- "Unsupported domain: atcoder.jp").
-            local reason, short = failure_reason(err_acc, out_acc, res.code, url ~= nil)
-            set_state(path, "error", short, url)
-            arm_invalidation(ctx.bufnr) -- a failed verdict is stale once the source changes
+            local reason = failure_reason(err_acc, out_acc, res.code, url ~= nil)
             utils.notify((url and "submit: " or "submit failed, ") .. reason, "ERROR")
         end)
     end)
@@ -1397,8 +1510,7 @@ local function run_watch(ctx, cmd)
             end)
             local st = M.state[path]
             if st and st.token == my_token then
-                M.state[path] = nil -- clear the stuck indicator (don't show a false failure)
-                refresh_status()
+                settle(path, ctx.bufnr) -- the stuck indicator goes, and no failure is claimed
             end
             utils.notify("submit: stopped watching " .. name .. " after timeout (no verdict).", "WARN")
         end, tmo)
@@ -1495,7 +1607,7 @@ M.providers.command = function(ctx)
     local name = display_name(ctx) -- header/sidecar problem name if known, else the basename
     -- Terminal path can't learn the verdict, so flash a pending state that clears.
     -- (No `vim.notify` here — like the watch path, the lualine indicator is enough.)
-    set_state(ctx.filepath, "pending", "submitting " .. name, nil, scfg.status_time)
+    set_state(ctx.filepath, "pending", "submitting " .. name, nil, scfg.status_time, ctx.bufnr)
 end
 
 -- Browser-handoff provider: for a judge the user has no tool for, open the submit page
@@ -1520,7 +1632,7 @@ M.providers.browser = function(ctx)
     -- Same lualine text as the terminal/watch paths ("submitting <name>"): the browser
     -- handoff is just a manual variant of the same submit flow (paste + click). Brief
     -- flash that clears after `status_time` (there's no verdict to track here).
-    set_state(ctx.filepath, "pending", "submitting " .. name, ctx.url, scfg.status_time)
+    set_state(ctx.filepath, "pending", "submitting " .. name, ctx.url, scfg.status_time, ctx.bufnr)
 end
 
 --------------------------------------------------------------------------------

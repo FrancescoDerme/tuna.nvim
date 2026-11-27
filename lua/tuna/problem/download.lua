@@ -497,7 +497,7 @@ local function store_downloaded_task(filepath, task, cfg)
     testcases.write_testcases(filepath, cfg, task_to_tctbl(task))
     -- Persist the task's URL beside the source so `:Tuna submit` can find it even
     -- when the file carries no header marker.
-    require("tuna.problem.submit").write_task_store(filepath, task, cfg)
+    require("tuna.problem.submit").write_task_store(filepath, task)
     return template
 end
 
@@ -722,7 +722,7 @@ local function store_contest(tasks, cfg, finished, by_hand)
                                 -- Kept as it is, but known as the problem at its place when
                                 -- nothing says otherwise: a contest begun by hand is then a
                                 -- contest as a downloaded one is.
-                                if not sidecar.get_entry(t.filepath, "task", local_cfg) then
+                                if not sidecar.get_entry(t.filepath, "task") then
                                     require("tuna.problem.submit").write_task_store(t.filepath, t.task, local_cfg)
                                 end
                             else

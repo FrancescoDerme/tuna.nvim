@@ -25,6 +25,7 @@ local subcommand_args = {
     scaffold = tools.SCAFFOLDS,
     checker = { "auto", "off" },
     submit = { "clear" },
+    verdict = { "accepted", "rejected", "partial", "clear" },
     go = { "problem", "contest", "judge" },
     next = { "problem", "scaffold" },
     prev = { "problem", "scaffold" },
@@ -900,6 +901,25 @@ M.subcommands = {
             require("tuna.problem.submit").clear(bufnr) -- dismiss the lualine verdict / cancel a running submit
         else
             require("tuna.problem.submit").submit(bufnr)
+        end
+    end,
+    -- The judge's verdict, recorded by hand where nothing reports it back. Set as the checker
+    -- is: a verdict records it, `clear` forgets it, and the bare command says what is recorded.
+    verdict = function(args)
+        local want = args[1]
+        if want ~= nil and not vim.tbl_contains(subcommand_args.verdict, want) then
+            utils.notify("verdict: use accepted, rejected, partial or clear, or nothing to see what is recorded.", "WARN")
+            return
+        end
+        local bufnr = M.solution_bufnr()
+        if not bufnr then
+            return
+        end
+        local submit = require("tuna.problem.submit")
+        if want == nil then
+            submit.show_verdict(bufnr)
+        else
+            submit.record(bufnr, want ~= "clear" and want or nil)
         end
     end,
     clean = function()

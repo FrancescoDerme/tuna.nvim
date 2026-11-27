@@ -195,6 +195,19 @@ t.eq("so a contest made by hand counts what passed locally", menu.contest_status
     { "1/2 " },
     { "passed", "TunaCorrect" },
 })
+-- A verdict recorded by hand (`:Tuna verdict`) says the user is the one hearing the judge.
+local by_hand_b = vim.json.decode(table.concat(vim.fn.readfile(by_hand .. "/B/.tuna.json"), "\n"))
+by_hand_b.submit = { ["main.cpp"] = { state = "accepted", text = "accepted", hash = vim.fn.sha256("int main() {}\n") } }
+t.write(by_hand .. "/B", ".tuna.json", vim.json.encode(by_hand_b))
+t.eq("until one of its problems has a verdict recorded, and then it counts the judge's", menu.contest_status({ dir = by_hand, name = "swiss" }), {
+    { "1/2 " },
+    { "accepted", "TunaCorrect" },
+})
+t.write(by_hand .. "/B", "main.cpp", "int main() { return 1; }\n")
+t.eq("while that verdict still describes its source", menu.contest_status({ dir = by_hand, name = "swiss" }), {
+    { "1/2 " },
+    { "passed", "TunaCorrect" },
+})
 
 t.eq("a contest with no problems says nothing", menu.contest_status({ dir = t.tempdir(), name = "e" }), {})
 t.eq("and neither does one whose directory is gone", menu.contest_status({ dir = "/nonexistent/tuna/contest", name = "g" }), {})

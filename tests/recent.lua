@@ -130,9 +130,9 @@ do
     local flat, attempts = norm(t.tempdir()), norm(t.tempdir())
     for _, p in ipairs({ "A", "B" }) do
         t.write(flat, p .. ".cpp", "int main() {}\n")
-        submit.write_task_store(flat .. "/" .. p .. ".cpp", { url = cf .. p, name = p, group = "Codeforces - Round 8" }, cfg)
+        submit.write_task_store(flat .. "/" .. p .. ".cpp", { url = cf .. p, name = p, group = "Codeforces - Round 8" })
         t.write(attempts, p .. ".cpp", "int main() {}\n")
-        submit.write_task_store(attempts .. "/" .. p .. ".cpp", { url = "https://codeforces.com/contest/80/problem/C", name = "C", group = "Codeforces - Round 80" }, cfg)
+        submit.write_task_store(attempts .. "/" .. p .. ".cpp", { url = "https://codeforces.com/contest/80/problem/C", name = "C", group = "Codeforces - Round 80" })
     end
     t.eq("a folder of a contest's problems is its contest, and one problem's attempts none", {
         (recent.contest_of(flat .. "/B.cpp", cfg) or {}).dir,
@@ -150,19 +150,19 @@ do
     for _, p in ipairs({ "A", "B" }) do
         vim.fn.mkdir(folders .. "/" .. p, "p")
         t.write(folders .. "/" .. p, "main.cpp", "int main() {}\n")
-        submit.write_task_store(folders .. "/" .. p .. "/main.cpp", { url = "", name = p, group = group }, cfg)
+        submit.write_task_store(folders .. "/" .. p .. "/main.cpp", { url = "", name = p, group = group })
         t.write(flat, p .. ".cpp", "int main() {}\n")
-        submit.write_task_store(flat .. "/" .. p .. ".cpp", { url = "", name = p, group = group }, cfg)
+        submit.write_task_store(flat .. "/" .. p .. ".cpp", { url = "", name = p, group = group })
     end
-    t.eq("a problem made by hand is recorded with no url", sidecar.get_entry(flat .. "/A.cpp", "task", cfg), { name = "A", group = group })
+    t.eq("a problem made by hand is recorded with no url", sidecar.get_entry(flat .. "/A.cpp", "task"), { name = "A", group = group })
     t.eq("folders of problems made by hand are their contest, and so is a folder of their files", {
         (recent.contest_of(folders .. "/A/main.cpp", cfg) or {}).dir,
         (recent.contest_of(flat .. "/B.cpp", cfg) or {}).dir,
     }, { folders, flat })
     t.write(flat, "C.cpp", "int main() {}\n")
-    t.eq("a file with no task of its own there is no problem of theirs", sidecar.task(flat .. "/C.cpp", cfg), nil)
+    t.eq("a file with no task of its own there is no problem of theirs", sidecar.task(flat .. "/C.cpp"), nil)
     t.write(flat, "A2.cpp", "int main() {}\n")
-    submit.write_task_store(flat .. "/A2.cpp", { url = "", name = "A", group = group }, cfg)
+    submit.write_task_store(flat .. "/A2.cpp", { url = "", name = "A", group = group })
     t.eq("and a second attempt counts with its problem", #recent.contest_versions(flat, cfg), 3)
 
     -- Problems naming no contest are no contest's, whatever they share: problems made one by one
@@ -170,13 +170,13 @@ do
     local singles, mirrored = norm(t.tempdir()), norm(t.tempdir())
     for _, p in ipairs({ "Foo", "Bar" }) do
         t.write(singles, p .. ".cpp", "int main() {}\n")
-        submit.write_task_store(singles .. "/" .. p .. ".cpp", { url = "", name = p, group = "kattis" }, cfg)
+        submit.write_task_store(singles .. "/" .. p .. ".cpp", { url = "", name = p, group = "kattis" })
     end
     for i, p in ipairs({ "A", "B" }) do
         vim.fn.mkdir(mirrored .. "/" .. p, "p")
         t.write(mirrored .. "/" .. p, "main.cpp", "int main() {}\n")
         local url = "https://codeforces.com/contest/" .. (100 + i) .. "/problem/" .. p
-        submit.write_task_store(mirrored .. "/" .. p .. "/main.cpp", { url = url, name = p, group = "Codeforces" }, cfg)
+        submit.write_task_store(mirrored .. "/" .. p .. "/main.cpp", { url = url, name = p, group = "Codeforces" })
     end
     t.eq("problems of one judge naming no contest are none, nor two rounds a mirror sends alike", {
         recent.contest_of(singles .. "/Foo.cpp", cfg),

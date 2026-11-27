@@ -263,11 +263,10 @@ end
 
 ---The problem a file is a solution of, from its sidecar.
 ---@param file string
----@param cfg table
 ---@return tuna.CCTask?
-local function task_of(file, cfg)
+local function task_of(file)
     local sidecar = require("tuna.problem.sidecar")
-    local data = sidecar.task(file, cfg)
+    local data = sidecar.task(file)
     return sidecar.identity(data) and { name = data.name or "", group = data.group or "", url = data.url or "" } or nil
 end
 
@@ -354,7 +353,7 @@ local function write(role, ext, path, cfg, task, opts)
             return done(nil)
         end
         -- A file written anew starts with nothing stored about it, whatever one of its name left.
-        require("tuna.problem.sidecar").forget(path, cfg)
+        require("tuna.problem.sidecar").forget(path)
         require("tuna.run.tools").forget(path)
         if opts.open ~= false then
             utils.notify("scaffold: created " .. fname .. ".", "INFO")
@@ -440,7 +439,7 @@ function M.create(role, bufnr, ext, opts)
         ext = ext or default_language(cfg, current)
     end
     -- The problem of the solution it is written beside, else of the file it is written from.
-    local task = task_of(solution or current, cfg)
+    local task = task_of(solution or current)
     if not ext or ext == "" then
         utils.notify("scaffold: no language to write it in, open a solution file or pass an extension.")
         return nothing()

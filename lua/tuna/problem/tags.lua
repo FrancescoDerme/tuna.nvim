@@ -69,7 +69,7 @@ function M.sync(bufnr)
     local sidecar = require("tuna.problem.sidecar")
     path = vim.fs.normalize(path)
     local dir, name = vim.fs.dirname(path), vim.fs.basename(path)
-    local store = sidecar.read_or_nil(dir, cfg)
+    local store = sidecar.read_or_nil(dir)
     if not store then
         return
     end
@@ -81,7 +81,7 @@ function M.sync(bufnr)
     end
     section[name] = #tags > 0 and tags or nil
     store.tags = section
-    sidecar.write(dir, cfg, store, name)
+    sidecar.write(dir, store, name)
 end
 
 return M

@@ -229,7 +229,7 @@ local SIBLING_LIMIT = 40
 local function names_another(dir, key, identity, cfg)
     local sidecar = require("tuna.problem.sidecar")
     local judges = require("tuna.problem.judges")
-    for _, task in ipairs(sidecar.tasks(dir, cfg)) do
+    for _, task in ipairs(sidecar.tasks(dir)) do
         local id = sidecar.identity(task)
         if id and id ~= identity and judges.contest_key(task, cfg.judge_parsers) == key then
             return true
@@ -250,7 +250,7 @@ end
 local function infer_contest(file, cfg)
     local sidecar = require("tuna.problem.sidecar")
     local judges = require("tuna.problem.judges")
-    local task = sidecar.task(file, cfg)
+    local task = sidecar.task(file)
     local key = judges.contest_key(task, cfg.judge_parsers)
     if not key then
         return nil
@@ -457,7 +457,7 @@ local function is_problem_buffer(bufnr, path)
     if require("tuna.run.tools").is_support(path, cfg) then
         return false
     end
-    if require("tuna.problem.sidecar").task(vim.fs.normalize(path), cfg) then
+    if require("tuna.problem.sidecar").task(vim.fs.normalize(path)) then
         return true
     end
     local ok, tctbl = pcall(require("tuna.problem.testcases").buf_get_testcases, bufnr)
@@ -650,7 +650,7 @@ function M.contest_versions(dir, cfg)
     local sidecar = require("tuna.problem.sidecar")
     local problems, by_identity = {}, {}
     for _, file in ipairs(tools.solutions_in(dir, cfg)) do
-        local id = sidecar.identity(sidecar.task(file, cfg))
+        local id = sidecar.identity(sidecar.task(file))
         local versions = id and by_identity[id]
         if versions then
             versions[#versions + 1] = file

@@ -25,11 +25,9 @@
 -- because a folder may hold several problems (`a.cpp`, `b.cpp`) as easily as one
 -- problem's several attempts. Writers merge, so no writer clobbers another's field.
 --
--- `cfg` is optional throughout: callers that already resolved a buffer's config pass
--- it, and the rest fall back to the current setup. So a per-directory `.tuna.lua`
--- renaming `problem_store_file` is honoured wherever a resolved config is at hand
--- (submit, download, clean) but not for the lazily-hydrated run state, which only has
--- a path. Renaming the sidecar per directory is not a thing anyone needs to do.
+-- Its name is the setup's `problem_store_file` everywhere (`M.name`), never a `.tuna.lua`'s:
+-- most readers have a path and no buffer (the menu, the run state, the startup autocmd), and
+-- a name resolved per directory would have its writers and readers look in different files.
 
 local utils = require("tuna.utils")
 
@@ -40,30 +38,25 @@ local M = {}
 -- folder is still that problem's.
 local PER_FILE = { "submit", "run", "results", "tags" }
 
----@param cfg table? resolved config (falls back to the current setup, then defaults)
+---The sidecar's file name, the setup's `problem_store_file`.
 ---@return string
-local function store_file(cfg)
-    if cfg and cfg.problem_store_file then
-        return cfg.problem_store_file
-    end
+function M.name()
     return require("tuna.config").current_setup.problem_store_file or ".tuna.json"
 end
 
 ---The sidecar's path for a problem directory.
 ---@param dir string
----@param cfg table?
 ---@return string
-function M.path(dir, cfg)
-    return vim.fs.normalize(dir) .. "/" .. store_file(cfg)
+function M.path(dir)
+    return vim.fs.normalize(dir) .. "/" .. M.name()
 end
 
 ---Read a directory's sidecar, or `nil` when there is none or it is not a JSON object, for
 ---callers that need to tell "no sidecar" from "an empty one".
 ---@param dir string
----@param cfg table?
 ---@return table?
-function M.read_or_nil(dir, cfg)
-    local content = utils.read_file(M.path(dir, cfg))
+function M.read_or_nil(dir)
+    local content = utils.read_file(M.path(dir))
     return content and M.decode(content) or nil
 end
 
@@ -78,10 +71,9 @@ end
 ---Read a directory's sidecar as a table (empty when absent or unreadable), so a
 ---writer can merge its own field without clobbering the others.
 ---@param dir string
----@param cfg table?
 ---@return table
-function M.read(dir, cfg)
-    return M.read_or_nil(dir, cfg) or {}
+function M.read(dir)
+    return M.read_or_nil(dir) or {}
 end
 
 ---Write a sidecar table back to disk. A sidecar travels with a problem's folder, so there is
@@ -92,10 +84,9 @@ end
 ---a new file given a deleted one's name would take its forced run settings. With nothing
 ---left to say about the problem, the file goes too.
 ---@param dir string
----@param cfg table?
 ---@param store table
 ---@param keep string? the basename being written, kept whether or not its file exists
-function M.write(dir, cfg, store, keep)
+function M.write(dir, store, keep)
     dir = vim.fs.normalize(dir)
     if vim.fn.isdirectory(dir) ~= 1 then
         return
@@ -112,24 +103,23 @@ function M.write(dir, cfg, store, keep)
         end
     end
     if next(store) == nil then
-        if utils.file_exists(M.path(dir, cfg)) then
-            utils.delete_file(M.path(dir, cfg))
+        if utils.file_exists(M.path(dir)) then
+            utils.delete_file(M.path(dir))
         end
         return
     end
     local ok, encoded = pcall(vim.json.encode, store)
     if ok then
-        utils.write_file(M.path(dir, cfg), encoded)
+        utils.write_file(M.path(dir), encoded)
     end
 end
 
 ---Read one file's entry from a per-basename section (`submit`, `run`, …).
 ---@param filepath string absolute path of the source file
 ---@param section string
----@param cfg table?
 ---@return table?
-function M.get_entry(filepath, section, cfg)
-    local store = M.read(vim.fn.fnamemodify(filepath, ":h"), cfg)
+function M.get_entry(filepath, section)
+    local store = M.read(vim.fn.fnamemodify(filepath, ":h"))
     local sec = store[section]
     if type(sec) ~= "table" then
         return nil
@@ -144,13 +134,12 @@ end
 ---@param filepath string absolute path of the source file
 ---@param section string
 ---@param entry table? the entry to store, or nil to remove it
----@param cfg table?
-function M.set_entry(filepath, section, entry, cfg)
+function M.set_entry(filepath, section, entry)
     local dir, name = vim.fn.fnamemodify(filepath, ":h"), vim.fn.fnamemodify(filepath, ":t")
-    local store = M.read(dir, cfg)
+    local store = M.read(dir)
     store[section] = type(store[section]) == "table" and store[section] or {}
     store[section][name] = entry
-    M.write(dir, cfg, store, name)
+    M.write(dir, store, name)
 end
 
 ---What tells a task's problem from another: its URL, else its name, which is all a problem
@@ -185,10 +174,9 @@ end
 
 ---The problems the sidecar of `dir` names, each file's task.
 ---@param dir string
----@param cfg table?
 ---@return table[]
-function M.tasks(dir, cfg)
-    return tasks_of(M.read_or_nil(dir, cfg))
+function M.tasks(dir)
+    return tasks_of(M.read_or_nil(dir))
 end
 
 ---The problem `filepath` is a solution of, as downloaded (`url`, `name`, `group`, and the
@@ -197,10 +185,9 @@ end
 ---solution is that problem's. A folder of several problems, a contest's plain files, names none
 ---for a file it has no entry for.
 ---@param filepath string absolute path of the source file
----@param cfg table?
 ---@return table?
-function M.task(filepath, cfg)
-    local store = M.read_or_nil(vim.fn.fnamemodify(filepath, ":h"), cfg)
+function M.task(filepath)
+    local store = M.read_or_nil(vim.fn.fnamemodify(filepath, ":h"))
     local own = store and type(store.task) == "table" and store.task[vim.fn.fnamemodify(filepath, ":t")]
     if type(own) == "table" then
         return own
@@ -217,10 +204,9 @@ end
 
 ---Forget everything stored about a file, for one written anew in its place.
 ---@param filepath string absolute path of the source file
----@param cfg table?
-function M.forget(filepath, cfg)
+function M.forget(filepath)
     local dir, name = vim.fn.fnamemodify(filepath, ":h"), vim.fn.fnamemodify(filepath, ":t")
-    local store = M.read_or_nil(dir, cfg)
+    local store = M.read_or_nil(dir)
     if not store then
         return
     end
@@ -229,7 +215,7 @@ function M.forget(filepath, cfg)
             store[section][name] = nil
         end
     end
-    M.write(dir, cfg, store)
+    M.write(dir, store)
 end
 
 return M

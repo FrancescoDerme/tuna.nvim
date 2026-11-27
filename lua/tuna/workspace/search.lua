@@ -75,6 +75,7 @@ local function walk(roots, cfg, done)
         skips[name] = true
     end
     local found, seen, used, pending, truncated = {}, {}, 0, 0, false
+    local store_name = sidecar.name()
 
     local function settle()
         pending = pending - 1
@@ -109,9 +110,9 @@ local function walk(roots, cfg, done)
                     names[name] = true
                 end
             end
-            if names[cfg.problem_store_file] then
+            if names[store_name] then
                 pending = pending + 1
-                read_async(dir .. "/" .. cfg.problem_store_file, function(content)
+                read_async(dir .. "/" .. store_name, function(content)
                     if content then
                         found[#found + 1] = { dir = dir, names = names, content = content }
                     end

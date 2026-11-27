@@ -47,7 +47,8 @@ The test suite. The rules that hold everywhere are in the root `CLAUDE.md`.
   - `clean.lua`: similarity and classification, pinned files, builds, directories, languages,
     the prompts.
   - `submit.lua`: redaction, failure reasons, verdict scanning, the watch, restoring and
-    hiding a verdict, the problem a file is a solution of, `:Tuna go judge`.
+    hiding a verdict, a verdict given by hand (`:Tuna verdict`), the problem a file is a
+    solution of, `:Tuna go judge`.
   - `runner.lua`: all four run modes with `vim.system` and `uv.spawn` stubbed, on real UI
     windows, in both interfaces where the grid changes: rows, builds and their reuse, stops,
     the stress search, interactive sessions and the conversation, run-all, and the board

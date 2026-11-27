@@ -574,7 +574,7 @@ local function disposable_patterns(cfg)
     add(cfg.testcases_single_file_format)
     add(cfg.testcases_directory_input)
     add(cfg.testcases_directory_output)
-    add(cfg.problem_store_file or ".tuna.json")
+    add(require("tuna.problem.sidecar").name())
     return pats
 end
 
